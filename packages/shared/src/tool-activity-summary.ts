@@ -28,6 +28,18 @@ export function summarizeToolActivity(toolName: string, input: Record<string, un
       const command = compact(redact(asString(input.command)));
       return command ? `运行命令：${command}` : "运行命令";
     }
+    case "BashBatch": {
+      const commands = Array.isArray(input.commands)
+        ? input.commands.filter((item) => typeof item === "string")
+        : [];
+      return commands.length > 0 ? `批量运行命令：${commands.length} 条` : "批量运行命令";
+    }
+    case "ProcessWait":
+      return "等待命令完成";
+    case "ProcessInput": {
+      const value = compact(redact(asString(input.input)), 80);
+      return value ? `发送终端输入：${value}` : "发送终端输入";
+    }
     case "Read": {
       const path = filePath(input);
       return path ? `读取文件：${path}` : "读取文件";
@@ -63,6 +75,20 @@ export function summarizeToolActivity(toolName: string, input: Record<string, un
       const query = compact(redact(asString(input.query)), 100);
       return query ? `网页搜索：${query}` : "网页搜索";
     }
+    case "ViewImage": {
+      const path = filePath(input);
+      return path ? `查看图片：${path}` : "查看图片";
+    }
+    case "ViewImageBatch": {
+      const paths = Array.isArray(input.paths)
+        ? input.paths.filter((item) => typeof item === "string")
+        : [];
+      return paths.length > 0 ? `批量查看图片：${paths.length} 张` : "批量查看图片";
+    }
+    case "Web":
+      return "访问网页";
+    case "ToolScript":
+      return "执行工具编排";
     case "TodoWrite":
       return "更新任务列表";
     case "Patch": {

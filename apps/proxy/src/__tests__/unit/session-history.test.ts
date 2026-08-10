@@ -1099,7 +1099,7 @@ describe("readSessionMessages", () => {
     ]);
   });
 
-  it("restores raw Codex custom exec input as command details", async () => {
+  it("extracts the real shell command from Codex custom exec orchestration", async () => {
     writeCodexConversation("codex-custom-exec-history", [
       JSON.stringify({
         timestamp: "2026-08-10T00:00:01.000Z",
@@ -1107,7 +1107,8 @@ describe("readSessionMessages", () => {
         payload: {
           type: "custom_tool_call",
           name: "exec",
-          input: 'const result = await tools.exec_command({ cmd: "pnpm test" });',
+          input:
+            'const result = await tools.exec_command({"cmd":"pnpm test -- --grep=\\\"history details\\\"","workdir":"/tmp/project","yield_time_ms":30000}); text(result.output);',
           call_id: "call-custom-exec",
         },
       }),
@@ -1126,13 +1127,230 @@ describe("readSessionMessages", () => {
     expect(page.messages).toMatchObject([
       {
         role: "activity",
+        text: '运行命令：pnpm test -- --grep="history details"',
         toolId: "call-custom-exec",
         toolName: "Bash",
         parameters: {
-          command: 'const result = await tools.exec_command({ cmd: "pnpm test" });',
+          command: 'pnpm test -- --grep="history details"',
+          workdir: "/tmp/project",
+          yield_time_ms: 30000,
         },
         status: "done",
       },
+    ]);
+  });
+
+  it("classifies Codex write_stdin polling as waiting instead of a shell command", async () => {
+    writeCodexConversation("codex-write-stdin-wait-history", [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const result = await tools.write_stdin({ session_id: 6019, chars: "", yield_time_ms: 30000 }); text(result);',
+          call_id: "call-wait",
+        },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage(
+      "codex-write-stdin-wait-history",
+      { limit: 10 },
+      "codex",
+    );
+    expect(page.messages).toMatchObject([
+      {
+        role: "activity",
+        text: "等待命令完成",
+        toolName: "ProcessWait",
+        parameters: { session_id: 6019, chars: "", yield_time_ms: 30000 },
+      },
+    ]);
+  });
+
+  it("classifies Codex write_stdin input separately from shell execution", async () => {
+    writeCodexConversation("codex-write-stdin-input-history", [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input: 'const result = await tools.write_stdin({ session_id: 42, chars: "y\\n" });',
+          call_id: "call-input",
+        },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage(
+      "codex-write-stdin-input-history",
+      { limit: 10 },
+      "codex",
+    );
+    expect(page.messages).toMatchObject([
+      {
+        role: "activity",
+        text: "发送终端输入：y",
+        toolName: "ProcessInput",
+        parameters: { session_id: 42, chars: "y\n", input: "y\n" },
+      },
+    ]);
+  });
+
+  it("does not mislabel unparsed Codex orchestration as a shell command", async () => {
+    writeCodexConversation("codex-unknown-exec-history", [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input: "const result = tools.some_future_tool ? null : null;",
+          call_id: "call-unknown",
+        },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage(
+      "codex-unknown-exec-history",
+      { limit: 10 },
+      "codex",
+    );
+    expect(page.messages).toMatchObject([
+      {
+        role: "activity",
+        text: "执行工具编排",
+        toolName: "ToolScript",
+      },
+    ]);
+  });
+
+  it("restores nested image and patch tools with their user-facing semantics", async () => {
+    writeCodexConversation("codex-nested-tools-history", [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const image = await tools.view_image({path:"/tmp/screenshot.png",detail:"original"});',
+          call_id: "call-image",
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const patch = "*** Begin Patch\\n*** Update File: /tmp/app.ts\\n@@\\n-tools.exec_command({ cmd: \\\"old\\\" })\\n+new\\n*** End Patch";\ntext(await tools.apply_patch(patch));',
+          call_id: "call-patch",
+        },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage(
+      "codex-nested-tools-history",
+      { limit: 10 },
+      "codex",
+    );
+    expect(page.messages).toMatchObject([
+      {
+        text: "查看图片：/tmp/screenshot.png",
+        toolName: "ViewImage",
+        parameters: { path: "/tmp/screenshot.png", detail: "original" },
+      },
+      {
+        text: "应用补丁：/tmp/app.ts",
+        toolName: "Patch",
+        parameters: { paths: ["/tmp/app.ts"] },
+      },
+    ]);
+  });
+
+  it("restores batched Codex orchestration without falling back to exec", async () => {
+    writeCodexConversation("codex-batched-tools-history", [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const cmds = [{label:"tests",cmd:"pnpm test",yield_time_ms:30000},{label:"build",cmd:"pnpm build",yield_time_ms:30000}];\nconst results = await Promise.all(cmds.map(async ({label, ...options}) => tools.exec_command(options)));',
+          call_id: "call-command-batch",
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const paths = ["/tmp/one.png", "/tmp/two.png"];\nconst results = await Promise.all(paths.map(path => tools.view_image({path, detail:"original"})));',
+          call_id: "call-image-batch",
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const plan = [{step:"检查历史",status:"in_progress"}];\nconst result = await tools.update_plan({plan});',
+          call_id: "call-plan",
+        },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage(
+      "codex-batched-tools-history",
+      { limit: 10 },
+      "codex",
+    );
+    expect(page.messages).toMatchObject([
+      {
+        text: "批量运行命令：2 条",
+        toolName: "BashBatch",
+        parameters: { commands: ["pnpm test", "pnpm build"] },
+      },
+      {
+        text: "批量查看图片：2 张",
+        toolName: "ViewImageBatch",
+        parameters: { paths: ["/tmp/one.png", "/tmp/two.png"] },
+      },
+      {
+        text: "更新任务列表",
+        toolName: "TodoWrite",
+      },
+    ]);
+  });
+
+  it("restores variable and malformed web orchestration without exposing exec scripts", async () => {
+    writeCodexConversation("codex-web-tools-history", [
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input:
+            'const args = {search_query:[{q:"Codex history"}],response_length:"short"};\nconst result = await tools.web__run(args);',
+          call_id: "call-web-variable",
+        },
+      }),
+      JSON.stringify({
+        type: "response_item",
+        payload: {
+          type: "custom_tool_call",
+          name: "exec",
+          input: 'const result = await tools.web__run({open\\":[{\\"ref_id\\":\\"broken\\"}]});',
+          call_id: "call-web-malformed",
+        },
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage("codex-web-tools-history", { limit: 10 }, "codex");
+    expect(page.messages).toMatchObject([
+      { text: "访问网页", toolName: "Web" },
+      { text: "访问网页", toolName: "Web", parameters: {} },
     ]);
   });
 

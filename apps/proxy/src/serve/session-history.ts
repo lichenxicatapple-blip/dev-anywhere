@@ -306,7 +306,6 @@ function parseToolInput(value: unknown): Record<string, unknown> {
 
 function normalizeHistoryToolName(name: string): string {
   switch (name) {
-    case "exec":
     case "exec_command":
     case "shell":
     case "shell_command":
@@ -319,9 +318,370 @@ function normalizeHistoryToolName(name: string): string {
       return "Write";
     case "search_query":
       return "WebSearch";
+    case "view_image":
+      return "ViewImage";
+    case "update_plan":
+      return "TodoWrite";
+    case "web__run":
+      return "Web";
     default:
       return name;
   }
+}
+
+interface NormalizedHistoryToolCall {
+  toolName: string;
+  parameters: Record<string, unknown>;
+}
+
+function decodeJavascriptStringLiteral(source: string): string | null {
+  const quote = source[0];
+  if ((quote !== '"' && quote !== "'" && quote !== "`") || source.at(-1) !== quote) return null;
+  if (quote === "`" && source.includes("${")) return null;
+
+  let result = "";
+  for (let index = 1; index < source.length - 1; index += 1) {
+    const character = source[index];
+    if (character !== "\\") {
+      result += character;
+      continue;
+    }
+    index += 1;
+    if (index >= source.length - 1) return null;
+    const escaped = source[index];
+    switch (escaped) {
+      case "n":
+        result += "\n";
+        break;
+      case "r":
+        result += "\r";
+        break;
+      case "t":
+        result += "\t";
+        break;
+      case "b":
+        result += "\b";
+        break;
+      case "f":
+        result += "\f";
+        break;
+      case "v":
+        result += "\v";
+        break;
+      case "0":
+        result += "\0";
+        break;
+      case "\n":
+        break;
+      case "\r":
+        if (source[index + 1] === "\n") index += 1;
+        break;
+      default:
+        result += escaped;
+        break;
+    }
+  }
+  return result;
+}
+
+function findJavascriptStringLiteralEnd(source: string, start: number): number | null {
+  const quote = source[start];
+  if (quote !== '"' && quote !== "'" && quote !== "`") return null;
+  let escaped = false;
+  for (let index = start + 1; index < source.length; index += 1) {
+    const character = source[index];
+    if (escaped) {
+      escaped = false;
+    } else if (character === "\\") {
+      escaped = true;
+    } else if (character === quote) {
+      return index + 1;
+    }
+  }
+  return null;
+}
+
+function findJavascriptValueEnd(source: string, start: number): number {
+  const stack: string[] = [];
+  let quote = "";
+  let escaped = false;
+
+  for (let index = start; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (character === "{" || character === "[" || character === "(") {
+      stack.push(character);
+      continue;
+    }
+    if (character === "}" || character === "]" || character === ")") {
+      if (stack.length === 0) return index;
+      stack.pop();
+      continue;
+    }
+    if ((character === "," || character === ";") && stack.length === 0) return index;
+  }
+  return source.length;
+}
+
+function parseJavascriptPrimitive(source: string): unknown {
+  const value = source.trim();
+  const stringValue = decodeJavascriptStringLiteral(value);
+  if (stringValue !== null) return stringValue;
+  if (value.startsWith("[")) {
+    const arrayValue = parseJavascriptArrayLiteral(value, 0);
+    if (arrayValue) return arrayValue;
+  }
+  if (value.startsWith("{")) {
+    const objectValue = parseJavascriptObjectLiteral(value, 0);
+    if (objectValue) return objectValue;
+  }
+  if (value === "true") return true;
+  if (value === "false") return false;
+  if (value === "null") return null;
+  if (/^-?(?:\d+\.?\d*|\.\d+)(?:e[+-]?\d+)?$/iu.test(value)) return Number(value);
+  try {
+    return JSON.parse(value) as unknown;
+  } catch {
+    return value;
+  }
+}
+
+function parseJavascriptArrayLiteral(source: string, start: number): unknown[] | null {
+  let index = start;
+  while (/\s/u.test(source[index] ?? "")) index += 1;
+  if (source[index] !== "[") return null;
+  index += 1;
+  const result: unknown[] = [];
+
+  while (index < source.length) {
+    while (/[\s,]/u.test(source[index] ?? "")) index += 1;
+    if (source[index] === "]") return result;
+    const valueEnd = findJavascriptValueEnd(source, index);
+    result.push(parseJavascriptPrimitive(source.slice(index, valueEnd)));
+    index = valueEnd;
+    if (source[index] === "]") return result;
+    if (source[index] !== ",") return null;
+    index += 1;
+  }
+  return null;
+}
+
+function parseJavascriptObjectLiteral(
+  source: string,
+  start: number,
+): Record<string, unknown> | null {
+  let index = start;
+  while (/\s/u.test(source[index] ?? "")) index += 1;
+  if (source[index] !== "{") return null;
+  index += 1;
+  const result: Record<string, unknown> = {};
+
+  while (index < source.length) {
+    while (/[\s,]/u.test(source[index] ?? "")) index += 1;
+    if (source[index] === "}") return result;
+
+    let key = "";
+    if (source[index] === '"' || source[index] === "'") {
+      const keyEnd = findJavascriptStringLiteralEnd(source, index);
+      if (keyEnd === null) return null;
+      const decodedKey = decodeJavascriptStringLiteral(source.slice(index, keyEnd));
+      if (decodedKey === null) return null;
+      key = decodedKey;
+      index = keyEnd;
+    } else {
+      const keyMatch = source.slice(index).match(/^[$A-Z_a-z][$\w]*/u);
+      if (!keyMatch) return null;
+      key = keyMatch[0];
+      index += key.length;
+    }
+    while (/\s/u.test(source[index] ?? "")) index += 1;
+    if (source[index] === "," || source[index] === "}") {
+      result[key] = undefined;
+      if (source[index] === "}") return result;
+      index += 1;
+      continue;
+    }
+    if (source[index] !== ":") return null;
+    index += 1;
+    while (/\s/u.test(source[index] ?? "")) index += 1;
+    const valueEnd = findJavascriptValueEnd(source, index);
+    result[key] = parseJavascriptPrimitive(source.slice(index, valueEnd));
+    index = valueEnd;
+    if (source[index] === "}") return result;
+    if (source[index] !== ",") return null;
+    index += 1;
+  }
+  return null;
+}
+
+function resolveJavascriptVariable(input: string, variableName: string): unknown {
+  if (!/^[$A-Z_a-z][$\w]*$/u.test(variableName)) return undefined;
+  const assignment = new RegExp(`\\b(?:const|let|var)\\s+${variableName}\\s*=\\s*`, "u").exec(
+    input,
+  );
+  if (assignment?.index === undefined) return undefined;
+  const valueStart = assignment.index + assignment[0].length;
+  const valueEnd =
+    findJavascriptStringLiteralEnd(input, valueStart) ?? findJavascriptValueEnd(input, valueStart);
+  return parseJavascriptPrimitive(input.slice(valueStart, valueEnd));
+}
+
+function stringArray(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value.filter((item): item is string => typeof item === "string")
+    : [];
+}
+
+function batchCommands(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((item) => {
+    if (Array.isArray(item)) {
+      const command = item.find((entry, index) => index > 0 && typeof entry === "string");
+      return typeof command === "string" ? [command] : [];
+    }
+    const record = asRecord(item);
+    const command = record && (record.command ?? record.cmd);
+    return typeof command === "string" ? [command] : [];
+  });
+}
+
+function findJavascriptToolCall(
+  source: string,
+): { toolName: string; argumentsStart: number } | null {
+  let quote = "";
+  let escaped = false;
+
+  for (let index = 0; index < source.length; index += 1) {
+    const character = source[index];
+    if (quote) {
+      if (escaped) {
+        escaped = false;
+      } else if (character === "\\") {
+        escaped = true;
+      } else if (character === quote) {
+        quote = "";
+      }
+      continue;
+    }
+    if (character === '"' || character === "'" || character === "`") {
+      quote = character;
+      continue;
+    }
+    if (source.startsWith("//", index)) {
+      const newline = source.indexOf("\n", index + 2);
+      if (newline < 0) return null;
+      index = newline;
+      continue;
+    }
+    if (source.startsWith("/*", index)) {
+      const commentEnd = source.indexOf("*/", index + 2);
+      if (commentEnd < 0) return null;
+      index = commentEnd + 1;
+      continue;
+    }
+    if (!source.startsWith("tools.", index)) continue;
+    const nameStart = index + "tools.".length;
+    const nameMatch = source.slice(nameStart).match(/^[$A-Z_a-z][$\w]*/u);
+    if (!nameMatch) continue;
+    let argumentsStart = nameStart + nameMatch[0].length;
+    while (/\s/u.test(source[argumentsStart] ?? "")) argumentsStart += 1;
+    if (source[argumentsStart] !== "(") continue;
+    return { toolName: nameMatch[0], argumentsStart: argumentsStart + 1 };
+  }
+  return null;
+}
+
+function decodeCodexExecInput(input: string): NormalizedHistoryToolCall | null {
+  const call = findJavascriptToolCall(input);
+  if (!call) return null;
+  const { argumentsStart, toolName: nestedToolName } = call;
+  const argumentEnd = findJavascriptValueEnd(input, argumentsStart);
+  const argument = input.slice(argumentsStart, argumentEnd).trim();
+  let parameters = parseJavascriptObjectLiteral(input, argumentsStart);
+  if (!parameters && /^[$A-Z_a-z][$\w]*$/u.test(argument)) {
+    parameters = asRecord(resolveJavascriptVariable(input, argument));
+  }
+
+  if (nestedToolName === "apply_patch") {
+    let content = typeof parameters?.content === "string" ? parameters.content : "";
+    if (!content && /^[$A-Z_a-z][$\w]*$/u.test(argument)) {
+      const assignment = new RegExp(`\\b(?:const|let|var)\\s+${argument}\\s*=\\s*`, "u").exec(
+        input,
+      );
+      if (assignment?.index !== undefined) {
+        const valueStart = assignment.index + assignment[0].length;
+        const valueEnd =
+          findJavascriptStringLiteralEnd(input, valueStart) ??
+          findJavascriptValueEnd(input, valueStart);
+        const value = parseJavascriptPrimitive(input.slice(valueStart, valueEnd));
+        if (typeof value === "string") content = value;
+      }
+    }
+    if (!content) return { toolName: "Patch", parameters: {} };
+    const paths = Array.from(
+      content.matchAll(/^\*\*\* (?:Add|Delete|Update) File: (.+)$/gmu),
+      (match) => match[1],
+    );
+    return { toolName: "Patch", parameters: { content, ...(paths.length ? { paths } : {}) } };
+  }
+
+  if (nestedToolName === "exec_command" && !parameters) {
+    const commands = batchCommands(resolveJavascriptVariable(input, "cmds"));
+    if (commands.length > 0) return { toolName: "BashBatch", parameters: { commands } };
+    return { toolName: "Bash", parameters: {} };
+  }
+
+  if (!parameters) {
+    return { toolName: normalizeHistoryToolName(nestedToolName), parameters: {} };
+  }
+
+  if (nestedToolName === "exec_command") {
+    const command = typeof parameters.cmd === "string" ? parameters.cmd : "";
+    if (!command) {
+      const commands = batchCommands(resolveJavascriptVariable(input, "cmds"));
+      if (commands.length > 0) return { toolName: "BashBatch", parameters: { commands } };
+      return { toolName: "Bash", parameters: {} };
+    }
+    const normalized: Record<string, unknown> = { ...parameters, command };
+    delete normalized.cmd;
+    return { toolName: "Bash", parameters: normalized };
+  }
+
+  if (nestedToolName === "write_stdin") {
+    const chars = typeof parameters.chars === "string" ? parameters.chars : "";
+    return {
+      toolName: chars ? "ProcessInput" : "ProcessWait",
+      parameters: chars ? { ...parameters, input: chars } : parameters,
+    };
+  }
+
+  if (nestedToolName === "view_image" && typeof parameters.path !== "string") {
+    const paths = stringArray(resolveJavascriptVariable(input, "paths"));
+    if (paths.length > 0) return { toolName: "ViewImageBatch", parameters: { paths } };
+  }
+
+  if (nestedToolName === "update_plan" && parameters.plan === undefined) {
+    const plan = resolveJavascriptVariable(input, "plan");
+    return {
+      toolName: "TodoWrite",
+      parameters: plan === undefined ? {} : { plan },
+    };
+  }
+
+  return { toolName: normalizeHistoryToolName(nestedToolName), parameters };
 }
 
 function normalizeHistoryToolParameters(
@@ -351,6 +711,18 @@ function normalizeHistoryToolParameters(
   return parameters;
 }
 
+function normalizeHistoryToolCall(rawToolName: string, input: unknown): NormalizedHistoryToolCall {
+  if (rawToolName === "exec" && typeof input === "string") {
+    const decoded = decodeCodexExecInput(input);
+    if (decoded) return decoded;
+    if (/\btools\./u.test(input)) {
+      return { toolName: "ToolScript", parameters: {} };
+    }
+  }
+  const toolName = normalizeHistoryToolName(rawToolName);
+  return { toolName, parameters: normalizeHistoryToolParameters(rawToolName, input) };
+}
+
 function toolUseHistoryItem(
   toolId: string,
   rawToolName: string,
@@ -358,8 +730,7 @@ function toolUseHistoryItem(
   timestamp?: number,
 ): ExtractedHistoryItem | null {
   if (!toolId || !rawToolName) return null;
-  const toolName = normalizeHistoryToolName(rawToolName);
-  const parameters = normalizeHistoryToolParameters(rawToolName, input);
+  const { toolName, parameters } = normalizeHistoryToolCall(rawToolName, input);
   return {
     kind: "message",
     message: {
