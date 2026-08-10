@@ -4,6 +4,13 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.33](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.32...v0.5.33) (2026-08-10)
+
+
+### 修复
+
+* normalize historical patch diff previews ([f98ecbd](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/f98ecbd22dd7143d68c28c97f9c965fca7d39e9f))
+
 ## [0.5.32] - 2026-08-10
 
 ### 修复
