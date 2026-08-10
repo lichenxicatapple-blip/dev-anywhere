@@ -5,7 +5,7 @@ async function openJsonPreview(page: Page, path: string): Promise<void> {
   const input = page.getByLabel("输入聊天消息");
   await input.fill(`inspect @${path}`);
   await page.locator('[data-slot="send-button"][data-variant="send"]').click();
-  await page.locator('[data-slot="inline-image-preview-link"]', { hasText: path }).click();
+  await page.locator('[data-slot="user-image-attachment"]').click();
 }
 
 async function expectPreviewReady(page: Page, path: string): Promise<void> {
@@ -138,7 +138,7 @@ test.describe("image preview", () => {
       await expect(page.locator('[data-slot="image-preview-copy-image"]')).toBeEnabled();
 
       await closePreview(page);
-      await page.locator('[data-slot="inline-image-preview-link"]', { hasText: path }).click();
+      await page.locator('[data-slot="user-image-attachment"]').click();
       await expectPreviewReady(page, path);
     });
 
