@@ -98,7 +98,12 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
     await expect(emuPage.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", false);
 
     await input.fill("这是我主动发送的新消息");
-    await emuPage.locator('[data-slot="send-button"][data-variant="send"]').click();
+    // This case verifies the local-send follow contract, not Android hit
+    // testing. Trigger the enabled button directly so an in-flight IME resize
+    // cannot leave Playwright waiting for a geometrically stable tap target.
+    await emuPage
+      .locator('[data-slot="send-button"][data-variant="send"]')
+      .evaluate((button: HTMLButtonElement) => button.click());
 
     await expect
       .poll(() =>

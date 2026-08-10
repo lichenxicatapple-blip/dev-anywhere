@@ -1,5 +1,6 @@
 import { expect, mobileBaseUrl, test } from "../fixtures/cdp";
 import { installFakeRelay, sentFakeRelayMessages } from "../helpers";
+import { dismissSoftKeyboard } from "./pty-soft-keyboard";
 
 test.describe("L4 mobile / chat attachment preview", () => {
   test.setTimeout(90_000);
@@ -151,6 +152,14 @@ test.describe("L4 mobile / chat attachment preview", () => {
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
     await input.fill("发送日志");
+    // Geometry assertions need a fixed viewport. Android may open the IME for
+    // fill() asynchronously, which otherwise makes the before/after samples
+    // compare two different visual viewport heights.
+    await input.evaluate((node: HTMLTextAreaElement) => node.blur());
+    await dismissSoftKeyboard(emuPage);
+    await expect
+      .poll(() => emuPage.locator("[data-keyboard-offset]").getAttribute("data-keyboard-offset"))
+      .toBe("0");
     const inputRegion = emuPage.locator('[data-slot="input-bar-region"]');
     const baseline = await measureComposerLayout(inputRegion);
 
