@@ -83,8 +83,9 @@ async function movePtyViewportAwayWhileKeyboardStaysOpen(
   const clearance = await readPtyCursorKeyboardClearance(page, sessionId);
   const reviewDistance = Math.max(240, (clearance?.clearance ?? 0) + 80);
   await terminal.evaluate((element, distance) => {
-    const scroller = element as HTMLElement;
-    scroller.scrollTop = Math.max(0, scroller.scrollTop - distance);
+    element.dispatchEvent(
+      new WheelEvent("wheel", { deltaY: -distance, bubbles: true, cancelable: true }),
+    );
   }, reviewDistance);
   await expect
     .poll(() => terminal.evaluate((element) => (element as HTMLElement).scrollTop))
