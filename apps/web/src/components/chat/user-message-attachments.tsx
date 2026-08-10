@@ -59,7 +59,7 @@ function ImageGallery({ images }: { images: UserMessageAttachment[] }) {
       data-count={images.length}
       className={cn(
         "relative max-w-full overflow-hidden rounded-lg",
-        multiple ? "w-[min(72vw,28rem)]" : "w-[min(64vw,20rem)]",
+        multiple ? "w-[min(68vw,24rem)]" : "w-32",
       )}
       aria-label={`图片附件，共 ${images.length} 张`}
     >
@@ -142,9 +142,9 @@ function RemoteImageCard({
       type="button"
       data-slot="user-image-attachment"
       className={cn(
-        "group relative aspect-[4/3] min-h-28 snap-start overflow-hidden rounded-lg bg-primary-foreground/10",
+        "group relative snap-start overflow-hidden rounded-lg bg-primary-foreground/10",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground/80 focus-visible:ring-offset-2 focus-visible:ring-offset-primary",
-        multiple ? "basis-[78%] shrink-0 sm:basis-48" : "w-full shrink-0",
+        multiple ? "h-28 basis-[68%] shrink-0 sm:basis-40" : "h-24 w-32 shrink-0",
       )}
       aria-label={label}
       onClick={() => openImagePreview(path)}

@@ -430,6 +430,26 @@ test.describe("ChatJsonView — BackToBottom threshold + click + follow", () => 
     await expect(hasNewIndicator).toBeVisible();
   });
 
+  test("local send while scrolled up explicitly follows the new user bubble", async ({ page }) => {
+    await scrollBy(page, 300);
+    await expect(page.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", false);
+
+    const input = page.getByLabel("输入聊天消息");
+    await input.fill("这是我主动发送的新消息");
+    await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const el = document.querySelector<HTMLElement>('[data-slot="message-list"]');
+          if (!el) return -1;
+          return el.scrollHeight - (el.scrollTop + el.clientHeight);
+        }),
+      )
+      .toBeLessThanOrEqual(8);
+    await expect(page.getByText("这是我主动发送的新消息", { exact: true })).toBeVisible();
+  });
+
   test("at-bottom new message auto-follows (isAtBottom sticky)", async ({ page }) => {
     await scrollToBottom(page);
 

@@ -179,4 +179,18 @@ describe("summarizeClaudeToolActivity", () => {
       "使用工具：CustomTool",
     );
   });
+
+  it("keeps generic tool parameters available behind the shared detail disclosure", () => {
+    expect(
+      getClaudeToolActivityDetails("wait", {
+        ids: ["job-1"],
+        timeout_ms: 10_000,
+      }),
+    ).toEqual([
+      {
+        title: "工具参数",
+        content: '{\n  "ids": [\n    "job-1"\n  ],\n  "timeout_ms": 10000\n}',
+      },
+    ]);
+  });
 });

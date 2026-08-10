@@ -3,6 +3,7 @@ import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import type { SessionHistoryMessage } from "@dev-anywhere/shared";
 import type { ChatActivityDetail } from "@/lib/chat-activity-detail";
+import { getClaudeToolActivityDetails } from "@/lib/claude-activity-summary";
 
 export interface ToolCallInfo {
   toolName: string;
@@ -62,6 +63,7 @@ export interface ChatMessage {
 
 interface ChatSessionSlice {
   messages: ChatMessage[];
+  followLatestRequest: number;
   turnCompletionVersion: number;
   historyInitialized: boolean;
   historyHasMore: boolean;
@@ -77,6 +79,7 @@ interface ChatSessionSlice {
 
 export const EMPTY_SLICE: ChatSessionSlice = {
   messages: [],
+  followLatestRequest: 0,
   turnCompletionVersion: 0,
   historyInitialized: false,
   historyHasMore: false,
@@ -125,6 +128,7 @@ interface ChatStoreState {
   addDraftAttachment: (sessionId: string, attachment: ChatDraftAttachment) => void;
   removeDraftAttachment: (sessionId: string, attachmentId: string) => void;
   clearDraftAttachments: (sessionId: string) => void;
+  requestFollowLatest: (sessionId: string) => void;
   loadHistory: (sessionId: string, messages: SessionHistoryMessage[]) => void;
   loadHistoryPage: (
     sessionId: string,
@@ -184,6 +188,7 @@ function toHistoryChatMessage(sessionId: string, message: SessionHistoryMessage)
         status: message.status,
         text: message.text,
         toolName: message.toolName,
+        details: getClaudeToolActivityDetails(message.toolName, message.parameters ?? {}),
         durable: true,
       },
     };
@@ -487,6 +492,14 @@ export const useChatStore = create<ChatStoreState>()(
       clearDraftAttachments: (sessionId) =>
         set((state) =>
           updateSlice(state, sessionId, (slice) => ({ ...slice, draftAttachments: [] })),
+        ),
+
+      requestFollowLatest: (sessionId) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            followLatestRequest: slice.followLatestRequest + 1,
+          })),
         ),
 
       loadHistory: (sessionId, historyMessages) =>

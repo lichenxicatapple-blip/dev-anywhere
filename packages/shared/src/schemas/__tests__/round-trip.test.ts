@@ -194,6 +194,7 @@ describe("RelayControlSchema round-trip stability", () => {
           text: "运行命令：pnpm test",
           toolId: "tool-history",
           toolName: "Bash",
+          parameters: { command: "pnpm test" },
           status: "done" as const,
           cursor: "b:10:1",
         },

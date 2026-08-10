@@ -50,6 +50,9 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   const historyLoading = useChatStore(
     (s) => s.bySessionId[sessionId]?.historyLoading ?? EMPTY_SLICE.historyLoading,
   );
+  const followLatestRequest = useChatStore(
+    (s) => s.bySessionId[sessionId]?.followLatestRequest ?? EMPTY_SLICE.followLatestRequest,
+  );
   const setHistoryLoading = useChatStore((s) => s.setHistoryLoading);
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
@@ -549,8 +552,11 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   // estimate→measure 过渡期定位不稳 (target 可能被 clamp 到 0), 直接设
   // scrollTop = scrollHeight 最可靠; 多轮 raf 补偿 measure 后 scrollHeight 收缩
   const initialScrollDoneRef = useRef(false);
+  const handledFollowLatestRequestRef = useRef(followLatestRequest);
   useEffect(() => {
     initialScrollDoneRef.current = false;
+    handledFollowLatestRequestRef.current =
+      useChatStore.getState().bySessionId[sessionId]?.followLatestRequest ?? 0;
     setStopPending(false);
     setFindOpen(false);
     setFindQuery("");
@@ -574,6 +580,23 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     setNewMsgsWhileAway(false);
     return () => cancelAnimationFrame(r1);
   }, [scrollEl, messages.length]);
+
+  // 本机用户主动发送/排队是明确的“回到最新”意图。它与远端/助手新消息分开处理：
+  // 后者仍尊重用户正在阅读历史的位置，前者无论发送前在哪都定位到刚发出的气泡。
+  useLayoutEffect(() => {
+    if (handledFollowLatestRequestRef.current === followLatestRequest) return;
+    handledFollowLatestRequestRef.current = followLatestRequest;
+    if (!scrollEl || messages.length === 0) return;
+    traceJsonScrollRef.current("local-submit-follow-latest");
+    setNewMsgsWhileAway(false);
+    virtualizer.scrollToIndex(messages.length - 1, { align: "end", behavior: "auto" });
+    scrollToBottom();
+    const raf = requestAnimationFrame(() => {
+      virtualizer.scrollToIndex(messages.length - 1, { align: "end", behavior: "auto" });
+      scrollToBottom();
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [followLatestRequest, messages.length, scrollEl, scrollToBottom, virtualizer]);
 
   // isAtBottom 用 ref 传到下方新消息 effect: 新消息到达时只看"当前是否在底",
   // isAtBottom 自身变化不应触发 amber (离底仅代表用户在看旧消息, 不是有新消息)

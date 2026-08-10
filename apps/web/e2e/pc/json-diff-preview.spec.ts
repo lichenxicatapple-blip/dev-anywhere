@@ -44,6 +44,36 @@ test.describe("JSON diff preview", () => {
     );
   });
 
+  test("restores historical tool parameters through the same activity disclosure", async ({
+    page,
+  }) => {
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "session_history_messages",
+        sessionId: "test-sess",
+        messages: [
+          {
+            role: "activity",
+            text: "使用工具：wait",
+            toolId: "history-wait-1",
+            toolName: "wait",
+            parameters: { ids: ["job-1"], timeout_ms: 10_000 },
+            status: "done",
+            cursor: "history:wait:1",
+          },
+        ],
+        hasMore: false,
+      });
+    });
+
+    const activity = page.locator('[data-slot="activity-bubble"]', { hasText: "使用工具：wait" });
+    await expect(activity).toBeVisible();
+    await activity.getByRole("button", { name: "展开工具详情" }).click();
+    await expect(activity.locator('[data-slot="activity-detail-content"]')).toContainText(
+      '"timeout_ms": 10000',
+    );
+  });
+
   test("renders Edit approval details as a diff preview", async ({ page }) => {
     await page.evaluate(() => {
       window.__devAnywhereE2E?.socket?.emitJson({

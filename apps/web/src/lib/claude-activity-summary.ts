@@ -168,7 +168,10 @@ export function getClaudeToolActivityDetails(
       if (changeDetails.length > 0) return changeDetails;
       return compactDetails([detail("补丁内容", input.content)]);
     }
-    default:
-      return [];
+    default: {
+      const entries = Object.entries(input);
+      if (entries.length === 0) return [];
+      return compactDetails([detail("工具参数", input)]);
+    }
   }
 }

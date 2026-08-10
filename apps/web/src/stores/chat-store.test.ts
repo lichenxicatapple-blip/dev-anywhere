@@ -208,6 +208,15 @@ describe("chat-store per-session", () => {
     expect(useChatStore.getState().bySessionId).toEqual({});
   });
 
+  it("scopes explicit follow-latest requests to the submitting session", () => {
+    useChatStore.getState().requestFollowLatest("s1");
+    useChatStore.getState().requestFollowLatest("s1");
+    useChatStore.getState().requestFollowLatest("s2");
+
+    expect(useChatStore.getState().bySessionId.s1.followLatestRequest).toBe(2);
+    expect(useChatStore.getState().bySessionId.s2.followLatestRequest).toBe(1);
+  });
+
   it("prepends older history pages without duplicating existing or live messages", () => {
     useChatStore.getState().loadHistoryPage("s1", {
       mode: "replace",
@@ -257,6 +266,7 @@ describe("chat-store per-session", () => {
           text: "运行命令：pnpm test",
           toolId: "tool-history",
           toolName: "Bash",
+          parameters: { command: "pnpm test" },
           status: "done",
           cursor: "b:2:1",
         },
@@ -273,6 +283,12 @@ describe("chat-store per-session", () => {
         id: "tool-history",
         toolName: "Bash",
         status: "done",
+        details: [
+          {
+            title: "工具参数",
+            content: '{\n  "command": "pnpm test"\n}',
+          },
+        ],
         durable: true,
       },
     });

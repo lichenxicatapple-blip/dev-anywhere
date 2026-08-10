@@ -22,7 +22,11 @@ import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import { attachPtyReviewSnapshot } from "@/lib/pty-review-snapshot";
 import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
-import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
+import {
+  attachPtyScrollController,
+  type PtyPageResumeState,
+  type PtyScrollState,
+} from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
@@ -143,8 +147,9 @@ interface UsePtyViewResult {
 interface ScrollControllerHandle {
   relayout: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
-  preparePageResumeRestore: () => void;
-  restorePageResume: () => void;
+  capturePageResumeState: () => PtyPageResumeState;
+  preparePageResumeRestore: (state: PtyPageResumeState) => void;
+  restorePageResume: (state: PtyPageResumeState) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
@@ -340,6 +345,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const physicalKeyboardModeRef = useRef(false);
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
+  const pageResumeStateRef = useRef<PtyPageResumeState>({ mode: "following" });
+  const pageResumeHadNewFrameRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
@@ -425,6 +432,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   };
 
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
+  const setHasNewFramesWhileAway = follow.setHasNewFramesWhileAway;
 
   // === scheduler（首次访问 lazy 创建，组件卸载时清理）===
   if (!relayoutSchedulerRef.current) {
@@ -452,25 +460,38 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }, []);
 
   const rememberHiddenPtyState = useCallback((): void => {
+    if (!pageResumePendingRef.current) pageResumeHadNewFrameRef.current = false;
+    const scroll = scrollControllerRef.current;
+    if (scroll) {
+      pageResumeStateRef.current = scroll.capturePageResumeState();
+      // 从 hidden 开始就冻结语义状态；Chrome 可能在真正恢复前回放陈旧 scroll 事件。
+      scroll.preparePageResumeRestore(pageResumeStateRef.current);
+    }
     pageResumePendingRef.current = true;
     cancelPendingResumeFrame();
   }, [cancelPendingResumeFrame]);
 
   const scheduleResumeRestore = useCallback((): void => {
     if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
-    scrollControllerRef.current?.preparePageResumeRestore();
+    scrollControllerRef.current?.preparePageResumeRestore(pageResumeStateRef.current);
     cancelPendingResumeFrame();
     pageResumeFrameRef.current = requestAnimationFrame(() => {
       pageResumeFrameRef.current = requestAnimationFrame(() => {
         pageResumeFrameRef.current = null;
         const scroll = scrollControllerRef.current;
         if (!scroll) return;
-        scroll.restorePageResume();
-        clearNewFramesWhileAway();
+        const resumeState = pageResumeStateRef.current;
+        scroll.restorePageResume(resumeState);
+        if (resumeState.mode === "following") {
+          clearNewFramesWhileAway();
+        } else if (pageResumeHadNewFrameRef.current) {
+          setHasNewFramesWhileAway(true);
+        }
+        pageResumeHadNewFrameRef.current = false;
         pageResumePendingRef.current = false;
       });
     });
-  }, [cancelPendingResumeFrame, clearNewFramesWhileAway]);
+  }, [cancelPendingResumeFrame, clearNewFramesWhileAway, setHasNewFramesWhileAway]);
 
   useEffect(() => {
     return () => {
@@ -761,6 +782,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
+      if (pageResumePendingRef.current) pageResumeHadNewFrameRef.current = true;
       if (userHasVerticalScrollIntentRef.current && !follow.hasNewFramesWhileAwayRef.current) {
         follow.setHasNewFramesWhileAway(true);
       }
@@ -845,7 +867,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
         const shouldRestorePageResumeOnAttach = pageResumePendingRef.current;
         if (shouldRestorePageResumeOnAttach) {
-          userHasVerticalScrollIntentRef.current = false;
+          userHasVerticalScrollIntentRef.current = pageResumeStateRef.current.mode === "reviewing";
         }
 
         const scrollCtrl = attachPtyScrollController({
@@ -875,8 +897,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
         if (shouldRestorePageResumeOnAttach) {
-          scrollCtrl.restorePageResume();
-          clearNewFramesWhileAway();
+          const resumeState = pageResumeStateRef.current;
+          scrollCtrl.restorePageResume(resumeState);
+          if (resumeState.mode === "following") {
+            clearNewFramesWhileAway();
+          } else if (pageResumeHadNewFrameRef.current) {
+            setHasNewFramesWhileAway(true);
+          }
+          pageResumeHadNewFrameRef.current = false;
           pageResumePendingRef.current = false;
         }
 

@@ -58,6 +58,7 @@ export function InputBar({ sessionId }: InputBarProps) {
   const addDraftAttachment = useChatStore((s) => s.addDraftAttachment);
   const removeDraftAttachment = useChatStore((s) => s.removeDraftAttachment);
   const clearDraftAttachments = useChatStore((s) => s.clearDraftAttachments);
+  const requestFollowLatest = useChatStore((s) => s.requestFollowLatest);
   const addUserMessage = useChatStore((s) => s.addUserMessage);
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
   const forceHardwareInput = useAppStore((s) => s.inputModePreference === "hardware");
@@ -148,8 +149,9 @@ export function InputBar({ sessionId }: InputBarProps) {
       toolCalls: [],
       deliveryStatus: "queued",
     });
+    requestFollowLatest(sessionId);
     clearComposer();
-  }, [canQueue, submissionText, sessionId, addUserMessage, clearComposer]);
+  }, [canQueue, submissionText, sessionId, addUserMessage, requestFollowLatest, clearComposer]);
 
   const send = useCallback(() => {
     // 只负责真正发给 relay 的路径；form submit / Enter / 按钮先走 submitDraft 分流。
@@ -171,6 +173,7 @@ export function InputBar({ sessionId }: InputBarProps) {
         timestamp: now,
         toolCalls: [],
       });
+      requestFollowLatest(sessionId);
     }
     // 乐观翻 session.state：proxy 20~50ms 内会回 session_status 覆写（包括万一没被接受的降级态）
     updateSessionState(sessionId, isCompactCommand ? "compacting" : "working", now);
@@ -185,7 +188,15 @@ export function InputBar({ sessionId }: InputBarProps) {
       version: "1",
     });
     clearComposer();
-  }, [canSend, submissionText, sessionId, addUserMessage, updateSessionState, clearComposer]);
+  }, [
+    canSend,
+    submissionText,
+    sessionId,
+    addUserMessage,
+    requestFollowLatest,
+    updateSessionState,
+    clearComposer,
+  ]);
 
   const submitDraft = useCallback(() => {
     if (canSend) {

@@ -79,6 +79,22 @@ describe("UserMessageAttachments", () => {
     await waitFor(() => expect(requestImagePreviewUrl).toHaveBeenCalledTimes(3));
   });
 
+  it("renders one image as a compact thumbnail and keeps the normal preview action", async () => {
+    const path = "/tmp/compact preview.png";
+    const { container } = render(
+      <UserMessageAttachments attachments={[{ kind: "image", path }]} />,
+    );
+
+    const gallery = container.querySelector<HTMLElement>('[data-slot="user-image-gallery"]');
+    expect(gallery?.className).toContain("w-32");
+    const thumbnail = screen.getByRole("button", { name: "打开图片" });
+    expect(thumbnail.className).toContain("h-24");
+    expect(thumbnail.className).toContain("w-32");
+    fireEvent.click(thumbnail);
+    expect(openImagePreview).toHaveBeenCalledWith(path);
+    await waitFor(() => expect(requestImagePreviewUrl).toHaveBeenCalledWith(path));
+  });
+
   it("renders a semantic file card without exposing its file name or path visually", () => {
     const path = "/private/uploads/customer secrets/final-report.pdf";
     const { container } = render(<UserMessageAttachments attachments={[{ kind: "file", path }]} />);

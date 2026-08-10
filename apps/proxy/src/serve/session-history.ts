@@ -324,6 +324,26 @@ function normalizeHistoryToolName(name: string): string {
   }
 }
 
+function normalizeHistoryToolParameters(
+  rawToolName: string,
+  input: unknown,
+): Record<string, unknown> {
+  const parameters = parseToolInput(input);
+  const toolName = normalizeHistoryToolName(rawToolName);
+  if (toolName === "Bash" && typeof parameters.command !== "string") {
+    const command = typeof parameters.cmd === "string" ? parameters.cmd : undefined;
+    if (command) {
+      const rest = { ...parameters };
+      delete rest.cmd;
+      return { ...rest, command };
+    }
+  }
+  if (toolName === "Patch" && typeof input === "string" && !parameters.content) {
+    return { ...parameters, content: input };
+  }
+  return parameters;
+}
+
 function toolUseHistoryItem(
   toolId: string,
   rawToolName: string,
@@ -332,7 +352,7 @@ function toolUseHistoryItem(
 ): ExtractedHistoryItem | null {
   if (!toolId || !rawToolName) return null;
   const toolName = normalizeHistoryToolName(rawToolName);
-  const parameters = parseToolInput(input);
+  const parameters = normalizeHistoryToolParameters(rawToolName, input);
   return {
     kind: "message",
     message: {
@@ -340,6 +360,7 @@ function toolUseHistoryItem(
       text: summarizeToolActivity(toolName, parameters),
       toolId,
       toolName,
+      parameters,
       status: "running",
       ...(timestamp !== undefined ? { timestamp } : {}),
     },

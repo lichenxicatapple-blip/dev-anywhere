@@ -62,4 +62,52 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
     await expect(emuPage.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
     await expect(backToBottom).toHaveJSProperty("inert", false);
   });
+
+  test("local send explicitly follows the new user bubble from a history position", async ({
+    emuPage,
+  }) => {
+    await installFakeRelay(emuPage);
+    await emuPage.goto(`${mobileBaseUrl}/#/chat/fo-sess?mode=json`);
+    await emuPage.reload();
+    const input = emuPage.getByLabel("输入聊天消息");
+    await expect(input).toBeVisible({ timeout: 30_000 });
+
+    await emuPage.evaluate(() => {
+      const hooks = window.__ccTest;
+      if (!hooks) throw new Error("__ccTest 未安装");
+      for (let i = 0; i < 70; i += 1) {
+        hooks.chat.addUserMessage("fo-sess", {
+          id: `mobile-send-hist-u-${i}`,
+          role: "user",
+          text: `发送前历史问题 ${i}`,
+          isPartial: false,
+          timestamp: Date.now() + i,
+          toolCalls: [],
+        });
+        hooks.chat.appendAssistantText("fo-sess", `发送前历史回复 ${i}`);
+        hooks.chat.markTurnComplete("fo-sess");
+      }
+    });
+
+    const list = emuPage.locator('[data-slot="message-list"]');
+    await list.evaluate((node) => {
+      const el = node as HTMLElement;
+      el.scrollTop = Math.max(0, el.scrollHeight / 2);
+      el.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect(emuPage.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", false);
+
+    await input.fill("这是我主动发送的新消息");
+    await emuPage.locator('[data-slot="send-button"][data-variant="send"]').click();
+
+    await expect
+      .poll(() =>
+        list.evaluate((node) => {
+          const el = node as HTMLElement;
+          return el.scrollHeight - (el.scrollTop + el.clientHeight);
+        }),
+      )
+      .toBeLessThanOrEqual(8);
+    await expect(emuPage.getByText("这是我主动发送的新消息", { exact: true })).toBeVisible();
+  });
 });

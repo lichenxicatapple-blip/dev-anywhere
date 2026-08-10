@@ -63,10 +63,11 @@ interface PtyScrollController {
   // 默认被动 caller (pendingFrame / relayout / termScroll) 在 intent=true
   // 时整段 no-op。把 invariant 收到 controller 内部, 新加 caller 默认就对。
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
-  // 浏览器从后台 / bfcache 恢复时可能先还原一个旧 DOM scrollTop。生命周期恢复统一
-  // 以实时终端为准回到底部；前台主动回看仍由 scrollToBottom 的 passive guard 保护。
-  preparePageResumeRestore: () => void;
-  restorePageResume: () => void;
+  // 浏览器从后台 / bfcache 恢复时可能先还原一个旧 DOM scrollTop。隐藏时先捕获语义
+  // 锚点；恢复时仅 following 回到底部，reviewing 保留原来的 buffer 行与屏幕位置。
+  capturePageResumeState: () => PtyPageResumeState;
+  preparePageResumeRestore: (state: PtyPageResumeState) => void;
+  restorePageResume: (state: PtyPageResumeState) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
@@ -77,6 +78,16 @@ interface PtyScrollController {
   // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
   getDebugProbe: () => PtyScrollDebugProbe;
 }
+
+export type PtyPageResumeState =
+  | { mode: "following" }
+  | {
+      mode: "reviewing";
+      ydisp: number;
+      scrollTop: number;
+      scrollLeft: number;
+      cellH: number;
+    };
 
 export interface PtyScrollState {
   scrollTop: number;
@@ -160,6 +171,8 @@ export function attachPtyScrollController(
   // 页面从后台 / keepalive 隐藏层恢复时,浏览器可能先回放旧 scrollTop 或 touch scroll。
   // 如果隐藏前语义上在 following,这些恢复噪音不能抢先把 intent 改成 reviewing。
   let pageResumeRestorePendingFromFollowing = false;
+  let pendingPageResumeReview: Extract<PtyPageResumeState, { mode: "reviewing" }> | null = null;
+  let pageResumeReviewRestoreRequested = false;
   // 进入页面时按"几何贴底"一次定锚 (终端心智), 之后只在"光标行真的变了"时让
   // followCursorY 接管把光标拉回视野。无变动的 onRender 帧 (focus 切换 / theme 重绘 /
   // 同一 buffer 重 paint) 不应改 scrollTop, 否则进入瞬间就会从底吸底跳成 cursor 居中,
@@ -491,23 +504,70 @@ export function attachPtyScrollController(
     trace("scroll-to-bottom:end", { ydisp: maxYdisp });
   };
 
-  const preparePageResumeRestore = (): void => {
-    pageResumeRestorePendingFromFollowing = true;
-    trace("page-resume:prepare-follow");
-    if (userHasVerticalScrollIntent()) {
-      dispatchVerticalIntent({
-        type: "scroll-to-bottom",
-        force: true,
-        reason: "pageResumePrepare",
-      });
+  const capturePageResumeState = (): PtyPageResumeState => {
+    if (!userHasVerticalScrollIntent()) return { mode: "following" };
+    const { cellH } = getDims();
+    return {
+      mode: "reviewing",
+      ydisp:
+        cellH > 0 ? getYdispForScrollTop(container.scrollTop, cellH) : term.buffer.active.viewportY,
+      scrollTop: container.scrollTop,
+      scrollLeft: container.scrollLeft,
+      cellH,
+    };
+  };
+
+  const preparePageResumeRestore = (state: PtyPageResumeState): void => {
+    pageResumeRestorePendingFromFollowing = state.mode === "following";
+    pendingPageResumeReview = state.mode === "reviewing" ? state : null;
+    pageResumeReviewRestoreRequested = false;
+    trace(state.mode === "following" ? "page-resume:prepare-follow" : "page-resume:prepare-review");
+  };
+
+  const restorePageResumeReview = (): void => {
+    const state = pendingPageResumeReview;
+    if (!state) return;
+    const { cellH } = getDims();
+    if (cellH <= 0) return;
+    const maxYdisp = Math.max(0, term.buffer.active.length - term.rows);
+    const targetYdisp = Math.min(state.ydisp, maxYdisp);
+    const withinRowOffset = state.cellH > 0 ? state.scrollTop - state.ydisp * state.cellH : 0;
+    const maxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
+    const targetScrollTop = Math.max(
+      0,
+      Math.min(maxScrollTop, ydispToScrollTop(targetYdisp, cellH) + withinRowOffset),
+    );
+    dispatchVerticalIntent({
+      type: "scroll-to-ratio",
+      ratio: maxScrollTop > 0 ? targetScrollTop / maxScrollTop : 0,
+      scrollTop: targetScrollTop,
+    });
+    reviewScrollAnchor = { scrollTop: targetScrollTop, ydisp: targetYdisp, cellH };
+    reviewSnapshotRefreshPending = true;
+    container.scrollTop = targetScrollTop;
+    container.scrollLeft = state.scrollLeft;
+    syncContainerScroll();
+    trace("page-resume:restore-review", {
+      details: `ydisp=${targetYdisp}/${state.ydisp} scrollTop=${targetScrollTop}`,
+    });
+    // 重连后的 buffer 可能仍在重放。没达到原锚点前保留目标，后续 render 继续尝试；
+    // 达到后交还给正常 reviewing 状态，后台新增输出只显示提示。
+    if (maxYdisp >= state.ydisp) {
+      pendingPageResumeReview = null;
+      pageResumeReviewRestoreRequested = false;
     }
   };
 
-  const restorePageResume = (): void => {
-    preparePageResumeRestore();
+  const restorePageResume = (state: PtyPageResumeState): void => {
+    preparePageResumeRestore(state);
     updateSpacer();
-    scrollToBottom("pageResume", { force: true });
-    resetHorizontalScroll("pageResume");
+    if (state.mode === "reviewing") {
+      pageResumeReviewRestoreRequested = true;
+      restorePageResumeReview();
+    } else {
+      scrollToBottom("pageResume", { force: true });
+      resetHorizontalScroll("pageResume");
+    }
     pageResumeRestorePendingFromFollowing = false;
   };
 
@@ -995,6 +1055,17 @@ export function attachPtyScrollController(
     if (restoreRecentRawInputLayoutDrift(effectiveScrollTop, atBottom, verticalDelta)) {
       return;
     }
+    if (pendingPageResumeReview) {
+      trace("container-scroll:page-resume-review-pending", {
+        details: `scrollTop=${effectiveScrollTop} restore=${pendingPageResumeReview.scrollTop}`,
+      });
+      // hidden/bfcache 阶段 Chrome 可能回放陈旧 DOM scrollTop。此时以隐藏前捕获的
+      // reviewing 锚点为准，不能让该程序化事件清除用户的回看意图。
+      container.scrollTop = pendingPageResumeReview.scrollTop;
+      lastSeenScrollTop = pendingPageResumeReview.scrollTop;
+      notifyScroll();
+      return;
+    }
     if (pageResumeRestorePendingFromFollowing) {
       trace("container-scroll:page-resume-pending", {
         details: `scrollTop=${effectiveScrollTop} bottom=${getCurrentAnchor().bottomScrollTop}`,
@@ -1263,6 +1334,7 @@ export function attachPtyScrollController(
   const onRender = (): void => {
     trace("render");
     updateSpacer();
+    if (pendingPageResumeReview && pageResumeReviewRestoreRequested) restorePageResumeReview();
     // 顺序很关键: retry 必须在 handlePendingNewFrame 之前。如果反过来,
     // handlePendingNewFrame 在 follow 路径里会调 scrollToBottom 改写 scrollTop,
     // 后跑的 syncContainerScroll 就会按"被改写后的 scrollTop"重新对齐,等于无视
@@ -1367,6 +1439,7 @@ export function attachPtyScrollController(
     },
     relayout,
     scrollToBottom,
+    capturePageResumeState,
     preparePageResumeRestore,
     restorePageResume,
     scrollToRatio,

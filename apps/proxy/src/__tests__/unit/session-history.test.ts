@@ -810,6 +810,7 @@ describe("readSessionMessages", () => {
       text: "运行命令：pnpm test",
       toolId: "toolu-test",
       toolName: "Bash",
+      parameters: { command: "pnpm test" },
       status: "done",
     });
 
@@ -1067,7 +1068,7 @@ describe("readSessionMessages", () => {
         payload: {
           type: "function_call",
           name: "exec_command",
-          arguments: JSON.stringify({ cmd: "pnpm test", command: "pnpm test" }),
+          arguments: JSON.stringify({ cmd: "pnpm test" }),
           call_id: "call-test",
         },
       }),
@@ -1091,6 +1092,7 @@ describe("readSessionMessages", () => {
         text: "运行命令：pnpm test",
         toolId: "call-test",
         toolName: "Bash",
+        parameters: { command: "pnpm test" },
         status: "done",
       },
       { role: "assistant", text: "测试通过。" },

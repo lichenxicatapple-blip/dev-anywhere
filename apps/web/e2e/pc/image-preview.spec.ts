@@ -5,7 +5,11 @@ async function openJsonPreview(page: Page, path: string): Promise<void> {
   const input = page.getByLabel("输入聊天消息");
   await input.fill(`inspect @${path}`);
   await page.locator('[data-slot="send-button"][data-variant="send"]').click();
-  await page.locator('[data-slot="user-image-attachment"]').click();
+  const thumbnail = page.locator('[data-slot="user-image-attachment"]');
+  await expect(thumbnail).toBeVisible();
+  const thumbnailBox = await thumbnail.boundingBox();
+  expect(thumbnailBox?.width).toBeLessThanOrEqual(129);
+  await thumbnail.click();
 }
 
 async function expectPreviewReady(page: Page, path: string): Promise<void> {

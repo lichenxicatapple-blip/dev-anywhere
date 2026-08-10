@@ -93,6 +93,117 @@ test.describe("PTY keep-alive", () => {
     await expect.poll(() => activePtyBottomGap(page)).toBeLessThanOrEqual(8);
   });
 
+  test("preserves a reviewing PTY position when re-activated and marks background output", async ({
+    page,
+  }) => {
+    await expect(activePty(page).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitPty(
+        "claude-pty",
+        Array.from(
+          { length: 180 },
+          (_, i) => `review resume line ${String(i).padStart(3, "0")}\r\n`,
+        ).join(""),
+      );
+    });
+    await expect.poll(() => activePtyBottomGap(page)).toBeLessThanOrEqual(8);
+
+    const terminal = activePty(page).locator('[data-slot="pty-terminal"]');
+    await terminal.hover();
+    await page.mouse.wheel(0, -600);
+    await expect(activePty(page).locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
+      "inert",
+      false,
+    );
+    const reviewedScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+
+    await page.locator('[data-slot="session-row"][data-session-id="codex-pty"]:visible').click();
+    await expect(page).toHaveURL(/\/chat\/codex-pty\?mode=pty/);
+
+    // 模拟隐藏标签页期间 Chrome 回放错误 DOM 位置，同时终端继续产生输出。
+    await ptyEntry(page, "claude-pty")
+      .locator('[data-slot="pty-terminal"]')
+      .evaluate((el) => {
+        const node = el as HTMLElement;
+        node.scrollTop = node.scrollHeight;
+        node.dispatchEvent(new Event("scroll", { bubbles: true }));
+      });
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitPty("claude-pty", "BACKGROUND-REVIEW-FRAME\r\n");
+    });
+
+    await page.locator('[data-slot="session-row"][data-session-id="claude-pty"]:visible').click();
+    await expect(page).toHaveURL(/\/chat\/claude-pty\?mode=pty/);
+    const restoredTerminal = activePty(page).locator('[data-slot="pty-terminal"]');
+    await expect
+      .poll(() => restoredTerminal.evaluate((el) => (el as HTMLElement).scrollTop))
+      .toBeCloseTo(reviewedScrollTop, 0);
+    await expect(activePty(page).locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
+      "inert",
+      false,
+    );
+    await expect(
+      activePty(page).locator('[data-slot="back-to-bottom-new-indicator"]'),
+    ).toBeVisible();
+  });
+
+  test("preserves a reviewing PTY across Chrome visibility background reconnect", async ({
+    page,
+  }) => {
+    await expect(activePty(page).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+    await page.evaluate(() => {
+      window.__devAnywhereE2E?.socket?.emitPty(
+        "claude-pty",
+        Array.from({ length: 180 }, (_, i) => `tab resume line ${i}\r\n`).join(""),
+      );
+    });
+    await expect.poll(() => activePtyBottomGap(page)).toBeLessThanOrEqual(8);
+
+    const terminal = activePty(page).locator('[data-slot="pty-terminal"]');
+    await terminal.hover();
+    await page.mouse.wheel(0, -600);
+    await expect(activePty(page).locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
+      "inert",
+      false,
+    );
+    const reviewedScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "hidden",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+      const node = document.querySelector<HTMLElement>(
+        '[data-slot="pty-keepalive-entry"][data-active="true"] [data-slot="pty-terminal"]',
+      );
+      if (node) {
+        node.scrollTop = node.scrollHeight;
+        node.dispatchEvent(new Event("scroll", { bubbles: true }));
+      }
+      window.__devAnywhereE2E?.socket?.emitPty("claude-pty", "TAB-BACKGROUND-FRAME\r\n");
+    });
+    await page.waitForTimeout(5_200);
+
+    await page.evaluate(() => {
+      Object.defineProperty(document, "visibilityState", {
+        configurable: true,
+        value: "visible",
+      });
+      document.dispatchEvent(new Event("visibilitychange"));
+    });
+    await expect
+      .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
+      .toBeCloseTo(reviewedScrollTop, 0);
+    await expect(activePty(page).locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
+      "inert",
+      false,
+    );
+    await expect(
+      activePty(page).locator('[data-slot="back-to-bottom-new-indicator"]'),
+    ).toBeVisible();
+  });
+
   test("renders the active PTY after a hard reload on the chat route", async ({ page }) => {
     await expect(activePty(page).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
 

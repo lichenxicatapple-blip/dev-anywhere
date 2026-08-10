@@ -1946,6 +1946,7 @@ describe("attachPtyScrollController", () => {
 
     expect(container.scrollTop).toBe(1600);
     onUserVerticalScrollIntentChange.mockClear();
+    const resumeState = controller.capturePageResumeState();
 
     // Chrome can restore the DOM scrollTop from page history before the PTY controller has
     // re-established its semantic "following bottom" state.
@@ -1956,7 +1957,7 @@ describe("attachPtyScrollController", () => {
     terminal.scrollToLine.mockClear();
     onUserVerticalScrollIntentChange.mockClear();
 
-    controller.restorePageResume();
+    controller.restorePageResume(resumeState);
 
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
@@ -1983,7 +1984,8 @@ describe("attachPtyScrollController", () => {
     onUserVerticalScrollIntentChange.mockClear();
     terminal.scrollToLine.mockClear();
 
-    controller.preparePageResumeRestore();
+    const resumeState = controller.capturePageResumeState();
+    controller.preparePageResumeRestore(resumeState);
     container.dispatchEvent(touchEvent("touchstart", 320));
     container.scrollTop = 100;
     container.dispatchEvent(new Event("scroll"));
@@ -1993,14 +1995,14 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
 
-    controller.restorePageResume();
+    controller.restorePageResume(resumeState);
 
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
   });
 
-  it("returns to the bottom on page resume even when the page was hidden while reviewing", () => {
+  it("preserves the viewed buffer row on page resume while reviewing", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
     const { terminal } = createTerminal({ 19: "prompt" });
@@ -2019,13 +2021,22 @@ describe("attachPtyScrollController", () => {
 
     container.scrollTop = 100;
     terminal.scrollToLine.mockClear();
+    onUserVerticalScrollIntentChange.mockClear();
+    const resumeState = controller.capturePageResumeState();
 
-    controller.restorePageResume();
+    // 模拟 Chrome 在后台恢复期间写入一个陈旧 DOM 位置；语义锚点应覆盖它。
+    controller.preparePageResumeRestore(resumeState);
+    container.scrollTop = 700;
+    container.dispatchEvent(new Event("scroll"));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
 
-    expect(container.scrollTop).toBe(1600);
-    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(80);
+    controller.restorePageResume(resumeState);
+
+    expect(container.scrollTop).toBe(100);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     const intentCalls = onUserVerticalScrollIntentChange.mock.calls.map((c) => c[0]);
-    expect(intentCalls).toContain(false);
+    expect(intentCalls).not.toContain(false);
   });
 
   it("owns at-bottom state and exposes scrollToBottom", () => {

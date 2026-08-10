@@ -100,6 +100,7 @@ export const SessionHistoryMessageSchema = z.discriminatedUnion("role", [
     text: z.string(),
     toolId: IdSchema,
     toolName: z.string(),
+    parameters: z.record(z.string(), z.unknown()).optional(),
     status: z.enum(["running", "done", "error"]),
     ...SessionHistoryPositionShape,
   }),
