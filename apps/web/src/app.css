@@ -749,7 +749,7 @@ code.hljs,
 
 /* Android keyboard toolbars can paint into the visual viewport edge. Keep the
    complete composer above that overlap, matching the PTY mobile controls. */
-.dev-chat-input-rail-inset[data-soft-keyboard-open="true"] {
+.dev-chat-input-rail-inset[data-keyboard-edge-guard="true"] {
   padding-bottom: calc(var(--dev-mobile-keyboard-overlap-guard) + var(--dev-mobile-keyboard-gap));
 }
 
