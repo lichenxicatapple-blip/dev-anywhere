@@ -97,7 +97,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expectPtySessionSubscribeCount(page, 2);
   });
 
-  test("restores page-resume scroll to bottom after browser restores stale positions", async ({
+  test("restores the semantic PTY position after browser restores stale positions", async ({
     page,
   }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID });
@@ -130,7 +130,12 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
 
-    await expectPtyAtBottom(page);
+    await expect
+      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
+      .toBeGreaterThan(100);
+    await expect
+      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.scrollTop))
+      .toBeLessThanOrEqual(8);
   });
 
   test("owns the PTY scroll position across a full browser reload", async ({ page }) => {

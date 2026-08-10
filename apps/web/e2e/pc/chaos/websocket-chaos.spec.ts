@@ -268,15 +268,14 @@ test.describe("WebSocket reconnect chaos", () => {
     });
     await expectPtyAtBottom(page);
 
-    await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
-    await ptyTerminal(page).evaluate((el) => {
+    const staleBottomGap = await ptyTerminal(page).evaluate((el) => {
+      window.dispatchEvent(new Event("pagehide"));
       const node = el as HTMLElement;
       node.scrollTop = 0;
       node.dispatchEvent(new Event("scroll", { bubbles: true }));
+      return Math.max(0, node.scrollHeight - node.clientHeight - node.scrollTop);
     });
-    await expect
-      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
-      .toBeGreaterThan(100);
+    expect(staleBottomGap).toBeGreaterThan(100);
 
     await holdNextConnectionAndDropSocket(page);
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
