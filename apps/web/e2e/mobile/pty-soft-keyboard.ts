@@ -261,10 +261,28 @@ export async function setAndroidEmulatorOrientation(
 }
 
 export async function touchPtyTerminalAndWaitForSoftKeyboard(page: Page): Promise<void> {
-  await touchPtyTerminal(page);
-  await expect(
-    page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
-  ).toBeFocused();
-  await waitForSoftKeyboard(page);
-  await waitForPtyControlsToSettleAboveKeyboard(page);
+  const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
+  let firstError: unknown;
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    await touchPtyTerminal(page);
+    await expect(input).toBeFocused();
+    try {
+      await waitForSoftKeyboard(page);
+      await waitForPtyControlsToSettleAboveKeyboard(page);
+      return;
+    } catch (error) {
+      firstError ??= error;
+      if (attempt === 1) throw firstError;
+
+      // Android Emulator occasionally reports the IME as visible while Chrome
+      // never applies the matching visualViewport resize. Reset that native
+      // interaction once; all product layout assertions still run afterward.
+      await input.evaluate((node: HTMLTextAreaElement) => node.blur());
+      await dismissSoftKeyboard(page);
+      await expect
+        .poll(() => page.locator("[data-keyboard-offset]").getAttribute("data-keyboard-offset"))
+        .toBe("0");
+    }
+  }
 }
