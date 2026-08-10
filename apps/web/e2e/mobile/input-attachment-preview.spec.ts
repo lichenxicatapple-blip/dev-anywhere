@@ -211,23 +211,21 @@ test.describe("L4 mobile / chat attachment preview", () => {
 
     await pasteGeneratedImage(input, images[0]);
     await expect(previews).toHaveCount(1);
-    const inputRegion = emuPage.locator('[data-slot="input-bar-region"]');
-    const singleImageLayout = await measureComposerLayout(inputRegion);
+    const strip = emuPage.locator('[data-slot="input-attachments"]');
+    const singleRowHeight = await strip.evaluate((element) => element.clientHeight);
 
     for (const image of images.slice(1)) {
       await pasteGeneratedImage(input, image);
       await expect(previews).toHaveCount(images.indexOf(image) + 1);
     }
 
-    const manyImageLayout = await measureComposerLayout(inputRegion);
-    expect(manyImageLayout.inputHeight).toBeCloseTo(singleImageLayout.inputHeight, 0);
-    const strip = emuPage.locator('[data-slot="input-attachments"]');
     const overflow = await strip.evaluate((element) => ({
       clientWidth: element.clientWidth,
       scrollWidth: element.scrollWidth,
       clientHeight: element.clientHeight,
       scrollHeight: element.scrollHeight,
     }));
+    expect(overflow.clientHeight).toBe(singleRowHeight);
     expect(overflow.scrollWidth).toBeGreaterThan(overflow.clientWidth);
     expect(overflow.scrollHeight).toBe(overflow.clientHeight);
 
