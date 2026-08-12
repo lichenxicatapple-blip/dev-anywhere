@@ -212,7 +212,10 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test("keeps the input row visible on the first keyboard open while PTY output settles", async ({
     emuPage,
   }) => {
-    test.setTimeout(90_000);
+    // Two complete native IME open/close cycles. Hosted UIAutomator is several
+    // times slower than local ADB, so preserve the helpers' bounded diagnostics
+    // instead of killing their worker midway through the second cycle.
+    test.setTimeout(180_000);
     const sessionId = `${SESSION_ID}-first-keyboard-open`;
     await dismissSoftKeyboard(emuPage);
     await setAndroidEmulatorOrientation(emuPage, "portrait");
@@ -254,7 +257,9 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test("keeps the live PTY input cursor visible across repeated soft-keyboard cycles", async ({
     emuPage,
   }) => {
-    test.setTimeout(120_000);
+    // Three complete native IME cycles, each with independently bounded native
+    // visibility, web viewport and controls-settlement checks.
+    test.setTimeout(240_000);
     const sessionId = `${SESSION_ID}-cursor-clearance`;
     await setupPtyChat(emuPage, {
       sessionId,
@@ -308,7 +313,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test("returns to the live cursor when typing after keyboard-open history review", async ({
     emuPage,
   }) => {
-    test.setTimeout(90_000);
+    test.setTimeout(120_000);
     const sessionId = `${SESSION_ID}-review-then-type`;
     await setupPtyChat(emuPage, {
       sessionId,
@@ -357,6 +362,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test("keeps one-row PTY controls clear of the Android keyboard in landscape", async ({
     emuPage,
   }) => {
+    test.setTimeout(90_000);
     await setAndroidEmulatorOrientation(emuPage, "landscape");
     try {
       await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });

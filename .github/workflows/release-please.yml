@@ -78,7 +78,11 @@ jobs:
   verify-android:
     name: Verify Android Chrome
     runs-on: ubuntu-latest
-    timeout-minutes: 25
+    # The 23-spec single-emulator gate includes real UIAutomator keyboard and
+    # orientation cycles. Keep a job-level safety ceiling above their summed,
+    # per-operation bounded timeouts; the runner still stops on the first reset
+    # or assertion failure (no retries).
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@v4
 
