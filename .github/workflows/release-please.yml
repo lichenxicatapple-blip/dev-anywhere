@@ -35,6 +35,26 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      - name: Configure isolated local runtime
+        run: |
+          mkdir -p "$HOME/.dev-anywhere"
+          node <<'NODE'
+          const fs = require("node:fs");
+          const path = require("node:path");
+          fs.writeFileSync(
+            path.join(process.env.HOME, ".dev-anywhere", "config.json"),
+            JSON.stringify(
+              {
+                defaultProfile: "local",
+                profiles: { local: { relay: "local" } },
+                relays: { local: { url: "ws://localhost:3100" } },
+              },
+              null,
+              2,
+            ) + "\n",
+          );
+          NODE
+
       - name: Install Chromium
         run: pnpm --filter @dev-anywhere/web exec playwright install --with-deps chromium
 

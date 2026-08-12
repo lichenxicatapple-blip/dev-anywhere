@@ -40,6 +40,8 @@ assert.match(
   /needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- verify-android/,
 );
 assert.match(releasePleaseWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1/);
+assert.match(releasePleaseWorkflow, /Configure isolated local runtime/);
+assert.match(releasePleaseWorkflow, /ws:\/\/localhost:3100/);
 assert.match(releasePleaseWorkflow, /reactivecircus\/android-emulator-runner@v2/);
 assert.match(releasePleaseWorkflow, /TEST_MOBILE_REQUIRE_EMULATOR=1/);
 assert.match(releasePleaseWorkflow, /release_created == 'true'/);
