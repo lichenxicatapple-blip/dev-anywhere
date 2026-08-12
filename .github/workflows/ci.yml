@@ -56,6 +56,8 @@ jobs:
 
       - run: pnpm --filter @dev-anywhere/web exec playwright install --with-deps chromium
 
-      - run: pnpm test:layout
+      # Hosted browser gates are intentionally serial. Parallel workers have
+      # previously hung before reporting their first test on GitHub runners.
+      - run: pnpm test:layout -- --workers=1 --reporter=line
 
-      - run: pnpm test:pc
+      - run: pnpm test:pc -- --workers=1 --reporter=line

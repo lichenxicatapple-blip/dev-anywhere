@@ -80,6 +80,8 @@ assert.match(ciWorkflow, /pull_request:/);
 assert.match(ciWorkflow, /workflow_call:/);
 assert.match(ciWorkflow, /pnpm test/);
 assert.match(ciWorkflow, /pnpm release:check/);
+assert.match(ciWorkflow, /pnpm test:layout -- --workers=1 --reporter=line/);
+assert.match(ciWorkflow, /pnpm test:pc -- --workers=1 --reporter=line/);
 
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");
