@@ -4,8 +4,7 @@ SMOKE_STARTED_VITE_PID="${SMOKE_STARTED_VITE_PID:-}"
 SMOKE_STARTED_VITE_PORT="${SMOKE_STARTED_VITE_PORT:-}"
 
 smoke_use_stable_node() {
-  # Playwright 1.52 hangs under the currently installed Node 25 on this machine.
-  # Prefer local Node 22 when available; production Docker images already use Node 22.
+  # Match the production and hosted-gate Node major when it is locally available.
   for node_bin in "$HOME"/.nvm/versions/node/v22*/bin; do
     if [[ -x "$node_bin/node" ]]; then
       export PATH="$node_bin:$PATH"

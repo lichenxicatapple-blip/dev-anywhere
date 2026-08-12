@@ -47,6 +47,7 @@ interface PtyScrollControllerOptions {
   onScrollStateChange?: (state: PtyScrollState) => void;
   initialUserHasVerticalScrollIntent?: boolean;
   onUserVerticalScrollIntentChange?: (value: boolean) => void;
+  onReviewStateCapture?: (state: Extract<PtyPageResumeState, { mode: "reviewing" }>) => void;
   onTouchReviewStart?: () => void;
   onTouchBoundaryPrevent?: () => void;
   onReviewSnapshotCapture?: (ydisp: number, rows: number) => boolean;
@@ -118,6 +119,7 @@ export function attachPtyScrollController(
     onScrollStateChange,
     initialUserHasVerticalScrollIntent = false,
     onUserVerticalScrollIntentChange,
+    onReviewStateCapture,
     onTouchReviewStart,
     onTouchBoundaryPrevent,
     onReviewSnapshotCapture,
@@ -407,6 +409,8 @@ export function attachPtyScrollController(
           reviewSnapshotRefreshPending = !captured;
           if (!captured) reviewScrollAnchor = null;
         }
+        const state = capturePageResumeState();
+        if (state.mode === "reviewing") onReviewStateCapture?.(state);
       } else {
         reviewSnapshotRefreshPending = false;
         reviewSnapshotCaptured = false;

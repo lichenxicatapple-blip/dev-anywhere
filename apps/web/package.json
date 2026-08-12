@@ -39,7 +39,7 @@
   },
   "devDependencies": {
     "@dev-anywhere/shared": "workspace:*",
-    "@playwright/test": "^1.52.0",
+    "@playwright/test": "^1.62.1",
     "@resvg/resvg-js": "^2.6.2",
     "@tailwindcss/vite": "^4.1.8",
     "@testing-library/jest-dom": "^6.9.1",

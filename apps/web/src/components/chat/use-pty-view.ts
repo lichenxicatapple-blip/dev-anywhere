@@ -335,6 +335,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const scrollControllerRef = useRef<ScrollControllerHandle | null>(null);
   const activeRef = useRef(active);
   const previousActiveRef = useRef(active);
+  const keepAliveReviewStateRef = useRef<PtyPageResumeState | null>(null);
   const readyRef = useRef(false);
   const pendingNewFrameRef = useRef(false);
   const userHasVerticalScrollIntentRef = useRef(false);
@@ -348,6 +349,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const pageResumePendingRef = useRef(false);
   const pageResumeStateRef = useRef<PtyPageResumeState>({ mode: "following" });
   const pageResumeHadNewFrameRef = useRef(false);
+  const keepAliveHadNewFrameRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
@@ -464,11 +466,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     if (!pageResumePendingRef.current) pageResumeHadNewFrameRef.current = false;
     const scroll = scrollControllerRef.current;
     if (scroll) {
-      pageResumeStateRef.current = scroll.capturePageResumeState();
+      pageResumeStateRef.current =
+        keepAliveReviewStateRef.current ?? scroll.capturePageResumeState();
       // 从 hidden 开始就冻结语义状态；Chrome 可能在真正恢复前回放陈旧 scroll 事件。
       scroll.preparePageResumeRestore(pageResumeStateRef.current);
     }
     pageResumePendingRef.current = true;
+    if (keepAliveHadNewFrameRef.current) pageResumeHadNewFrameRef.current = true;
     cancelPendingResumeFrame();
   }, [cancelPendingResumeFrame]);
 
@@ -485,10 +489,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         scroll.restorePageResume(resumeState);
         if (resumeState.mode === "following") {
           clearNewFramesWhileAway();
-        } else if (pageResumeHadNewFrameRef.current) {
+        } else if (pageResumeHadNewFrameRef.current || keepAliveHadNewFrameRef.current) {
           setHasNewFramesWhileAway(true);
         }
         pageResumeHadNewFrameRef.current = false;
+        keepAliveHadNewFrameRef.current = false;
         pageResumePendingRef.current = false;
       });
     });
@@ -784,6 +789,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
       if (pageResumePendingRef.current) pageResumeHadNewFrameRef.current = true;
+      if (keepAliveReviewStateRef.current) {
+        pageResumeHadNewFrameRef.current = true;
+        keepAliveHadNewFrameRef.current = true;
+        follow.setHasNewFramesWhileAway(true);
+      }
       if (userHasVerticalScrollIntentRef.current && !follow.hasNewFramesWhileAwayRef.current) {
         follow.setHasNewFramesWhileAway(true);
       }
@@ -890,6 +900,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
             : userHasVerticalScrollIntentRef.current,
           onUserVerticalScrollIntentChange: (value) => {
             userHasVerticalScrollIntentRef.current = value;
+          },
+          onReviewStateCapture: (state) => {
+            keepAliveReviewStateRef.current = state;
           },
           onTouchReviewStart: suppressPtyFocus,
           onTouchBoundaryPrevent: suppressPtyFocus,
