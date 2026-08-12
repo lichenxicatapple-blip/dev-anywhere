@@ -5,6 +5,10 @@ import { dismissSoftKeyboard } from "./pty-soft-keyboard";
 test.describe("L4 mobile / chat attachment preview", () => {
   test.setTimeout(90_000);
 
+  test.afterEach(async ({ emuPage }) => {
+    await dismissSoftKeyboard(emuPage);
+  });
+
   test("keeps file and image previews inside the composer and preserves the agent payload", async ({
     emuPage,
   }, testInfo) => {
@@ -170,6 +174,13 @@ test.describe("L4 mobile / chat attachment preview", () => {
     });
     const card = emuPage.locator('[data-slot="input-file-attachment"]');
     await expect(card).toBeVisible({ timeout: 15_000 });
+    // Upload completion intentionally restores the textarea focus. Freeze the
+    // visual viewport again before comparing attachment-only geometry.
+    await input.evaluate((node: HTMLTextAreaElement) => node.blur());
+    await dismissSoftKeyboard(emuPage);
+    await expect
+      .poll(() => emuPage.locator("[data-keyboard-offset]").getAttribute("data-keyboard-offset"))
+      .toBe("0");
 
     const expanded = await measureComposerLayout(inputRegion);
     expect(expanded.inputHeight).toBeGreaterThan(baseline.inputHeight);

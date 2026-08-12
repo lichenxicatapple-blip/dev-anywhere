@@ -3,14 +3,12 @@ import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pc-pty-selection-copy";
 
-declare global {
-  interface Window {
-    __pcPtyCopiedText?: string;
-  }
-}
-
 test.describe("PTY desktop selection copy", () => {
-  test("copies the active xterm selection with the browser copy shortcut", async ({ page }) => {
+  test("copies the active xterm selection with the browser copy shortcut", async ({
+    context,
+    page,
+  }) => {
+    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
     await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
 
@@ -36,20 +34,8 @@ test.describe("PTY desktop selection copy", () => {
     }, SESSION_ID);
     expect(selected).toBe("PC COPY TARGET ALPHA");
 
-    await page.evaluate(() => {
-      window.__pcPtyCopiedText = "";
-      document.addEventListener(
-        "copy",
-        (event) => {
-          window.__pcPtyCopiedText = event.clipboardData?.getData("text/plain") ?? "";
-        },
-        { once: true },
-      );
-    });
     await page.keyboard.press("ControlOrMeta+C");
 
-    await expect
-      .poll(() => page.evaluate(() => window.__pcPtyCopiedText ?? ""))
-      .toBe("PC COPY TARGET ALPHA");
+    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(selected);
   });
 });
