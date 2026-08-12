@@ -56,6 +56,8 @@ jobs:
           node-version: "22.22.0"
           cache: pnpm
 
+      - run: apt-get update && apt-get install -y --no-install-recommends build-essential
+
       - run: pnpm install --frozen-lockfile
 
       # Hosted browser gates are intentionally serial. Parallel workers have
