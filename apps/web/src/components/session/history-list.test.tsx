@@ -74,8 +74,12 @@ describe("HistoryList", () => {
     requestSessionHistory.mockResolvedValue([]);
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     cleanup();
+    // Radix FocusScope restores focus in a zero-delay unmount callback. Let it
+    // finish while this test file's jsdom realm is still active; otherwise a
+    // parallel file can replace global CustomEvent before the callback runs.
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
   it("groups the same project directory with or without a trailing slash", () => {

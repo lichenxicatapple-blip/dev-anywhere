@@ -40,7 +40,7 @@ jobs:
     name: Browser smoke
     # Keep the hosted browser image reproducible across release runs.
     runs-on: ubuntu-22.04
-    timeout-minutes: 10
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
 

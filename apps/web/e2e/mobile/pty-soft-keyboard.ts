@@ -121,7 +121,8 @@ export async function tapWithAdb(locator: Locator): Promise<void> {
       .find(
         (value) =>
           value.includes('package="com.android.chrome"') &&
-          value.includes('content-desc="Web View"'),
+          (value.includes('content-desc="Web View"') ||
+            value.includes('class="android.webkit.WebView"')),
       );
     const webViewBounds = webViewNode?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
     const chromeToolbarNode = [...lastHierarchy.matchAll(/<node\b[^>]*>/g)]

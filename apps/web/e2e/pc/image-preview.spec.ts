@@ -130,7 +130,7 @@ test.describe("image preview", () => {
     test("JSON mode opens local image paths with a loading transition", async ({ page }) => {
       const path = ".dev-anywhere/clipboard/test-sess/preview.png";
       await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-      await page.evaluate(() => window.__devAnywhereE2E?.setImagePreviewDelay(250));
+      await page.evaluate(() => window.__devAnywhereE2E?.holdImagePreviews());
 
       await openJsonPreview(page, path);
       await expect(page.locator('[data-slot="image-preview-loading"]')).toBeVisible();
@@ -138,6 +138,7 @@ test.describe("image preview", () => {
         "正在从开发机读取图片",
       );
       await expect(page.locator('[data-slot="image-preview-copy-image"]')).toBeDisabled();
+      await page.evaluate(() => window.__devAnywhereE2E?.releaseImagePreviews());
       await expectPreviewReady(page, path);
       await expect(page.locator('[data-slot="image-preview-copy-image"]')).toBeEnabled();
 
@@ -152,7 +153,7 @@ test.describe("image preview", () => {
       const path =
         "/Users/catli/MyApps/dev-anywhere/.dev-anywhere/clipboard/test-sess/a-very-long-directory-name/another-very-long-directory-name/third-very-long-directory-name/fourth-very-long-directory-name/fifth-very-long-directory-name/paste-ZLC5zm.png";
       await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-      await page.evaluate(() => window.__devAnywhereE2E?.setImagePreviewDelay(250));
+      await page.evaluate(() => window.__devAnywhereE2E?.holdImagePreviews());
 
       await openJsonPreview(page, path);
 
@@ -183,6 +184,7 @@ test.describe("image preview", () => {
         "copy path button",
       );
 
+      await page.evaluate(() => window.__devAnywhereE2E?.releaseImagePreviews());
       await expectPreviewReady(page, path);
       await expect(page.locator('[data-slot="image-preview-meta"]')).toHaveText("图片已加载");
     });

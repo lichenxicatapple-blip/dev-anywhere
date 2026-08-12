@@ -47,6 +47,8 @@ declare global {
       events: string[];
       holdConnections(): void;
       releaseConnections(): void;
+      holdImagePreviews(): void;
+      releaseImagePreviews(): void;
       setImagePreviewDelay(ms: number): void;
       setImagePreviewDataBase64(value: string): void;
       setProxySelectDelay(ms: number): void;
@@ -230,6 +232,8 @@ export async function installFakeRelay(page: Page): Promise<void> {
     let proxySelectDelayMs = 0;
     let sessionListDelayMs = 0;
     let imagePreviewDelayMs = 0;
+    let holdImagePreviews = false;
+    const heldImagePreviewResponses: Array<() => void> = [];
     const ptyBuffers = new Map<string, string>();
     const voiceAsrSent: FakeVoiceSocketPayload[] = [];
     const voiceTtsSent: string[] = [];
@@ -622,8 +626,13 @@ export async function installFakeRelay(page: Page): Promise<void> {
                     : "data:text/plain;base64,QUJD",
                 expiresAt: Date.now() + 60_000,
               });
-            if (msg.disposition === "inline") setTimeout(emitResponse, imagePreviewDelayMs);
-            else emitResponse();
+            if (msg.disposition !== "inline") {
+              emitResponse();
+            } else if (holdImagePreviews) {
+              heldImagePreviewResponses.push(emitResponse);
+            } else {
+              setTimeout(emitResponse, imagePreviewDelayMs);
+            }
             break;
           }
           case "session_resources_request":
@@ -976,6 +985,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
         holdConnections = false;
         for (const socket of [...heldSockets]) {
           socket.open();
+        }
+      },
+      holdImagePreviews() {
+        holdImagePreviews = true;
+      },
+      releaseImagePreviews() {
+        holdImagePreviews = false;
+        for (const emitResponse of heldImagePreviewResponses.splice(0)) {
+          emitResponse();
         }
       },
       setImagePreviewDelay(ms: number) {
