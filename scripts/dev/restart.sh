@@ -144,13 +144,13 @@ wait_port() {
   local label="$2"
   local log_file="$3"
   for _ in $(seq 1 50); do
-    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    if curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$port/" >/dev/null 2>&1; then
       echo "$label ready on :$port (log: $log_file)"
       return
     fi
     sleep 0.1
   done
-  echo "ERROR: $label failed to listen on :$port. Log: $log_file" >&2
+  echo "ERROR: $label failed its HTTP readiness check on :$port. Log: $log_file" >&2
   tail -n 80 "$log_file" 2>/dev/null || true
   exit 1
 }
@@ -232,7 +232,19 @@ echo "=== Restarting relay ==="
 kill_port "$RELAY_PORT" "relay"
 RELAY_LOG="$(prepare_run_log "$LOG_DIR/relay-dev.log")"
 start_detached "$ROOT/apps/relay" "$RELAY_LOG" env PORT="$RELAY_PORT" "$ROOT/node_modules/.bin/tsx" src/index.ts
-wait_port "$RELAY_PORT" "Relay" "$RELAY_LOG"
+for _ in $(seq 1 50); do
+  if curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$RELAY_PORT/api/status" >/dev/null 2>&1; then
+    echo "Relay ready on :$RELAY_PORT (log: $RELAY_LOG)"
+    RELAY_READY=1
+    break
+  fi
+  sleep 0.1
+done
+if [[ "${RELAY_READY:-0}" != "1" ]]; then
+  echo "ERROR: Relay failed its HTTP readiness check on :$RELAY_PORT. Log: $RELAY_LOG" >&2
+  tail -n 80 "$RELAY_LOG" 2>/dev/null || true
+  exit 1
+fi
 
 echo ""
 echo "=== Restarting web ==="

@@ -302,20 +302,20 @@ start_detached() {
   disown "$pid" 2>/dev/null || true
 }
 
-port_has_listener() {
-  lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
-}
-
-port_has_no_listener() {
-  ! port_has_listener "$1"
-}
-
 relay_http_ok() {
-  curl -fsS "http://localhost:$RELAY_PORT/api/status" >/dev/null
+  curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$RELAY_PORT/api/status" >/dev/null
 }
 
 web_http_ok() {
-  curl -fsS "http://localhost:$WEB_PORT/" >/dev/null
+  curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$WEB_PORT/" >/dev/null
+}
+
+relay_http_down() {
+  ! relay_http_ok
+}
+
+web_http_down() {
+  ! web_http_ok
 }
 
 run_real_ui_smoke() {
@@ -564,7 +564,6 @@ start_relay_only() {
     DEV_ANYWHERE_RELAY_CHAOS_REORDER="$RELAY_CHAOS_REORDER" \
     DEV_ANYWHERE_RELAY_CHAOS_REORDER_DELAY_MS="$RELAY_CHAOS_REORDER_DELAY_MS" \
     "$ROOT/node_modules/.bin/tsx" src/index.ts
-  wait_until "relay listens on :$RELAY_PORT" 10 port_has_listener "$RELAY_PORT"
   wait_until "relay HTTP status responds" 10 relay_http_ok
 }
 
@@ -572,7 +571,6 @@ start_web_only() {
   local web_log
   web_log="$(prepare_run_log "$LOG_DIR/web-dev.log")"
   start_detached "$ROOT/apps/web" "$web_log" env DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:$RELAY_PORT" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT"
-  wait_until "web listens on :$WEB_PORT" 10 port_has_listener "$WEB_PORT"
   wait_until "web HTTP responds" 10 web_http_ok
 }
 
@@ -583,7 +581,7 @@ run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web
 section "Chaos 1: relay process crash and reconnect"
 mark_service_log
 kill_port "$RELAY_PORT" "relay"
-wait_until "relay listener is down" 10 port_has_no_listener "$RELAY_PORT"
+wait_until "relay HTTP status is down" 10 relay_http_down
 run_relay_down_ui_smoke
 wait_until "proxy observes relay disconnected" 30 proxy_relay_disconnect_observed
 start_relay_only
@@ -608,14 +606,14 @@ run_real_ui_smoke "after proxy serve restart"
 
 section "Chaos 3: web dev server crash and restart"
 kill_port "$WEB_PORT" "web"
-wait_until "web listener is down" 10 port_has_no_listener "$WEB_PORT"
+wait_until "web HTTP is down" 10 web_http_down
 start_web_only
 run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
 run_real_ui_smoke "after web restart"
 
 section "Chaos 4: relay duplicate/reorder/delay with real UI"
 kill_port "$RELAY_PORT" "relay"
-wait_until "relay listener is down" 10 port_has_no_listener "$RELAY_PORT"
+wait_until "relay HTTP status is down" 10 relay_http_down
 mark_service_log
 start_relay_only 1
 wait_until "proxy reconnects to chaos relay" 30 proxy_relay_connected_observed

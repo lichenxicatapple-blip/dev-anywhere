@@ -8,10 +8,11 @@ release_script="$(cat scripts/release/release.sh)"
 restart_script="$(cat scripts/dev/restart.sh)"
 chaos_script="$(cat scripts/dev/chaos.sh)"
 
-grep -q 'lsof -nP -iTCP:"\$port" -sTCP:LISTEN' <<<"$restart_script"
-grep -q 'lsof -nP -iTCP:"\$1" -sTCP:LISTEN' <<<"$chaos_script"
-if grep -q 'lsof -i ":' <<<"$restart_script$chaos_script"; then
-  echo "dev service probes must use the portable -iTCP:<port> form" >&2
+grep -q '127.0.0.1:\$RELAY_PORT/api/status' <<<"$restart_script"
+grep -q 'relay HTTP status responds' <<<"$chaos_script"
+grep -q 'relay HTTP status is down' <<<"$chaos_script"
+if grep -q 'wait_until .*listener' <<<"$chaos_script"; then
+  echo "Chaos health gates must use HTTP readiness instead of lsof listener probes" >&2
   exit 1
 fi
 
