@@ -478,7 +478,7 @@ service_pid() {
 }
 
 proxy_relay_connected() {
-  service_status | grep -q "Relay:   connected"
+  service_status | grep "Relay:   connected" >/dev/null
 }
 
 service_log_has_relay_connected() {
@@ -493,7 +493,7 @@ proxy_relay_connected_observed() {
 }
 
 proxy_relay_disconnected() {
-  service_status | grep -q "Relay:   disconnected"
+  service_status | grep "Relay:   disconnected" >/dev/null
 }
 
 service_log_has_relay_disconnect() {
@@ -508,7 +508,7 @@ proxy_relay_disconnect_observed() {
 }
 
 proxy_service_running() {
-  service_status | grep -q "Service: running"
+  service_status | grep "Service: running" >/dev/null
 }
 
 started_proxy_process_alive() {
@@ -516,7 +516,7 @@ started_proxy_process_alive() {
 }
 
 service_log_has_service_started() {
-  service_log_since_marker | grep -q '"msg":"Service started"'
+  service_log_since_marker | grep '"msg":"Service started"' >/dev/null
 }
 
 proxy_service_running_observed() {

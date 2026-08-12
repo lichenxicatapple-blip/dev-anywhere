@@ -57,6 +57,11 @@ grep -q 'ws://localhost:3100' <<<"$release_please_workflow"
 grep -q 'group: release-please-' <<<"$release_please_workflow"
 grep -q 'cancel-in-progress: true' <<<"$release_please_workflow"
 grep -q 'path: ~/.dev-anywhere' <<<"$release_please_workflow"
+grep -q 'include-hidden-files: true' <<<"$release_please_workflow"
+if grep -q 'service_status | grep -q' <<<"$chaos_script"; then
+  echo "Chaos status probes must not use grep -q under pipefail" >&2
+  exit 1
+fi
 grep -q 'Upload Chaos service logs' <<<"$release_please_workflow"
 grep -q 'process-chaos-service-logs-' <<<"$release_please_workflow"
 grep -q 'verify-android:' <<<"$release_please_workflow"

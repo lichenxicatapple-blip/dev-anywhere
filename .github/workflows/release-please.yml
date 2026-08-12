@@ -72,6 +72,7 @@ jobs:
           name: process-chaos-service-logs-${{ github.run_attempt }}
           path: ~/.dev-anywhere
           if-no-files-found: warn
+          include-hidden-files: true
           retention-days: 7
 
   verify-android:
