@@ -92,6 +92,11 @@ smoke_start_vite_if_needed() {
   fi
 
   mkdir -p "$artifact_dir"
+  if ! pnpm --dir "$root/packages/shared" run build >"$artifact_dir/shared-build.log" 2>&1; then
+    echo "ERROR: Failed to build @dev-anywhere/shared before starting Vite." >&2
+    tail -n 80 "$artifact_dir/shared-build.log" >&2 || true
+    exit 1
+  fi
   pnpm --dir "$root/apps/web" exec vite --host "$vite_host" --port "$web_port" \
     >"$artifact_dir/vite.log" 2>&1 &
   SMOKE_STARTED_VITE_PID="$!"

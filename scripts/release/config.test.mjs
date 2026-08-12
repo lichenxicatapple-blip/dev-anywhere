@@ -88,6 +88,10 @@ assert.match(ciWorkflow, /name: Upload browser diagnostics/);
 assert.match(ciWorkflow, /uses: actions\/upload-artifact@v4/);
 assert.match(ciWorkflow, /apps\/web\/test-results/);
 
+const smokeCommon = fs.readFileSync("scripts/lib/smoke-common.sh", "utf8");
+assert.match(smokeCommon, /pnpm --dir "\$root\/packages\/shared" run build/);
+assert.match(smokeCommon, /shared-build\.log/);
+
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");
 assert.match(publishWorkflow, /workflow_call:/);
