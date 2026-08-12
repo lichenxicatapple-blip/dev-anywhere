@@ -43,6 +43,8 @@ RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
 FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-0}"
 CHROME_MAX_SPECS_PER_PROCESS="${TEST_MOBILE_CHROME_MAX_SPECS_PER_PROCESS:-4}"
 CHROME_SPECS_IN_PROCESS=0
+CHROME_TARGET_SEQUENCE=0
+ACTIVE_TARGET_URL=""
 TIMING_REPORT="$ARTIFACT_DIR/mobile-timing.tsv"
 PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
@@ -113,50 +115,39 @@ mobile_wait_for_cdp_page() {
 }
 
 mobile_replace_page_target() {
-  # A new CDP target gets a fresh document and fresh addInitScript registry, so
-  # spec isolation does not require restarting Chrome. Restarting per spec makes
-  # Android accumulate hidden Chrome document tasks until DevTools stops exposing
-  # a page even though its socket is alive.
-  local new_id stale_ids
+  # A new CDP target gets a fresh document and fresh addInitScript registry. Do
+  # not close the previous target here: Android Chrome can asynchronously carry
+  # that close into the newly activated target after our health probe succeeds.
+  # The process-level batch limit bounds these retained targets and clears all of
+  # them at the next cold start.
+  local new_id target_url healthy_checks encoded_url
+  CHROME_TARGET_SEQUENCE=$((CHROME_TARGET_SEQUENCE + 1))
+  target_url="about:blank#dev-anywhere-e2e-$CHROME_TARGET_SEQUENCE"
+  encoded_url="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$target_url")"
   new_id="$(curl --noproxy '*' -sS -m 5 -X PUT \
-    "http://localhost:$CDP_PORT/json/new?about%3Ablank" | python3 -c \
+    "http://localhost:$CDP_PORT/json/new?$encoded_url" | python3 -c \
     "import json, sys; print(json.load(sys.stdin).get('id', ''))" 2>/dev/null || true)"
   if [[ -z "$new_id" ]]; then
     echo "ERROR: failed to create a clean Chrome page target" >&2
     return 1
   fi
 
-  # Make the replacement foreground before closing the page owned by the
-  # previous Playwright worker. Android Chrome can terminate its DevTools
-  # socket when the foreground target is closed, even if a background target
-  # was created milliseconds earlier.
+  # Make the dedicated target foreground, then require it to remain visible to
+  # CDP. Playwright receives its unique URL and attaches to this exact page.
   if ! curl --noproxy '*' -fsS -m 2 "http://localhost:$CDP_PORT/json/activate/$new_id" \
     >/dev/null 2>&1; then
     echo "ERROR: failed to activate the clean Chrome page target" >&2
     return 1
   fi
 
-  stale_ids="$(curl --noproxy '*' -s -m 2 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
-    "import json, os, sys
-targets = json.load(sys.stdin)
-pages = [t for t in targets if t.get('type') == 'page' and t.get('id')]
-keep = os.environ['NEW_ID']
-print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null || true)"
-
-  for id in $stale_ids; do
-    curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json/close/$id" >/dev/null || true
-  done
-
-  # Avoid a blind sleep. Require several consecutive healthy observations after
-  # stale targets disappear, so a DevTools socket that collapses just after the
-  # close cannot be handed to the next Playwright worker.
-  local healthy_checks=0
+  healthy_checks=0
   for _ in $(seq 1 30); do
-    if curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
-      "import json, os, sys; targets=json.load(sys.stdin); pages=[t for t in targets if t.get('type') == 'page']; sys.exit(0 if len(pages) == 1 and pages[0].get('id') == os.environ['NEW_ID'] else 1)" \
+    if curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" TARGET_URL="$target_url" python3 -c \
+      "import json, os, sys; targets=json.load(sys.stdin); sys.exit(0 if any(t.get('type') == 'page' and t.get('id') == os.environ['NEW_ID'] and t.get('url') == os.environ['TARGET_URL'] for t in targets) else 1)" \
       >/dev/null 2>&1; then
       healthy_checks=$((healthy_checks + 1))
       if [[ "$healthy_checks" -ge 5 ]]; then
+        ACTIVE_TARGET_URL="$target_url"
         return 0
       fi
     else
@@ -164,7 +155,7 @@ print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null 
     fi
     sleep 0.1
   done
-  echo "ERROR: clean Chrome page target did not remain healthy" >&2
+  echo "ERROR: dedicated Chrome page target did not remain healthy" >&2
   return 1
 }
 
@@ -247,10 +238,10 @@ mobile_cold_start_chrome() {
 }
 
 # Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
-# 每个 spec 用 /json/new 创建干净 target、关闭旧 target；同一进程最多承载固定数量
-# 的 spec，再主动冷启动。Hosted Android Chrome 在第 5 次 attach 前会稳定丢失
-# DevTools socket，而逐 spec 冷启动又会积累 Android hidden tasks；分批回收同时给
-# target 和进程生命周期设置上界。
+# 每个 spec 用 /json/new 创建一个有唯一 URL 的干净 target；批次内保留旧 target，
+# 避免 Android Chrome 的异步 close 杀掉刚激活的新 target。同一进程最多承载固定
+# 数量的 spec，再主动冷启动，一次清理所有旧 target。分批回收同时给 target 和进程
+# 生命周期设置上界。
 reset_chrome() {
   if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
     echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
@@ -312,6 +303,7 @@ mobile_run_playwright_spec() {
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
+      MOBILE_CDP_TARGET_URL="$ACTIVE_TARGET_URL" \
       ./node_modules/.bin/playwright test \
       --project=device-mobile-android \
       --workers=1 \
@@ -323,6 +315,7 @@ mobile_run_playwright_spec() {
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
+      MOBILE_CDP_TARGET_URL="$ACTIVE_TARGET_URL" \
       ./node_modules/.bin/playwright test \
       --project=device-mobile-android \
       --workers=1 \

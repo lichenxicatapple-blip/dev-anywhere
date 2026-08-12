@@ -7,6 +7,7 @@ import { promisify } from "node:util";
 
 const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
 const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://127.0.0.1:5174";
+const CDP_TARGET_URL = process.env.MOBILE_CDP_TARGET_URL;
 const execFileAsync = promisify(execFile);
 const MOBILE_NETWORK_ERROR =
   /(?:net::ERR_(?:EMPTY_RESPONSE|SOCKET_NOT_CONNECTED|CONNECTION_REFUSED)|chrome-error:\/\/chromewebdata)/;
@@ -135,8 +136,8 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
   // 3. addInitScript 没有 unregister API, 跨 spec 共用 page 时多次 install 会让
   //    fake relay 的 init script 重复叠加.
   //
-  // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 调用前创建并激活一个
-  // 干净 target，再关闭旧 target；Chrome/CDP 不健康或达到批次上限时冷启动进程。
+  // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 创建并激活一个有唯一
+  // URL 的干净 target；批次内保留旧 target，达到批次上限时冷启动进程统一清理。
   // 同 spec file 内多个 test 共享这一个 page, 通过 spec 内的 setupPtyChat /
   // installFakeRelay+reload 各自 reset.
   emuPage: [
@@ -144,7 +145,16 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       const contexts = emuBrowser.contexts();
       const context = contexts[0] ?? (await emuBrowser.newContext());
       const pages = context.pages();
-      const page = pages[0] ?? (await context.newPage());
+      const page = CDP_TARGET_URL
+        ? pages.find((candidate) => candidate.url() === CDP_TARGET_URL)
+        : pages[0];
+      if (!page) {
+        throw new Error(
+          CDP_TARGET_URL
+            ? `Android Chrome target missing: ${CDP_TARGET_URL}`
+            : "Android Chrome exposed no page target",
+        );
+      }
       installNavigationTransportRecovery(page);
       await safeGoto(page, VITE_BASE_URL);
       // Target replacement preserves this origin's storage. Clear it before each spec
