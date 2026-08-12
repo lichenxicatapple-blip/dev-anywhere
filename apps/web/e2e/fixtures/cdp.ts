@@ -114,6 +114,28 @@ async function safeGoto(page: Page, url: string): Promise<void> {
   }
 }
 
+async function closeAndroidTargetAndWait(page: Page): Promise<void> {
+  const session = await page.context().newCDPSession(page);
+  const { targetInfo } = await session.send("Target.getTargetInfo");
+  const targetId = targetInfo.targetId;
+  await fetch(`${CDP_ENDPOINT}/json/close/${targetId}`).catch(() => undefined);
+
+  let absentChecks = 0;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const targets = (await fetch(`${CDP_ENDPOINT}/json`)
+      .then((response) => response.json())
+      .catch(() => [])) as Array<{ id?: string }>;
+    if (!targets.some((target) => target.id === targetId)) {
+      absentChecks += 1;
+      if (absentChecks >= 5) return;
+    } else {
+      absentChecks = 0;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 100));
+  }
+  throw new Error(`Android Chrome target did not close: ${targetId}`);
+}
+
 export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
   // 整个 worker 复用一个 browser 连接, 减少 CDP attach 抖动.
   emuBrowser: [
@@ -137,14 +159,16 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
   // 3. addInitScript 没有 unregister API, 跨 spec 共用 page 时多次 install 会让
   //    fake relay 的 init script 重复叠加.
   //
-  // 整套发布门禁只建立一次 browser CDP connection；每个 test 的 newPage 提供独立
-  // document 和 addInitScript registry。测试结束不调用 page.close，因为 Android
-  // Chrome 不会真正删除该 tab，且异步 close 可能杀掉下一个 target；Chrome 进程在
-  // 整套结束后统一回收。
+  // 整套发布门禁只建立一次 browser CDP connection；每个 test 使用独立 target，
+  // 提供独立 document 和 addInitScript registry。测试结束后先通过 DevTools HTTP
+  // 关闭当前 target，并等它稳定消失；下一 test 才创建新 target。这个顺序避免旧页
+  // 后台运行，也不会重现“先建新页、再异步 close 旧页”误杀新 target 的竞态。
   emuPage: [
     async ({ emuBrowser }, use) => {
       const contexts = emuBrowser.contexts();
       const context = contexts[0] ?? (await emuBrowser.newContext());
+      // Keep Chrome's startup page as a passive anchor so closing a test target
+      // never leaves DevTools without any page target.
       const page = await context.newPage();
       installNavigationTransportRecovery(page);
       await safeGoto(page, VITE_BASE_URL);
@@ -156,6 +180,7 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
         sessionStorage.clear();
       });
       await use(page);
+      await closeAndroidTargetAndWait(page);
     },
     // safeGoto has three bounded recovery attempts (20s navigation + 10s shell
     // readiness each). Do not let the global 30s test timeout cut the worker
