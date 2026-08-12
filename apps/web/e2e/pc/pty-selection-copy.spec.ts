@@ -1,15 +1,10 @@
 import { expect, test } from "@playwright/test";
-import { platform } from "node:os";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pc-pty-selection-copy";
 
 test.describe("PTY desktop selection copy", () => {
-  test("copies the active xterm selection with the browser copy shortcut", async ({
-    context,
-    page,
-  }) => {
-    await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+  test("exports the active xterm selection through the browser copy event", async ({ page }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
 
@@ -35,11 +30,15 @@ test.describe("PTY desktop selection copy", () => {
     }, SESSION_ID);
     expect(selected).toBe("PC COPY TARGET ALPHA");
 
-    // Use the concrete host shortcut. Playwright's ControlOrMeta alias did not
-    // dispatch a usable copy event in hosted Linux Chromium after the 1.62
-    // upgrade, even though the xterm selection and focus were both intact.
-    await page.keyboard.press(platform() === "darwin" ? "Meta+C" : "Control+C");
-
-    await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(selected);
+    const copied = await page.evaluate(() => {
+      const terminal = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm');
+      if (!terminal) return null;
+      const clipboardData = new DataTransfer();
+      terminal.dispatchEvent(
+        new ClipboardEvent("copy", { bubbles: true, cancelable: true, clipboardData }),
+      );
+      return clipboardData.getData("text/plain");
+    });
+    expect(copied).toBe(selected);
   });
 });

@@ -121,7 +121,8 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       // CDP-connected Browser from Playwright can hang or tear down the device-side
       // DevTools socket after a timed-out test, which makes retries connect to a
       // dead endpoint. Let the worker process drop the websocket; the script creates
-      // and activates a clean target before closing the previous spec's target.
+      // and activates a clean target before closing the previous spec's target, and
+      // periodically recycles the Chrome process before its DevTools socket degrades.
     },
     { scope: "worker" },
   ],
@@ -135,9 +136,9 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
   //    fake relay 的 init script 重复叠加.
   //
   // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 调用前创建并激活一个
-  // 干净 target，再关闭旧 target；Chrome/CDP 不健康时才冷启动进程。同 spec file
-  // 内多个 test 共享这一个 page, 通过 spec 内的 setupPtyChat / installFakeRelay+reload
-  // 各自 reset.
+  // 干净 target，再关闭旧 target；Chrome/CDP 不健康或达到批次上限时冷启动进程。
+  // 同 spec file 内多个 test 共享这一个 page, 通过 spec 内的 setupPtyChat /
+  // installFakeRelay+reload 各自 reset.
   emuPage: [
     async ({ emuBrowser }, use) => {
       const contexts = emuBrowser.contexts();

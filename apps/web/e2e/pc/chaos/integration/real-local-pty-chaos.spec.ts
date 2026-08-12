@@ -111,6 +111,17 @@ async function terminalText(page: Page, sessionId: string): Promise<string> {
   return page.evaluate((id) => window.__ccTest?.pty.serialize(id) ?? "", sessionId);
 }
 
+async function clickLiveSessionRow(page: Page, row: ReturnType<Page["locator"]>): Promise<void> {
+  await expect(row).toBeVisible({ timeout: 30_000 });
+  const button = row.locator("button").first();
+  await expect(button).toBeEnabled({ timeout: 15_000 });
+  // The live session list replaces rows whenever reconnect metadata changes.
+  // Playwright's actionability click may therefore observe a different DOM node
+  // on every animation frame. Resolve and click the current React button in one
+  // browser task; this still exercises the real row handler and router.
+  await button.evaluate((element: HTMLButtonElement) => element.click());
+}
+
 async function openLocalRuntimeSession(page: Page, uniqueName: string): Promise<string> {
   await page.goto("/#/sessions");
   await selectFirstProxy(page);
@@ -120,8 +131,7 @@ async function openLocalRuntimeSession(page: Page, uniqueName: string): Promise<
     .filter({ hasText: uniqueName })
     .filter({ hasText: provider === "codex" ? "Codex" : "Claude Code" })
     .filter({ has: page.locator('[data-slot="session-mode-icon"][data-mode="pty"]') });
-  await expect(row).toBeVisible({ timeout: 30_000 });
-  await row.locator("button").first().click();
+  await clickLiveSessionRow(page, row);
   await expect(page).toHaveURL(/\/chat\/[^?]+\?mode=pty/, { timeout: 15_000 });
   const sessionId = new URL(page.url()).hash.match(/\/chat\/([^?]+)/)?.[1];
   expect(sessionId).toBeTruthy();
@@ -187,11 +197,10 @@ test.describe("real local runtime PTY chaos", () => {
       await test.step("reopen reconnected terminal session", async () => {
         await page.goto("/#/sessions", { waitUntil: "domcontentloaded", timeout: 20_000 });
         await selectFirstProxy(page);
-        await page
-          .locator(`[data-slot="session-row"][data-session-id="${sessionId}"]:visible`)
-          .locator("button")
-          .first()
-          .click();
+        await clickLiveSessionRow(
+          page,
+          page.locator(`[data-slot="session-row"][data-session-id="${sessionId}"]:visible`),
+        );
         await expect(page).toHaveURL(new RegExp(`/chat/${sessionId}\\?mode=pty`), {
           timeout: 30_000,
         });

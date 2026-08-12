@@ -41,6 +41,8 @@ CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
 RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
 FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-0}"
+CHROME_MAX_SPECS_PER_PROCESS="${TEST_MOBILE_CHROME_MAX_SPECS_PER_PROCESS:-4}"
+CHROME_SPECS_IN_PROCESS=0
 TIMING_REPORT="$ARTIFACT_DIR/mobile-timing.tsv"
 PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
@@ -192,8 +194,10 @@ mobile_cold_start_chrome() {
 }
 
 # Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
-# 每个 spec 用 /json/new 创建干净 target、关闭旧 target；Chrome 进程只在整套首次
-# 不可用时冷启动。这样既隔离 init script，也不会因逐 spec force-stop 累积 hidden task。
+# 每个 spec 用 /json/new 创建干净 target、关闭旧 target；同一进程最多承载固定数量
+# 的 spec，再主动冷启动。Hosted Android Chrome 在第 5 次 attach 前会稳定丢失
+# DevTools socket，而逐 spec 冷启动又会积累 Android hidden tasks；分批回收同时给
+# target 和进程生命周期设置上界。
 reset_chrome() {
   if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
     echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
@@ -208,11 +212,14 @@ reset_chrome() {
   e2e_mobile_setup_adb_reverse
   adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null 2>&1 || true
 
-  if ! mobile_cdp_ready; then
+  if ! mobile_cdp_ready || [[ "$CHROME_SPECS_IN_PROCESS" -ge "$CHROME_MAX_SPECS_PER_PROCESS" ]]; then
     mobile_cold_start_chrome || return 1
+    CHROME_SPECS_IN_PROCESS=1
+    return 0
   fi
 
   if mobile_replace_page_target; then
+    CHROME_SPECS_IN_PROCESS=$((CHROME_SPECS_IN_PROCESS + 1))
     return 0
   fi
 
@@ -221,7 +228,7 @@ reset_chrome() {
   # get their normal fail-fast behavior after the browser is healthy.
   echo "[mobile] Chrome target reset was unhealthy; recovering with a cold start" >&2
   mobile_cold_start_chrome || return 1
-  mobile_replace_page_target
+  CHROME_SPECS_IN_PROCESS=1
 }
 
 if [[ "$#" -gt 0 ]]; then
