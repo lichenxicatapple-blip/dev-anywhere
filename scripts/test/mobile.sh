@@ -169,14 +169,22 @@ print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null 
 }
 
 mobile_wait_for_chrome_exit() {
-  local process_list
+  local process_list absent_checks=0
   for _ in $(seq 1 100); do
     process_list="$(adb shell ps -A -o NAME 2>/dev/null | tr -d '\r' || true)"
     # grep -E uses POSIX ERE, not PCRE. A non-capturing group (`(?:...)`)
     # makes GNU grep reject the pattern and falsely report that Chrome exited,
     # racing the following start against the still-running force-stop.
     if ! grep -Eq '^com\.android\.chrome(:|$)' <<<"$process_list"; then
-      return 0
+      absent_checks=$((absent_checks + 1))
+      # force-stop tears down several Chrome processes and its Activity in
+      # stages. A single empty ps sample is only a transition window; require a
+      # full second of stable absence before launching the replacement process.
+      if [[ "$absent_checks" -ge 10 ]]; then
+        return 0
+      fi
+    else
+      absent_checks=0
     fi
     sleep 0.1
   done
@@ -221,6 +229,10 @@ mobile_cold_start_chrome() {
   e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
   mobile_wait_for_cdp_page || {
     echo "ERROR: Chrome cold start produced no CDP page target" >&2
+    echo "[mobile] Chrome start result:" >&2
+    echo "$start_output" >&2
+    echo "[mobile] Chrome processes after failed start:" >&2
+    adb shell ps -A -o PID,NAME 2>/dev/null | grep -E '(^|[[:space:]])com\.android\.chrome(:|$)' >&2 || true
     return 1
   }
 
