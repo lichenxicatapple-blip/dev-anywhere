@@ -67,7 +67,14 @@ grep -q 'process-chaos-service-logs-' <<<"$release_please_workflow"
 grep -q 'verify-android:' <<<"$release_please_workflow"
 grep -q -- '- verify-android' <<<"$release_please_workflow"
 grep -q 'TEST_MOBILE_REQUIRE_EMULATOR=1 TEST_MOBILE_FAIL_FAST=1 pnpm test:mobile' <<<"$release_please_workflow"
-grep -q 'FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-0}"' scripts/test/mobile.sh
+grep -q 'mobile_run_playwright_suite' scripts/test/mobile.sh
+grep -q -- '--workers=1' scripts/test/mobile.sh
+grep -q -- '--retries=0' scripts/test/mobile.sh
+grep -q -- '--max-failures=1' scripts/test/mobile.sh
+if grep -q 'mobile_run_playwright_spec' scripts/test/mobile.sh; then
+  echo "default mobile gate must keep one Playwright/CDP process for the full serial suite" >&2
+  exit 1
+fi
 publish_dependencies="$(sed -n '/^  publish:/,/^    runs-on:\|^    uses:/p' <<<"$release_please_workflow")"
 grep -q -- '- verify' <<<"$publish_dependencies"
 grep -q -- '- verify-chaos' <<<"$publish_dependencies"
