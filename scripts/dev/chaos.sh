@@ -303,7 +303,7 @@ start_detached() {
 }
 
 port_has_listener() {
-  lsof -i ":$1" -sTCP:LISTEN >/dev/null 2>&1
+  lsof -nP -iTCP:"$1" -sTCP:LISTEN >/dev/null 2>&1
 }
 
 port_has_no_listener() {

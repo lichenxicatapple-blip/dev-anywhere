@@ -5,6 +5,15 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 release_script="$(cat scripts/release/release.sh)"
+restart_script="$(cat scripts/dev/restart.sh)"
+chaos_script="$(cat scripts/dev/chaos.sh)"
+
+grep -q 'lsof -nP -iTCP:"\$port" -sTCP:LISTEN' <<<"$restart_script"
+grep -q 'lsof -nP -iTCP:"\$1" -sTCP:LISTEN' <<<"$chaos_script"
+if grep -q 'lsof -i ":' <<<"$restart_script$chaos_script"; then
+  echo "dev service probes must use the portable -iTCP:<port> form" >&2
+  exit 1
+fi
 
 grep -q -- "--emergency" <<<"$release_script"
 grep -q "RELEASE_EMERGENCY" <<<"$release_script"

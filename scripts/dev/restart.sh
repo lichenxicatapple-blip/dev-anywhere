@@ -144,7 +144,7 @@ wait_port() {
   local label="$2"
   local log_file="$3"
   for _ in $(seq 1 50); do
-    if lsof -i ":$port" -sTCP:LISTEN >/dev/null 2>&1; then
+    if lsof -nP -iTCP:"$port" -sTCP:LISTEN >/dev/null 2>&1; then
       echo "$label ready on :$port (log: $log_file)"
       return
     fi
