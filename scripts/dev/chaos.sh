@@ -286,7 +286,9 @@ start_detached() {
   local cwd="$1"
   local log_file="$2"
   shift 2
-  if command -v screen >/dev/null 2>&1; then
+  # CI must keep the child owned by the job shell. GitHub runners include
+  # screen, but their detached sessions can disappear before launching Relay.
+  if [[ -z "${CI:-}" ]] && command -v screen >/dev/null 2>&1; then
     local session_name
     session_name="dev-anywhere-chaos-$(basename "$cwd")-$(date +%s)-$RANDOM"
     screen -dmS "$session_name" bash -lc \

@@ -41,6 +41,15 @@ jobs:
       - name: Run process Chaos release gate
         run: RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
 
+      - name: Upload Chaos service logs
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: process-chaos-service-logs-${{ github.run_attempt }}
+          path: ~/.dev-anywhere/logs
+          if-no-files-found: warn
+          retention-days: 7
+
   verify-android:
     name: Verify Android Chrome
     runs-on: ubuntu-latest
@@ -78,10 +87,6 @@ jobs:
 
   release-please:
     name: Prepare or create release
-    needs:
-      - verify
-      - verify-chaos
-      - verify-android
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
@@ -96,7 +101,11 @@ jobs:
 
   publish:
     name: Publish release artifacts
-    needs: release-please
+    needs:
+      - verify
+      - verify-chaos
+      - verify-android
+      - release-please
     if: needs.release-please.outputs.release_created == 'true'
     uses: ./.github/workflows/release.yml
     with:

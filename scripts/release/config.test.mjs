@@ -43,6 +43,14 @@ assert.match(releasePleaseWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_
 assert.match(releasePleaseWorkflow, /reactivecircus\/android-emulator-runner@v2/);
 assert.match(releasePleaseWorkflow, /TEST_MOBILE_REQUIRE_EMULATOR=1/);
 assert.match(releasePleaseWorkflow, /release_created == 'true'/);
+assert.match(
+  releasePleaseWorkflow,
+  /release-please:\s*\n\s*name: Prepare or create release\s*\n\s*runs-on:/,
+);
+assert.match(
+  releasePleaseWorkflow,
+  /publish:\s*\n(?:.|\n)*?needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- verify-android\s*\n\s*- release-please/,
+);
 assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/release\.yml/);
 assert.match(releasePleaseWorkflow, /secrets: inherit/);
 

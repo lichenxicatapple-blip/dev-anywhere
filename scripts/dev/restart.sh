@@ -195,7 +195,10 @@ start_detached() {
   local cwd="$1"
   local log_file="$2"
   shift 2
-  if command -v screen >/dev/null 2>&1; then
+  # GitHub-hosted runners provide screen, but detached sessions are not a
+  # reliable process supervisor there and can exit before the child starts.
+  # CI keeps the child owned by the job shell so startup and logs stay visible.
+  if [[ -z "${CI:-}" ]] && command -v screen >/dev/null 2>&1; then
     local session_name
     session_name="dev-anywhere-$(basename "$cwd")-$(date +%s)-$RANDOM"
     screen -dmS "$session_name" bash -lc \

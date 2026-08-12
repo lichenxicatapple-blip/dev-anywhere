@@ -42,9 +42,16 @@ release_please_workflow="$(cat .github/workflows/release-please.yml)"
 grep -q 'verify-chaos:' <<<"$release_please_workflow"
 grep -q -- '- verify-chaos' <<<"$release_please_workflow"
 grep -q 'RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep' <<<"$release_please_workflow"
+grep -q 'Upload Chaos service logs' <<<"$release_please_workflow"
+grep -q 'process-chaos-service-logs-' <<<"$release_please_workflow"
 grep -q 'verify-android:' <<<"$release_please_workflow"
 grep -q -- '- verify-android' <<<"$release_please_workflow"
 grep -q 'TEST_MOBILE_REQUIRE_EMULATOR=1 pnpm test:mobile' <<<"$release_please_workflow"
+publish_dependencies="$(sed -n '/^  publish:/,/^    runs-on:\|^    uses:/p' <<<"$release_please_workflow")"
+grep -q -- '- verify' <<<"$publish_dependencies"
+grep -q -- '- verify-chaos' <<<"$publish_dependencies"
+grep -q -- '- verify-android' <<<"$publish_dependencies"
+grep -q -- '- release-please' <<<"$publish_dependencies"
 if grep -q 'TEST_MOBILE_PARALLEL_WORKERS' <<<"$release_please_workflow"; then
   echo "release workflow must use the intrinsically serial test:mobile entrypoint" >&2
   exit 1
