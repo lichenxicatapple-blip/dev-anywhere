@@ -33,7 +33,7 @@ for (const path of versionFiles) {
 }
 
 const releasePleaseWorkflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
-const expectedCiNodeVersion = "22.22.0";
+const expectedCiNodeVersion = "22.22.2";
 const assertPinnedCiNode = (workflow, path) => {
   const versions = [...workflow.matchAll(/node-version:\s*["']?([^\s"']+)/g)].map(
     ([, version]) => version,
