@@ -139,6 +139,11 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   });
 
   test("raises the Android soft keyboard and keeps PTY controls above it", async ({ emuPage }) => {
+    // setupPtyChat/terminal mount can consume up to 30s, while the native tap,
+    // IME visibility, visual viewport and controls-settle checks have their own
+    // bounded budgets. The describe-level 60s cap could kill the worker during
+    // those documented waits and turn one timeout into a dead CDP connection.
+    test.setTimeout(90_000);
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     const rowsBeforeFocus = await emuPage.evaluate(
