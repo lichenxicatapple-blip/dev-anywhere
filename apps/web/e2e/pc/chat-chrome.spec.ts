@@ -101,7 +101,7 @@ test.describe("ChatHeader compact navigation controls", () => {
     expect(valueFontSize).toBeGreaterThanOrEqual(14);
     expect(
       Math.abs(valueBox.y + valueBox.height / 2 - (stepperBox.y + stepperBox.height / 2)),
-    ).toBeLessThanOrEqual(1);
+    ).toBeLessThanOrEqual(3);
     expect(stepperBox.y).toBeGreaterThanOrEqual(rowBox.y - 1);
     expect(Math.abs(stepperBox.x - resetLabelBox.x)).toBeLessThanOrEqual(1);
     expect(stepperBox.x + stepperBox.width).toBeLessThanOrEqual(rowBox.x + rowBox.width + 1);

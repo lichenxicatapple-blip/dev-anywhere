@@ -396,12 +396,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const mobileControlsBottomInset = physicalKeyboardMode ? 0 : layoutBottomInset;
   physicalKeyboardModeRef.current = physicalKeyboardMode;
 
-  useEffect(() => {
-    activeRef.current = active;
-  }, [active]);
-  useEffect(() => {
-    readyRef.current = connection.ready;
-  }, [connection.ready]);
+  // Event/RAF callbacks must observe the render that scheduled them. Effects
+  // run later and can leave the previous session's readiness visible during a
+  // keepalive activation transition.
+  activeRef.current = active;
+  readyRef.current = connection.ready;
 
   const canAcceptInput = useCallback((): boolean => {
     return activeRef.current && readyRef.current;
@@ -478,11 +477,23 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   const scheduleResumeRestore = useCallback((): void => {
     if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
-    scrollControllerRef.current?.preparePageResumeRestore(pageResumeStateRef.current);
+    const scheduledController = scrollControllerRef.current;
+    scheduledController?.preparePageResumeRestore(pageResumeStateRef.current);
     cancelPendingResumeFrame();
     pageResumeFrameRef.current = requestAnimationFrame(() => {
       pageResumeFrameRef.current = requestAnimationFrame(() => {
         pageResumeFrameRef.current = null;
+        // Keepalive can mark the entry active before a reconnect has attached
+        // the replacement terminal controller. Do not let the stale controller
+        // consume the restore request; onTerminalReady will apply it after the
+        // new controller is ready.
+        if (
+          !activeRef.current ||
+          !readyRef.current ||
+          scheduledController !== scrollControllerRef.current
+        ) {
+          return;
+        }
         const scroll = scrollControllerRef.current;
         if (!scroll) return;
         const resumeState = pageResumeStateRef.current;
@@ -539,13 +550,17 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   useEffect(() => {
     const wasActive = previousActiveRef.current;
     previousActiveRef.current = active;
-    if (wasActive === active) return;
     if (!active) {
-      rememberHiddenPtyState();
+      if (wasActive) rememberHiddenPtyState();
       return;
     }
-    scheduleResumeRestore();
-  }, [active, rememberHiddenPtyState, scheduleResumeRestore]);
+    // Activation and reconnect readiness are separate transitions. If the
+    // entry became active first, consume the pending restore when ready turns
+    // true instead of requiring another active edge that will never arrive.
+    if ((!wasActive || pageResumePendingRef.current) && connection.ready) {
+      scheduleResumeRestore();
+    }
+  }, [active, connection.ready, rememberHiddenPtyState, scheduleResumeRestore]);
 
   const scheduleRawInputFollow = useCallback(
     (source: string = "rawInput", opts?: { force?: boolean }): void => {
