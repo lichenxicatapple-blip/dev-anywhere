@@ -6,6 +6,12 @@ on:
   push:
     tags:
       - "v*.*.*"
+  workflow_dispatch:
+    inputs:
+      tag_name:
+        description: Existing vX.Y.Z tag to publish
+        required: true
+        type: string
   workflow_call:
     inputs:
       tag_name:
@@ -96,6 +102,9 @@ jobs:
           context: .
           file: apps/relay/Dockerfile
           push: true
+          # Aliyun ACR rejects the OCI attestation manifests emitted by Buildx.
+          provenance: false
+          sbom: false
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=dev-anywhere-relay

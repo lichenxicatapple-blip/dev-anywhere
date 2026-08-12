@@ -54,6 +54,9 @@ assert.match(ciWorkflow, /pnpm release:check/);
 
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assert.match(publishWorkflow, /workflow_call:/);
+assert.match(publishWorkflow, /workflow_dispatch:/);
+assert.match(publishWorkflow, /provenance: false/);
+assert.match(publishWorkflow, /sbom: false/);
 assert.match(publishWorkflow, /type=raw,value=\$\{\{ needs\.resolve-release\.outputs\.tag \}\}/);
 assert.match(publishWorkflow, /Ensure GitHub Release/);
 
