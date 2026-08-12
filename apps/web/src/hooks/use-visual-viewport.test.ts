@@ -1,11 +1,15 @@
+import { act, cleanup, renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   computeVisualViewportBottomOffset,
   computeVisualViewportLayoutBottomInset,
   resetDocumentScrollIfNeeded,
+  useVisualViewportInsets,
 } from "./use-visual-viewport";
 
 afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
   vi.restoreAllMocks();
   Object.defineProperty(window, "scrollX", { configurable: true, value: 0 });
   Object.defineProperty(window, "scrollY", { configurable: true, value: 0 });
@@ -13,6 +17,37 @@ afterEach(() => {
   document.documentElement.scrollTop = 0;
   document.body.scrollLeft = 0;
   document.body.scrollTop = 0;
+});
+
+describe("useVisualViewportInsets", () => {
+  it("samples a keyboard transition even when the focus event does not bubble", async () => {
+    vi.useFakeTimers();
+    const viewport = new EventTarget() as EventTarget & {
+      height: number;
+      width: number;
+      offsetTop: number;
+    };
+    Object.assign(viewport, { height: 789, width: 411, offsetTop: 0 });
+    Object.defineProperty(window, "innerHeight", { configurable: true, value: 789 });
+    Object.defineProperty(window, "visualViewport", { configurable: true, value: viewport });
+    const input = document.createElement("textarea");
+    document.body.append(input);
+
+    const { result } = renderHook(() => useVisualViewportInsets());
+    await act(async () => vi.advanceTimersByTime(20));
+    expect(result.current.bottomOffset).toBe(0);
+
+    input.addEventListener("focusin", (event) => event.stopPropagation());
+    input.focus();
+    await act(async () => vi.advanceTimersByTime(1_500));
+    expect(result.current.bottomOffset).toBe(0);
+
+    viewport.height = 477;
+    await act(async () => vi.advanceTimersByTime(150));
+
+    expect(result.current.bottomOffset).toBe(312);
+    input.remove();
+  });
 });
 
 describe("computeVisualViewportBottomOffset", () => {

@@ -5,6 +5,38 @@
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { installFakeRelay } from "../helpers";
 
+async function scrollToHistoryPosition(list: import("@playwright/test").Locator): Promise<void> {
+  await expect
+    .poll(() =>
+      list.evaluate((node) => {
+        const el = node as HTMLElement;
+        return el.scrollHeight - el.clientHeight;
+      }),
+    )
+    .toBeGreaterThan(500);
+  await list.evaluate(
+    (node) =>
+      new Promise<void>((resolve) => {
+        requestAnimationFrame(() =>
+          requestAnimationFrame(() => {
+            const el = node as HTMLElement;
+            el.scrollTop = 0;
+            el.dispatchEvent(new Event("scroll", { bubbles: true }));
+            resolve();
+          }),
+        );
+      }),
+  );
+  await expect
+    .poll(() =>
+      list.evaluate((node) => {
+        const el = node as HTMLElement;
+        return el.scrollHeight - (el.scrollTop + el.clientHeight);
+      }),
+    )
+    .toBeGreaterThan(500);
+}
+
 test.describe("L4 mobile / JSON streaming respects user reading position", () => {
   test.setTimeout(60_000);
 
@@ -41,11 +73,7 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
     await expect(list).toBeVisible();
 
     // 滚到中部模拟用户翻历史; 等 isAtBottom 状态稳定为 false (back-to-bottom 出现).
-    await list.evaluate((node) => {
-      const el = node as HTMLElement;
-      el.scrollTop = Math.max(0, el.scrollHeight / 2);
-      el.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
+    await scrollToHistoryPosition(list);
     // BackToBottom visible=true 时 inert=false (interactive); visible=false 时
     // inert=true (隔离交互 / AT)。用 IDL property 断言避开 attribute 序列化差异。
     const backToBottom = emuPage.locator('[data-slot="back-to-bottom"]');
@@ -90,20 +118,20 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
     });
 
     const list = emuPage.locator('[data-slot="message-list"]');
-    await list.evaluate((node) => {
-      const el = node as HTMLElement;
-      el.scrollTop = Math.max(0, el.scrollHeight / 2);
-      el.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
+    await scrollToHistoryPosition(list);
     await expect(emuPage.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", false);
 
     await input.fill("这是我主动发送的新消息");
     // This case verifies the local-send follow contract, not Android hit
     // testing. Trigger the enabled button directly so an in-flight IME resize
     // cannot leave Playwright waiting for a geometrically stable tap target.
-    await emuPage
-      .locator('[data-slot="send-button"][data-variant="send"]')
-      .evaluate((button: HTMLButtonElement) => button.click());
+    const sendButton = emuPage.locator('[data-slot="send-button"][data-variant="send"]');
+    // input.fill() updates the DOM value synchronously, while React may commit
+    // the store-backed submissionText on a later task under emulator load.
+    // Waiting for enabled pins the actual product precondition before invoking
+    // a direct DOM click.
+    await expect(sendButton).toBeEnabled();
+    await sendButton.evaluate((button: HTMLButtonElement) => button.click());
 
     await expect
       .poll(() =>

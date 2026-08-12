@@ -293,7 +293,7 @@ describe("xterm file download links", () => {
     element.remove();
   });
 
-  it("joins indented hard-wrapped path continuations before detecting download paths", () => {
+  it("keeps consecutive hard-newline paths as separate download links", () => {
     const onDownload = vi.fn();
     const providerRef: {
       current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
@@ -301,23 +301,11 @@ describe("xterm file download links", () => {
     const lines = [
       {
         isWrapped: false,
-        text: "  - /Users/catli/MyApps/AIMovieFactory/doc",
-      },
-      {
-        isWrapped: true,
-        text: "s/",
+        text: "  /tmp/first.log",
       },
       {
         isWrapped: false,
-        text: "    superpowers/specs/2026-05-13-v1-founda",
-      },
-      {
-        isWrapped: true,
-        text: "tion-",
-      },
-      {
-        isWrapped: false,
-        text: "    design.md",
+        text: "  /tmp/second.txt",
       },
     ];
     const term = {
@@ -333,16 +321,13 @@ describe("xterm file download links", () => {
           },
         },
       },
-      cols: 42,
+      cols: 40,
       registerLinkProvider: vi.fn((provider) => {
         providerRef.current = provider;
         return { dispose: vi.fn() };
       }),
     };
     registerFileDownloadLinkProvider(term as never, onDownload);
-
-    const expectedPath =
-      "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-13-v1-foundation-design.md";
 
     providerRef.current?.provideLinks(1, (links) => {
       const arr = links as
@@ -352,13 +337,13 @@ describe("xterm file download links", () => {
           }>
         | undefined;
       expect(arr).toHaveLength(1);
-      expect(arr?.every((link) => link.text === expectedPath)).toBe(true);
+      expect(arr?.every((link) => link.text === "/tmp/first.log")).toBe(true);
       expect(arr?.map((link) => link.range)).toEqual([
-        { start: { x: 5, y: 1 }, end: { x: 42, y: 1 } },
+        { start: { x: 3, y: 1 }, end: { x: 16, y: 1 } },
       ]);
     });
 
-    providerRef.current?.provideLinks(5, (links) => {
+    providerRef.current?.provideLinks(2, (links) => {
       const arr = links as
         | Array<{
             text: string;
@@ -368,13 +353,13 @@ describe("xterm file download links", () => {
         | undefined;
       expect(arr).toHaveLength(1);
       const link = arr?.[0];
-      expect(link?.text).toBe(expectedPath);
-      expect(link?.range.start).toEqual({ x: 5, y: 5 });
-      expect(link?.range.end).toEqual({ x: 13, y: 5 });
+      expect(link?.text).toBe("/tmp/second.txt");
+      expect(link?.range.start).toEqual({ x: 3, y: 2 });
+      expect(link?.range.end).toEqual({ x: 17, y: 2 });
       link?.activate({ metaKey: true } as MouseEvent, link.text);
     });
 
-    expect(onDownload).toHaveBeenCalledWith(expectedPath);
+    expect(onDownload).toHaveBeenCalledWith("/tmp/second.txt");
   });
 
   it("ignores plain clicks without a modifier (anti-misclick)", () => {

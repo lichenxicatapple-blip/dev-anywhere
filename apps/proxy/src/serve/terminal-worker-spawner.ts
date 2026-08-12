@@ -2,7 +2,7 @@ import { spawnScript } from "../common/env.js";
 import { serviceLogger } from "../common/logger.js";
 import { PROFILE_NAME } from "../common/paths.js";
 
-export interface TerminalWorkerStartOptions {
+interface TerminalWorkerStartOptions {
   sessionId: string;
   cwd: string;
   name: string;

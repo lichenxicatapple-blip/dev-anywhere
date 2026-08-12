@@ -795,10 +795,18 @@ export async function installFakeRelay(page: Page): Promise<void> {
             );
             this.emitJson(
               envelope("assistant_message", String(msg.sessionId), {
+                turnId: `${String(msg.sessionId)}-fake-turn`,
+                revision: 1,
                 text: "收到。",
-                isPartial: false,
+                status: "completed",
               }),
             );
+            this.emitJson({
+              type: "turn_result",
+              sessionId: String(msg.sessionId),
+              success: true,
+              isError: false,
+            });
             this.emitJson(
               envelope("session_status", String(msg.sessionId), {
                 sessionId: String(msg.sessionId),

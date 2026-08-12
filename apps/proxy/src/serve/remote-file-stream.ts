@@ -55,7 +55,10 @@ export class RemoteFileStreamManager {
         error: "会话不存在",
         errorCode: ControlErrorCode.SESSION_NOT_FOUND,
       });
-      serviceLogger.warn({ sessionId, requestId }, "Remote file metadata rejected: session not found");
+      serviceLogger.warn(
+        { sessionId, requestId },
+        "Remote file metadata rejected: session not found",
+      );
       return;
     }
 

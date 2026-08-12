@@ -1,10 +1,10 @@
 import { describeClientDevice, type ClientDeviceHints } from "./client-device";
 
-export interface BrowserSupportHints extends ClientDeviceHints {
+interface BrowserSupportHints extends ClientDeviceHints {
   standalone?: boolean;
 }
 
-export type BrowserSupportDecision =
+type BrowserSupportDecision =
   | { supported: true }
   | {
       supported: false;

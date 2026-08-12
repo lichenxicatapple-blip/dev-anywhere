@@ -6,6 +6,10 @@ cd "$ROOT"
 
 echo "=== Check release scripts ==="
 bash -n scripts/release/release.sh
+bash -n scripts/release/smoke.sh
+bash -n scripts/release/deep.sh
+bash -n scripts/lib/stage-timing.sh
+bash -n scripts/quality/check.sh
 bash -n scripts/deploy/install-relay.sh
 bash -n scripts/lib/install-relay-render.sh
 bash -n scripts/deploy/check-prerequisite.sh

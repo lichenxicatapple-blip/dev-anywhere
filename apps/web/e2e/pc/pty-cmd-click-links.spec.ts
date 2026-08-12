@@ -108,6 +108,97 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     expect(Buffer.concat(chunks).toString("utf8")).toBe("ABC");
   });
 
+  test("real cmd+click downloads a historical file without jumping to the PTY bottom", async ({
+    page,
+  }) => {
+    await gotoPty(page);
+    const path = "./build/history-report.txt";
+    const lines = Array.from({ length: 180 }, (_, index) =>
+      index === 48
+        ? `historical artifact ${path}`
+        : `terminal history ${String(index).padStart(3, "0")}`,
+    );
+    await emitPtyLine(page, `${lines.join("\r\n")}\r\n`);
+    await waitForBufferContains(page, path);
+
+    const terminalScroller = page.locator('[data-slot="pty-terminal"]');
+    const target = await page.evaluate((needle) => {
+      const term = window.__ccTestPtyTerminals?.get("claude-pty");
+      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+      const scroller = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      if (!term || !screen || !scroller) return null;
+      const buffer = term.buffer.active;
+      let lineIndex = -1;
+      let columnIndex = -1;
+      for (let index = 0; index < buffer.length; index += 1) {
+        const text = buffer.getLine(index)?.translateToString(true) ?? "";
+        const column = text.indexOf(needle);
+        if (column < 0) continue;
+        lineIndex = index;
+        columnIndex = column;
+        break;
+      }
+      if (lineIndex < 0) return null;
+      const cellHeight = screen.clientHeight / term.rows;
+      scroller.scrollTop = Math.max(0, (lineIndex - 4) * cellHeight);
+      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+      return { lineIndex, columnIndex };
+    }, path);
+    expect(target).not.toBeNull();
+
+    await expect
+      .poll(() =>
+        page.evaluate(({ lineIndex }) => {
+          const term = window.__ccTestPtyTerminals?.get("claude-pty");
+          if (!term) return false;
+          const row = lineIndex - term.buffer.active.viewportY;
+          return row >= 1 && row < term.rows - 1;
+        }, target!),
+      )
+      .toBe(true);
+
+    const clickPoint = await page.evaluate(
+      ({ lineIndex, columnIndex, pathLength }) => {
+        const term = window.__ccTestPtyTerminals?.get("claude-pty");
+        const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+        if (!term || !screen) return null;
+        const rect = screen.getBoundingClientRect();
+        const cellWidth = screen.clientWidth / term.cols;
+        const cellHeight = screen.clientHeight / term.rows;
+        const viewportRow = lineIndex - term.buffer.active.viewportY;
+        return {
+          x: rect.left + (columnIndex + Math.min(2, pathLength - 1) + 0.5) * cellWidth,
+          y: rect.top + (viewportRow + 0.5) * cellHeight,
+        };
+      },
+      { ...target!, pathLength: path.length },
+    );
+    expect(clickPoint).not.toBeNull();
+
+    await page.mouse.move(clickPoint!.x, clickPoint!.y);
+    await expect(page.locator('[data-slot="pty-file-link-hover-overlay"]')).toBeVisible();
+    const before = await terminalScroller.evaluate((element) => ({
+      scrollTop: element.scrollTop,
+      bottomGap: element.scrollHeight - element.clientHeight - element.scrollTop,
+    }));
+    expect(before.bottomGap).toBeGreaterThan(100);
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.keyboard.down("Meta");
+    await page.mouse.click(clickPoint!.x, clickPoint!.y);
+    await page.keyboard.up("Meta");
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toBe("history-report.txt");
+
+    await expect
+      .poll(() => terminalScroller.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(before.scrollTop, 0);
+    const afterBottomGap = await terminalScroller.evaluate(
+      (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+    );
+    expect(afterBottomGap).toBeGreaterThan(100);
+  });
+
   test("ctrl+click on a file path also triggers download (non-mac users)", async ({ page }) => {
     await gotoPty(page);
     const path = "/var/log/system.log";

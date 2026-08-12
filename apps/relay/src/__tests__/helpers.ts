@@ -104,7 +104,12 @@ export function makeEnvelope(
   source: MessageSource = "proxy",
 ) {
   const payloads: Record<string, unknown> = {
-    assistant_message: { text: `msg-${seq}`, isPartial: false },
+    assistant_message: {
+      turnId: `turn-${seq}`,
+      revision: 1,
+      text: `msg-${seq}`,
+      status: "completed",
+    },
     user_input: { text: `input-${seq}` },
   };
   return {
@@ -114,6 +119,11 @@ export function makeEnvelope(
     source,
     version: "1.0",
     type,
-    payload: payloads[type] ?? { text: `msg-${seq}`, isPartial: false },
+    payload: payloads[type] ?? {
+      turnId: `turn-${seq}`,
+      revision: 1,
+      text: `msg-${seq}`,
+      status: "completed",
+    },
   };
 }

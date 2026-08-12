@@ -124,9 +124,9 @@ export function SessionRow({
       ? session.name
       : terminalPathName
         ? terminalPathName
-      : formattedName === "New Session"
-        ? session.sessionId.slice(0, 8)
-        : formattedName;
+        : formattedName === "New Session"
+          ? session.sessionId.slice(0, 8)
+          : formattedName;
   const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
   const lastActiveLabel = lastActive !== undefined ? formatRelativeTime(lastActive, now) : null;
   const isLocalTerminalPty = session.mode === "pty" && session.ptyOwner === "local-terminal";

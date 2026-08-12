@@ -8,7 +8,11 @@
       "ignoreDependencies": ["pino", "zod"]
     },
     "apps/web": {
-      "entry": ["e2e/**/*.{ts,d.ts,mjs}"],
+      "entry": [
+        "e2e/**/*.{ts,d.ts,mjs}",
+        "public/notification-sw.js",
+        "src/types/echogarden-fvad-wasm.d.ts"
+      ],
       "ignore": ["src/components/ui/**"]
     }
   }

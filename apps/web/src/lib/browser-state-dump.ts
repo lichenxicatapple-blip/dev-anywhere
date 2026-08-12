@@ -37,7 +37,7 @@ interface SerializedDomNode {
   omittedChildren?: number;
 }
 
-export interface BrowserStateDump {
+interface BrowserStateDump {
   schemaVersion: 1;
   createdAt: string;
   trigger: string;
@@ -199,10 +199,6 @@ const STYLE_PROPS = [
   "margin-left",
 ] as const;
 
-export function isBrowserStateDumpEnabled(): boolean {
-  return getBrowserStateDumpMode() !== "off";
-}
-
 export function getBrowserStateDumpMode(): BrowserStateDumpMode {
   if (typeof window === "undefined") return "off";
   const explicit = getDebugParam("debugDump");
@@ -275,7 +271,7 @@ export async function captureAndPersistBrowserStateDump(
   return persistBrowserStateDump(dump);
 }
 
-export async function persistBrowserStateDump(
+async function persistBrowserStateDump(
   dump: BrowserStateDump,
 ): Promise<BrowserStateDumpPersistResult> {
   const payload = JSON.stringify(dump, null, 2);

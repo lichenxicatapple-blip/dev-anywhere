@@ -35,6 +35,7 @@ if [[ "$ARTIFACT_DIR" != /* ]]; then
   ARTIFACT_DIR="$ROOT/$ARTIFACT_DIR"
 fi
 BASE_URL="http://127.0.0.1:${TIER_MOBILE_VITE_PORT}"
+DEVICE_BASE_URL="${TEST_MOBILE_DEVICE_BASE_URL:-$BASE_URL}"
 CDP_PORT="${TIER_MOBILE_CDP_PORT:-9222}"
 CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
@@ -49,12 +50,12 @@ unset NO_COLOR FORCE_COLOR
 mkdir -p "$ARTIFACT_DIR"
 trap 'e2e_mobile_remove_forward_port "$CDP_PORT"; e2e_mobile_teardown_adb_reverse; smoke_cleanup' EXIT
 smoke_use_stable_node
-smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$BASE_URL"
+smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$BASE_URL" "$TIER_MOBILE_VITE_PORT"
 e2e_mobile_setup_adb_reverse
 e2e_mobile_prepare_soft_keyboard
 adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null
 
-echo "[mobile] vite=$BASE_URL relay=:${TIER_MOBILE_RELAY_PORT} cdp=:$CDP_PORT adb=${ANDROID_SERIAL:-$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | xargs)}"
+echo "[mobile] vite=$BASE_URL device-vite=$DEVICE_BASE_URL relay=:${TIER_MOBILE_RELAY_PORT} cdp=:$CDP_PORT adb=${ANDROID_SERIAL:-$(adb devices | awk 'NR>1 && $2=="device" {print $1}' | xargs)}"
 
 cd "$ROOT/apps/web"
 
@@ -108,23 +109,25 @@ mobile_wait_for_cdp_page() {
   mobile_cdp_ready && mobile_cdp_has_page
 }
 
-mobile_close_stale_tabs() {
-  # Keep the first page that matches BASE_URL when possible, because that is the
-  # freshly launched target. Android Chrome may also restore old tabs after a
-  # force-stop, and leaving those around makes CDP page selection flaky.
-  local stale_ids
-  stale_ids="$(curl --noproxy '*' -s -m 2 "http://localhost:$CDP_PORT/json" | BASE_URL="$BASE_URL" python3 -c \
+mobile_replace_page_target() {
+  # A new CDP target gets a fresh document and fresh addInitScript registry, so
+  # spec isolation does not require restarting Chrome. Restarting per spec makes
+  # Android accumulate hidden Chrome document tasks until DevTools stops exposing
+  # a page even though its socket is alive.
+  local new_id stale_ids
+  new_id="$(curl --noproxy '*' -sS -m 5 -X PUT \
+    "http://localhost:$CDP_PORT/json/new?about%3Ablank" | python3 -c \
+    "import json, sys; print(json.load(sys.stdin).get('id', ''))" 2>/dev/null || true)"
+  if [[ -z "$new_id" ]]; then
+    echo "ERROR: failed to create a clean Chrome page target" >&2
+    return 1
+  fi
+
+  stale_ids="$(curl --noproxy '*' -s -m 2 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
     "import json, os, sys
 targets = json.load(sys.stdin)
 pages = [t for t in targets if t.get('type') == 'page' and t.get('id')]
-base = os.environ.get('BASE_URL', '')
-keep = None
-for target in pages:
-    if target.get('url', '').startswith(base):
-        keep = target.get('id')
-        break
-if keep is None and pages:
-    keep = pages[0].get('id')
+keep = os.environ['NEW_ID']
 print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null || true)"
 
   for id in $stale_ids; do
@@ -134,45 +137,63 @@ print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null 
   # Avoid a blind sleep. Most closes settle immediately, but poll briefly so the
   # next Playwright attach does not race stale tab removal.
   for _ in $(seq 1 20); do
-    if curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json" | python3 -c \
-      "import json, sys; targets=json.load(sys.stdin); pages=[t for t in targets if t.get('type') == 'page']; sys.exit(0 if len(pages) <= 1 else 1)" \
+    if curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
+      "import json, os, sys; targets=json.load(sys.stdin); pages=[t for t in targets if t.get('type') == 'page']; sys.exit(0 if len(pages) == 1 and pages[0].get('id') == os.environ['NEW_ID'] else 1)" \
       >/dev/null 2>&1; then
+      if curl --noproxy '*' -fsS -m 2 "http://localhost:$CDP_PORT/json/activate/$new_id" \
+        >/dev/null 2>&1; then
+        return 0
+      fi
+    fi
+    sleep 0.1
+  done
+  echo "ERROR: stale Chrome page targets did not close" >&2
+  return 1
+}
+
+mobile_wait_for_chrome_exit() {
+  local process_list
+  for _ in $(seq 1 100); do
+    process_list="$(adb shell ps -A -o NAME 2>/dev/null | tr -d '\r' || true)"
+    if ! grep -Eq '^com\.android\.chrome(?::|$)' <<<"$process_list"; then
       return 0
     fi
     sleep 0.1
   done
+  echo "ERROR: Chrome processes did not exit after force-stop" >&2
+  return 1
 }
 
-# Android Chrome over CDP 不支持 newContext 隔离 + page.close 不真删 tab + addInitScript
-# 不能 unregister, 跨 spec file 共用同一 chrome 进程会 navigation race. 解决方案是
-# 每个 spec file 都给它一个干净 chrome 进程: force-stop + 重启 + adb forward 重建 +
-# playwright 单独跑该 spec. 同 spec file 内多 test 仍共享 page (worker scope).
+# Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
+# 每个 spec 用 /json/new 创建干净 target、关闭旧 target；Chrome 进程只在整套首次
+# 不可用时冷启动。这样既隔离 init script，也不会因逐 spec force-stop 累积 hidden task。
 reset_chrome() {
   if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
     echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
     echo "Set TEST_MOBILE_ALLOW_REAL_DEVICE_RESET=1 only for a dedicated test device." >&2
     return 1
   fi
-  local attempt
-  for attempt in 1 2; do
-    # force-stop 后 chrome restore session 把 tab 全恢复, page.close 在 emu 上又不真删
-    # tab, 跑多了累积几十个 tab 会让 page.goto / locator 操作 timeout. CDP /json/close
-    # endpoint 是真能 close target 的, 拿它把多余 tab 关掉留 1 个干净的.
+  # A failed/interrupted orientation test cannot poison later specs.
+  adb shell settings put system accelerometer_rotation 0 >/dev/null 2>&1
+  adb shell settings put system user_rotation 0 >/dev/null 2>&1
+  adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
+  adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
+  e2e_mobile_setup_adb_reverse
+  adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null 2>&1 || true
+
+  if ! mobile_cdp_ready; then
     adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
-    e2e_mobile_setup_adb_reverse
+    mobile_wait_for_chrome_exit || return 1
     e2e_mobile_remove_forward_port "$CDP_PORT"
-    adb shell am start -a android.intent.action.VIEW -d "$BASE_URL/" >/dev/null 2>&1
+    adb shell am start -W -a android.intent.action.VIEW -d "$DEVICE_BASE_URL/" >/dev/null 2>&1
     e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
-    if mobile_wait_for_cdp_page; then
-      mobile_close_stale_tabs
-      return 0
-    fi
-    if [[ "$attempt" -eq 1 ]]; then
-      echo "WARN: chrome 重启后暂无 CDP page target，完整重试一次" >&2
-    fi
-  done
-  echo "ERROR: chrome 重启两次后 CDP 仍无可用 page target" >&2
-  return 1
+    mobile_wait_for_cdp_page || {
+      echo "ERROR: Chrome cold start produced no CDP page target" >&2
+      return 1
+    }
+  fi
+
+  mobile_replace_page_target
 }
 
 if [[ "$#" -gt 0 ]]; then
@@ -201,12 +222,12 @@ mobile_run_playwright_spec() {
   local spec="$1"
   if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
     WEB_BASE_URL="$BASE_URL" \
-      MOBILE_VITE_BASE_URL="$BASE_URL" \
+      MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
       ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"
   else
     WEB_BASE_URL="$BASE_URL" \
-      MOBILE_VITE_BASE_URL="$BASE_URL" \
+      MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
       ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 "$spec"
   fi

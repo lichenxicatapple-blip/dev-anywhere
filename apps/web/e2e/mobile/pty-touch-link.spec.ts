@@ -3,11 +3,16 @@ import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
 
 const SESSION_ID = "mobile-touch-link";
+const PTY_READY_MARKER = "PTY SMOKE READY";
 
 declare global {
   interface Window {
     __ccTestPtyTouchGestureEvents?: unknown[];
     __ccTestPtyTouchLinkActivations?: unknown[];
+    __ccTestPtyLinks?: Map<
+      string,
+      Array<{ kind: "file-download" | "image-preview"; path: string }>
+    >;
   }
 }
 
@@ -19,6 +24,16 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     payload: string,
     needle: string,
   ): Promise<void> {
+    // session_subscribe is emitted before the initial render snapshot is applied.
+    // Wait for hydration so a late snapshot cannot overwrite output injected by the test.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (sid) => (window.__ccTest?.pty.serialize(sid) ?? "").replace(/\n/g, ""),
+          SESSION_ID,
+        ),
+      )
+      .toContain(PTY_READY_MARKER);
     await page.evaluate((p) => {
       window.__ptySmoke.sendPty(p);
     }, payload);
@@ -201,7 +216,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     await expectNoFileDownloadRequest(emuPage, path);
   });
 
-  test("tap on an indented hard-wrapped PTY document path does not trigger download", async ({
+  test("does not combine indented hard-newline path fragments into one link", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
@@ -221,12 +236,17 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       "research.md",
     );
 
-    await tapPtyLink(emuPage, {
-      sid: SESSION_ID,
-      kind: "file-download",
-      needle: path,
-    });
-
+    await expect
+      .poll(() =>
+        emuPage.evaluate(
+          ({ sid, needle }) => {
+            const links = window.__ccTestPtyLinks?.get(sid) ?? [];
+            return links.some((link) => link.kind === "file-download" && link.path === needle);
+          },
+          { sid: SESSION_ID, needle: path },
+        ),
+      )
+      .toBe(false);
     await expectNoFileDownloadRequest(emuPage, path);
   });
 

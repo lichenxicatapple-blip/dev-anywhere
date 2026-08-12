@@ -8,12 +8,14 @@ import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
 import { readSessionMessagesPage } from "./session-history.js";
 import type { SessionManager } from "./session-manager.js";
+import type { WorkerRegistry } from "./worker-registry.js";
 import type { SessionInfo } from "./session-manager.js";
 
 interface RelayHistoryHandlersDeps {
   relaySend: RelaySend;
   sessionManager: SessionManager;
   permissionBroker: PermissionBroker;
+  workerRegistry: WorkerRegistry;
 }
 
 export class RelayHistoryHandlers {
@@ -22,6 +24,7 @@ export class RelayHistoryHandlers {
   onSessionMessagesRequest(msg: ControlMessage<"session_messages_request">): void {
     const { sessionId: sid, requestId, before, limit } = msg;
     if (!sid) return;
+    if (before === undefined) this.deps.workerRegistry.replayAssistantSnapshot(sid);
 
     const session = this.deps.sessionManager.getSession(sid);
     if (session?.claudeSessionId || session?.historySessionId) {

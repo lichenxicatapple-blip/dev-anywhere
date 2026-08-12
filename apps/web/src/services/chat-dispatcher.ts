@@ -39,7 +39,7 @@ function flushQueuedUserInputBatch(sessionId: string, relay: ChatRelay | null): 
 
   const now = Date.now();
   for (const queuedMessage of queued) {
-    const sentMessage = { ...queuedMessage };
+    const sentMessage = { ...queuedMessage, timestamp: now };
     delete sentMessage.deliveryStatus;
     store.upsertUserMessage(sessionId, sentMessage);
   }
@@ -57,14 +57,7 @@ function flushQueuedUserInputBatch(sessionId: string, relay: ChatRelay | null): 
 }
 
 function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant_message" }>) {
-  const store = useChatStore.getState();
-  if (env.payload.text.length > 0) {
-    store.appendAssistantText(env.sessionId, env.payload.text);
-  }
-  // isPartial=false 仅在 proxy 兜底场景 (如历史聚合纯文本) 出现；session.state 由 proxy session_status 推送维护
-  if (!env.payload.isPartial) {
-    store.markTurnComplete(env.sessionId);
-  }
+  useChatStore.getState().upsertAssistantSnapshot(env.sessionId, env.payload);
 }
 
 function handleUserInput(env: Extract<MessageEnvelope, { type: "user_input" }>) {
@@ -82,7 +75,7 @@ function handleUserInput(env: Extract<MessageEnvelope, { type: "user_input" }>) 
 
 function handleToolUseRequest(
   env: Extract<MessageEnvelope, { type: "tool_use_request" }>,
-  relay: Pick<RelayClient, "sendControl"> | null,
+  relay: ChatRelay | null,
 ) {
   const store = useChatStore.getState();
   // 审批 ID = toolId (ToolUseRequestPayloadSchema)
@@ -194,10 +187,14 @@ function handleTurnResult(
   if (resultText.trim()) {
     const slice = store.bySessionId[msg.sessionId];
     const last = slice?.messages[slice.messages.length - 1];
-    const lastAssistantHasText =
-      last?.role === "assistant" && last.text.trim().length > 0 && last.isPartial;
+    const lastAssistantHasText = last?.role === "assistant" && last.text.trim().length > 0;
     if (!lastAssistantHasText) {
-      store.appendAssistantText(msg.sessionId, resultText);
+      store.upsertAssistantSnapshot(msg.sessionId, {
+        turnId: `${msg.sessionId}-result-${Date.now()}`,
+        revision: 1,
+        text: resultText,
+        status: "completed",
+      });
     }
   }
   store.markTurnComplete(msg.sessionId);

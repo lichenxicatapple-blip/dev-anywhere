@@ -145,7 +145,12 @@ describe("Relay Server Integration", () => {
       source: "proxy",
       version: "1.0",
       type: "assistant_message",
-      payload: { text: "hello from proxy", isPartial: false },
+      payload: {
+        turnId: "turn-1",
+        revision: 1,
+        text: "hello from proxy",
+        status: "completed",
+      },
     };
     proxy.send(JSON.stringify(envelope));
     const received = JSON.parse(await clientMsgPromise);

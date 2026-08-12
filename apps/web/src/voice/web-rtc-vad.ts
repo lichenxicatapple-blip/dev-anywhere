@@ -2,7 +2,7 @@ import fvadWasmUrl from "@echogarden/fvad-wasm/fvad.wasm?url";
 import type { FvadWasmModule } from "@echogarden/fvad-wasm";
 
 export const WEB_RTC_VAD_SAMPLE_RATE = 16_000;
-export const WEB_RTC_VAD_FRAME_MS = 20;
+const WEB_RTC_VAD_FRAME_MS = 20;
 export const WEB_RTC_VAD_FRAME_SAMPLES = (WEB_RTC_VAD_SAMPLE_RATE * WEB_RTC_VAD_FRAME_MS) / 1000;
 const WEB_RTC_VAD_FRAME_BYTES = WEB_RTC_VAD_FRAME_SAMPLES * Int16Array.BYTES_PER_ELEMENT;
 
@@ -81,7 +81,7 @@ export class WebRtcVadClassifier implements VoiceActivityClassifier {
   }
 }
 
-export type VoiceActivityTransition = "none" | "speech-start" | "speech-end";
+type VoiceActivityTransition = "none" | "speech-start" | "speech-end";
 
 interface VoiceActivityGateOptions {
   startSpeechFrames?: number;

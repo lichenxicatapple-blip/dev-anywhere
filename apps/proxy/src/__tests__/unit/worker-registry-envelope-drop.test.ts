@@ -79,7 +79,7 @@ describe("WorkerRegistry onEnvelopeDropped", () => {
       type: "assistant_message",
       sessionId: "s2",
       seq: 1,
-      payload: { text: "hi", isPartial: false },
+      payload: { turnId: "turn-1", revision: 1, text: "hi", status: "completed" },
       source: "proxy",
       timestamp: Date.now(),
     });

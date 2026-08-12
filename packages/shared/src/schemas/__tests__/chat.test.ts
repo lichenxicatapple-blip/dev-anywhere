@@ -27,12 +27,29 @@ describe("UserInputPayloadSchema", () => {
 });
 
 describe("AssistantMessagePayloadSchema", () => {
-  it("rejects missing isPartial", () => {
+  it("rejects missing snapshot identity and version", () => {
     expect(() => AssistantMessagePayloadSchema.parse({ text: "hello" })).toThrow();
   });
 
   it("rejects missing text", () => {
-    expect(() => AssistantMessagePayloadSchema.parse({ isPartial: false })).toThrow();
+    expect(() =>
+      AssistantMessagePayloadSchema.parse({
+        turnId: "turn-1",
+        revision: 1,
+        status: "completed",
+      }),
+    ).toThrow();
+  });
+
+  it("rejects non-positive revisions", () => {
+    expect(() =>
+      AssistantMessagePayloadSchema.parse({
+        turnId: "turn-1",
+        revision: 0,
+        text: "hello",
+        status: "streaming",
+      }),
+    ).toThrow();
   });
 });
 

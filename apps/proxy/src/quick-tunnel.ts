@@ -23,7 +23,7 @@ interface CommandResult {
   stderr: string;
 }
 
-export interface QuickTunnelOptions {
+interface QuickTunnelOptions {
   cloudflaredBin?: string;
 }
 

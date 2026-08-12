@@ -422,7 +422,7 @@ describe("MessageBubble", () => {
     screen.getByRole("button", { name: /shot\.png/ });
   });
 
-  it("renders a local image path containing spaces as one preview link", () => {
+  it("does not combine a whitespace-containing path into one preview link", () => {
     const path = "/Users/cat/My Project/final shot.png";
     render(
       <ImagePreviewProvider sessionId="s1">
@@ -436,8 +436,7 @@ describe("MessageBubble", () => {
       </ImagePreviewProvider>,
     );
 
-    const preview = screen.getByRole("button", { name: `预览 ${path}` });
-    expect(preview).toHaveTextContent(path);
+    expect(screen.queryByRole("button", { name: `预览 ${path}` })).toBeNull();
   });
 
   it("renders file paths inline and does not duplicate them as bottom download chips", () => {

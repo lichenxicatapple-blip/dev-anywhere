@@ -43,10 +43,6 @@ type BufferTextBlock = {
 };
 
 const MAX_WRAPPED_PATH_LINES = 16;
-const MAX_SEMANTIC_PATH_BLOCKS = 8;
-const SEMANTIC_PATH_START_RE =
-  /(?:^|[\s([{@])@?(?:\/|\.\/|\.\.\/|~\/|[^\s`"'<>，。；：！？、/@]+\/)[^\n`"'<>，。；：！？、@]*$/u;
-const SEMANTIC_PATH_CONTINUATION_RE = /^[^\n\r\t`"'<>，。；：！？、@]+$/u;
 
 export function findXtermPathMatches(line: string, extractPaths: PathExtractor): XtermPathMatch[] {
   return findPathSpans(line, extractPaths).map((span) => ({
@@ -61,76 +57,36 @@ export function findXtermPathMatchesInWrappedBuffer(
   bufferLineNumber: number,
   extractPaths: PathExtractor,
 ): XtermBufferPathMatch[] {
-  const blocks: BufferTextBlock[] = [
-    getWrappedLineBlock(terminal, bufferLineNumber),
-    ...getSemanticPathBlocksAroundLine(terminal, bufferLineNumber),
-  ].filter((block): block is BufferTextBlock => block !== null);
+  const block = getWrappedLineBlock(terminal, bufferLineNumber);
+  if (!block) return [];
 
   const seen = new Set<string>();
-  const matches = blocks.flatMap((block) => {
-    const logicalLine = block.parts.map((part) => part.text).join("");
-    return findPathSpans(logicalLine, extractPaths)
-      .map((span) => {
-        const start = stringIndexToTerminalPosition(block.parts, span.startIndex);
-        const end = stringEndIndexToTerminalPosition(block.parts, span.endIndex);
-        if (!start || !end) return null;
-        return {
-          path: span.path,
-          startLineNumber: start.lineNumber,
-          startColumn: start.column,
-          endLineNumber: end.lineNumber,
-          endColumn: end.column,
-          segments: getPathSegmentsForSpan(block.parts, span.startIndex, span.endIndex),
-        };
-      })
-      .filter((match): match is XtermBufferPathMatch => match !== null)
-      .filter(
-        (match) =>
-          bufferLineNumber >= match.startLineNumber && bufferLineNumber <= match.endLineNumber,
-      )
-      .filter((match) => {
-        const key = `${match.path}:${match.startLineNumber}:${match.startColumn}:${match.endLineNumber}:${match.endColumn}`;
-        if (seen.has(key)) return false;
-        seen.add(key);
-        return true;
-      });
-  });
-
-  // A generic relative path can also look like the beginning of a new semantic block
-  // while it is actually an indented continuation of an earlier path. Keep the widest
-  // match when both resolve to the same terminal region.
-  return matches.filter(
-    (candidate) =>
-      !matches.some(
-        (other) =>
-          other !== candidate &&
-          compareBufferPosition(
-            other.startLineNumber,
-            other.startColumn,
-            candidate.startLineNumber,
-            candidate.startColumn,
-          ) <= 0 &&
-          compareBufferPosition(
-            other.endLineNumber,
-            other.endColumn,
-            candidate.endLineNumber,
-            candidate.endColumn,
-          ) >= 0 &&
-          (other.startLineNumber !== candidate.startLineNumber ||
-            other.startColumn !== candidate.startColumn ||
-            other.endLineNumber !== candidate.endLineNumber ||
-            other.endColumn !== candidate.endColumn),
-      ),
-  );
-}
-
-function compareBufferPosition(
-  leftLine: number,
-  leftColumn: number,
-  rightLine: number,
-  rightColumn: number,
-): number {
-  return leftLine - rightLine || leftColumn - rightColumn;
+  const logicalLine = block.parts.map((part) => part.text).join("");
+  return findPathSpans(logicalLine, extractPaths)
+    .map((span) => {
+      const start = stringIndexToTerminalPosition(block.parts, span.startIndex);
+      const end = stringEndIndexToTerminalPosition(block.parts, span.endIndex);
+      if (!start || !end) return null;
+      return {
+        path: span.path,
+        startLineNumber: start.lineNumber,
+        startColumn: start.column,
+        endLineNumber: end.lineNumber,
+        endColumn: end.column,
+        segments: getPathSegmentsForSpan(block.parts, span.startIndex, span.endIndex),
+      };
+    })
+    .filter((match): match is XtermBufferPathMatch => match !== null)
+    .filter(
+      (match) =>
+        bufferLineNumber >= match.startLineNumber && bufferLineNumber <= match.endLineNumber,
+    )
+    .filter((match) => {
+      const key = `${match.path}:${match.startLineNumber}:${match.startColumn}:${match.endLineNumber}:${match.endColumn}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
 }
 
 export function getXtermPathLinkRanges(match: XtermBufferPathMatch): ILink["range"][] {
@@ -207,73 +163,6 @@ function getWrappedLineBlockFromStart(
     parts.push({ lineNumber, sourceText, sourceStartIndex: 0, text: sourceText });
   }
   return { startLineNumber, endLineNumber, parts };
-}
-
-function getSemanticPathBlocksAroundLine(
-  terminal: Pick<Terminal, "buffer">,
-  bufferLineNumber: number,
-): BufferTextBlock[] {
-  const active = terminal.buffer.active;
-  const blocks: BufferTextBlock[] = [];
-  const firstCandidate = Math.max(1, bufferLineNumber - MAX_WRAPPED_PATH_LINES);
-
-  for (let lineNumber = firstCandidate; lineNumber <= bufferLineNumber; lineNumber += 1) {
-    const line = active.getLine(lineNumber - 1);
-    if (!line || line.isWrapped) continue;
-    const block = getSemanticPathBlockFromStart(terminal, lineNumber);
-    if (
-      block &&
-      bufferLineNumber >= block.startLineNumber &&
-      bufferLineNumber <= block.endLineNumber
-    ) {
-      blocks.push(block);
-    }
-  }
-  return blocks;
-}
-
-function getSemanticPathBlockFromStart(
-  terminal: Pick<Terminal, "buffer">,
-  startLineNumber: number,
-): BufferTextBlock | null {
-  const firstBlock = getWrappedLineBlockFromStart(terminal, startLineNumber);
-  if (!firstBlock) return null;
-  const firstText = firstBlock.parts.map((part) => part.text).join("");
-  if (!SEMANTIC_PATH_START_RE.test(firstText)) return null;
-
-  const parts = [...firstBlock.parts];
-  let endLineNumber = firstBlock.endLineNumber;
-  let hasContinuation = false;
-
-  for (let guard = 0; guard < MAX_SEMANTIC_PATH_BLOCKS; guard += 1) {
-    const nextStartLineNumber = endLineNumber + 1;
-    const nextBlock = getWrappedLineBlockFromStart(terminal, nextStartLineNumber);
-    if (!nextBlock) break;
-    const firstPart = nextBlock.parts[0];
-    if (!firstPart) break;
-    const sourceStartIndex = countLeadingWhitespace(firstPart.sourceText);
-    const text = firstPart.sourceText.slice(sourceStartIndex);
-    if (!isSemanticPathContinuation(sourceStartIndex, text)) break;
-
-    parts.push({ ...firstPart, sourceStartIndex, text });
-    parts.push(...nextBlock.parts.slice(1));
-    hasContinuation = true;
-    endLineNumber = nextBlock.endLineNumber;
-  }
-
-  if (!hasContinuation) return null;
-  return { startLineNumber, endLineNumber, parts };
-}
-
-function countLeadingWhitespace(value: string): number {
-  return value.match(/^\s*/)?.[0].length ?? 0;
-}
-
-function isSemanticPathContinuation(sourceStartIndex: number, text: string): boolean {
-  if (sourceStartIndex < 2) return false;
-  if (!text || text.startsWith("-") || text.startsWith("•") || text.startsWith("›")) return false;
-  if (text.includes("://")) return false;
-  return SEMANTIC_PATH_CONTINUATION_RE.test(text);
 }
 
 function stringIndexToTerminalPosition(

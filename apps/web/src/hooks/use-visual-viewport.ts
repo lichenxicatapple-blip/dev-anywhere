@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 
 const VISUAL_VIEWPORT_HEIGHT_VAR = "--dev-visual-viewport-height";
 const SOFT_KEYBOARD_MIN_OCCLUDED_VIEWPORT_SHARE = 0.3;
+const KEYBOARD_TRANSITION_SAMPLE_INTERVAL_MS = 100;
+const KEYBOARD_TRANSITION_TIMEOUT_MS = 10_000;
 
 interface VisualViewportBottomOffsetInput {
   layoutViewportHeight: number;
@@ -14,7 +16,7 @@ interface VisualViewportBottomOffsetInput {
   subtractVisualViewportOffsetTop?: boolean;
 }
 
-export interface VisualViewportInsets {
+interface VisualViewportInsets {
   bottomOffset: number;
   layoutBottomInset: number;
 }
@@ -164,8 +166,9 @@ export function useVisualViewportInsets(): VisualViewportInsets {
     if (!vv) return;
     const iosLikeTouchWebKit = isIosLikeTouchWebKit();
     let raf = 0;
+    let focusTransitionTimer: ReturnType<typeof setTimeout> | undefined;
 
-    const update = () => {
+    const update = (): number => {
       const visualHeight = vv.height;
       const visualTop = vv.offsetTop;
       const visualWidth = vv.width;
@@ -205,15 +208,20 @@ export function useVisualViewportInsets(): VisualViewportInsets {
         subtractVisualViewportOffsetTop: iosLikeTouchWebKit,
       });
       const next: VisualViewportInsets = {
-        bottomOffset,
-        layoutBottomInset: computeVisualViewportLayoutBottomInset({
-          layoutViewportHeight,
-          visualViewportHeight: visualHeight,
-          visualViewportOffsetTop: visualTop,
-          baselineViewportHeight: baselineHeightRef.current,
-          allowBaselineFallback: allowLayoutInsetBaseline,
-          softKeyboardOpen: bottomOffset > 0,
-        }),
+        // Browser viewport values are fractional CSS pixels and can wobble by a
+        // fraction during IME animation. Layout at whole CSS pixels to avoid
+        // needless React renders and controls oscillating around the boundary.
+        bottomOffset: Math.round(bottomOffset),
+        layoutBottomInset: Math.round(
+          computeVisualViewportLayoutBottomInset({
+            layoutViewportHeight,
+            visualViewportHeight: visualHeight,
+            visualViewportOffsetTop: visualTop,
+            baselineViewportHeight: baselineHeightRef.current,
+            allowBaselineFallback: allowLayoutInsetBaseline,
+            softKeyboardOpen: bottomOffset > 0,
+          }),
+        ),
       };
       setInsets((previous) =>
         previous.bottomOffset === next.bottomOffset &&
@@ -221,6 +229,7 @@ export function useVisualViewportInsets(): VisualViewportInsets {
           ? previous
           : next,
       );
+      return next.bottomOffset;
     };
 
     const scheduleUpdate = () => {
@@ -231,10 +240,36 @@ export function useVisualViewportInsets(): VisualViewportInsets {
       });
     };
 
+    const stopFocusTransition = () => {
+      if (focusTransitionTimer !== undefined) clearTimeout(focusTransitionTimer);
+      focusTransitionTimer = undefined;
+    };
+
+    const sampleFocusTransition = () => {
+      stopFocusTransition();
+      scheduleUpdate();
+      const deadline = performance.now() + KEYBOARD_TRANSITION_TIMEOUT_MS;
+      const sample = () => {
+        // Run this transition sample synchronously. Routing it through the shared
+        // RAF scheduler lets an unrelated viewport event cancel the only sample
+        // that observed the keyboard-open geometry.
+        const committedBottomOffset = update();
+        if (committedBottomOffset > 0 || performance.now() >= deadline) {
+          focusTransitionTimer = undefined;
+          return;
+        }
+        focusTransitionTimer = setTimeout(sample, KEYBOARD_TRANSITION_SAMPLE_INTERVAL_MS);
+      };
+      focusTransitionTimer = setTimeout(sample, KEYBOARD_TRANSITION_SAMPLE_INTERVAL_MS);
+    };
+
     scheduleUpdate();
     window.addEventListener("resize", scheduleUpdate);
     vv.addEventListener("resize", scheduleUpdate);
     vv.addEventListener("scroll", scheduleUpdate);
+    // xterm may stop focus events while moving focus to its hidden textarea.
+    // Capture at document level so keyboard-opening samples always start.
+    document.addEventListener("focusin", sampleFocusTransition, true);
 
     // 键盘关闭后 visualViewport 更新可能滞后, 失焦延迟 300ms 再采样一次
     const onBlur = () => {
@@ -244,9 +279,11 @@ export function useVisualViewportInsets(): VisualViewportInsets {
 
     return () => {
       cancelAnimationFrame(raf);
+      stopFocusTransition();
       window.removeEventListener("resize", scheduleUpdate);
       vv.removeEventListener("resize", scheduleUpdate);
       vv.removeEventListener("scroll", scheduleUpdate);
+      document.removeEventListener("focusin", sampleFocusTransition, true);
       window.removeEventListener("focusout", onBlur);
     };
   }, []);

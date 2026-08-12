@@ -3,22 +3,18 @@ import { RelayControlSchema } from "@dev-anywhere/shared";
 import { mapCodexAppServerEvent } from "#src/serve/codex-app-server-event-mapper.js";
 
 describe("mapCodexAppServerEvent", () => {
-  it("maps agent message deltas to assistant message envelopes", () => {
+  it("maps agent message deltas to assistant text events", () => {
     const mapped = mapCodexAppServerEvent("s1", 11, {
       type: "codex_app_server",
       method: "item/agentMessage/delta",
-      params: { delta: "OK" },
+      params: { itemId: "msg-1", delta: "OK" },
     });
 
     expect(mapped).toEqual([
       {
-        kind: "envelope",
-        envelope: expect.objectContaining({
-          type: "assistant_message",
-          sessionId: "s1",
-          seq: 11,
-          payload: { text: "OK", isPartial: true },
-        }),
+        kind: "assistant_text",
+        text: "OK",
+        turnId: "msg-1",
       },
     ]);
   });

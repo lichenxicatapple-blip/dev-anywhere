@@ -56,6 +56,7 @@ describe("RelayHistoryHandlers pending approval replay", () => {
       relaySend: (data) => sent.push(data),
       sessionManager: { getSession: () => undefined } as never,
       permissionBroker,
+      workerRegistry: { replayAssistantSnapshot: vi.fn() } as never,
     });
 
     handlers.onSessionMessagesRequest({
@@ -73,6 +74,31 @@ describe("RelayHistoryHandlers pending approval replay", () => {
       { requestId: "req-3", toolName: "Write", input: { file_path: "/tmp/b" } },
     ]);
     expect(decisions).toEqual([{ behavior: "allow" }]);
+  });
+
+  it("replays the active assistant snapshot only for the latest history page", () => {
+    const replayAssistantSnapshot = vi.fn();
+    const handlers = new RelayHistoryHandlers({
+      relaySend: vi.fn(),
+      sessionManager: { getSession: () => undefined } as never,
+      permissionBroker: new PermissionBroker(),
+      workerRegistry: { replayAssistantSnapshot } as never,
+    });
+
+    handlers.onSessionMessagesRequest({
+      type: "session_messages_request",
+      sessionId: "s1",
+      requestId: "latest",
+    } as ControlMessage<"session_messages_request">);
+    handlers.onSessionMessagesRequest({
+      type: "session_messages_request",
+      sessionId: "s1",
+      requestId: "older",
+      before: "b:100",
+    } as ControlMessage<"session_messages_request">);
+
+    expect(replayAssistantSnapshot).toHaveBeenCalledTimes(1);
+    expect(replayAssistantSnapshot).toHaveBeenCalledWith("s1");
   });
 });
 
@@ -115,6 +141,7 @@ describe("RelayHistoryHandlers resumed JSON history", () => {
       relaySend: (data) => sent.push(data),
       sessionManager: { getSession: () => session } as never,
       permissionBroker: new PermissionBroker(),
+      workerRegistry: { replayAssistantSnapshot: vi.fn() } as never,
     });
 
     handlers.onSessionMessagesRequest({
@@ -178,6 +205,7 @@ describe("RelayHistoryHandlers resumed JSON history", () => {
       relaySend: (data) => sent.push(data),
       sessionManager: { getSession: () => session } as never,
       permissionBroker: new PermissionBroker(),
+      workerRegistry: { replayAssistantSnapshot: vi.fn() } as never,
     });
 
     handlers.onSessionMessagesRequest({

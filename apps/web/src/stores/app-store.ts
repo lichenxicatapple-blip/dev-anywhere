@@ -35,13 +35,13 @@ interface PendingToast {
   message: string;
 }
 
-export interface ProxySwitchTarget {
+interface ProxySwitchTarget {
   proxyId: string;
   name: string;
 }
 
 export type InputModePreference = "auto" | "touch" | "hardware";
-export type AdaptiveInputModality = "unknown" | "touch" | "hardware";
+type AdaptiveInputModality = "unknown" | "touch" | "hardware";
 
 interface AppStoreState {
   phase: AppPhase;

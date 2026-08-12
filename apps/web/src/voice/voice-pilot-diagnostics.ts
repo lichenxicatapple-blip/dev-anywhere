@@ -9,7 +9,7 @@ export type VoicePilotDiagnosticScope =
 
 export type VoicePilotDiagnosticDetails = Record<string, string | number | boolean | null>;
 
-export interface VoicePilotDiagnosticEvent {
+interface VoicePilotDiagnosticEvent {
   sequence: number;
   timestamp: string;
   monotonicMs: number;
@@ -30,7 +30,7 @@ export interface VoicePilotDiagnosticInput {
   details?: VoicePilotDiagnosticDetails;
 }
 
-export interface VoicePilotDiagnosticsApi {
+interface VoicePilotDiagnosticsApi {
   snapshot(): VoicePilotDiagnosticEvent[];
   clear(): void;
 }

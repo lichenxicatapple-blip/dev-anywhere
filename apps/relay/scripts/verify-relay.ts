@@ -107,7 +107,12 @@ async function verify(): Promise<void> {
         timestamp: Date.now(),
         source: "proxy",
         version: "1.0.0",
-        payload: { text: "hello from proxy", isPartial: false },
+        payload: {
+          turnId: "verify-turn",
+          revision: 1,
+          text: "hello from proxy",
+          status: "completed",
+        },
       }),
     );
     const fromProxy = (await clientMsgPromise) as { type: string; payload: { text: string } };

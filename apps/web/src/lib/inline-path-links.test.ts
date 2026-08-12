@@ -16,26 +16,32 @@ describe("inline path link detection", () => {
     ]);
   });
 
-  it("keeps an explicitly bounded image path with spaces as one preview action", () => {
-    const text = "preview @/Users/cat/My Project/final shot.png now";
-    const path = "/Users/cat/My Project/final shot.png";
-    const start = text.indexOf("@");
+  it("keeps Unicode image and file paths without whitespace as complete inline actions", () => {
+    const image = "/Users/cat/项目素材/最终截图.png";
+    const file = "docs/项目文档/发布说明.md";
+    const text = `see ${image} and ${file}`;
     expect(findInlinePathLinks(text)).toEqual([
-      { kind: "image", path, start, end: start + path.length + 1 },
-    ]);
-  });
-
-  it("keeps Unicode image and file paths as complete inline actions", () => {
-    const image = "/Users/cat/项目 素材/最终 截图.png";
-    const file = "docs/项目 文档/发布 说明.md";
-    const text = `see @${image} and ${file}`;
-    expect(findInlinePathLinks(text)).toEqual([
-      { kind: "image", path: image, start: 4, end: 5 + image.length },
+      { kind: "image", path: image, start: 4, end: 4 + image.length },
       {
         kind: "file",
         path: file,
         start: text.indexOf(file),
         end: text.indexOf(file) + file.length,
+      },
+    ]);
+  });
+
+  it("keeps consecutive lines as separate link candidates", () => {
+    const first = "/tmp/first.log";
+    const second = "/tmp/second.png";
+    const text = `${first}\n${second}`;
+    expect(findInlinePathLinks(text)).toEqual([
+      { kind: "file", path: first, start: 0, end: first.length },
+      {
+        kind: "image",
+        path: second,
+        start: first.length + 1,
+        end: text.length,
       },
     ]);
   });

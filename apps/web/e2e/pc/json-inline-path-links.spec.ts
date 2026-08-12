@@ -11,8 +11,10 @@ async function emitAssistantMessage(page: import("@playwright/test").Page, text:
       version: "1",
       type: "assistant_message",
       payload: {
+        turnId: `inline-${Date.now()}`,
+        revision: 1,
         text: messageText,
-        isPartial: false,
+        status: "completed",
       },
     });
   }, text);

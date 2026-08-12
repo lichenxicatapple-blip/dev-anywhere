@@ -67,13 +67,22 @@ describe("file-download-path extraction", () => {
     ]);
   });
 
-  it("supports explicitly bounded, spaced and Unicode file paths", () => {
-    expect(
-      extractFileDownloadPaths(
-        "read @/Users/cat/项目 资料/最终 报告.csv and docs/设计稿/说明文档.md",
-      ),
-    ).toEqual(["/Users/cat/项目 资料/最终 报告.csv", "docs/设计稿/说明文档.md"]);
+  it("supports explicitly bounded and Unicode file paths without whitespace", () => {
+    expect(extractFileDownloadPaths("read docs/设计稿/说明文档.md")).toEqual([
+      "docs/设计稿/说明文档.md",
+    ]);
     expect(extractFileDownloadPaths("open @biome.json next")).toEqual(["biome.json"]);
+  });
+
+  it("treats whitespace and newlines as hard path boundaries", () => {
+    expect(extractFileDownloadPaths("/tmp/first.log /tmp/second.txt")).toEqual([
+      "/tmp/first.log",
+      "/tmp/second.txt",
+    ]);
+    expect(extractFileDownloadPaths("/tmp/first.log\n/tmp/second.txt")).toEqual([
+      "/tmp/first.log",
+      "/tmp/second.txt",
+    ]);
   });
 
   it("recognizes paths and well-known top-level project filenames", () => {

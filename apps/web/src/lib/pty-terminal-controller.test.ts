@@ -102,6 +102,26 @@ describe("attachPtyTerminalController", () => {
     expect(h.terminal.focus).toHaveBeenCalledTimes(1);
   });
 
+  it("does not focus terminal input for Cmd/Ctrl pointer link actions", async () => {
+    const h = createHarness();
+
+    attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+    });
+    await Promise.resolve();
+
+    h.host.dispatchEvent(new MouseEvent("pointerdown", { metaKey: true }));
+    h.host.dispatchEvent(new MouseEvent("pointerdown", { ctrlKey: true }));
+
+    expect(h.terminal.focus).not.toHaveBeenCalled();
+  });
+
   // 触屏入口要传 noop scheduleAutoFocus, 不让进会话立刻给 helper textarea 抛 focus
   // (Android Chrome / iOS Safari 看到 focus 立刻起 IME, 视口被键盘吃掉一半)。
   it("skips auto-focus when scheduleAutoFocus is a no-op (touch device opt-out)", async () => {

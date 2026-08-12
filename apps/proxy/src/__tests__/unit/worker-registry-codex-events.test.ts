@@ -73,8 +73,39 @@ describe("WorkerRegistry Codex app-server events", () => {
       type: "assistant_message",
       sessionId: "s1",
       seq: 11,
-      payload: { text: "OK", isPartial: true },
+      payload: {
+        turnId: "msg-1",
+        revision: 1,
+        text: "OK",
+        status: "streaming",
+      },
     });
+  });
+
+  it("sends growing full snapshots for the same Codex message", async () => {
+    const { relay } = await createConnectedRegistry();
+    for (const [seq, delta] of [
+      [11, "完整"],
+      [12, "回复"],
+    ] as const) {
+      acceptedSocket?.write(
+        serializeWorkerMsg({
+          type: "worker_event",
+          seq,
+          event: {
+            type: "codex_app_server",
+            method: "item/agentMessage/delta",
+            params: { threadId: "cx-1", turnId: "turn-1", itemId: "msg-1", delta },
+          },
+        }),
+      );
+    }
+
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(2));
+    expect(relay.envelopes.map((message) => (message as { payload: unknown }).payload)).toEqual([
+      { turnId: "msg-1", revision: 1, text: "完整", status: "streaming" },
+      { turnId: "msg-1", revision: 2, text: "完整回复", status: "streaming" },
+    ]);
   });
 
   it("turns Codex turn/completed into a JSON turn_result", async () => {

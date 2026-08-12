@@ -11,4 +11,3 @@ export const sessionModeValues = ["pty", "json"] as const;
 export type SessionMode = (typeof sessionModeValues)[number];
 
 export const sessionKindValues = ["agent", "terminal"] as const;
-export type SessionKind = (typeof sessionKindValues)[number];

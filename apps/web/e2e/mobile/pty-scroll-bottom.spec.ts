@@ -425,6 +425,25 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       await sendPtyOutput(emuPage, `visible-tail-append ${String(index).padStart(2, "0")}\r\n`);
       await emuPage.waitForTimeout(50);
     }
+    await expect
+      .poll(
+        () =>
+          emuPage.evaluate(
+            () =>
+              (
+                window as typeof window & {
+                  __ptyReviewScrollSamples?: ReviewScrollSample[];
+                }
+              ).__ptyReviewScrollSamples?.filter(
+                (sample) => sample.renderedLine !== null && sample.renderedLineViewportTop !== null,
+              ).length ?? 0,
+          ),
+        {
+          timeout: 10_000,
+          message: "PTY frozen review did not produce enough rendered frame samples",
+        },
+      )
+      .toBeGreaterThan(10);
     const reviewSamples = await stopReviewScrollSampling(emuPage);
     expectReviewedFrameFrozen(reviewSamples);
     expect(await reviewSnapshot.boundingBox()).toEqual(frozenBox);

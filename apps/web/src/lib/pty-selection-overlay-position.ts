@@ -7,6 +7,14 @@ interface PtySelectionToolbarPositionInput {
   viewportOffsetTop?: number;
 }
 
+interface PtySelectionScrollDismissInput {
+  now: number;
+  viewportTransitionUntil: number;
+  scrollLeft: number;
+  scrollTop: number;
+  selectionAutoscrollPosition: { scrollLeft: number; scrollTop: number } | null;
+}
+
 function clamp(value: number, min: number, max: number): number {
   if (min > max) return (min + max) / 2;
   return Math.min(Math.max(value, min), max);
@@ -30,4 +38,19 @@ export function computePtySelectionToolbarPosition({
     left: clamp(clientX, minLeft, maxLeft),
     top: clamp(clientY - 48, minTop, maxTop),
   };
+}
+
+export function shouldDismissPtySelectionOnContainerScroll({
+  now,
+  viewportTransitionUntil,
+  scrollLeft,
+  scrollTop,
+  selectionAutoscrollPosition,
+}: PtySelectionScrollDismissInput): boolean {
+  if (now <= viewportTransitionUntil) return false;
+  return !(
+    selectionAutoscrollPosition &&
+    scrollLeft === selectionAutoscrollPosition.scrollLeft &&
+    scrollTop === selectionAutoscrollPosition.scrollTop
+  );
 }

@@ -73,7 +73,7 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   );
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
-  const { isAtBottom, scrollToBottom } = useFollowOutput(scrollEl);
+  const { isAtBottom, scrollToBottom, releaseFollowLock } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(() => isJsonScrollTraceEnabled());
   const [stopPending, setStopPending] = useState(false);
@@ -146,28 +146,26 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     historyRefreshKeyRef.current = sessionId;
     const refreshGeneration = ++historyRefreshGenerationRef.current;
     const historySlice = useChatStore.getState().bySessionId[sessionId];
-    const isReconcile = historySlice?.historyInitialized === true;
+    const isRefresh = historySlice?.historyInitialized === true;
     const refreshStartedAt = Date.now();
-    traceJsonScrollRef.current(
-      isReconcile ? "history-reconcile:request" : "history-initial:request",
-    );
+    traceJsonScrollRef.current(isRefresh ? "history-refresh:request" : "history-initial:request");
     setHistoryLoading(sessionId, true);
     void relay
       .requestSessionMessagesPage(sessionId, { limit: HISTORY_PAGE_SIZE })
       .then((page) => {
         if (historyRefreshGenerationRef.current !== refreshGeneration) return;
         traceJsonScrollRef.current(
-          isReconcile ? "history-reconcile:response" : "history-initial:response",
+          isRefresh ? "history-refresh:response" : "history-initial:response",
           {
             historyHasMore: page.hasMore,
           },
         );
         useChatStore.getState().loadHistoryPage(sessionId, {
-          mode: isReconcile ? "reconcile" : "replace",
+          mode: isRefresh ? "refresh" : "replace",
           messages: page.messages,
           hasMore: page.hasMore,
           nextBefore: page.nextBefore,
-          preserveLiveSince: isReconcile ? refreshStartedAt : undefined,
+          preserveLiveSince: isRefresh ? refreshStartedAt : undefined,
         });
       })
       .catch(() => {
@@ -554,6 +552,7 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   const initialScrollDoneRef = useRef(false);
   const handledFollowLatestRequestRef = useRef(followLatestRequest);
   useEffect(() => {
+    releaseFollowLock();
     initialScrollDoneRef.current = false;
     handledFollowLatestRequestRef.current =
       useChatStore.getState().bySessionId[sessionId]?.followLatestRequest ?? 0;
@@ -564,7 +563,7 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     setFindHistoryLoading(false);
     setFindHistoryFailed(false);
     findHistoryLoadingRef.current = false;
-  }, [sessionId]);
+  }, [releaseFollowLock, sessionId]);
   useLayoutEffect(() => {
     if (!scrollEl || messages.length === 0 || initialScrollDoneRef.current) return;
     initialScrollDoneRef.current = true;
@@ -589,14 +588,19 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     if (!scrollEl || messages.length === 0) return;
     traceJsonScrollRef.current("local-submit-follow-latest");
     setNewMsgsWhileAway(false);
-    virtualizer.scrollToIndex(messages.length - 1, { align: "end", behavior: "auto" });
-    scrollToBottom();
-    const raf = requestAnimationFrame(() => {
-      virtualizer.scrollToIndex(messages.length - 1, { align: "end", behavior: "auto" });
-      scrollToBottom();
-    });
+    // Do not race virtualizer.scrollToIndex against a direct bottom pin. Its
+    // deferred alignment can run after scrollToBottom and leave a small gap at
+    // the bottom. Pin across a few frames while the new bubble is measured.
+    let remainingFrames = 3;
+    let raf = 0;
+    const pin = () => {
+      scrollToBottom({ lockUntilUserInteraction: true });
+      remainingFrames -= 1;
+      if (remainingFrames > 0) raf = requestAnimationFrame(pin);
+    };
+    pin();
     return () => cancelAnimationFrame(raf);
-  }, [followLatestRequest, messages.length, scrollEl, scrollToBottom, virtualizer]);
+  }, [followLatestRequest, messages.length, scrollEl, scrollToBottom]);
 
   // isAtBottom 用 ref 传到下方新消息 effect: 新消息到达时只看"当前是否在底",
   // isAtBottom 自身变化不应触发 amber (离底仅代表用户在看旧消息, 不是有新消息)

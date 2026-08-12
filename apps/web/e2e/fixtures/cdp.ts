@@ -2,9 +2,86 @@
 // 入口前置: scripts/test/mobile.sh 已建 adb forward tcp:9222 -> chrome_devtools_remote.
 import { chromium, type Browser, type Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 
 const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
-const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://localhost:5174";
+const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://127.0.0.1:5174";
+const execFileAsync = promisify(execFile);
+const MOBILE_NETWORK_ERROR =
+  /(?:net::ERR_(?:EMPTY_RESPONSE|SOCKET_NOT_CONNECTED|CONNECTION_REFUSED)|chrome-error:\/\/chromewebdata)/;
+
+async function restoreAdbReverse(): Promise<void> {
+  const serialArgs = process.env.ANDROID_SERIAL ? ["-s", process.env.ANDROID_SERIAL] : [];
+  const vitePort = new URL(VITE_BASE_URL).port || "5174";
+  const relayPort = process.env.TIER_MOBILE_RELAY_PORT ?? "6100";
+  await execFileAsync("adb", [...serialArgs, "reverse", `tcp:${vitePort}`, `tcp:${vitePort}`]);
+  await execFileAsync("adb", [...serialArgs, "reverse", `tcp:${relayPort}`, `tcp:${relayPort}`]);
+}
+
+function isMobileNetworkError(error: unknown): boolean {
+  return MOBILE_NETWORK_ERROR.test(error instanceof Error ? error.message : String(error));
+}
+
+async function isChromeNetworkErrorPage(page: Page): Promise<boolean> {
+  return page
+    .evaluate(() => {
+      if (document.documentURI.startsWith("chrome-error://")) return true;
+      if (document.querySelector("#main-frame-error, .interstitial-wrapper")) return true;
+      const text = document.body?.innerText ?? "";
+      return /(?:ERR_(?:EMPTY_RESPONSE|SOCKET_NOT_CONNECTED|CONNECTION_REFUSED)|No internet connection)/i.test(
+        text,
+      );
+    })
+    .catch(() => page.url().startsWith("chrome-error://"));
+}
+
+async function waitForFailedNavigationToSettle(page: Page): Promise<void> {
+  await page.waitForLoadState("domcontentloaded", { timeout: 2_000 }).catch(() => {});
+  await page.waitForTimeout(250);
+}
+
+async function navigateWithTransportRecovery<T>(
+  page: Page,
+  navigate: (attempt: number) => Promise<T>,
+): Promise<T> {
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      const result = await navigate(attempt);
+      if (!(await isChromeNetworkErrorPage(page))) return result;
+      lastError = new Error("Android Chrome loaded chrome-error://chromewebdata/");
+    } catch (error) {
+      if (!isMobileNetworkError(error)) throw error;
+      lastError = error;
+    }
+
+    if (attempt === 2) throw lastError;
+    await restoreAdbReverse();
+    // Chrome may still be committing its native offline page when Playwright's
+    // navigation rejects. Let that commit finish before starting the retry.
+    await waitForFailedNavigationToSettle(page);
+  }
+  throw lastError;
+}
+
+function installNavigationTransportRecovery(page: Page): void {
+  const originalGoto = page.goto.bind(page);
+  const originalReload = page.reload.bind(page);
+
+  page.goto = ((...args: Parameters<Page["goto"]>) =>
+    navigateWithTransportRecovery(page, async () => {
+      return originalGoto(...args);
+    })) as Page["goto"];
+
+  page.reload = ((...args: Parameters<Page["reload"]>) => {
+    const targetUrl = page.url();
+    const options = args[0];
+    return navigateWithTransportRecovery(page, async (attempt) => {
+      return attempt === 0 ? originalReload(...args) : originalGoto(targetUrl, options);
+    });
+  }) as Page["reload"];
+}
 
 interface MobileWorkerFixtures {
   emuBrowser: Browser;
@@ -18,6 +95,14 @@ async function safeGoto(page: Page, url: string): Promise<void> {
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      await page.waitForFunction(
+        () => {
+          const root = document.querySelector("#root");
+          return root !== null && root.childElementCount > 0;
+        },
+        undefined,
+        { timeout: 10_000 },
+      );
       return;
     } catch (err) {
       if (attempt === 2) throw err;
@@ -58,6 +143,7 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       const context = contexts[0] ?? (await emuBrowser.newContext());
       const pages = context.pages();
       const page = pages[0] ?? (await context.newPage());
+      installNavigationTransportRecovery(page);
       await safeGoto(page, VITE_BASE_URL);
       // force-stop restarts Chrome but preserves this origin's storage. Clear it before
       // each spec installs its init scripts so a previous fake proxy/session selection

@@ -22,6 +22,7 @@ import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import { attachPtyReviewSnapshot } from "@/lib/pty-review-snapshot";
 import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
+import { isOnlyPtyMouseInput } from "@/lib/pty-mouse-input";
 import {
   attachPtyScrollController,
   type PtyPageResumeState,
@@ -794,6 +795,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
 
     const onRawInput = (data: string): void => {
+      if (isOnlyPtyMouseInput(data)) return;
       scheduleRawInputFollow("rawInput", { force: true });
       resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
     };

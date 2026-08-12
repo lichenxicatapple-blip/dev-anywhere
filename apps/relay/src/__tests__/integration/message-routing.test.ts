@@ -92,7 +92,7 @@ describe("Message routing integration", () => {
         source: "proxy",
         version: "1.0",
         type: "assistant_message",
-        payload: { text: "hello", isPartial: false },
+        payload: { turnId: "turn-1", revision: 1, text: "hello", status: "completed" },
       }),
     );
 

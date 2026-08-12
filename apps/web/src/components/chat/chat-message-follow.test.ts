@@ -19,8 +19,6 @@ describe("isLiveVoiceTranscript", () => {
     expect(isLiveVoiceTranscript(message({ inputMethod: "voice" }))).toBe(true);
     expect(isLiveVoiceTranscript(message({ inputMethod: "voice", isPartial: false }))).toBe(false);
     expect(isLiveVoiceTranscript(message())).toBe(false);
-    expect(
-      isLiveVoiceTranscript(message({ role: "assistant", inputMethod: "voice" })),
-    ).toBe(false);
+    expect(isLiveVoiceTranscript(message({ role: "assistant", inputMethod: "voice" }))).toBe(false);
   });
 });

@@ -168,17 +168,24 @@ pnpm --filter @dev-anywhere/web exec playwright test \
 
 ### 移动端
 
-并行运行移动端测试：
+串行运行完整移动端门禁：
 
 ```bash
 pnpm test:mobile
 ```
 
-设备资源冲突时改为串行：
+该入口始终只使用一台模拟器，机器上即使还有其他在线设备也不会自动并行，避免第二台模拟器影响宿主机图形、CDP 与键盘时序。正式发布门禁也只允许使用这个串行入口。
+发布门禁还固定使用软件 GPU 渲染，避免 macOS host GPU/MoltenVK 波动；可通过
+`RELEASE_MOBILE_GPU_MODE` 显式覆盖。
+
+只有需要主动评估并行吞吐或资源竞争时，才显式运行：
 
 ```bash
-pnpm test:mobile:serial
+TEST_MOBILE_PARALLEL_WORKERS=2 pnpm test:mobile:parallel
 ```
+
+并行入口不会由发布流程调用；依赖真实 Android IME 与 `visualViewport` 的 spec
+仍会在普通分片结束后独占一台模拟器串行执行。
 
 Android 测试环境管理：
 
@@ -246,11 +253,33 @@ apps/web/artifacts/
 pnpm release <version>
 ```
 
-脚本会运行发布检查与 smoke 测试、更新 package 版本、创建 release commit 和 tag，然后推送。需要单独执行门禁时使用：
+脚本会运行发布检查、快速 smoke 门禁、进程/网络 Chaos 和完整 Android Chrome 门禁，随后更新 package 版本、创建 release commit 和 tag，然后推送。快速门禁只保留确定性的单测、布局和完整桌面浏览器测试，用于开发阶段快速反馈；Chaos 与 Android 都是每次正式发布的阻断条件。需要单独执行快速门禁时使用：
 
 ```bash
 pnpm release:check
 pnpm release:smoke
 ```
+
+真实上传下载链路、进程/网络 Chaos 和完整 Android Chrome 测试由深度门禁承载：
+
+```bash
+pnpm release:deep
+```
+
+也可以只跑与改动相关的慢速层：
+
+```bash
+RELEASE_DEEP_SCOPE=real pnpm release:deep
+RELEASE_DEEP_SCOPE=chaos pnpm release:deep
+RELEASE_DEEP_SCOPE=mobile pnpm release:deep
+```
+
+其中 `chaos` 和 `mobile` scope 都会由 `pnpm release` 自动执行并阻塞打 tag；Release Please 在 `main` 上创建版本前也有独立 Chaos 与 Android Chrome 必需检查，自动发布无法绕过。`real` 文件链路保持按需运行：
+
+- Relay/Proxy 重连与进程生命周期：Chaos 每次正式发布必跑；真实文件链路按需运行。
+- Android E2E：每次正式发布必跑；移动端软键盘、触摸、长按选区、横竖屏或 Voice Pilot 改动还应在开发过程中提前运行。
+- 测试基础设施、Playwright fixture、发布与部署脚本：完整 `release:deep`。
+
+`release:smoke` 与 `release:deep` 都会把各阶段耗时写入 `artifacts/release-*/timing.tsv`。如果某阶段持续变慢，应先治理该层，不要把更多环境依赖重新塞回快速门禁。
 
 tag 推送后，GitHub Actions 发布 `@dev-anywhere/proxy`、`@dev-anywhere/relay` 和 Relay Docker 镜像。发布完成后还应验证一次 Quick Tunnel，并用现有 Token 执行一次 VPS 幂等升级。

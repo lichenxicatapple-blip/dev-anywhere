@@ -1,6 +1,8 @@
 const PTY_HELPER_TEXTAREA_CLASS = "xterm-helper-textarea";
 
-export function blurActivePtyHelperTextarea(activeElement: Element | null = document.activeElement): boolean {
+export function blurActivePtyHelperTextarea(
+  activeElement: Element | null = document.activeElement,
+): boolean {
   if (!(activeElement instanceof HTMLElement)) return false;
   if (!activeElement.classList.contains(PTY_HELPER_TEXTAREA_CLASS)) return false;
   activeElement.blur();
@@ -22,7 +24,7 @@ export function canScrollVerticallyWithinBoundary(
   return false;
 }
 
-export function canElementScrollY(element: HTMLElement, deltaY: number): boolean {
+function canElementScrollY(element: HTMLElement, deltaY: number): boolean {
   if (element.scrollHeight <= element.clientHeight + 1) return false;
   const overflowY = window.getComputedStyle(element).overflowY;
   if (overflowY !== "auto" && overflowY !== "scroll" && overflowY !== "overlay") return false;

@@ -247,7 +247,11 @@ body {
   }
 }
 
-@media (orientation: landscape) {
+/* Android Chrome can shrink the layout viewport until height < width when the
+   keyboard opens on a portrait phone. Width keeps the portrait/landscape
+   distinction stable, so do not collapse the two-row controls on that false
+   CSS orientation change. */
+@media (orientation: landscape) and (min-width: 600px) {
   .dev-pty-mobile-controls {
     display: grid;
     grid-template-columns: repeat(14, minmax(0, 1fr));

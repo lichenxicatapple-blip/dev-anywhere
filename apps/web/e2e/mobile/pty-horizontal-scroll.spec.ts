@@ -21,34 +21,51 @@ async function touchDrag(
   start: { x: number; y: number },
   end: { x: number; y: number },
 ): Promise<void> {
-  const client = await page.context().newCDPSession(page);
-  try {
-    await client.send("Input.dispatchTouchEvent", {
-      type: "touchStart",
-      touchPoints: [{ x: start.x, y: start.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
-    });
-    for (let step = 1; step <= 4; step += 1) {
-      const progress = step / 4;
-      await page.waitForTimeout(40);
-      await client.send("Input.dispatchTouchEvent", {
-        type: "touchMove",
-        touchPoints: [
-          {
-            x: start.x + (end.x - start.x) * progress,
-            y: start.y + (end.y - start.y) * progress,
-            id: 1,
-            radiusX: 2,
-            radiusY: 2,
-            force: 1,
-          },
-        ],
-      });
-    }
-    await page.waitForTimeout(60);
-    await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-  } finally {
-    await client.detach();
-  }
+  await page.evaluate(
+    async ({ startPoint, endPoint }) => {
+      const target = document.elementFromPoint(startPoint.x, startPoint.y);
+      if (!(target instanceof Element)) throw new Error("touch drag target is missing");
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const makeTouch = (point: { x: number; y: number }) =>
+        new Touch({
+          identifier: 1,
+          target,
+          clientX: point.x,
+          clientY: point.y,
+          radiusX: 2,
+          radiusY: 2,
+          force: 1,
+        });
+      const dispatch = (type: "touchstart" | "touchmove" | "touchend", point: Touch | null) => {
+        target.dispatchEvent(
+          new TouchEvent(type, {
+            bubbles: true,
+            cancelable: true,
+            composed: true,
+            touches: point && type !== "touchend" ? [point] : [],
+            targetTouches: point && type !== "touchend" ? [point] : [],
+            changedTouches: point ? [point] : [],
+          }),
+        );
+      };
+
+      dispatch("touchstart", makeTouch(startPoint));
+      for (let step = 1; step <= 4; step += 1) {
+        const progress = step / 4;
+        await sleep(40);
+        dispatch(
+          "touchmove",
+          makeTouch({
+            x: startPoint.x + (endPoint.x - startPoint.x) * progress,
+            y: startPoint.y + (endPoint.y - startPoint.y) * progress,
+          }),
+        );
+      }
+      await sleep(60);
+      dispatch("touchend", makeTouch(endPoint));
+    },
+    { startPoint: start, endPoint: end },
+  );
 }
 
 test.describe("L4 mobile / PTY input scroll", () => {

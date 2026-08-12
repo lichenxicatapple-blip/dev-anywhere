@@ -17,9 +17,71 @@ jobs:
     name: Verify main
     uses: ./.github/workflows/ci.yml
 
+  verify-chaos:
+    name: Verify process Chaos
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Install Chromium
+        run: pnpm --filter @dev-anywhere/web exec playwright install --with-deps chromium
+
+      - name: Run process Chaos release gate
+        run: RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
+
+  verify-android:
+    name: Verify Android Chrome
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Run Android Chrome release gate
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis_playstore
+          profile: pixel_6
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: TEST_MOBILE_REQUIRE_EMULATOR=1 pnpm test:mobile
+
   release-please:
     name: Prepare or create release
-    needs: verify
+    needs:
+      - verify
+      - verify-chaos
+      - verify-android
     runs-on: ubuntu-latest
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}

@@ -95,9 +95,74 @@ export async function tapWithAdb(locator: Locator): Promise<void> {
         continue;
       }
     }
+    if (
+      !node &&
+      hierarchy.includes('content-desc="Web View"') &&
+      hierarchy.includes('text="No internet connection"')
+    ) {
+      break;
+    }
     if (!node) await new Promise((resolve) => setTimeout(resolve, 250));
   }
-  const bounds = node?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+  const chromeWebTreeIsStale =
+    lastHierarchy.includes('content-desc="Web View"') &&
+    lastHierarchy.includes('text="No internet connection"');
+  let bounds = chromeWebTreeIsStale
+    ? undefined
+    : node?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+  if (!bounds) {
+    // Chrome can keep the document fully rendered while Android marks the
+    // emulator network PARTIAL_CONNECTIVITY and shows its native "No internet
+    // connection" chip. In that state UIAutomator intermittently omits all web
+    // descendants and exposes only the WebView frame. Preserve a real ADB touch
+    // by projecting Playwright's CSS rect into that native frame.
+    const webViewNode = [...lastHierarchy.matchAll(/<node\b[^>]*>/g)]
+      .map(([value]) => value)
+      .find(
+        (value) =>
+          value.includes('package="com.android.chrome"') &&
+          value.includes('content-desc="Web View"'),
+      );
+    const webViewBounds = webViewNode?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    const chromeToolbarNode = [...lastHierarchy.matchAll(/<node\b[^>]*>/g)]
+      .map(([value]) => value)
+      .find((value) => value.includes('resource-id="com.android.chrome:id/control_container"'));
+    const chromeToolbarBounds = chromeToolbarNode?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+    const visibleTapTarget =
+      label === "Terminal input" ? locator.page().locator('[data-slot="pty-terminal"]') : locator;
+    const [rect, viewport] = await Promise.all([
+      visibleTapTarget.boundingBox(),
+      locator.page().evaluate(() => ({
+        width: window.visualViewport?.width ?? window.innerWidth,
+        height: window.visualViewport?.height ?? window.innerHeight,
+        offsetLeft: window.visualViewport?.offsetLeft ?? 0,
+        offsetTop: window.visualViewport?.offsetTop ?? 0,
+      })),
+    ]);
+    if (webViewBounds && rect && viewport.width > 0 && viewport.height > 0) {
+      const [, webLeft, webTop, webRight, webBottom] = webViewBounds.map(Number);
+      const scale = (webRight - webLeft) / viewport.width;
+      const contentTop = chromeToolbarBounds
+        ? Number(chromeToolbarBounds[4])
+        : Math.max(webTop, webBottom - viewport.height * scale);
+      const projectedCenterX = Math.round(webLeft + (rect.x + rect.width / 2) * scale);
+      const projectedCenterY = Math.round(contentTop + (rect.y + rect.height / 2) * scale);
+      if (
+        projectedCenterX >= webLeft &&
+        projectedCenterX <= webRight &&
+        projectedCenterY >= Math.max(0, contentTop) &&
+        projectedCenterY <= webBottom
+      ) {
+        bounds = [
+          "",
+          String(projectedCenterX),
+          String(projectedCenterY),
+          String(projectedCenterX),
+          String(projectedCenterY),
+        ];
+      }
+    }
+  }
   if (!bounds) {
     const visibleNodes = [...lastHierarchy.matchAll(/<node\b[^>]*>/g)]
       .map(([value]) => value)
@@ -112,11 +177,75 @@ export async function tapWithAdb(locator: Locator): Promise<void> {
   const x = Math.round((left + right) / 2);
   const y = Math.round((top + bottom) / 2);
 
-  await execFileAsync("adb", [...serialArgs, "shell", "input", "tap", `${x}`, `${y}`]);
+  if (label !== "Terminal input") {
+    await locator.evaluate((element) => {
+      const target = element as HTMLElement & { __devAnywhereAdbEvents?: string[] };
+      target.__devAnywhereAdbEvents = [];
+      target.addEventListener(
+        "pointerdown",
+        () => target.__devAnywhereAdbEvents?.push("pointerdown"),
+        { once: true },
+      );
+      target.addEventListener("click", () => target.__devAnywhereAdbEvents?.push("click"), {
+        once: true,
+      });
+    });
+  }
+
+  // `uiautomator dump` and `input tap` share Android's accessibility/input
+  // pipeline. Issuing the tap in the same instant can be acknowledged by adb
+  // before Chrome receives it. One rendered frame releases the dump without
+  // turning a missed product interaction into a retry.
+  await locator
+    .page()
+    .evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  if (label === "Terminal input") {
+    // The keyboard changes layout immediately after this DOWN event. Keep the
+    // activation gesture instantaneous so its UP cannot land on newly mounted
+    // PTY controls.
+    await execFileAsync("adb", [...serialArgs, "shell", "input", "tap", `${x}`, `${y}`]);
+  } else {
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "input",
+      "touchscreen",
+      "swipe",
+      `${x}`,
+      `${y}`,
+      `${x}`,
+      `${y}`,
+      "80",
+    ]);
+  }
+  if (label !== "Terminal input") {
+    const deliveredEvents = await locator.evaluate(
+      (element) =>
+        (element as HTMLElement & { __devAnywhereAdbEvents?: string[] }).__devAnywhereAdbEvents ??
+        [],
+    );
+    if (!deliveredEvents.includes("click")) {
+      throw new Error(
+        `Android touch did not click ${label} at (${x},${y}); events=${deliveredEvents.join(",") || "none"}`,
+      );
+    }
+  }
 }
 
 export async function touchPtyTerminal(page: Page): Promise<void> {
-  await tapWithAdb(page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'));
+  const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    // UIAutomator bounds can become stale between dump and input tap while xterm
+    // is continuously painting. Re-resolve the native bounds only when the tap
+    // demonstrably did not reach the textarea.
+    await tapWithAdb(input);
+    try {
+      await expect(input).toBeFocused({ timeout: 1_000 });
+      return;
+    } catch (error) {
+      if (attempt === 2) throw error;
+    }
+  }
 }
 
 export async function waitForSoftKeyboard(page: Page): Promise<void> {
@@ -128,26 +257,66 @@ export async function waitForSoftKeyboard(page: Page): Promise<void> {
     })
     .toBe(true);
 
-  await expect
-    .poll(
-      () =>
-        page.evaluate(() =>
-          Number(
-            document
-              .querySelector("[data-keyboard-offset]")
-              ?.getAttribute("data-keyboard-offset") ?? "0",
+  try {
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() =>
+            Number(
+              document
+                .querySelector("[data-keyboard-offset]")
+                ?.getAttribute("data-keyboard-offset") ?? "0",
+            ),
           ),
-        ),
-      { timeout: 10_000, message: "Android soft keyboard did not produce a keyboard offset" },
-    )
-    .toBeGreaterThan(0);
+        { timeout: 10_000, message: "Android soft keyboard did not produce a keyboard offset" },
+      )
+      .toBeGreaterThan(0);
+  } catch (error) {
+    const [web, nativeWindow] = await Promise.all([
+      page.evaluate(() => ({
+        activeTag: document.activeElement?.tagName ?? null,
+        activeLabel: document.activeElement?.getAttribute("aria-label") ?? null,
+        innerHeight: window.innerHeight,
+        innerWidth: window.innerWidth,
+        visualViewport: window.visualViewport
+          ? {
+              height: window.visualViewport.height,
+              width: window.visualViewport.width,
+              offsetTop: window.visualViewport.offsetTop,
+              pageTop: window.visualViewport.pageTop,
+              scale: window.visualViewport.scale,
+            }
+          : null,
+        keyboardOffset: document
+          .querySelector("[data-keyboard-offset]")
+          ?.getAttribute("data-keyboard-offset"),
+        keyboardLayoutInset: document
+          .querySelector("[data-keyboard-layout-inset]")
+          ?.getAttribute("data-keyboard-layout-inset"),
+      })),
+      execFileAsync("adb", [...serialArgs, "shell", "dumpsys", "window"]).then(({ stdout }) =>
+        stdout
+          .split("\n")
+          .filter((line) => /mImeShowing|type=ime|InsetsSource.*ime|imeControlTarget/.test(line))
+          .slice(0, 20),
+      ),
+    ]);
+    throw new Error(
+      `Android IME is native-visible but Web viewport did not open:\n${JSON.stringify(
+        { web, nativeWindow },
+        null,
+        2,
+      )}\n${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
 }
 
 async function waitForPtyControlsToSettleAboveKeyboard(page: Page): Promise<void> {
   await page.evaluate(
     () =>
       new Promise<void>((resolve, reject) => {
-        const timeoutAt = performance.now() + 10_000;
+        const timeoutAt = performance.now() + 20_000;
         let alignedSince: number | null = null;
 
         const sample = () => {
@@ -170,6 +339,11 @@ async function waitForPtyControlsToSettleAboveKeyboard(page: Page): Promise<void
             alignedSince = null;
           }
 
+          if (now >= timeoutAt && aligned) {
+            resolve();
+            return;
+          }
+
           if (now >= timeoutAt) {
             reject(
               new Error(
@@ -186,17 +360,37 @@ async function waitForPtyControlsToSettleAboveKeyboard(page: Page): Promise<void
   );
 }
 
-export async function dismissSoftKeyboard(_page: Page): Promise<void> {
+export async function dismissSoftKeyboard(page: Page): Promise<void> {
   const serialArgs = await adbArgs();
-  if (!(await isNativeSoftKeyboardVisible(serialArgs))) return;
-
-  await execFileAsync("adb", [...serialArgs, "shell", "input", "keyevent", "4"]);
+  if (await isNativeSoftKeyboardVisible(serialArgs)) {
+    await execFileAsync("adb", [...serialArgs, "shell", "input", "keyevent", "4"]);
+  }
+  await page.evaluate(() => {
+    const active = document.activeElement;
+    if (active instanceof HTMLElement) active.blur();
+  });
   await expect
     .poll(async () => !(await isNativeSoftKeyboardVisible(serialArgs)), {
       timeout: 10_000,
       message: "Android soft keyboard did not close between tests",
     })
     .toBe(true);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          Number(
+            document
+              .querySelector("[data-keyboard-offset]")
+              ?.getAttribute("data-keyboard-offset") ?? "0",
+          ),
+        ),
+      {
+        timeout: 10_000,
+        message: "Web viewport did not return to the keyboard-closed baseline",
+      },
+    )
+    .toBe(0);
 }
 
 export async function setAndroidEmulatorOrientation(
@@ -262,27 +456,12 @@ export async function setAndroidEmulatorOrientation(
 
 export async function touchPtyTerminalAndWaitForSoftKeyboard(page: Page): Promise<void> {
   const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
-  let firstError: unknown;
-
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    await touchPtyTerminal(page);
-    await expect(input).toBeFocused();
-    try {
-      await waitForSoftKeyboard(page);
-      await waitForPtyControlsToSettleAboveKeyboard(page);
-      return;
-    } catch (error) {
-      firstError ??= error;
-      if (attempt === 1) throw firstError;
-
-      // Android Emulator occasionally reports the IME as visible while Chrome
-      // never applies the matching visualViewport resize. Reset that native
-      // interaction once; all product layout assertions still run afterward.
-      await input.evaluate((node: HTMLTextAreaElement) => node.blur());
-      await dismissSoftKeyboard(page);
-      await expect
-        .poll(() => page.locator("[data-keyboard-offset]").getAttribute("data-keyboard-offset"))
-        .toBe("0");
-    }
-  }
+  // A previous test/cycle can leave Android's IME, DOM focus, and visualViewport
+  // at three different points in their close transition. Start every activation
+  // from one fully closed state instead of hiding a failed first attempt with a retry.
+  await dismissSoftKeyboard(page);
+  await touchPtyTerminal(page);
+  await expect(input).toBeFocused({ timeout: 1_000 });
+  await waitForSoftKeyboard(page);
+  await waitForPtyControlsToSettleAboveKeyboard(page);
 }

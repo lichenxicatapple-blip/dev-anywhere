@@ -58,6 +58,13 @@ interface NativeSessionRef {
   sessionId: string;
 }
 
+interface AssistantSnapshotState {
+  turnId: string;
+  revision: number;
+  text: string;
+  status: "streaming" | "completed";
+}
+
 const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
 function normalizeLocalCommandText(content: string): string {
@@ -100,8 +107,8 @@ export class WorkerRegistry {
   private readySessions = new Set<string>();
   private readyWaiters = new Map<string, Set<ReadyWaiter>>();
   private pendingNativeSessions = new Map<string, NativeSessionRef>();
-  // 记录哪些 session 是 spawn 时带 --stream-delta 的；forwardEvent 据此决定是否跳过 aggregated 去重
-  private streamDeltaSessions = new Set<string>();
+  private assistantSnapshots = new Map<string, AssistantSnapshotState>();
+  private assistantTurnCounter = 0;
 
   constructor(private deps: WorkerRegistryDeps) {
     // relay queue 溢出时，被 drop 的 envelope 不会到达 client；若是 tool_use_request，
@@ -177,7 +184,6 @@ export class WorkerRegistry {
     args.push("--permission-mode", options?.permissionMode ?? "default");
     if (options?.streamDelta) {
       args.push("--stream-delta");
-      this.streamDeltaSessions.add(sessionId);
     }
     if (options?.hook) {
       args.push(
@@ -326,8 +332,8 @@ export class WorkerRegistry {
     this.children.delete(sessionId);
     this.sockets.delete(sessionId);
     this.readySessions.delete(sessionId);
-    this.streamDeltaSessions.delete(sessionId);
     this.pendingNativeSessions.delete(sessionId);
+    this.assistantSnapshots.delete(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker session deleted before ready: ${sessionId}`),
       sessionId,
@@ -340,8 +346,8 @@ export class WorkerRegistry {
     sock?.destroy();
     this.sockets.delete(sessionId);
     this.readySessions.delete(sessionId);
-    this.streamDeltaSessions.delete(sessionId);
     this.pendingNativeSessions.delete(sessionId);
+    this.assistantSnapshots.delete(sessionId);
     this.children.delete(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker process terminated before ready: ${sessionId}`),
@@ -366,6 +372,7 @@ export class WorkerRegistry {
     this.sockets.clear();
     this.readySessions.clear();
     this.pendingNativeSessions.clear();
+    this.assistantSnapshots.clear();
     this.rejectReadyWaiters(new Error("Worker registry destroyed"));
   }
 
@@ -536,7 +543,9 @@ export class WorkerRegistry {
     }
     const ev = parsed.data;
     this.deps.touchSessionActivity?.(sessionId);
-    const isStreamDeltaSession = this.streamDeltaSessions.has(sessionId);
+    // 全文快照协议下 Claude worker 始终以 --stream-delta 启动；serve 重启并重连
+    // 到旧 worker 后也必须继续忽略 aggregated assistant text，避免同一回复重复。
+    const isStreamDeltaSession = true;
 
     if (ev.type === "system") {
       if (this.handleCompactSystemEvent(sessionId, seq, ev)) return;
@@ -559,9 +568,15 @@ export class WorkerRegistry {
       isStreamDeltaSession,
       isCompactingSession: this.isCompactingSession(sessionId),
     })) {
-      if (mapped.kind === "envelope") {
+      if (mapped.kind === "assistant_text") {
+        this.appendAssistantSnapshot(sessionId, seq, mapped.text, mapped.turnId);
+      } else if (mapped.kind === "envelope") {
+        if (mapped.envelope.type === "assistant_tool_use") {
+          this.completeAssistantSnapshot(sessionId, seq);
+        }
         relay.sendEnvelope(mapped.envelope);
       } else if (mapped.kind === "control") {
+        this.completeAssistantSnapshot(sessionId, seq);
         relay.sendRaw(mapped.raw);
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       } else {
@@ -581,13 +596,78 @@ export class WorkerRegistry {
     const relay = this.deps.relayConnection;
     this.deps.touchSessionActivity?.(sessionId);
     for (const mapped of mapCodexAppServerEvent(sessionId, seq, event)) {
-      if (mapped.kind === "envelope") {
+      if (mapped.kind === "assistant_text") {
+        this.appendAssistantSnapshot(sessionId, seq, mapped.text, mapped.turnId);
+      } else if (mapped.kind === "envelope") {
+        if (mapped.envelope.type === "assistant_tool_use") {
+          this.completeAssistantSnapshot(sessionId, seq);
+        }
         relay.sendEnvelope(mapped.envelope);
       } else {
+        this.completeAssistantSnapshot(sessionId, seq);
         relay.sendRaw(mapped.raw);
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       }
     }
+  }
+
+  private nextAssistantTurnId(sessionId: string): string {
+    this.assistantTurnCounter += 1;
+    return `${sessionId}-assistant-${Date.now()}-${this.assistantTurnCounter}`;
+  }
+
+  private appendAssistantSnapshot(
+    sessionId: string,
+    seq: number,
+    delta: string,
+    sourceTurnId?: string,
+  ): void {
+    if (!delta) return;
+    const previous = this.assistantSnapshots.get(sessionId);
+    const sameTurn =
+      previous?.status === "streaming" && (!sourceTurnId || previous.turnId === sourceTurnId);
+    if (previous?.status === "streaming" && !sameTurn) {
+      this.completeAssistantSnapshot(sessionId, seq);
+    }
+    const next: AssistantSnapshotState = sameTurn
+      ? { ...previous, revision: previous.revision + 1, text: previous.text + delta }
+      : {
+          turnId: sourceTurnId ?? this.nextAssistantTurnId(sessionId),
+          revision: 1,
+          text: delta,
+          status: "streaming",
+        };
+    this.assistantSnapshots.set(sessionId, next);
+    this.sendAssistantSnapshot(sessionId, seq, next);
+  }
+
+  private completeAssistantSnapshot(sessionId: string, seq: number): void {
+    const previous = this.assistantSnapshots.get(sessionId);
+    if (!previous || previous.status === "completed") return;
+    const completed: AssistantSnapshotState = {
+      ...previous,
+      revision: previous.revision + 1,
+      status: "completed",
+    };
+    this.assistantSnapshots.set(sessionId, completed);
+    this.sendAssistantSnapshot(sessionId, seq, completed);
+  }
+
+  replayAssistantSnapshot(sessionId: string): void {
+    const snapshot = this.assistantSnapshots.get(sessionId);
+    if (!snapshot || snapshot.status !== "streaming") return;
+    const seq = this.deps.nextSeq?.(sessionId) ?? getSeqCounterFor(sessionId).next();
+    this.sendAssistantSnapshot(sessionId, seq, snapshot);
+  }
+
+  private sendAssistantSnapshot(
+    sessionId: string,
+    seq: number,
+    snapshot: AssistantSnapshotState,
+  ): void {
+    this.deps.relayConnection.sendEnvelope(
+      buildMessage("assistant_message", sessionId, seq, snapshot, "proxy"),
+    );
   }
 
   private handleCompactSystemEvent(
@@ -614,7 +694,12 @@ export class WorkerRegistry {
         "assistant_message",
         sessionId,
         seq,
-        { text: outcome.message, isPartial: true },
+        {
+          turnId: this.nextAssistantTurnId(sessionId),
+          revision: 1,
+          text: outcome.message,
+          status: "completed",
+        },
         "proxy",
       ),
     );

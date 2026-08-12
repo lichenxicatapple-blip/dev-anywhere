@@ -35,7 +35,13 @@ for (const path of versionFiles) {
 const releasePleaseWorkflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
 assert.match(releasePleaseWorkflow, /googleapis\/release-please-action@v4/);
 assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/ci\.yml/);
-assert.match(releasePleaseWorkflow, /needs: verify/);
+assert.match(
+  releasePleaseWorkflow,
+  /needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- verify-android/,
+);
+assert.match(releasePleaseWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1/);
+assert.match(releasePleaseWorkflow, /reactivecircus\/android-emulator-runner@v2/);
+assert.match(releasePleaseWorkflow, /TEST_MOBILE_REQUIRE_EMULATOR=1/);
 assert.match(releasePleaseWorkflow, /release_created == 'true'/);
 assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/release\.yml/);
 assert.match(releasePleaseWorkflow, /secrets: inherit/);

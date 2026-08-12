@@ -1,4 +1,4 @@
-export interface PendingTerminalSubscribe {
+interface PendingTerminalSubscribe {
   requestId?: string;
 }
 

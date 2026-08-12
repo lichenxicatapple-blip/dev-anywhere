@@ -8,6 +8,7 @@ interface CodexFileChange {
 }
 
 type MappedCodexAppServerEvent =
+  | { kind: "assistant_text"; text: string; turnId?: string }
   | { kind: "envelope"; envelope: MessageEnvelope }
   | { kind: "control"; raw: string; notifyTurnResult: boolean };
 
@@ -68,14 +69,9 @@ export function mapCodexAppServerEvent(
     if (!delta) return [];
     return [
       {
-        kind: "envelope",
-        envelope: buildMessage(
-          "assistant_message",
-          sessionId,
-          seq,
-          { text: delta, isPartial: true },
-          "proxy",
-        ),
+        kind: "assistant_text",
+        text: delta,
+        ...(typeof params.itemId === "string" && params.itemId ? { turnId: params.itemId } : {}),
       },
     ];
   }

@@ -3,6 +3,12 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
+source "$ROOT/scripts/lib/smoke-common.sh"
+
+# Knip loads Playwright config and inherits the caller's Node runtime. Node 25 makes
+# Playwright 1.52 hang/fail during config loading, so all parallel quality jobs use
+# the same supported Node 22 runtime as unit and browser test wrappers.
+smoke_use_stable_node
 
 TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/dev-anywhere-quality.XXXXXX")"
 PIDS=()

@@ -10,6 +10,14 @@ function emit(value) {
 
 function assistantText(text) {
   emit({
+    type: "stream_event",
+    event: {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text },
+    },
+  });
+  emit({
     type: "assistant",
     message: {
       role: "assistant",

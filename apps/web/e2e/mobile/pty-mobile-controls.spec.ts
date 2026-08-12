@@ -27,6 +27,7 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
     await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
     const controls = emuPage.locator('[data-slot="pty-mobile-controls"]');
     await expect(controls).toBeVisible();
+    await expect.poll(() => readRawPtyInput(emuPage)).toBe("");
 
     // esc (\x1b) + clear input area (\x1b\x1b) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + ^S (\x13) + enter (\r).
     let expectedRawInput = "";

@@ -1,4 +1,4 @@
-export type ClientDeviceKind = "desktop" | "tablet" | "phone" | "unknown";
+type ClientDeviceKind = "desktop" | "tablet" | "phone" | "unknown";
 
 export interface ClientDeviceHints {
   userAgent?: string;
@@ -6,7 +6,7 @@ export interface ClientDeviceHints {
   maxTouchPoints?: number;
 }
 
-export interface ClientDeviceDescriptor extends ClientDeviceHints {
+interface ClientDeviceDescriptor extends ClientDeviceHints {
   browserName: string;
   osName: string;
   deviceKind: ClientDeviceKind;

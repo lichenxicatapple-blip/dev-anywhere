@@ -1,9 +1,5 @@
 import { describe, expect, it } from "vitest";
-import {
-  int16PcmEnvelope,
-  pcmWaveformDisplayValue,
-  VOICE_WAVEFORM_FLOOR_DB,
-} from "./pcm-waveform";
+import { int16PcmEnvelope, pcmWaveformDisplayValue, VOICE_WAVEFORM_FLOOR_DB } from "./pcm-waveform";
 
 describe("int16PcmEnvelope", () => {
   it("preserves the minimum and maximum sample in each time bin", () => {
@@ -20,7 +16,7 @@ describe("int16PcmEnvelope", () => {
   });
 
   it("maps PCM amplitudes to a perceptual decibel display scale", () => {
-    const halfwayAmplitude = 10 ** ((VOICE_WAVEFORM_FLOOR_DB / 2) / 20);
+    const halfwayAmplitude = 10 ** (VOICE_WAVEFORM_FLOOR_DB / 2 / 20);
     const floorAmplitude = 10 ** (VOICE_WAVEFORM_FLOOR_DB / 20);
 
     expect(pcmWaveformDisplayValue(0)).toBe(0);

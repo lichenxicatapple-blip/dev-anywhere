@@ -17,10 +17,6 @@ const FILE_PATH_RE =
   /(?<![\p{L}\p{N}@:/.-])(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*\.[\p{L}\p{N}]{1,16}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/giu;
 const EXPLICIT_FILE_PATH_RE =
   /(?<![A-Za-z0-9._+-])@(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*\.[\p{L}\p{N}]{1,16}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/giu;
-const SPACED_FILE_PATH_RE =
-  /(?<![\p{L}\p{N}@:/.-])(?:~\/|\.{1,2}\/|\/|[^\s`"'<>，。；：！？、/@]+\/)[^\n\r\t`"'<>，。；：！？、@]*?\.[\p{L}\p{N}]{1,16}(?=$|[\s`"'<>),;:!?，。；：！？、])/giu;
-const EXPLICIT_SPACED_FILE_PATH_RE =
-  /(?<![A-Za-z0-9._+-])@(?:~\/|[^\s`"'<>，。；：！？、@])[^\n\r\t`"'<>，。；：！？、@]*?\.[\p{L}\p{N}]{1,16}(?=$|[\s`"'<>),;:!?，。；：！？、])/giu;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const FILE_EXT_RE = /\.[\p{L}\p{N}]{1,16}$/u;
 const KNOWN_TOP_LEVEL_FILE_NAMES = new Set([
@@ -94,39 +90,25 @@ export function isFileDownloadPath(value: string, options: { allowBare?: boolean
   return isPlausibleFileNameStem(path);
 }
 
-export interface FileDownloadPathMatch {
+interface FileDownloadPathMatch {
   path: string;
   start: number;
   end: number;
 }
 
 export function findFileDownloadPathMatches(text: string): FileDownloadPathMatch[] {
-  const candidates: FileDownloadPathMatch[] = [];
-  for (const pattern of [
-    EXPLICIT_SPACED_FILE_PATH_RE,
-    SPACED_FILE_PATH_RE,
-    EXPLICIT_FILE_PATH_RE,
-    FILE_PATH_RE,
-  ]) {
+  const matches: FileDownloadPathMatch[] = [];
+  for (const pattern of [EXPLICIT_FILE_PATH_RE, FILE_PATH_RE]) {
     for (const match of text.matchAll(pattern)) {
       const raw = match[0] ?? "";
       const start = match.index ?? -1;
       if (start < 0) continue;
       const path = trimPathToken(raw);
       if (!isFileDownloadPath(path, { allowBare: raw.startsWith("@") })) continue;
-      candidates.push({ path, start, end: start + raw.length });
+      matches.push({ path, start, end: start + raw.length });
     }
   }
-
-  candidates.sort((a, b) => a.start - b.start || b.end - a.end);
-  const matches: FileDownloadPathMatch[] = [];
-  for (const candidate of candidates) {
-    if (matches.some((match) => candidate.start < match.end && candidate.end > match.start)) {
-      continue;
-    }
-    matches.push(candidate);
-  }
-  return matches;
+  return matches.sort((a, b) => a.start - b.start);
 }
 
 export function extractFileDownloadPaths(text: string): string[] {

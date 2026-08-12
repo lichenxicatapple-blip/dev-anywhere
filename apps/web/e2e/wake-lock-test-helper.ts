@@ -48,10 +48,7 @@ export async function installWakeLockMock(page: Page): Promise<void> {
   });
 }
 
-export async function wakeLockTestCount(
-  page: Page,
-  key: "requests" | "releases",
-): Promise<number> {
+export async function wakeLockTestCount(page: Page, key: "requests" | "releases"): Promise<number> {
   return page.evaluate(
     (stateKey) =>
       (

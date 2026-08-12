@@ -193,7 +193,12 @@ describe("chat-dispatcher permission flow", () => {
     handle(
       envelope({
         type: "assistant_message",
-        payload: { text: "OK", isPartial: true },
+        payload: {
+          turnId: "turn-1",
+          revision: 1,
+          text: "OK",
+          status: "streaming",
+        },
       }),
     );
     handle({
@@ -276,7 +281,12 @@ describe("chat-dispatcher permission flow", () => {
     handle(
       envelope({
         type: "assistant_message",
-        payload: { text: "我先跑一下测试。", isPartial: true },
+        payload: {
+          turnId: "turn-1",
+          revision: 1,
+          text: "我先跑一下测试。",
+          status: "completed",
+        },
       }),
     );
     handle(
@@ -292,7 +302,12 @@ describe("chat-dispatcher permission flow", () => {
     handle(
       envelope({
         type: "assistant_message",
-        payload: { text: "测试跑完了。", isPartial: true },
+        payload: {
+          turnId: "turn-2",
+          revision: 1,
+          text: "测试跑完了。",
+          status: "streaming",
+        },
       }),
     );
 
@@ -312,6 +327,27 @@ describe("chat-dispatcher permission flow", () => {
     expect(messages[1].text).toContain("运行命令");
     expect(messages[1].text).not.toContain("abc123");
     expect(messages[2]).toMatchObject({ text: "测试跑完了。", isPartial: true });
+  });
+
+  it("replaces a full snapshot and ignores older or duplicate revisions", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+    const snapshot = (revision: number, text: string) =>
+      envelope({
+        type: "assistant_message",
+        payload: { turnId: "turn-reconnect", revision, text, status: "streaming" },
+      });
+
+    handle(snapshot(2, "完整前半段和后半段。"));
+    handle(snapshot(1, "完整前半段"));
+    handle(snapshot(2, "重复版本不应覆盖"));
+    handle(snapshot(3, "完整前半段和后半段。继续。"));
+
+    expect(useChatStore.getState().bySessionId.s1.messages).toHaveLength(1);
+    expect(useChatStore.getState().bySessionId.s1.messages[0]).toMatchObject({
+      text: "完整前半段和后半段。继续。",
+      revision: 3,
+      isPartial: true,
+    });
   });
 
   it("attaches raw file edit details to native activity bubbles", () => {

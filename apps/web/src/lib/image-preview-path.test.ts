@@ -30,22 +30,18 @@ describe("image preview path detection", () => {
     ]);
   });
 
-  it("keeps spaces inside paths that have an explicit directory boundary", () => {
-    expect(
-      extractImagePreviewPaths(
-        "preview @/Users/cat/My Project/final shot.png and ./review assets/second image.webp",
-      ),
-    ).toEqual(["/Users/cat/My Project/final shot.png", "./review assets/second image.webp"]);
-    expect(extractImagePreviewPaths("open docs/My Images/comparison final.jpg now")).toEqual([
-      "docs/My Images/comparison final.jpg",
+  it("treats whitespace and newlines as hard path boundaries", () => {
+    expect(extractImagePreviewPaths("/tmp/first.png /tmp/second.webp")).toEqual([
+      "/tmp/first.png",
+      "/tmp/second.webp",
     ]);
-    expect(extractImagePreviewPaths("preview @final shot.png now")).toEqual(["final shot.png"]);
+    expect(extractImagePreviewPaths("/tmp/first.png\n/tmp/second.webp")).toEqual([
+      "/tmp/first.png",
+      "/tmp/second.webp",
+    ]);
   });
 
-  it("supports Unicode directory and image names", () => {
-    expect(extractImagePreviewPaths("查看 @/Users/cat/项目 素材/最终 截图.png，然后继续")).toEqual([
-      "/Users/cat/项目 素材/最终 截图.png",
-    ]);
+  it("supports Unicode directory and image names without whitespace", () => {
     expect(extractImagePreviewPaths("打开 docs/设计稿/登录页.webp")).toEqual([
       "docs/设计稿/登录页.webp",
     ]);

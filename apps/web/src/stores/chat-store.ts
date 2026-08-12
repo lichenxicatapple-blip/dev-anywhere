@@ -59,6 +59,7 @@ export interface ChatMessage {
   deliveryStatus?: "queued";
   quotedMessage?: QuotedMessage;
   activity?: ChatActivityInfo;
+  revision?: number;
 }
 
 interface ChatSessionSlice {
@@ -95,6 +96,11 @@ export const EMPTY_SLICE: ChatSessionSlice = {
 interface ChatStoreState {
   bySessionId: Record<string, ChatSessionSlice>;
 
+  upsertAssistantSnapshot: (
+    sessionId: string,
+    snapshot: { turnId: string; revision: number; text: string; status: "streaming" | "completed" },
+  ) => void;
+  // 测试/本地注入辅助；线上消息只走 upsertAssistantSnapshot。
   appendAssistantText: (sessionId: string, text: string) => void;
   upsertActivityMessage: (sessionId: string, activity: ChatActivityInfo) => void;
   completeActivityMessage: (
@@ -133,7 +139,7 @@ interface ChatStoreState {
   loadHistoryPage: (
     sessionId: string,
     page: {
-      mode: "replace" | "prepend" | "reconcile";
+      mode: "replace" | "prepend" | "refresh";
       messages: SessionHistoryMessage[];
       hasMore?: boolean;
       nextBefore?: string;
@@ -208,11 +214,11 @@ function mergeMessages(existing: ChatMessage[], incoming: ChatMessage[]): ChatMe
   return [...incoming.filter((message) => !existingIds.has(message.id)), ...existing];
 }
 
-function isEquivalentHistoryMessage(message: ChatMessage, history: ChatMessage[]): boolean {
+function isExactHistoryDuplicate(message: ChatMessage, history: ChatMessage[]): boolean {
   return history.some(
     (candidate) =>
       candidate.role === message.role &&
-      candidate.text === message.text &&
+      candidate.text.trim() === message.text.trim() &&
       Math.abs(candidate.timestamp - message.timestamp) <= 2_000,
   );
 }
@@ -263,25 +269,55 @@ export const useChatStore = create<ChatStoreState>()(
     (set) => ({
       bySessionId: {},
 
-      appendAssistantText: (sessionId, text) =>
+      upsertAssistantSnapshot: (sessionId, snapshot) =>
         set((state) =>
           updateSlice(state, sessionId, (slice) => {
-            const last = slice.messages[slice.messages.length - 1];
-            if (last && last.role === "assistant" && last.isPartial) {
-              const updated = { ...last, text: last.text + text };
-              return { ...slice, messages: [...slice.messages.slice(0, -1), updated] };
+            const messageId = `${sessionId}-assistant-${snapshot.turnId}`;
+            const existingIndex = slice.messages.findIndex((message) => message.id === messageId);
+            if (existingIndex >= 0) {
+              const existing = slice.messages[existingIndex];
+              if ((existing?.revision ?? 0) >= snapshot.revision) return slice;
+              const next = slice.messages.slice();
+              next[existingIndex] = {
+                ...existing,
+                text: snapshot.text,
+                isPartial: snapshot.status === "streaming",
+                revision: snapshot.revision,
+              };
+              return { ...slice, messages: next };
             }
             const newMsg: ChatMessage = {
-              id: liveMessageId(sessionId, "assistant"),
+              id: messageId,
               role: "assistant",
-              text,
-              isPartial: true,
+              text: snapshot.text,
+              isPartial: snapshot.status === "streaming",
               timestamp: Date.now(),
               toolCalls: [],
+              revision: snapshot.revision,
             };
             return { ...slice, messages: [...slice.messages, newMsg] };
           }),
         ),
+
+      appendAssistantText: (sessionId, text) => {
+        const slice = useChatStore.getState().bySessionId[sessionId];
+        const last = slice?.messages.at(-1);
+        if (last?.role === "assistant" && last.isPartial && last.revision !== undefined) {
+          useChatStore.getState().upsertAssistantSnapshot(sessionId, {
+            turnId: last.id.slice(`${sessionId}-assistant-`.length),
+            revision: last.revision + 1,
+            text: last.text + text,
+            status: "streaming",
+          });
+          return;
+        }
+        useChatStore.getState().upsertAssistantSnapshot(sessionId, {
+          turnId: liveMessageId(sessionId, "assistant"),
+          revision: 1,
+          text,
+          status: "streaming",
+        });
+      },
 
       upsertActivityMessage: (sessionId, activity) =>
         set((state) =>
@@ -509,7 +545,9 @@ export const useChatStore = create<ChatStoreState>()(
               toHistoryChatMessage(sessionId, m),
             );
             const liveMessages = slice.messages.filter(
-              (m) => !m.id.startsWith(`history-${sessionId}-`),
+              (m) =>
+                !m.id.startsWith(`history-${sessionId}-`) &&
+                (m.deliveryStatus === "queued" || (m.role === "assistant" && m.isPartial)),
             );
             return {
               ...slice,
@@ -530,7 +568,7 @@ export const useChatStore = create<ChatStoreState>()(
             let nextMessages: ChatMessage[];
             if (page.mode === "prepend") {
               nextMessages = mergeMessages(slice.messages, historyMessages);
-            } else if (page.mode === "reconcile") {
+            } else if (page.mode === "refresh") {
               // 恢复前台后服务端历史是已落盘消息的权威来源。只保留仍在本地排队、或在本次
               // 拉取开始后通过实时通道到达的消息，避免陈旧 partial/activity 永久留在界面。
               // 如果用户之前翻页加载过更老历史，则保留最新页首个重叠项之前的部分。
@@ -541,7 +579,7 @@ export const useChatStore = create<ChatStoreState>()(
               const firstOverlapIndex = currentHistory.findIndex((message) =>
                 refreshedIds.has(message.id),
               );
-              const reconciledHistory = [
+              const refreshedHistory = [
                 ...(firstOverlapIndex >= 0 ? currentHistory.slice(0, firstOverlapIndex) : []),
                 ...historyMessages,
               ];
@@ -549,20 +587,20 @@ export const useChatStore = create<ChatStoreState>()(
               const liveMessages = slice.messages.filter(
                 (message) =>
                   !message.id.startsWith(historyPrefix) &&
-                  (message.deliveryStatus === "queued" || message.timestamp >= preserveLiveSince),
+                  (message.deliveryStatus === "queued" ||
+                    (message.role === "assistant" && message.isPartial) ||
+                    (message.timestamp >= preserveLiveSince &&
+                      !isExactHistoryDuplicate(message, refreshedHistory))),
               );
-              nextMessages = [
-                ...reconciledHistory,
-                ...liveMessages.filter(
-                  (message) =>
-                    message.deliveryStatus === "queued" ||
-                    !isEquivalentHistoryMessage(message, reconciledHistory),
-                ),
-              ];
+              nextMessages = [...refreshedHistory, ...liveMessages];
             } else {
               nextMessages = [
                 ...historyMessages,
-                ...slice.messages.filter((m) => !m.id.startsWith(historyPrefix)),
+                ...slice.messages.filter(
+                  (m) =>
+                    !m.id.startsWith(historyPrefix) &&
+                    (m.deliveryStatus === "queued" || (m.role === "assistant" && m.isPartial)),
+                ),
               ];
             }
             return {

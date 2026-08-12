@@ -1,6 +1,6 @@
 // chat-store per-session slice map 单测, 覆盖会话独立性 + CustomEvent 桥接替换
 import { describe, it, expect, beforeEach } from "vitest";
-import { useChatStore } from "./chat-store";
+import { EMPTY_SLICE, useChatStore } from "./chat-store";
 
 describe("chat-store per-session", () => {
   beforeEach(() => {
@@ -256,6 +256,55 @@ describe("chat-store per-session", () => {
     ]);
   });
 
+  it("keeps a replayed full snapshot while initial history loads", () => {
+    useChatStore.getState().upsertAssistantSnapshot("s1", {
+      turnId: "turn-active",
+      revision: 7,
+      text: "截至刷新的完整回复。",
+      status: "streaming",
+    });
+
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      messages: [{ role: "user", text: "历史问题", timestamp: 1_000, cursor: "b:user" }],
+    });
+
+    expect(useChatStore.getState().bySessionId.s1.messages.map((message) => message.text)).toEqual([
+      "历史问题",
+      "截至刷新的完整回复。",
+    ]);
+  });
+
+  it("keeps a live fragment while authoritative history has not captured its message yet", () => {
+    useChatStore.setState({
+      bySessionId: {
+        s1: {
+          ...EMPTY_SLICE,
+          messages: [
+            {
+              id: "still-streaming",
+              role: "assistant",
+              text: "仍在生成的实时片段。",
+              isPartial: true,
+              timestamp: 3_000,
+              toolCalls: [],
+            },
+          ],
+        },
+      },
+    });
+
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      messages: [{ role: "user", text: "已落盘的问题", timestamp: 2_000, cursor: "b:user" }],
+    });
+
+    expect(useChatStore.getState().bySessionId.s1.messages.map((message) => message.text)).toEqual([
+      "已落盘的问题",
+      "仍在生成的实时片段。",
+    ]);
+  });
+
   it("restores historical tool calls as durable activity messages", () => {
     useChatStore.getState().loadHistoryPage("s1", {
       mode: "replace",
@@ -294,13 +343,12 @@ describe("chat-store per-session", () => {
     });
   });
 
-  it("reconciles stale chat state after reconnect while preserving queued and racing messages", () => {
+  it("refreshes stale chat state after reconnect while preserving queued and racing messages", () => {
     const refreshStartedAt = Date.now() + 10_000;
     useChatStore.getState().loadHistoryPage("s1", {
       mode: "replace",
       messages: [{ role: "user", text: "stale history", timestamp: 100 }],
     });
-    useChatStore.getState().appendAssistantText("s1", "stale partial");
     useChatStore.getState().upsertActivityMessage("s1", {
       id: "stale-tool",
       source: "claude-native",
@@ -337,7 +385,7 @@ describe("chat-store per-session", () => {
     useChatStore.getState().setInputDraft("s1", "unsent draft");
 
     useChatStore.getState().loadHistoryPage("s1", {
-      mode: "reconcile",
+      mode: "refresh",
       preserveLiveSince: refreshStartedAt,
       hasMore: true,
       nextBefore: "before:1",

@@ -76,12 +76,12 @@ describe("routeVoiceText", () => {
       kind: "command",
       command: { type: "approve_once" },
     });
-    expect(
-      routeVoiceText("我不同意！", { phase: "approval", approvalPromptActive: true }),
-    ).toEqual({
-      kind: "command",
-      command: { type: "deny_once" },
-    });
+    expect(routeVoiceText("我不同意！", { phase: "approval", approvalPromptActive: true })).toEqual(
+      {
+        kind: "command",
+        command: { type: "deny_once" },
+      },
+    );
     expect(routeVoiceText("批准这次", { phase: "approval" })).toEqual({
       kind: "agentText",
       text: "批准这次",

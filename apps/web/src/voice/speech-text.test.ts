@@ -17,9 +17,9 @@ describe("prepareSpeechText", () => {
   });
 
   it("replaces bare URLs and autolinks with a spoken link marker", () => {
-    expect(prepareSpeechText("来源：https://example.com/a?x=1。备用：<https://example.org/b>")).toBe(
-      "来源：链接。备用：链接",
-    );
+    expect(
+      prepareSpeechText("来源：https://example.com/a?x=1。备用：<https://example.org/b>"),
+    ).toBe("来源：链接。备用：链接");
   });
 
   it("keeps image descriptions without speaking image URLs", () => {

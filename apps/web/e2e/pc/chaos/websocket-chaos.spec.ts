@@ -6,7 +6,7 @@ import {
   selectFakeProxy,
   sentFakeRelayMessages,
 } from "../../helpers";
-import { expectPtyAtBottom, ptyTerminal, readPtyScrollMetrics } from "../../pty-scroll-helpers";
+import { expectPtyAtBottom, expectPtyScrollable, ptyTerminal } from "../../pty-scroll-helpers";
 
 async function holdNextConnectionAndDropSocket(
   page: import("@playwright/test").Page,
@@ -266,6 +266,7 @@ test.describe("WebSocket reconnect chaos", () => {
         ).join(""),
       );
     });
+    await expectPtyScrollable(page, 100);
     await expectPtyAtBottom(page);
 
     const staleBottomGap = await ptyTerminal(page).evaluate((el) => {

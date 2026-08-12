@@ -6,6 +6,7 @@ import {
 } from "../common/stream-json-schema.js";
 
 type MappedClaudeStreamEvent =
+  | { kind: "assistant_text"; text: string; turnId?: string }
   | { kind: "envelope"; envelope: MessageEnvelope }
   | { kind: "control"; raw: string; notifyTurnResult: boolean }
   | { kind: "unknown_assistant_block"; blockType: string };
@@ -30,14 +31,8 @@ export function mapClaudeStreamEvent(
     if (d.type === "text_delta" && d.text) {
       return [
         {
-          kind: "envelope",
-          envelope: buildMessage(
-            "assistant_message",
-            sessionId,
-            seq,
-            { text: d.text, isPartial: true },
-            "proxy",
-          ),
+          kind: "assistant_text",
+          text: d.text,
         },
       ];
     }
@@ -70,14 +65,11 @@ export function mapClaudeStreamEvent(
         if (!isStreamDeltaSession && block.text) {
           forwardedContent = true;
           mapped.push({
-            kind: "envelope",
-            envelope: buildMessage(
-              "assistant_message",
-              sessionId,
-              seq,
-              { text: block.text, isPartial: true },
-              "proxy",
-            ),
+            kind: "assistant_text",
+            text: block.text,
+            ...(typeof event.message.id === "string" && event.message.id
+              ? { turnId: event.message.id }
+              : {}),
           });
         }
       } else if (block.type === "thinking") {

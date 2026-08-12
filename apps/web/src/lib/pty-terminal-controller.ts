@@ -111,7 +111,10 @@ export function attachPtyTerminalController(
         ...(isInputEnabled ? { isInputEnabled } : {}),
       }).dispose;
 
-      const focusTerminal = (): void => {
+      const focusTerminal = (event?: PointerEvent): void => {
+        // Cmd/Ctrl-click is a link action, not an intent to resume terminal input. Focusing
+        // xterm's hidden textarea here can make the browser reveal the live cursor at the bottom.
+        if (event?.metaKey || event?.ctrlKey) return;
         if (canFocus()) result.terminal.focus();
       };
       host.addEventListener("pointerdown", focusTerminal, { passive: true });

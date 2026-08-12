@@ -11,9 +11,7 @@ import {
 
 declare global {
   interface Window {
-    __devAnywhereDumpBrowserState?: (
-      trigger?: string,
-    ) => Promise<BrowserStateDumpPersistResult>;
+    __devAnywhereDumpBrowserState?: (trigger?: string) => Promise<BrowserStateDumpPersistResult>;
   }
 }
 

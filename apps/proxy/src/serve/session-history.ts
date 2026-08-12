@@ -493,7 +493,7 @@ function parseJavascriptObjectLiteral(
     while (/[\s,]/u.test(source[index] ?? "")) index += 1;
     if (source[index] === "}") return result;
 
-    let key = "";
+    let key: string;
     if (source[index] === '"' || source[index] === "'") {
       const keyEnd = findJavascriptStringLiteralEnd(source, index);
       if (keyEnd === null) return null;

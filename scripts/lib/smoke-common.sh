@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 
 SMOKE_STARTED_VITE_PID="${SMOKE_STARTED_VITE_PID:-}"
+SMOKE_STARTED_VITE_PORT="${SMOKE_STARTED_VITE_PORT:-}"
 
 smoke_use_stable_node() {
   # Playwright 1.52 hangs under the currently installed Node 25 on this machine.
@@ -65,6 +66,7 @@ smoke_start_vite_if_needed() {
   local artifact_dir="$2"
   local web_base_url="$3"
   local web_port="${4:-}"
+  local vite_host="${5:-127.0.0.1}"
 
   if curl --noproxy '*' -fsS "$web_base_url" >/dev/null 2>&1; then
     if smoke_check_web_entry "$web_base_url"; then
@@ -91,9 +93,10 @@ smoke_start_vite_if_needed() {
   fi
 
   mkdir -p "$artifact_dir"
-  pnpm --dir "$root/apps/web" exec vite --host 127.0.0.1 --port "$web_port" \
+  pnpm --dir "$root/apps/web" exec vite --host "$vite_host" --port "$web_port" \
     >"$artifact_dir/vite.log" 2>&1 &
   SMOKE_STARTED_VITE_PID="$!"
+  SMOKE_STARTED_VITE_PORT="$web_port"
 
   for _ in {1..40}; do
     if smoke_check_web_entry "$web_base_url"; then
@@ -157,5 +160,27 @@ smoke_require_local_real_chain() {
 smoke_cleanup() {
   if [[ -n "$SMOKE_STARTED_VITE_PID" ]]; then
     kill "$SMOKE_STARTED_VITE_PID" 2>/dev/null || true
+    # A following gate may immediately probe the same port. Do not let it see
+    # the dying Vite process as healthy and then inherit an ownerless server.
+    wait "$SMOKE_STARTED_VITE_PID" 2>/dev/null || true
+    SMOKE_STARTED_VITE_PID=""
+    if [[ -n "$SMOKE_STARTED_VITE_PORT" ]]; then
+      local listener_pids
+      listener_pids="$(lsof -tiTCP:"$SMOKE_STARTED_VITE_PORT" -sTCP:LISTEN 2>/dev/null || true)"
+      if [[ -n "$listener_pids" ]]; then
+        kill $listener_pids 2>/dev/null || true
+      fi
+      for _ in $(seq 1 50); do
+        if ! lsof -nP -iTCP:"$SMOKE_STARTED_VITE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+          break
+        fi
+        sleep 0.1
+      done
+      if lsof -nP -iTCP:"$SMOKE_STARTED_VITE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+        echo "ERROR: Vite port $SMOKE_STARTED_VITE_PORT did not close during cleanup" >&2
+        return 1
+      fi
+      SMOKE_STARTED_VITE_PORT=""
+    fi
   fi
 }

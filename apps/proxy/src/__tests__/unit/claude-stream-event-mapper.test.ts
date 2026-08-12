@@ -15,13 +15,8 @@ describe("mapClaudeStreamEvent", () => {
 
     expect(mapped).toEqual([
       {
-        kind: "envelope",
-        envelope: expect.objectContaining({
-          type: "assistant_message",
-          sessionId: "s1",
-          seq: 21,
-          payload: { text: "hello", isPartial: true },
-        }),
+        kind: "assistant_text",
+        text: "hello",
       },
     ]);
   });

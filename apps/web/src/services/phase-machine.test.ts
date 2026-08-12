@@ -217,9 +217,7 @@ describe("phase-machine request failure handling", () => {
     );
 
     await vi.waitFor(() => {
-      expect(toastWarning).toHaveBeenCalledWith(
-        "历史会话加载可能遇到问题，仍在等待开发机返回",
-      );
+      expect(toastWarning).toHaveBeenCalledWith("历史会话加载可能遇到问题，仍在等待开发机返回");
     });
     expect(toastError).not.toHaveBeenCalled();
     expect(relay.requestSessionHistory).toHaveBeenCalledWith(30_000);

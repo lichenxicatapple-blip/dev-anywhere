@@ -24,12 +24,17 @@ describe("buildMessage", () => {
       "assistant_message",
       "sess-1",
       5,
-      { text: "hi", isPartial: false },
+      { turnId: "turn-1", revision: 1, text: "hi", status: "completed" },
       "proxy",
     );
     expect(msg.type).toBe("assistant_message");
     expect(msg.seq).toBe(5);
-    expect(msg.payload).toEqual({ text: "hi", isPartial: false });
+    expect(msg.payload).toEqual({
+      turnId: "turn-1",
+      revision: 1,
+      text: "hi",
+      status: "completed",
+    });
     expect(msg.source).toBe("proxy");
   });
 

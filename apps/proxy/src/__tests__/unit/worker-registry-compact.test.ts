@@ -73,7 +73,7 @@ describe("WorkerRegistry compact command events", () => {
       sessionId: "s1",
       payload: {
         text: "上下文压缩失败：API Error: 502 upstream disconnected",
-        isPartial: true,
+        status: "completed",
       },
     });
     expect(relay.raw).toHaveLength(1);
@@ -85,6 +85,45 @@ describe("WorkerRegistry compact command events", () => {
       result: "上下文压缩失败：API Error: 502 upstream disconnected",
     });
     expect(onTurnResult).toHaveBeenCalledWith("s1");
+  });
+
+  it("aggregates Claude text deltas into growing full snapshots", async () => {
+    const relay = createRelayConnectionFake();
+    const registry = new WorkerRegistry({
+      sessionManager: createSessionManagerFake([{ id: "s1", mode: "json", provider: "claude" }]),
+      permissionBroker: new PermissionBroker(),
+      relayConnection: relay.relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
+    });
+    const sock = await registry.connect("s1", sockPath);
+    expect(sock).not.toBeNull();
+
+    for (const [seq, text] of [
+      [1, "完整"],
+      [2, "回复"],
+    ] as const) {
+      acceptedSocket?.write(
+        serializeWorkerMsg({
+          type: "worker_event",
+          seq,
+          event: {
+            type: "stream_event",
+            event: {
+              type: "content_block_delta",
+              index: 0,
+              delta: { type: "text_delta", text },
+            },
+          },
+        }),
+      );
+    }
+
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(2));
+    expect(relay.envelopes.map((message) => (message as { payload: unknown }).payload)).toEqual([
+      expect.objectContaining({ revision: 1, text: "完整", status: "streaming" }),
+      expect.objectContaining({ revision: 2, text: "完整回复", status: "streaming" }),
+    ]);
   });
 
   it("handles compact success emitted as a string user local-command stdout", async () => {
@@ -103,7 +142,7 @@ describe("WorkerRegistry compact command events", () => {
     expect(relay.envelopes).toHaveLength(1);
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_message",
-      payload: { text: "上下文压缩完成。", isPartial: true },
+      payload: expect.objectContaining({ text: "上下文压缩完成。", status: "completed" }),
     });
     expect(JSON.parse(relay.raw[0])).toMatchObject({
       type: "turn_result",

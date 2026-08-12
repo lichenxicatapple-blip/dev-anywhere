@@ -13,7 +13,7 @@ COUNT_ARG="${2:-}"
 if [[ "$COUNT_ARG" == "--" ]]; then
   COUNT_ARG="${3:-}"
 fi
-COUNT="${COUNT_ARG:-${DEV_ANYWHERE_MOBILE_EMULATORS:-2}}"
+COUNT="${COUNT_ARG:-${DEV_ANYWHERE_MOBILE_EMULATORS:-1}}"
 BASE_PORT="${DEV_ANYWHERE_MOBILE_BASE_PORT:-5570}"
 START_GAP_SECONDS="${DEV_ANYWHERE_MOBILE_START_GAP_SECONDS:-20}"
 ARTIFACT_DIR="${TEST_MOBILE_ARTIFACT_DIR:-$ROOT/artifacts/test-mobile/emulators}"
@@ -30,7 +30,7 @@ Usage: $0 <create|start|stop|list> [count]
 
 Environment:
   ANDROID_HOME                         Android SDK root. Default: $HOME/Library/Android/sdk
-  DEV_ANYWHERE_MOBILE_EMULATORS         Default count. Default: 2
+  DEV_ANYWHERE_MOBILE_EMULATORS         Default count. Default: 1; set explicitly for parallel tests
   DEV_ANYWHERE_MOBILE_BASE_PORT         First emulator console port. Default: 5570
   DEV_ANYWHERE_MOBILE_AVD_PREFIX        AVD name prefix. Default: dev-anywhere-mobile
   DEV_ANYWHERE_MOBILE_NO_WINDOW         Start headless when 1. Default: 1
@@ -165,6 +165,31 @@ wait_boot() {
   return 1
 }
 
+adb_device_online() {
+  local serial="$1"
+  adb devices 2>/dev/null | awk -v serial="$serial" '
+    $1 == serial && $2 == "device" { found = 1 }
+    END { exit found ? 0 : 1 }
+  '
+}
+
+wait_stopped() {
+  local serial="$1"
+  local deadline
+  deadline=$((SECONDS + 30))
+  while [[ "$SECONDS" -lt "$deadline" ]]; do
+    if ! adb devices 2>/dev/null | awk -v serial="$serial" '
+      $1 == serial { found = 1 }
+      END { exit found ? 0 : 1 }
+    '; then
+      return 0
+    fi
+    sleep 1
+  done
+  echo "WARN: $serial is still registered with adb after stop" >&2
+  return 1
+}
+
 start_pool() {
   require_emulator
   create_pool
@@ -180,8 +205,9 @@ start_pool() {
     err_log="$ARTIFACT_DIR/$serial.err.log"
     no_window_arg=()
 
-    if adb devices 2>/dev/null | awk '{print $1}' | grep -qx "$serial"; then
+    if adb_device_online "$serial"; then
       echo "[mobile-emulators] $serial already running"
+      wait_boot "$serial"
       continue
     fi
 
@@ -241,10 +267,11 @@ stop_pool() {
     serial="$(avd_serial "$i")"
     label="$(launch_label "$serial")"
     launchctl remove "$label" >/dev/null 2>&1 || true
-    if adb devices 2>/dev/null | awk '{print $1}' | grep -qx "$serial"; then
+    if adb_device_online "$serial"; then
       echo "[mobile-emulators] stopping $serial"
       adb -s "$serial" emu kill >/dev/null 2>&1 || true
     fi
+    wait_stopped "$serial" || true
   done
 }
 

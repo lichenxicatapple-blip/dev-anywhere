@@ -1247,7 +1247,7 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("50480px");
   });
 
-  it("lets native horizontal pan own scrollLeft after horizontal touch lock", () => {
+  it("commits the expected horizontal pan after horizontal touch lock", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 400, clientWidth: 360 });
     defineScrollWidth(container, 1200);
@@ -1272,14 +1272,13 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(move);
 
     expect(move.defaultPrevented).toBe(false);
-    expect(container.scrollLeft).toBe(0);
+    expect(container.scrollLeft).toBe(120);
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
     expect(controller.getDebugProbe().touchScrollGestureMode).toBe("horizontal");
     expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
 
-    container.scrollLeft = 120;
     container.dispatchEvent(new Event("scroll"));
 
     expect(container.scrollLeft).toBe(120);
@@ -1345,14 +1344,13 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(move);
 
     expect(move.defaultPrevented).toBe(false);
-    expect(container.scrollLeft).toBe(0);
+    expect(container.scrollLeft).toBe(10);
     expect(container.scrollTop).toBe(1600);
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
     expect(controller.getDebugProbe().touchScrollGestureMode).toBe("horizontal");
     expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
 
-    container.scrollLeft = 10;
     container.dispatchEvent(new Event("scroll"));
 
     expect(container.scrollLeft).toBe(10);

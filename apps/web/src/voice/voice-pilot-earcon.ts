@@ -1,6 +1,6 @@
 export type VoicePilotEarcon = "listening-start" | "user-end" | "assistant-end";
 
-export interface VoicePilotEarconPcm {
+interface VoicePilotEarconPcm {
   pcm: Uint8Array;
   durationMs: number;
 }

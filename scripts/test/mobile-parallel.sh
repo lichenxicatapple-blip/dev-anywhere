@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Mobile test dispatcher. Uses multiple Android emulators when available, while
-# keeping scripts/test/mobile.sh as the single-emulator execution unit.
+# Mobile test dispatcher. Serial execution is the safe default; multiple Android
+# emulators are used only when TEST_MOBILE_PARALLEL_WORKERS explicitly opts in.
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -12,7 +12,6 @@ if [[ "${1:-}" == "--" ]]; then
 fi
 
 REQUESTED_PARALLEL_WORKERS="${TEST_MOBILE_PARALLEL_WORKERS:-}"
-DEFAULT_MAX_PARALLEL_WORKERS="${TEST_MOBILE_MAX_PARALLEL_WORKERS:-2}"
 ROOT_ARTIFACT_DIR="${TEST_MOBILE_ARTIFACT_DIR:-$ROOT/artifacts/test-mobile}"
 BASE_CDP_PORT="${TIER_MOBILE_CDP_PORT:-9222}"
 EXPLICIT_EMULATOR_SERIALS="${TEST_MOBILE_EMULATOR_SERIALS:-}"
@@ -118,7 +117,12 @@ if ! command -v adb >/dev/null 2>&1; then
   mobile_parallel_run_serial "$@"
 fi
 
-if [[ -n "${ANDROID_SERIAL:-}" || "$REQUESTED_PARALLEL_WORKERS" == "1" ]]; then
+if [[ -n "$REQUESTED_PARALLEL_WORKERS" && ! "$REQUESTED_PARALLEL_WORKERS" =~ ^[1-9][0-9]*$ ]]; then
+  echo "ERROR: TEST_MOBILE_PARALLEL_WORKERS must be a positive integer." >&2
+  exit 2
+fi
+
+if [[ -n "${ANDROID_SERIAL:-}" || -z "$REQUESTED_PARALLEL_WORKERS" || "$REQUESTED_PARALLEL_WORKERS" == "1" ]]; then
   mobile_parallel_run_serial "$@"
 fi
 
@@ -126,7 +130,7 @@ mobile_parallel_collect_emulators
 if [[ "${#DEVICES[@]}" -lt 2 ]]; then
   mobile_parallel_run_serial "$@"
 fi
-PARALLEL_WORKERS="${REQUESTED_PARALLEL_WORKERS:-${#DEVICES[@]}}"
+PARALLEL_WORKERS="$REQUESTED_PARALLEL_WORKERS"
 
 SPECS=()
 while IFS= read -r spec; do
@@ -137,16 +141,33 @@ if [[ "${#SPECS[@]}" -lt 2 ]]; then
   mobile_parallel_run_serial "$@"
 fi
 
+# Real Android IME + visualViewport propagation becomes nondeterministic when a
+# second emulator is under load on the same host. Keep every spec that drives the
+# native keyboard on one otherwise-idle emulator; all other mobile specs remain parallel.
+SERIAL_SPECS=()
+PARALLEL_SPECS=()
+for spec in "${SPECS[@]}"; do
+  case "$spec" in
+    *chat-keyboard-layout.spec.ts | \
+      *pty-horizontal-scroll.spec.ts | \
+      *pty-input-keyboard.spec.ts | \
+      *pty-long-press-copy.spec.ts | \
+      *pty-mobile-controls-repeat.spec.ts | \
+      *pty-mobile-controls.spec.ts | \
+      *pty-paste.spec.ts)
+      SERIAL_SPECS+=("$spec")
+      ;;
+    *) PARALLEL_SPECS+=("$spec") ;;
+  esac
+done
+SPECS=("${PARALLEL_SPECS[@]}")
+
 if [[ "$PARALLEL_WORKERS" -gt "${#DEVICES[@]}" ]]; then
   PARALLEL_WORKERS="${#DEVICES[@]}"
 fi
 if [[ "$PARALLEL_WORKERS" -gt "${#SPECS[@]}" ]]; then
   PARALLEL_WORKERS="${#SPECS[@]}"
 fi
-if [[ -z "$REQUESTED_PARALLEL_WORKERS" && "$PARALLEL_WORKERS" -gt "$DEFAULT_MAX_PARALLEL_WORKERS" ]]; then
-  PARALLEL_WORKERS="$DEFAULT_MAX_PARALLEL_WORKERS"
-fi
-
 echo "[mobile-parallel] workers=$PARALLEL_WORKERS devices=${DEVICES[*]}"
 
 PIDS=()
@@ -192,10 +213,32 @@ for ((worker = 0; worker < PARALLEL_WORKERS; worker++)); do
   fi
 done
 
+if [[ "$EXIT_CODE" -eq 0 && "${#SERIAL_SPECS[@]}" -gt 0 ]]; then
+  serial_dir="$ROOT_ARTIFACT_DIR/serial"
+  serial_log="$serial_dir/output.log"
+  mkdir -p "$serial_dir"
+  printf '%s\n' "${SERIAL_SPECS[@]}" >"$serial_dir/specs.txt"
+  echo "[mobile-parallel] exclusive device=${DEVICES[0]} specs=${#SERIAL_SPECS[@]} log=$serial_log"
+  if (
+    export ANDROID_SERIAL="${DEVICES[0]}"
+    export TIER_MOBILE_CDP_PORT="$BASE_CDP_PORT"
+    export TEST_MOBILE_ARTIFACT_DIR="$serial_dir"
+    export TEST_MOBILE_RESET_FAIL_FAST=1
+    bash "$ROOT/scripts/test/mobile.sh" "${SERIAL_SPECS[@]}"
+  ) >"$serial_log" 2>&1; then
+    echo "[mobile-parallel] exclusive mobile specs passed"
+  else
+    EXIT_CODE="$?"
+    echo "[mobile-parallel] exclusive mobile specs failed rc=$EXIT_CODE"
+  fi
+  SHARD_LOGS+=("$serial_log")
+  SHARD_REPORTS+=("$serial_dir/mobile-timing.tsv")
+fi
+
 echo ""
 echo "[mobile-parallel] shard logs:"
-for ((worker = 0; worker < PARALLEL_WORKERS; worker++)); do
-  echo "  shard-$worker: ${SHARD_LOGS[worker]}"
+for log_file in "${SHARD_LOGS[@]}"; do
+  echo "  $log_file"
 done
 
 COMBINED_REPORT="$ROOT_ARTIFACT_DIR/mobile-timing.tsv"
@@ -225,10 +268,10 @@ fi
 if [[ "$EXIT_CODE" -ne 0 ]]; then
   echo ""
   echo "[mobile-parallel] failing shard tails:"
-  for ((worker = 0; worker < PARALLEL_WORKERS; worker++)); do
-    if grep -qE 'failed|ERROR|Timed out|TimeoutError' "${SHARD_LOGS[worker]}" 2>/dev/null; then
-      echo "--- shard-$worker ${SHARD_LOGS[worker]} ---"
-      tail -n 120 "${SHARD_LOGS[worker]}" || true
+  for log_file in "${SHARD_LOGS[@]}"; do
+    if grep -qE 'failed|ERROR|Timed out|TimeoutError' "$log_file" 2>/dev/null; then
+      echo "--- $log_file ---"
+      tail -n 120 "$log_file" || true
     fi
   done
 fi

@@ -1,6 +1,6 @@
 import { describeCurrentClientDevice } from "./client-device";
 
-export interface UploadPickerPolicy {
+interface UploadPickerPolicy {
   mediaAccept: string;
   fileAccept?: string;
 }

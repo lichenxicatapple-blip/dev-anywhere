@@ -238,7 +238,12 @@ describe("client_register protocol", () => {
       source: "proxy" as const,
       version: "1.0",
       type: "assistant_message" as const,
-      payload: { text: `msg-${seq}`, isPartial: false },
+      payload: {
+        turnId: `turn-${seq}`,
+        revision: 1,
+        text: `msg-${seq}`,
+        status: "completed",
+      },
     });
 
     // 客户端在线时收到这些消息
@@ -303,7 +308,12 @@ describe("client_register protocol", () => {
         source: "proxy",
         version: "1.0",
         type: "assistant_message",
-        payload: { text: "still connected", isPartial: false },
+        payload: {
+          turnId: "turn-connected",
+          revision: 1,
+          text: "still connected",
+          status: "completed",
+        },
       }),
     );
 

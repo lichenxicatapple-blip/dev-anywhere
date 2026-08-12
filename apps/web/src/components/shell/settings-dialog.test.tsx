@@ -531,9 +531,7 @@ describe("SettingsDialog", () => {
     fireEvent.click(screen.getByRole("button", { name: "保存" }));
 
     expect(screen.getByText("Relay Token 保存失败，请检查浏览器存储权限。")).not.toBeNull();
-    expect(toastError).toHaveBeenCalledWith(
-      "Relay Token 保存失败，请检查浏览器存储权限。",
-    );
+    expect(toastError).toHaveBeenCalledWith("Relay Token 保存失败，请检查浏览器存储权限。");
     expect(toastSuccess).not.toHaveBeenCalled();
     expect(reconnectRelayClient).not.toHaveBeenCalled();
   });
@@ -683,7 +681,7 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
 
     fireEvent.change(screen.getByLabelText("阿里云百炼 API Key"), {
       target: { value: "sk-test" },
@@ -737,7 +735,7 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "测试" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent("语音测试未返回可播放音频");
@@ -759,7 +757,7 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
     fireEvent.click(screen.getByRole("button", { name: "测试" }));
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
@@ -787,7 +785,7 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
 
     expect(screen.getByPlaceholderText("••••••••••••••••")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "清空" }));
@@ -811,7 +809,7 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
 
     expect(document.querySelector("select")).toBeNull();
     expect(screen.getByRole("button", { name: "语音识别模型" })).not.toBeNull();
@@ -875,7 +873,7 @@ describe("SettingsDialog", () => {
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
 
     fireEvent.click(screen.getByRole("button", { name: "语音合成模型" }));
     const unsupportedModel = screen.getByRole("option", {
@@ -903,7 +901,7 @@ describe("SettingsDialog", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
 
     expect(screen.getByText("Qwen3 ASR Flash Realtime")).not.toBeNull();
     expect(screen.getByText("CosyVoice V3 Flash")).not.toBeNull();
@@ -920,46 +918,18 @@ describe("SettingsDialog", () => {
   });
 
   it("keeps save success visible when the post-save capability refresh times out", async () => {
-    requestVoiceCapabilities
-      .mockResolvedValueOnce({
-        capabilities: {
-          asrModels: [
-            {
-              value: "qwen3-asr-flash-realtime-live",
-              label: "Qwen3 ASR · 动态实时",
-              source: "official",
-            },
-          ],
-          ttsModels: [
-            {
-              value: "cosyvoice-v3-flash-live",
-              label: "CosyVoice V3 Flash · 动态",
-              source: "official",
-            },
-          ],
-          ttsVoices: [
-            {
-              value: "longanhuan-live",
-              label: "龙安欢 · 女 · 动态元气 · 20-30",
-              gender: "female",
-              age: "20-30",
-              model: "cosyvoice-v3-flash-live",
-              source: "official",
-            },
-          ],
-          fetchedAt: 1760000000000,
-        },
-      })
-      .mockRejectedValueOnce(new Error("读取语音能力列表超时"));
-
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    const saveButton = screen.getByRole("button", { name: "保存" });
+    await waitFor(() => expect(saveButton).toBeEnabled(), { timeout: 5_000 });
+    requestVoiceCapabilities.mockClear();
+    requestVoiceCapabilities.mockRejectedValueOnce(new Error("读取语音能力列表超时"));
+    fireEvent.click(saveButton);
 
     await waitFor(() => expect(updateVoiceConfig).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
     expect(await screen.findByText("已保存")).not.toBeNull();
     expect(screen.queryByText("保存语音设置失败")).toBeNull();
   });

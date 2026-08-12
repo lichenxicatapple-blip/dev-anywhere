@@ -11,16 +11,9 @@ const IMAGE_PATH_RE =
   /(?<![\p{L}\p{N}@:/.-])(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/giu;
 const EXPLICIT_IMAGE_PATH_RE =
   /(?<![A-Za-z0-9._+-])@(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/giu;
-// 空格只有在路径具备明确边界时才放行：绝对/点相对/home 路径，
-// 或至少包含一个目录段。裸 `final shot.png` 无法与普通句子可靠区分，调用方应使用
-// @ 或 Markdown link 明确边界。
-const SPACED_IMAGE_PATH_RE =
-  /(?<![\p{L}\p{N}@:/.-])(?:~\/|\.{1,2}\/|\/|[^\s`"'<>，。；：！？、/@]+\/)[^\n\r\t`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、])/giu;
-const EXPLICIT_SPACED_IMAGE_PATH_RE =
-  /(?<![A-Za-z0-9._+-])@(?:~\/|[^\s`"'<>，。；：！？、@])[^\n\r\t`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif)(?=$|[\s`"'<>),;:!?，。；：！？、])/giu;
 const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 
-export interface ImagePreviewPathMatch {
+interface ImagePreviewPathMatch {
   path: string;
   start: number;
   end: number;
@@ -51,34 +44,18 @@ export function isImagePreviewPath(value: string): boolean {
 }
 
 export function findImagePreviewPathMatches(text: string): ImagePreviewPathMatch[] {
-  const candidates: ImagePreviewPathMatch[] = [];
-  for (const pattern of [
-    EXPLICIT_SPACED_IMAGE_PATH_RE,
-    SPACED_IMAGE_PATH_RE,
-    EXPLICIT_IMAGE_PATH_RE,
-    IMAGE_PATH_RE,
-  ]) {
+  const matches: ImagePreviewPathMatch[] = [];
+  for (const pattern of [EXPLICIT_IMAGE_PATH_RE, IMAGE_PATH_RE]) {
     for (const match of text.matchAll(pattern)) {
       const raw = match[0] ?? "";
       const start = match.index ?? -1;
       if (start < 0) continue;
       const path = trimPathToken(raw);
       if (!isImagePreviewPath(path)) continue;
-      candidates.push({ path, start, end: start + raw.length });
+      matches.push({ path, start, end: start + raw.length });
     }
   }
-
-  // The token regex can also find the tail of a spaced path. Prefer the earliest,
-  // longest candidate and discard overlapping partial matches.
-  candidates.sort((a, b) => a.start - b.start || b.end - a.end);
-  const matches: ImagePreviewPathMatch[] = [];
-  for (const candidate of candidates) {
-    if (matches.some((match) => candidate.start < match.end && candidate.end > match.start)) {
-      continue;
-    }
-    matches.push(candidate);
-  }
-  return matches;
+  return matches.sort((a, b) => a.start - b.start);
 }
 
 export function extractImagePreviewPaths(text: string): string[] {

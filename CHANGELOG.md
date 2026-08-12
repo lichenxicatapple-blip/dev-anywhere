@@ -102,36 +102,31 @@
 
 ## [0.5.26](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.25...v0.5.26) (2026-08-01)
 
-
 ### 修复
 
-* **web:** stabilize PTY review and keyboard follow ([896f556](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/896f556694fc0e2b8587e027be0dfab858232dc3))
+- **web:** stabilize PTY review and keyboard follow ([896f556](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/896f556694fc0e2b8587e027be0dfab858232dc3))
 
 ## [0.5.25](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.24...v0.5.25) (2026-07-30)
 
-
 ### 修复
 
-* **pty:** make snapshot recovery lossless ([ebbc79a](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/ebbc79a7db954e73db9d0fc6898e711e3837b76e))
-
+- **pty:** make snapshot recovery lossless ([ebbc79a](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/ebbc79a7db954e73db9d0fc6898e711e3837b76e))
 
 ### 文档
 
-* explain PTY network synchronization ([627d02f](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/627d02f9abe913a05da43cdbbe2443365210915f))
+- explain PTY network synchronization ([627d02f](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/627d02f9abe913a05da43cdbbe2443365210915f))
 
 ## [0.5.24](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.23...v0.5.24) (2026-07-30)
 
-
 ### 修复
 
-* **web:** preserve PTY snapshot row styles ([38eda48](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/38eda48807bc76074fd5dd9aaf23788855b82585))
+- **web:** preserve PTY snapshot row styles ([38eda48](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/38eda48807bc76074fd5dd9aaf23788855b82585))
 
 ## [0.5.23](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.22...v0.5.23) (2026-07-28)
 
-
 ### 修复
 
-* **proxy:** 修复 Codex 会话因 AGENTS.md 注入被错误合并 ([185bf13](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/185bf1318f0e7fc5337f36bf3a96236d5dad9f21))
+- **proxy:** 修复 Codex 会话因 AGENTS.md 注入被错误合并 ([185bf13](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/185bf1318f0e7fc5337f36bf3a96236d5dad9f21))
 
 ## [0.5.22] - 2026-07-27
 

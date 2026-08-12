@@ -5,7 +5,7 @@ import {
   PTY_INITIAL_MIN_ROWS,
 } from "@dev-anywhere/shared";
 
-export interface TerminalWorkerCliArgs {
+interface TerminalWorkerCliArgs {
   sessionId: string;
   cwd: string;
   name: string;

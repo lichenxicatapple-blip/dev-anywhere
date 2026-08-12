@@ -169,9 +169,9 @@ export class RelaySessionCreateHandler {
     }
 
     const resumeSessionId = msg.resumeSessionId;
-    // streamDelta 不在 session_create 协议字段里：当前没有客户端发起 delta 模式，
-    // 默认关闭即可。后续若要恢复增量推送，需先在 RelayControlSchema 加字段。
-    const streamDelta = false;
+    // Proxy 把 provider delta 聚合为版本化全文快照。Claude 开启 partial stream 后，
+    // 刷新或重连才能恢复生成到当前时刻的完整内容。
+    const streamDelta = true;
     const requestedName = normalizeSessionName(msg.name);
     const name = requestedName ?? tildify(sessionCwd);
     const nameLocked = requestedName !== undefined;

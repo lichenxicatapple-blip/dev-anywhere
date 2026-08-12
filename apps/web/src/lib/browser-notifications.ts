@@ -1,6 +1,6 @@
-export type BrowserNotificationPermissionResult = NotificationPermission | "unsupported";
+type BrowserNotificationPermissionResult = NotificationPermission | "unsupported";
 
-export interface BrowserNotificationPayload {
+interface BrowserNotificationPayload {
   title: string;
   body: string;
   tag: string;

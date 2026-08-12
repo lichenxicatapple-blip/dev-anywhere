@@ -4,7 +4,7 @@ export interface SpeechAudioStream {
   abort(): void;
 }
 
-export type SpeechInputPipelineState =
+type SpeechInputPipelineState =
   | "armed"
   | "opening"
   | "streaming"
@@ -18,7 +18,7 @@ interface SpeechInputPipelineOptions {
   onError: (error: unknown) => void;
 }
 
-export interface SpeechInputPipelineSnapshot {
+interface SpeechInputPipelineSnapshot {
   state: SpeechInputPipelineState;
   preRollBytes: number;
   pendingBytes: number;

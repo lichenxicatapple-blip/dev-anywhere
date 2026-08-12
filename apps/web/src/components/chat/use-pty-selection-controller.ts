@@ -22,7 +22,10 @@ import {
   type PtySelectionHandleMetrics,
   type PtySelectionHandles,
 } from "@/lib/pty-selection-layout";
-import { computePtySelectionToolbarPosition } from "@/lib/pty-selection-overlay-position";
+import {
+  computePtySelectionToolbarPosition,
+  shouldDismissPtySelectionOnContainerScroll,
+} from "@/lib/pty-selection-overlay-position";
 import {
   resolvePtySelectionPathAction,
   type PtySelectionPathAction,
@@ -33,6 +36,7 @@ import {
 } from "./use-pty-selection-gesture-driver";
 
 const LONG_PRESS_MOVE_THRESHOLD_PX = 8;
+const VIEWPORT_SELECTION_SETTLE_MS = 600;
 
 export type { PtySelectionHandleMetrics, PtySelectionHandles, PtySelectionPathAction };
 export type { PtySelectionHandleKind } from "./use-pty-selection-gesture-driver";
@@ -136,6 +140,7 @@ export function usePtySelectionController(
   const selectionAutoscrollPositionRef = useRef<{ scrollLeft: number; scrollTop: number } | null>(
     null,
   );
+  const selectionViewportTransitionUntilRef = useRef(0);
   const selectedPathActionRef = useRef<PtySelectionPathAction | null>(null);
   const selectedPtyTextRef = useRef("");
   const stopPtySelectionGestureRef = useRef<(() => void) | null>(null);
@@ -432,12 +437,15 @@ export function usePtySelectionController(
     const dismissSelection = (): void => {
       const autoscrollPosition = selectionAutoscrollPositionRef.current;
       if (
-        autoscrollPosition &&
-        containerEl.scrollLeft === autoscrollPosition.scrollLeft &&
-        containerEl.scrollTop === autoscrollPosition.scrollTop
-      ) {
+        !shouldDismissPtySelectionOnContainerScroll({
+          now: performance.now(),
+          viewportTransitionUntil: selectionViewportTransitionUntilRef.current,
+          scrollLeft: containerEl.scrollLeft,
+          scrollTop: containerEl.scrollTop,
+          selectionAutoscrollPosition: autoscrollPosition,
+        })
+      )
         return;
-      }
       clearPtySelection();
     };
     containerEl.addEventListener("scroll", dismissSelection, { passive: true });
@@ -467,6 +475,8 @@ export function usePtySelectionController(
     let raf = 0;
     let settleTimer = 0;
     const scheduleRefresh = (): void => {
+      selectionViewportTransitionUntilRef.current =
+        performance.now() + VIEWPORT_SELECTION_SETTLE_MS;
       cancelAnimationFrame(raf);
       window.clearTimeout(settleTimer);
       raf = requestAnimationFrame(() => {
@@ -477,7 +487,7 @@ export function usePtySelectionController(
       });
     };
 
-    scheduleRefresh();
+    refreshSelectionHandles();
     window.addEventListener("resize", scheduleRefresh);
     visualViewport?.addEventListener("resize", scheduleRefresh);
     visualViewport?.addEventListener("scroll", scheduleRefresh);

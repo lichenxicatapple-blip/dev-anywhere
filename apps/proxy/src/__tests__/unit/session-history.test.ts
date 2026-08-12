@@ -1107,8 +1107,11 @@ describe("readSessionMessages", () => {
         payload: {
           type: "custom_tool_call",
           name: "exec",
-          input:
-            'const result = await tools.exec_command({"cmd":"pnpm test -- --grep=\\\"history details\\\"","workdir":"/tmp/project","yield_time_ms":30000}); text(result.output);',
+          input: `const result = await tools.exec_command(${JSON.stringify({
+            cmd: 'pnpm test -- --grep="history details"',
+            workdir: "/tmp/project",
+            yield_time_ms: 30000,
+          })}); text(result.output);`,
           call_id: "call-custom-exec",
         },
       }),
@@ -1241,8 +1244,9 @@ describe("readSessionMessages", () => {
         payload: {
           type: "custom_tool_call",
           name: "exec",
-          input:
-            'const patch = "*** Begin Patch\\n*** Update File: /tmp/app.ts\\n@@\\n-tools.exec_command({ cmd: \\\"old\\\" })\\n+new\\n*** End Patch";\ntext(await tools.apply_patch(patch));',
+          input: `const patch = ${JSON.stringify(
+            '*** Begin Patch\n*** Update File: /tmp/app.ts\n@@\n-tools.exec_command({ cmd: "old" })\n+new\n*** End Patch',
+          )};\ntext(await tools.apply_patch(patch));`,
           call_id: "call-patch",
         },
       }),

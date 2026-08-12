@@ -10,14 +10,14 @@ const DEFAULT_IN_FLIGHT_WINDOW_BYTES = 32 * 1024;
 
 export type VoiceAsrAttemptCompletionReason = "closed" | "timeout";
 
-export interface VoiceAsrAttemptOptions {
+interface VoiceAsrAttemptOptions {
   sessionId: string;
   attemptId: string;
   sampleRate: number;
   encoding: VoiceAsrAudioEncoding;
 }
 
-export interface VoiceAsrAttemptSnapshot {
+interface VoiceAsrAttemptSnapshot {
   attemptId: string;
   queuedBytes: number;
   sentBytes: number;
@@ -28,7 +28,7 @@ export interface VoiceAsrAttemptSnapshot {
   stopSent: boolean;
 }
 
-export interface VoiceAsrAttempt {
+interface VoiceAsrAttempt {
   readonly attemptId: string;
   send(chunk: Uint8Array): void;
   finish(): void;
@@ -81,10 +81,7 @@ function parseServerMessage(data: unknown): VoiceAsrServerMessage | null {
 
 export class VoiceAsrTransport {
   private readonly options: Required<
-    Pick<
-      VoiceAsrTransportOptions,
-      "readyTimeoutMs" | "completionTimeoutMs" | "inFlightWindowBytes"
-    >
+    Pick<VoiceAsrTransportOptions, "readyTimeoutMs" | "completionTimeoutMs" | "inFlightWindowBytes">
   > &
     Omit<
       VoiceAsrTransportOptions,
@@ -350,10 +347,7 @@ export class VoiceAsrTransport {
     }, this.options.completionTimeoutMs);
   }
 
-  private completeAttempt(
-    state: ActiveAttempt,
-    reason: VoiceAsrAttemptCompletionReason,
-  ): void {
+  private completeAttempt(state: ActiveAttempt, reason: VoiceAsrAttemptCompletionReason): void {
     if (state.terminal) return;
     state.terminal = true;
     window.clearTimeout(state.readyTimeoutId);

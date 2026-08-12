@@ -276,6 +276,11 @@ export function createPtyTouchScrollHandler({
           `site=touchmove-horizontal dx=${Math.round(movement.absDx)} dy=${Math.round(movement.absDy)}`,
         );
       }
+      // Chrome normally applies this native pan in the compositor, but under
+      // Android IME/render load it can deliver the touch stream without
+      // committing scrollLeft. The expectation is absolute from touch start,
+      // so assigning it is idempotent even when native scrolling also ran.
+      container.scrollLeft = expectation.expectedScrollLeft;
       trace("touchmove:horizontal-native", {
         details: [
           `scrollLeft=${Math.round(container.scrollLeft)}`,

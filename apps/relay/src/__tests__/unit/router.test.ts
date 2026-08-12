@@ -32,7 +32,7 @@ const validEnvelope = {
   source: "proxy" as const,
   version: "1.0",
   type: "assistant_message" as const,
-  payload: { text: "hello", isPartial: false },
+  payload: { turnId: "turn-1", revision: 1, text: "hello", status: "completed" },
 };
 
 describe("parseMessage", () => {

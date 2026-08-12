@@ -97,11 +97,7 @@ export function PtyAutoYesController({
   return (
     <>
       {targets.map((target) => (
-        <PtyAutoYesSessionController
-          key={target.key}
-          target={target}
-          sendRawInput={sendRawInput}
-        />
+        <PtyAutoYesSessionController key={target.key} target={target} sendRawInput={sendRawInput} />
       ))}
     </>
   );

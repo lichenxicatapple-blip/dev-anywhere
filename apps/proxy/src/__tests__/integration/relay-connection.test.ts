@@ -68,7 +68,7 @@ describe("RelayConnection", () => {
       "assistant_message",
       "test-session",
       1,
-      { text: "hello", isPartial: false },
+      { turnId: "turn-1", revision: 1, text: "hello", status: "completed" },
       "proxy",
     );
 
@@ -223,7 +223,7 @@ describe("RelayConnection", () => {
       "assistant_message",
       "test-session",
       1,
-      { text: "queued", isPartial: false },
+      { turnId: "turn-2", revision: 1, text: "queued", status: "completed" },
       "proxy",
     );
     expect(() => conn!.sendEnvelope(envelope)).not.toThrow();
@@ -318,7 +318,7 @@ describe("RelayConnection", () => {
       "assistant_message",
       "sess-1",
       1,
-      { text: "buffered-msg", isPartial: false },
+      { turnId: "turn-3", revision: 1, text: "buffered-msg", status: "completed" },
       "proxy",
     );
     conn.sendEnvelope(envelope);

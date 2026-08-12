@@ -7,7 +7,7 @@ export function floatToInt16Pcm(samples: Float32Array): Uint8Array {
   return new Uint8Array(output.buffer);
 }
 
-export interface PcmCapture {
+interface PcmCapture {
   stop: () => Promise<void>;
 }
 

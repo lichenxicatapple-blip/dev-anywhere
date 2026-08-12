@@ -30,12 +30,17 @@ describe("MessageEnvelopeSchema round-trip stability", () => {
     expect(b).toEqual(a);
   });
 
-  it("assistant_message round-trip preserves isPartial=true", () => {
-    const original = baseEnv("assistant_message", { text: "delta", isPartial: true });
+  it("assistant_message round-trip preserves a versioned full snapshot", () => {
+    const original = baseEnv("assistant_message", {
+      turnId: "turn-1",
+      revision: 2,
+      text: "full text",
+      status: "streaming",
+    });
     const a = MessageEnvelopeSchema.parse(original);
     const b = roundTrip(MessageEnvelopeSchema, original);
     expect(b).toEqual(a);
-    if (b.type === "assistant_message") expect(b.payload.isPartial).toBe(true);
+    if (b.type === "assistant_message") expect(b.payload.revision).toBe(2);
   });
 
   it("tool_use_request with nested object parameters preserves structure", () => {

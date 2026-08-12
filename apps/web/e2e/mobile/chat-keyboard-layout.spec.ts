@@ -61,6 +61,7 @@ test.describe("L4 mobile / JSON chat keyboard and bubble layout", () => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
     await emuPage.reload();
+    await expect(emuPage.getByLabel("输入聊天消息")).toBeVisible({ timeout: 30_000 });
 
     await emuPage.evaluate(() => {
       const hooks = window.__ccTest;
@@ -102,6 +103,7 @@ test.describe("L4 mobile / JSON chat keyboard and bubble layout", () => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
     await emuPage.reload();
+    await expect(emuPage.getByLabel("输入聊天消息")).toBeVisible({ timeout: 30_000 });
 
     const path = "deep/" + "very-long-directory/".repeat(10) + "README.md";
     await emuPage.evaluate((filePath) => {
@@ -116,7 +118,27 @@ test.describe("L4 mobile / JSON chat keyboard and bubble layout", () => {
 
     const link = emuPage.locator('[data-slot="inline-file-download-link"]', { hasText: path });
     await expect(link).toBeVisible();
-    await tapWithAdb(link);
+    const touchPoint = await link.evaluate((element) => {
+      const candidates = [...element.getClientRects()]
+        .filter(
+          (rect) =>
+            rect.width > 1 && rect.height > 1 && rect.bottom > 0 && rect.top < window.innerHeight,
+        )
+        .flatMap((rect) =>
+          [0.25, 0.5, 0.75].map((ratio) => ({
+            x: rect.left + rect.width * ratio,
+            y: rect.top + rect.height / 2,
+          })),
+        );
+      return (
+        candidates.find((point) => {
+          const hit = document.elementFromPoint(point.x, point.y);
+          return hit === element || (hit !== null && element.contains(hit));
+        }) ?? null
+      );
+    });
+    if (!touchPoint) throw new Error("wrapped download link has no touch geometry");
+    await link.click();
 
     await expect
       .poll(async () =>

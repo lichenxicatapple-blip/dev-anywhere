@@ -1,4 +1,4 @@
-export type CopyImageResult = "copied" | "not-ready" | "insecure" | "unsupported" | "failed";
+type CopyImageResult = "copied" | "not-ready" | "insecure" | "unsupported" | "failed";
 
 export async function copyLoadedImageToClipboard(
   image: HTMLImageElement,

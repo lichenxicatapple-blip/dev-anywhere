@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 
-export interface PtyInputDebugPanelProps {
+interface PtyInputDebugPanelProps {
   ptyInputFocused: boolean;
   touchEditingSurface: boolean;
   softKeyboardEditingSurface: boolean;
