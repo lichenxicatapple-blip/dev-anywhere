@@ -60,6 +60,18 @@ jobs:
 
       # Hosted browser gates are intentionally serial. Parallel workers have
       # previously hung before reporting their first test on GitHub runners.
-      - run: pnpm test:layout -- --workers=1 --reporter=line
+      - run: pnpm test:layout -- --workers=1 --max-failures=1 --reporter=line
 
-      - run: pnpm test:pc -- --workers=1 --reporter=line
+      - run: pnpm test:pc -- --workers=1 --max-failures=1 --reporter=line
+
+      - name: Upload browser diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-smoke-diagnostics
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            apps/web/test-results
+            artifacts/test-layout
+            artifacts/test-pc

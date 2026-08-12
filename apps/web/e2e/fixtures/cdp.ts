@@ -154,7 +154,10 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       });
       await use(page);
     },
-    { scope: "worker" },
+    // safeGoto has three bounded recovery attempts (20s navigation + 10s shell
+    // readiness each). Do not let the global 30s test timeout cut the worker
+    // fixture off halfway through its documented recovery budget.
+    { scope: "worker", timeout: 100_000 },
   ],
 });
 

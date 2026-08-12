@@ -80,10 +80,13 @@ assert.match(ciWorkflow, /pull_request:/);
 assert.match(ciWorkflow, /workflow_call:/);
 assert.match(ciWorkflow, /pnpm test/);
 assert.match(ciWorkflow, /pnpm release:check/);
-assert.match(ciWorkflow, /pnpm test:layout -- --workers=1 --reporter=line/);
-assert.match(ciWorkflow, /pnpm test:pc -- --workers=1 --reporter=line/);
+assert.match(ciWorkflow, /pnpm test:layout -- --workers=1 --max-failures=1 --reporter=line/);
+assert.match(ciWorkflow, /pnpm test:pc -- --workers=1 --max-failures=1 --reporter=line/);
 assert.match(ciWorkflow, /playwright install --with-deps chromium/);
 assert.match(ciWorkflow, /browser-smoke:(?:.|\n)*?runs-on: ubuntu-22\.04/);
+assert.match(ciWorkflow, /name: Upload browser diagnostics/);
+assert.match(ciWorkflow, /uses: actions\/upload-artifact@v4/);
+assert.match(ciWorkflow, /apps\/web\/test-results/);
 
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");

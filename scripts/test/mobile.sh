@@ -40,6 +40,7 @@ CDP_PORT="${TIER_MOBILE_CDP_PORT:-9222}"
 CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
 RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
+FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-0}"
 TIMING_REPORT="$ARTIFACT_DIR/mobile-timing.tsv"
 PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
@@ -296,6 +297,9 @@ for spec in "${SPECS[@]}"; do
   TOTAL_MS="$(mobile_elapsed_ms "$SPEC_START_MS")"
   echo "[mobile] $spec $SPEC_STATUS reset=$(mobile_format_ms "$RESET_MS") test=$(mobile_format_ms "$TEST_MS") total=$(mobile_format_ms "$TOTAL_MS")"
   mobile_record_timing "$spec" "$SPEC_STATUS" "$RESET_MS" "$TEST_MS" "$TOTAL_MS"
+  if [[ "$SPEC_STATUS" != "passed" && "$FAIL_FAST" == "1" ]]; then
+    break
+  fi
 done
 
 mobile_print_timing_report

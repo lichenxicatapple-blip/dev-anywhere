@@ -108,7 +108,7 @@ jobs:
           profile: pixel_6
           disable-animations: true
           emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: TEST_MOBILE_REQUIRE_EMULATOR=1 pnpm test:mobile
+          script: TEST_MOBILE_REQUIRE_EMULATOR=1 TEST_MOBILE_FAIL_FAST=1 pnpm test:mobile
 
   release-please:
     name: Prepare or create release
