@@ -29,7 +29,16 @@ export default defineConfig({
   // 整 tier 给 1 次 retry 容忍真 race / cpu 抢占 / vite HMR 抖动. 同条 spec 重试仍挂
   // 才视为真 fail. PC tier 96 个 spec 并行下不加 retry 偶发 flake 影响 release smoke.
   retries: 1,
-  use: { baseURL: BASE_URL },
+  use: {
+    baseURL: BASE_URL,
+    launchOptions: process.env.CI
+      ? {
+          // GitHub-hosted runners expose a small /dev/shm. Older Chromium can
+          // silently stall its worker before the first test without this.
+          args: ["--disable-dev-shm-usage"],
+        }
+      : undefined,
+  },
   projects: [
     // L2 layout: viewport 模拟, 只查响应式断点, e2e/layout/.
     // 这些 spec 自己用 test.use / setViewportSize 覆盖具体断点; 单 project 避免
