@@ -39,6 +39,10 @@ jobs:
   browser-smoke:
     name: Browser smoke
     runs-on: ubuntu-latest
+    # Keep Chromium and Linux dependencies aligned with the Playwright version
+    # in pnpm-lock.yaml instead of inheriting a moving hosted-runner image.
+    container:
+      image: mcr.microsoft.com/playwright:v1.52.0-noble
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
@@ -53,8 +57,6 @@ jobs:
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile
-
-      - run: pnpm --filter @dev-anywhere/web exec playwright install --with-deps chromium
 
       # Hosted browser gates are intentionally serial. Parallel workers have
       # previously hung before reporting their first test on GitHub runners.

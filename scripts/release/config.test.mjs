@@ -82,6 +82,8 @@ assert.match(ciWorkflow, /pnpm test/);
 assert.match(ciWorkflow, /pnpm release:check/);
 assert.match(ciWorkflow, /pnpm test:layout -- --workers=1 --reporter=line/);
 assert.match(ciWorkflow, /pnpm test:pc -- --workers=1 --reporter=line/);
+assert.match(ciWorkflow, /mcr\.microsoft\.com\/playwright:v1\.52\.0-noble/);
+assert.doesNotMatch(ciWorkflow, /playwright install --with-deps chromium/);
 
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");
