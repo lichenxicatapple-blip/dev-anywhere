@@ -314,7 +314,9 @@ test.describe("PTY mobile controls — iPad landscape keyboard", () => {
       };
     });
     expect(hintLayout.actionLeft).toBeGreaterThanOrEqual(hintLayout.contentRight);
-    expect(hintLayout.actionHeight).toBeGreaterThanOrEqual(44);
+    // Chromium may report a CSS 44px box a few millionths below 44 because its
+    // device-scale conversion uses floating-point layout coordinates.
+    expect(hintLayout.actionHeight).toBeGreaterThanOrEqual(43.99);
 
     await page.evaluate(() =>
       window.__devAnywhereSetVisualViewport?.({
