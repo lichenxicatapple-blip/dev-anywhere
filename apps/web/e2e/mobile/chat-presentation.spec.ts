@@ -38,7 +38,9 @@ test.describe("L4 mobile / chat presentation", () => {
       sessionStorage.removeItem("dev-anywhere:route-restored");
       sessionStorage.removeItem("dev-anywhere:restored-target");
     });
-    await emuPage.goto(`${mobileBaseUrl}/#/chat/json-sess?mode=json`);
+    // json-sess intentionally carries a pending approval. This scenario needs an
+    // idle composer before it switches the proxy offline.
+    await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
     await expect(emuPage.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
       timeout: 30_000,
     });
