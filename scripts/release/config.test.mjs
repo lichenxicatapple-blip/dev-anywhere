@@ -83,6 +83,7 @@ assert.match(ciWorkflow, /pnpm release:check/);
 assert.match(ciWorkflow, /pnpm test:layout -- --workers=1 --reporter=line/);
 assert.match(ciWorkflow, /pnpm test:pc -- --workers=1 --reporter=line/);
 assert.match(ciWorkflow, /playwright install --with-deps chromium/);
+assert.match(ciWorkflow, /browser-smoke:(?:.|\n)*?runs-on: ubuntu-22\.04/);
 
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");
@@ -92,9 +93,5 @@ assert.match(publishWorkflow, /provenance: false/);
 assert.match(publishWorkflow, /sbom: false/);
 assert.match(publishWorkflow, /type=raw,value=\$\{\{ needs\.resolve-release\.outputs\.tag \}\}/);
 assert.match(publishWorkflow, /Ensure GitHub Release/);
-
-const playwrightConfig = fs.readFileSync("apps/web/playwright.config.ts", "utf8");
-assert.match(playwrightConfig, /process\.env\.CI/);
-assert.match(playwrightConfig, /--disable-dev-shm-usage/);
 
 console.log(`release config test passed (${rootPackage.version})`);

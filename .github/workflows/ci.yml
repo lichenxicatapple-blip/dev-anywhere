@@ -38,7 +38,9 @@ jobs:
 
   browser-smoke:
     name: Browser smoke
-    runs-on: ubuntu-latest
+    # Playwright 1.52 workers can hang before their first test on the moving
+    # ubuntu-latest image. Pin the last verified hosted browser environment.
+    runs-on: ubuntu-22.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
