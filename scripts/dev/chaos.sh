@@ -228,6 +228,12 @@ ok() {
 
 fail() {
   echo "FAIL $1" >&2
+  echo "--- proxy serve status ---" >&2
+  service_status >&2 || true
+  echo "--- proxy service log ---" >&2
+  tail -n 120 "$HOME/.dev-anywhere/profiles/$DEV_PROFILE/logs/service.log" >&2 2>/dev/null || true
+  echo "--- proxy terminal log ---" >&2
+  tail -n 120 "$HOME/.dev-anywhere/profiles/$DEV_PROFILE/logs/terminal.log" >&2 2>/dev/null || true
   exit 1
 }
 

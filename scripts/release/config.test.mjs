@@ -34,6 +34,8 @@ for (const path of versionFiles) {
 
 const releasePleaseWorkflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
 assert.match(releasePleaseWorkflow, /googleapis\/release-please-action@v4/);
+assert.match(releasePleaseWorkflow, /group: release-please-\$\{\{ github\.ref \}\}/);
+assert.match(releasePleaseWorkflow, /cancel-in-progress: true/);
 assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/ci\.yml/);
 assert.match(
   releasePleaseWorkflow,
@@ -42,6 +44,7 @@ assert.match(
 assert.match(releasePleaseWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1/);
 assert.match(releasePleaseWorkflow, /Configure isolated local runtime/);
 assert.match(releasePleaseWorkflow, /ws:\/\/localhost:3100/);
+assert.match(releasePleaseWorkflow, /path: ~\/\.dev-anywhere/);
 assert.match(releasePleaseWorkflow, /reactivecircus\/android-emulator-runner@v2/);
 assert.match(releasePleaseWorkflow, /TEST_MOBILE_REQUIRE_EMULATOR=1/);
 assert.match(releasePleaseWorkflow, /release_created == 'true'/);
