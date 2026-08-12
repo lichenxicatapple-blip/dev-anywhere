@@ -85,6 +85,9 @@ assert.match(ciWorkflow, /pnpm test:pc -- --workers=1 --reporter=line/);
 assert.match(ciWorkflow, /playwright install --with-deps chromium/);
 assert.match(ciWorkflow, /browser-smoke:(?:.|\n)*?runs-on: ubuntu-22\.04/);
 
+const playwrightConfig = fs.readFileSync("apps/web/playwright.config.ts", "utf8");
+assert.match(playwrightConfig, /channel: process\.env\.CI \? "chromium" : undefined/);
+
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");
 assert.match(publishWorkflow, /workflow_call:/);

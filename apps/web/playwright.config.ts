@@ -29,7 +29,13 @@ export default defineConfig({
   // 整 tier 给 1 次 retry 容忍真 race / cpu 抢占 / vite HMR 抖动. 同条 spec 重试仍挂
   // 才视为真 fail. PC tier 96 个 spec 并行下不加 retry 偶发 flake 影响 release smoke.
   retries: 1,
-  use: { baseURL: BASE_URL },
+  use: {
+    baseURL: BASE_URL,
+    // The legacy headless shell bundled with Playwright 1.52 can stall before
+    // the first test on hosted Linux. Keep the same Chromium build but use its
+    // regular channel (new headless implementation) in CI.
+    channel: process.env.CI ? "chromium" : undefined,
+  },
   projects: [
     // L2 layout: viewport 模拟, 只查响应式断点, e2e/layout/.
     // 这些 spec 自己用 test.use / setViewportSize 覆盖具体断点; 单 project 避免
