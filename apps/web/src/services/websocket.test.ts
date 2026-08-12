@@ -129,7 +129,7 @@ describe("WebSocketManager", () => {
     manager.close();
   });
 
-  it("replaces an apparently OPEN socket after returning from a long background period", async () => {
+  it("keeps an OPEN desktop socket after returning from a long background period", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
@@ -139,7 +139,37 @@ describe("WebSocketManager", () => {
       get: () => visibilityState,
     });
 
-    const manager = new WebSocketManager();
+    const manager = new WebSocketManager({ forceReconnectAfterBackground: false });
+    const statuses: boolean[] = [];
+    manager.onStatusChange((connected) => statuses.push(connected));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    visibilityState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(5_001);
+    visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+    expect(statuses).toEqual([true]);
+
+    manager.close();
+  });
+
+  it("replaces an apparently OPEN mobile socket after returning from a long background period", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    let visibilityState: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibilityState,
+    });
+
+    const manager = new WebSocketManager({ forceReconnectAfterBackground: true });
     const statuses: boolean[] = [];
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");

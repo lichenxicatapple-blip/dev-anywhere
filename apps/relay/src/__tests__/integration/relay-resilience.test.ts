@@ -9,7 +9,7 @@
  * - 第四节（Proxy 出站消息队列）：proxy 侧行为，由 relay-connection.test.ts 覆盖
  * - 第九~十一节（速查表）：文档性质，不可测试化
  * - 1.2（Proxy 自动重连退避）：proxy 侧 RelayConnection 行为
- * - 1.5（EventStore 对账回放）：proxy 侧 serve.ts 行为
+ * - 1.5（会话状态恢复）：proxy 侧重新推送当前权威状态，不由 relay 回放消息
  */
 
 import { describe, it, expect, beforeAll, afterAll, afterEach } from "vitest";

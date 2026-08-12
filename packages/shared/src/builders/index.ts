@@ -3,7 +3,7 @@ import { MessageEnvelopeSchema } from "../schemas/envelope.js";
 import type { RelayControlMessage } from "../schemas/relay-control.js";
 
 // 构建经过 schema 验证的消息信封
-// seq 由调用方提供，必须与 EventStore per-session seq 一致，保证 proxy 和 relay 对账可靠
+// seq 由调用方提供；session-scoped envelope 应使用该会话单调递增的发送序号。
 // sessionId 仅 session-scoped envelope 携带; 全局广播 (session_list / heartbeat / auth /
 // sync_*) 传 null 或省略, 否则要求合法 ID。
 export function buildMessage<T extends MessageEnvelope["type"]>(

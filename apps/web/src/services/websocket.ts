@@ -1,6 +1,7 @@
 // WebSocket 连接管理器，使用原生 WebSocket，支持文本和二进制消息分发，指数退避重连
 
 import { decodeBinaryFrame, RelayCloseCode } from "@dev-anywhere/shared";
+import { describeCurrentClientDevice } from "@/lib/client-device";
 
 type SendOptions = {
   queueWhenDisconnected?: boolean;
@@ -12,6 +13,10 @@ const MAX_PENDING_QUEUE_SIZE = 10000;
 // 手机锁屏/切后台后，浏览器可能保留一个 readyState=OPEN、实际已被系统回收的半开连接。
 // 短暂切应用不必抖动连接；超过这个窗口则在恢复前台时建立一条全新的连接。
 const BACKGROUND_RECONNECT_THRESHOLD_MS = 5_000;
+
+interface WebSocketManagerOptions {
+  forceReconnectAfterBackground?: boolean;
+}
 
 export class WebSocketManager {
   private ws: WebSocket | null = null;
@@ -26,6 +31,7 @@ export class WebSocketManager {
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
   private backgroundedAt: number | null = null;
+  private readonly forceReconnectAfterBackground: boolean;
   // 命名引用让 close() 能 removeEventListener；匿名 lambda 注册到 document/window 上
   // 后无法摘除，instance 不会被 GC，长寿 tab 上 close → reconnect 反复后能堆积大量回调。
   private readonly visibilityListener = (): void => {
@@ -39,6 +45,12 @@ export class WebSocketManager {
   private readonly pageHideListener = (): void => this.markBackgrounded();
   private readonly pageShowListener = (): void => this.resumeFromBackground();
 
+  constructor(options: WebSocketManagerOptions = {}) {
+    const deviceKind = describeCurrentClientDevice().deviceKind;
+    this.forceReconnectAfterBackground =
+      options.forceReconnectAfterBackground ?? (deviceKind === "phone" || deviceKind === "tablet");
+  }
+
   private markBackgrounded(): void {
     this.backgroundedAt ??= Date.now();
   }
@@ -48,7 +60,7 @@ export class WebSocketManager {
     this.backgroundedAt = null;
     const wasBackgroundedLongEnough =
       backgroundedAt !== null && Date.now() - backgroundedAt >= BACKGROUND_RECONNECT_THRESHOLD_MS;
-    this.wakeReconnect(wasBackgroundedLongEnough);
+    this.wakeReconnect(this.forceReconnectAfterBackground && wasBackgroundedLongEnough);
   }
 
   private cancelReconnectTimer(): void {
