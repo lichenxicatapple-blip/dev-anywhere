@@ -172,7 +172,10 @@ mobile_wait_for_chrome_exit() {
   local process_list
   for _ in $(seq 1 100); do
     process_list="$(adb shell ps -A -o NAME 2>/dev/null | tr -d '\r' || true)"
-    if ! grep -Eq '^com\.android\.chrome(?::|$)' <<<"$process_list"; then
+    # grep -E uses POSIX ERE, not PCRE. A non-capturing group (`(?:...)`)
+    # makes GNU grep reject the pattern and falsely report that Chrome exited,
+    # racing the following start against the still-running force-stop.
+    if ! grep -Eq '^com\.android\.chrome(:|$)' <<<"$process_list"; then
       return 0
     fi
     sleep 0.1
@@ -310,7 +313,11 @@ for spec in "${SPECS[@]}"; do
     echo "[mobile] $spec reset failed after $(mobile_format_ms "$RESET_MS")"
     mobile_record_timing "$spec" "reset-failed" "$RESET_MS" 0 "$TOTAL_MS"
     EXIT_CODE=1
-    if [[ "$RESET_FAIL_FAST" == "1" ]]; then
+    # A browser reset failure means the spec never ran. The release gate's
+    # general fail-fast setting must cover infrastructure failures as well as
+    # Playwright assertion failures; otherwise every remaining spec burns its
+    # full CDP timeout against the same broken browser.
+    if [[ "$RESET_FAIL_FAST" == "1" || "$FAIL_FAST" == "1" ]]; then
       break
     fi
     continue
