@@ -39,12 +39,6 @@ DEVICE_BASE_URL="${TEST_MOBILE_DEVICE_BASE_URL:-$BASE_URL}"
 CDP_PORT="${TIER_MOBILE_CDP_PORT:-9222}"
 CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
-RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
-FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-0}"
-CHROME_MAX_SPECS_PER_PROCESS="${TEST_MOBILE_CHROME_MAX_SPECS_PER_PROCESS:-1}"
-CHROME_SPECS_IN_PROCESS=0
-CHROME_TARGET_SEQUENCE=0
-ACTIVE_TARGET_URL=""
 TIMING_REPORT="$ARTIFACT_DIR/mobile-timing.tsv"
 PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
@@ -112,50 +106,6 @@ mobile_wait_for_cdp_page() {
   done
 
   mobile_cdp_ready && mobile_cdp_has_page
-}
-
-mobile_replace_page_target() {
-  # A new CDP target gets a fresh document and fresh addInitScript registry. Do
-  # not close the previous target here: Android Chrome can asynchronously carry
-  # that close into the newly activated target after our health probe succeeds.
-  # The next spec cold-starts Chrome, clearing all retained startup/test targets.
-  local new_id target_url healthy_checks encoded_url
-  CHROME_TARGET_SEQUENCE=$((CHROME_TARGET_SEQUENCE + 1))
-  target_url="about:blank#dev-anywhere-e2e-$CHROME_TARGET_SEQUENCE"
-  encoded_url="$(python3 -c 'import sys, urllib.parse; print(urllib.parse.quote(sys.argv[1], safe=""))' "$target_url")"
-  new_id="$(curl --noproxy '*' -sS -m 5 -X PUT \
-    "http://localhost:$CDP_PORT/json/new?$encoded_url" | python3 -c \
-    "import json, sys; print(json.load(sys.stdin).get('id', ''))" 2>/dev/null || true)"
-  if [[ -z "$new_id" ]]; then
-    echo "ERROR: failed to create a clean Chrome page target" >&2
-    return 1
-  fi
-
-  # Make the dedicated target foreground, then require it to remain visible to
-  # CDP. Playwright receives its unique URL and attaches to this exact page.
-  if ! curl --noproxy '*' -fsS -m 2 "http://localhost:$CDP_PORT/json/activate/$new_id" \
-    >/dev/null 2>&1; then
-    echo "ERROR: failed to activate the clean Chrome page target" >&2
-    return 1
-  fi
-
-  healthy_checks=0
-  for _ in $(seq 1 30); do
-    if curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" TARGET_URL="$target_url" python3 -c \
-      "import json, os, sys; targets=json.load(sys.stdin); sys.exit(0 if any(t.get('type') == 'page' and t.get('id') == os.environ['NEW_ID'] and t.get('url') == os.environ['TARGET_URL'] for t in targets) else 1)" \
-      >/dev/null 2>&1; then
-      healthy_checks=$((healthy_checks + 1))
-      if [[ "$healthy_checks" -ge 5 ]]; then
-        ACTIVE_TARGET_URL="$target_url"
-        return 0
-      fi
-    else
-      healthy_checks=0
-    fi
-    sleep 0.1
-  done
-  echo "ERROR: dedicated Chrome page target did not remain healthy" >&2
-  return 1
 }
 
 mobile_wait_for_chrome_exit() {
@@ -231,21 +181,11 @@ mobile_cold_start_chrome() {
     return 1
   }
 
-  # The VIEW intent's startup target is owned by Chrome's native launch flow
-  # and may be replaced when tab/session restoration finishes. Never hand that
-  # ephemeral target to Playwright. Create the same dedicated, foreground,
-  # consecutively-healthy target used for ordinary spec isolation.
-  mobile_replace_page_target || {
-    echo "ERROR: Chrome cold start did not produce a stable test page target" >&2
-    return 1
-  }
 }
 
-# Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
-# 每个 spec 冷启动一次 Chrome，再用 /json/new 创建有唯一 URL 的干净 target。
-# Android Chrome 在同一进程内反复 attach CDP 时会异步回收仍在使用的 target；进程级
-# 隔离消除这个竞态，同时仍只使用一台模拟器。环境变量可供专用设备显式调大复用数，
-# 发布门禁默认保持一 spec 一进程。
+# Android Chrome over CDP 不支持 newContext 隔离。整套门禁只启动一次 Chrome，
+# Playwright 也只 attach 一次；fixtures/cdp.ts 为每个 test 创建独立 target，隔离
+# addInitScript 和页面状态。避免跨进程反复 attach 和 force-stop 的两类 Chrome 竞态。
 reset_chrome() {
   if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
     echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
@@ -260,23 +200,10 @@ reset_chrome() {
   e2e_mobile_setup_adb_reverse
   adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null 2>&1 || true
 
-  if ! mobile_cdp_ready || [[ "$CHROME_SPECS_IN_PROCESS" -ge "$CHROME_MAX_SPECS_PER_PROCESS" ]]; then
+  if ! mobile_cdp_ready; then
     mobile_cold_start_chrome || return 1
-    CHROME_SPECS_IN_PROCESS=1
-    return 0
   fi
-
-  if mobile_replace_page_target; then
-    CHROME_SPECS_IN_PROCESS=$((CHROME_SPECS_IN_PROCESS + 1))
-    return 0
-  fi
-
-  # A process may die between the initial /json/version probe and target
-  # replacement. Recover once with a real cold start; business assertions still
-  # get their normal fail-fast behavior after the browser is healthy.
-  echo "[mobile] Chrome target reset was unhealthy; recovering with a cold start" >&2
-  mobile_cold_start_chrome || return 1
-  CHROME_SPECS_IN_PROCESS=1
+  mobile_wait_for_cdp_page
 }
 
 if [[ "$#" -gt 0 ]]; then
@@ -286,120 +213,57 @@ else
   SPECS=(e2e/mobile/*.spec.ts)
 fi
 
-EXIT_CODE=0
-REPORT_SPEC=()
-REPORT_STATUS=()
-REPORT_RESET_MS=()
-REPORT_TEST_MS=()
-REPORT_TOTAL_MS=()
-
-mobile_record_timing() {
-  REPORT_SPEC+=("$1")
-  REPORT_STATUS+=("$2")
-  REPORT_RESET_MS+=("$3")
-  REPORT_TEST_MS+=("$4")
-  REPORT_TOTAL_MS+=("$5")
-}
-
-mobile_run_playwright_spec() {
-  local spec="$1"
+mobile_run_playwright_suite() {
   if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
-      MOBILE_CDP_TARGET_URL="$ACTIVE_TARGET_URL" \
       ./node_modules/.bin/playwright test \
       --project=device-mobile-android \
       --workers=1 \
       --retries=0 \
       --max-failures=1 \
       "${PLAYWRIGHT_FLAKY_ARGS[@]}" \
-      "$spec"
+      "${SPECS[@]}"
   else
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
-      MOBILE_CDP_TARGET_URL="$ACTIVE_TARGET_URL" \
       ./node_modules/.bin/playwright test \
       --project=device-mobile-android \
       --workers=1 \
       --retries=0 \
       --max-failures=1 \
-      "$spec"
+      "${SPECS[@]}"
   fi
 }
 
-mobile_print_timing_report() {
-  local count i total_reset_ms total_test_ms total_ms top_n
-  count="${#REPORT_SPEC[@]}"
-  total_reset_ms=0
-  total_test_ms=0
-  total_ms=0
-  top_n="${TEST_MOBILE_TIMING_TOP_N:-8}"
-
-  printf 'spec\tstatus\treset_s\ttest_s\ttotal_s\n' >"$TIMING_REPORT"
-  for ((i = 0; i < count; i++)); do
-    total_reset_ms=$((total_reset_ms + REPORT_RESET_MS[i]))
-    total_test_ms=$((total_test_ms + REPORT_TEST_MS[i]))
-    total_ms=$((total_ms + REPORT_TOTAL_MS[i]))
-    printf '%s\t%s\t%.3f\t%.3f\t%.3f\n' \
-      "${REPORT_SPEC[i]}" \
-      "${REPORT_STATUS[i]}" \
-      "$(awk -v ms="${REPORT_RESET_MS[i]}" 'BEGIN { print ms / 1000 }')" \
-      "$(awk -v ms="${REPORT_TEST_MS[i]}" 'BEGIN { print ms / 1000 }')" \
-      "$(awk -v ms="${REPORT_TOTAL_MS[i]}" 'BEGIN { print ms / 1000 }')" \
-      >>"$TIMING_REPORT"
-  done
-
-  echo ""
-  echo "[mobile] timing report: $TIMING_REPORT"
-  echo "[mobile] total reset=$(mobile_format_ms "$total_reset_ms") test=$(mobile_format_ms "$total_test_ms") wall=$(mobile_format_ms "$total_ms")"
-  if [[ "$count" -gt 0 ]]; then
-    echo "[mobile] slowest specs:"
-    tail -n +2 "$TIMING_REPORT" | sort -t "$(printf '\t')" -k5,5nr | head -n "$top_n" | awk -F '\t' '{ printf "  %s total=%ss reset=%ss test=%ss status=%s\n", $1, $5, $3, $4, $2 }'
-  fi
-}
-
-for spec in "${SPECS[@]}"; do
-  echo ""
-  echo "=== $spec ==="
-  SPEC_START_MS="$(mobile_now_ms)"
-  RESET_START_MS="$(mobile_now_ms)"
-  if ! reset_chrome; then
-    RESET_MS="$(mobile_elapsed_ms "$RESET_START_MS")"
-    TOTAL_MS="$(mobile_elapsed_ms "$SPEC_START_MS")"
-    echo "[mobile] $spec reset failed after $(mobile_format_ms "$RESET_MS")"
-    mobile_record_timing "$spec" "reset-failed" "$RESET_MS" 0 "$TOTAL_MS"
-    EXIT_CODE=1
-    # A browser reset failure means the spec never ran. The release gate's
-    # general fail-fast setting must cover infrastructure failures as well as
-    # Playwright assertion failures; otherwise every remaining spec burns its
-    # full CDP timeout against the same broken browser.
-    if [[ "$RESET_FAIL_FAST" == "1" || "$FAIL_FAST" == "1" ]]; then
-      break
-    fi
-    continue
-  fi
+SUITE_START_MS="$(mobile_now_ms)"
+RESET_START_MS="$SUITE_START_MS"
+if ! reset_chrome; then
   RESET_MS="$(mobile_elapsed_ms "$RESET_START_MS")"
-  # WEB_BASE_URL 给 helpers.ts 的 BASE_URL (selectFakeProxy / gotoWithFakeProxy 等),
-  # mobile 跑独立 vite 在 5174 不是 host 5173, 不让 helpers 默认值 5173 把 emu 带去
-  # connection refused。
-  TEST_START_MS="$(mobile_now_ms)"
-  if mobile_run_playwright_spec "$spec"; then
-    SPEC_STATUS="passed"
-  else
-    SPEC_RC="$?"
-    SPEC_STATUS="failed($SPEC_RC)"
-    EXIT_CODE="$SPEC_RC"
-  fi
-  TEST_MS="$(mobile_elapsed_ms "$TEST_START_MS")"
-  TOTAL_MS="$(mobile_elapsed_ms "$SPEC_START_MS")"
-  echo "[mobile] $spec $SPEC_STATUS reset=$(mobile_format_ms "$RESET_MS") test=$(mobile_format_ms "$TEST_MS") total=$(mobile_format_ms "$TOTAL_MS")"
-  mobile_record_timing "$spec" "$SPEC_STATUS" "$RESET_MS" "$TEST_MS" "$TOTAL_MS"
-  if [[ "$SPEC_STATUS" != "passed" && "$FAIL_FAST" == "1" ]]; then
-    break
-  fi
-done
+  echo "[mobile] suite browser start failed after $(mobile_format_ms "$RESET_MS")" >&2
+  exit 1
+fi
+RESET_MS="$(mobile_elapsed_ms "$RESET_START_MS")"
+TEST_START_MS="$(mobile_now_ms)"
 
-mobile_print_timing_report
+# WEB_BASE_URL 给 helpers.ts 的 BASE_URL (selectFakeProxy / gotoWithFakeProxy 等),
+# mobile 跑独立 vite 在 5174 不是 host 5173, 不让 emu 带去 connection refused。
+if mobile_run_playwright_suite; then
+  EXIT_CODE=0
+else
+  EXIT_CODE="$?"
+fi
+TEST_MS="$(mobile_elapsed_ms "$TEST_START_MS")"
+TOTAL_MS="$(mobile_elapsed_ms "$SUITE_START_MS")"
+printf 'scope\tstatus\treset_s\ttest_s\ttotal_s\n' >"$TIMING_REPORT"
+printf 'all-mobile-specs\t%s\t%.3f\t%.3f\t%.3f\n' \
+  "$([[ "$EXIT_CODE" -eq 0 ]] && echo passed || echo "failed($EXIT_CODE)")" \
+  "$(awk -v ms="$RESET_MS" 'BEGIN { print ms / 1000 }')" \
+  "$(awk -v ms="$TEST_MS" 'BEGIN { print ms / 1000 }')" \
+  "$(awk -v ms="$TOTAL_MS" 'BEGIN { print ms / 1000 }')" \
+  >>"$TIMING_REPORT"
+echo "[mobile] timing report: $TIMING_REPORT"
+echo "[mobile] total reset=$(mobile_format_ms "$RESET_MS") test=$(mobile_format_ms "$TEST_MS") wall=$(mobile_format_ms "$TOTAL_MS")"
 exit "$EXIT_CODE"

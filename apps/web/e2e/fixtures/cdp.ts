@@ -7,7 +7,6 @@ import { promisify } from "node:util";
 
 const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
 const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://127.0.0.1:5174";
-const CDP_TARGET_URL = process.env.MOBILE_CDP_TARGET_URL;
 const execFileAsync = promisify(execFile);
 const MOBILE_NETWORK_ERROR =
   /(?:net::ERR_(?:EMPTY_RESPONSE|SOCKET_NOT_CONNECTED|CONNECTION_REFUSED)|chrome-error:\/\/chromewebdata)/;
@@ -84,9 +83,12 @@ function installNavigationTransportRecovery(page: Page): void {
   }) as Page["reload"];
 }
 
+interface MobileTestFixtures {
+  emuPage: Page;
+}
+
 interface MobileWorkerFixtures {
   emuBrowser: Browser;
-  emuPage: Page;
 }
 
 // emu 上 page.goto 偶发 ERR_ABORTED / Target closed (CDP-over-Android 的 navigation
@@ -112,7 +114,7 @@ async function safeGoto(page: Page, url: string): Promise<void> {
   }
 }
 
-export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
+export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
   // 整个 worker 复用一个 browser 连接, 减少 CDP attach 抖动.
   emuBrowser: [
     async ({}, use) => {
@@ -122,12 +124,12 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       // CDP-connected Browser from Playwright can hang or tear down the device-side
       // DevTools socket after a timed-out test, which makes retries connect to a
       // dead endpoint. Let the worker process drop the websocket; the script creates
-      // and activates a clean target in a fresh Chrome process for each spec.
+      // and owns one CDP connection for the complete serial suite.
     },
     { scope: "worker" },
   ],
 
-  // emuPage 是 worker scope 共享同一个 page. Android Chrome over CDP 的三条限制
+  // emuPage 每个 test 创建一个 page. Android Chrome over CDP 的三条限制
   // 决定了这种实现方式:
   // 1. Target.createBrowserContext 失败, 不能 newContext 隔离;
   // 2. page.close 在 emu 上不会从 chrome 删 tab (CDP 会标 page object closed,
@@ -135,26 +137,15 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
   // 3. addInitScript 没有 unregister API, 跨 spec 共用 page 时多次 install 会让
   //    fake relay 的 init script 重复叠加.
   //
-  // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 创建并激活一个有唯一
-  // URL 的干净 target；发布门禁为每个 spec 冷启动 Chrome，避免跨 worker CDP
-  // attach 触发 Android Chrome 的异步 target 回收。
-  // 同 spec file 内多个 test 共享这一个 page, 通过 spec 内的 setupPtyChat /
-  // installFakeRelay+reload 各自 reset.
+  // 整套发布门禁只建立一次 browser CDP connection；每个 test 的 newPage 提供独立
+  // document 和 addInitScript registry。测试结束不调用 page.close，因为 Android
+  // Chrome 不会真正删除该 tab，且异步 close 可能杀掉下一个 target；Chrome 进程在
+  // 整套结束后统一回收。
   emuPage: [
     async ({ emuBrowser }, use) => {
       const contexts = emuBrowser.contexts();
       const context = contexts[0] ?? (await emuBrowser.newContext());
-      const pages = context.pages();
-      const page = CDP_TARGET_URL
-        ? pages.find((candidate) => candidate.url() === CDP_TARGET_URL)
-        : pages[0];
-      if (!page) {
-        throw new Error(
-          CDP_TARGET_URL
-            ? `Android Chrome target missing: ${CDP_TARGET_URL}`
-            : "Android Chrome exposed no page target",
-        );
-      }
+      const page = await context.newPage();
       installNavigationTransportRecovery(page);
       await safeGoto(page, VITE_BASE_URL);
       // Target replacement preserves this origin's storage. Clear it before each spec
@@ -169,7 +160,7 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
     // safeGoto has three bounded recovery attempts (20s navigation + 10s shell
     // readiness each). Do not let the global 30s test timeout cut the worker
     // fixture off halfway through its documented recovery budget.
-    { scope: "worker", timeout: 100_000 },
+    { scope: "test", timeout: 100_000 },
   ],
 });
 
