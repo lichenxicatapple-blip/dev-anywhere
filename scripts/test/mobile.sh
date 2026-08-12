@@ -124,6 +124,16 @@ mobile_replace_page_target() {
     return 1
   fi
 
+  # Make the replacement foreground before closing the page owned by the
+  # previous Playwright worker. Android Chrome can terminate its DevTools
+  # socket when the foreground target is closed, even if a background target
+  # was created milliseconds earlier.
+  if ! curl --noproxy '*' -fsS -m 2 "http://localhost:$CDP_PORT/json/activate/$new_id" \
+    >/dev/null 2>&1; then
+    echo "ERROR: failed to activate the clean Chrome page target" >&2
+    return 1
+  fi
+
   stale_ids="$(curl --noproxy '*' -s -m 2 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
     "import json, os, sys
 targets = json.load(sys.stdin)
@@ -135,20 +145,24 @@ print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null 
     curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json/close/$id" >/dev/null || true
   done
 
-  # Avoid a blind sleep. Most closes settle immediately, but poll briefly so the
-  # next Playwright attach does not race stale tab removal.
-  for _ in $(seq 1 20); do
+  # Avoid a blind sleep. Require several consecutive healthy observations after
+  # stale targets disappear, so a DevTools socket that collapses just after the
+  # close cannot be handed to the next Playwright worker.
+  local healthy_checks=0
+  for _ in $(seq 1 30); do
     if curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
       "import json, os, sys; targets=json.load(sys.stdin); pages=[t for t in targets if t.get('type') == 'page']; sys.exit(0 if len(pages) == 1 and pages[0].get('id') == os.environ['NEW_ID'] else 1)" \
       >/dev/null 2>&1; then
-      if curl --noproxy '*' -fsS -m 2 "http://localhost:$CDP_PORT/json/activate/$new_id" \
-        >/dev/null 2>&1; then
+      healthy_checks=$((healthy_checks + 1))
+      if [[ "$healthy_checks" -ge 5 ]]; then
         return 0
       fi
+    else
+      healthy_checks=0
     fi
     sleep 0.1
   done
-  echo "ERROR: stale Chrome page targets did not close" >&2
+  echo "ERROR: clean Chrome page target did not remain healthy" >&2
   return 1
 }
 
@@ -163,6 +177,18 @@ mobile_wait_for_chrome_exit() {
   done
   echo "ERROR: Chrome processes did not exit after force-stop" >&2
   return 1
+}
+
+mobile_cold_start_chrome() {
+  adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
+  mobile_wait_for_chrome_exit || return 1
+  e2e_mobile_remove_forward_port "$CDP_PORT"
+  adb shell am start -W -a android.intent.action.VIEW -d "$DEVICE_BASE_URL/" >/dev/null 2>&1
+  e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
+  mobile_wait_for_cdp_page || {
+    echo "ERROR: Chrome cold start produced no CDP page target" >&2
+    return 1
+  }
 }
 
 # Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
@@ -183,17 +209,18 @@ reset_chrome() {
   adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null 2>&1 || true
 
   if ! mobile_cdp_ready; then
-    adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
-    mobile_wait_for_chrome_exit || return 1
-    e2e_mobile_remove_forward_port "$CDP_PORT"
-    adb shell am start -W -a android.intent.action.VIEW -d "$DEVICE_BASE_URL/" >/dev/null 2>&1
-    e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
-    mobile_wait_for_cdp_page || {
-      echo "ERROR: Chrome cold start produced no CDP page target" >&2
-      return 1
-    }
+    mobile_cold_start_chrome || return 1
   fi
 
+  if mobile_replace_page_target; then
+    return 0
+  fi
+
+  # A process may die between the initial /json/version probe and target
+  # replacement. Recover once with a real cold start; business assertions still
+  # get their normal fail-fast behavior after the browser is healthy.
+  echo "[mobile] Chrome target reset was unhealthy; recovering with a cold start" >&2
+  mobile_cold_start_chrome || return 1
   mobile_replace_page_target
 }
 

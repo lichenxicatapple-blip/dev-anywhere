@@ -120,8 +120,8 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       // The Android Chrome instance is owned by scripts/test/mobile.sh. Closing the
       // CDP-connected Browser from Playwright can hang or tear down the device-side
       // DevTools socket after a timed-out test, which makes retries connect to a
-      // dead endpoint. Let the worker process drop the websocket; the script
-      // force-stops Chrome before each spec file.
+      // dead endpoint. Let the worker process drop the websocket; the script creates
+      // and activates a clean target before closing the previous spec's target.
     },
     { scope: "worker" },
   ],
@@ -134,9 +134,10 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
   // 3. addInitScript 没有 unregister API, 跨 spec 共用 page 时多次 install 会让
   //    fake relay 的 init script 重复叠加.
   //
-  // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 调用前 force-stop
-  // chrome, 让该 spec file 拿到全新 chrome process. 同 spec file 内多个 test 共享
-  // 这一个 page, 通过 spec 内的 setupPtyChat / installFakeRelay+reload 各自 reset.
+  // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 调用前创建并激活一个
+  // 干净 target，再关闭旧 target；Chrome/CDP 不健康时才冷启动进程。同 spec file
+  // 内多个 test 共享这一个 page, 通过 spec 内的 setupPtyChat / installFakeRelay+reload
+  // 各自 reset.
   emuPage: [
     async ({ emuBrowser }, use) => {
       const contexts = emuBrowser.contexts();
@@ -145,9 +146,9 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       const page = pages[0] ?? (await context.newPage());
       installNavigationTransportRecovery(page);
       await safeGoto(page, VITE_BASE_URL);
-      // force-stop restarts Chrome but preserves this origin's storage. Clear it before
-      // each spec installs its init scripts so a previous fake proxy/session selection
-      // cannot redirect the next spec to stale offline state.
+      // Target replacement preserves this origin's storage. Clear it before each spec
+      // installs its init scripts so a previous fake proxy/session selection cannot
+      // redirect the next spec to stale offline state.
       await page.evaluate(() => {
         localStorage.clear();
         sessionStorage.clear();

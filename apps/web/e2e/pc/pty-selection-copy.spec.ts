@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { platform } from "node:os";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 
 const SESSION_ID = "pc-pty-selection-copy";
@@ -34,7 +35,10 @@ test.describe("PTY desktop selection copy", () => {
     }, SESSION_ID);
     expect(selected).toBe("PC COPY TARGET ALPHA");
 
-    await page.keyboard.press("ControlOrMeta+C");
+    // Use the concrete host shortcut. Playwright's ControlOrMeta alias did not
+    // dispatch a usable copy event in hosted Linux Chromium after the 1.62
+    // upgrade, even though the xterm selection and focus were both intact.
+    await page.keyboard.press(platform() === "darwin" ? "Meta+C" : "Control+C");
 
     await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).toBe(selected);
   });
