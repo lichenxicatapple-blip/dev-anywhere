@@ -41,7 +41,7 @@ CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
 RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
 FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-0}"
-CHROME_MAX_SPECS_PER_PROCESS="${TEST_MOBILE_CHROME_MAX_SPECS_PER_PROCESS:-4}"
+CHROME_MAX_SPECS_PER_PROCESS="${TEST_MOBILE_CHROME_MAX_SPECS_PER_PROCESS:-1}"
 CHROME_SPECS_IN_PROCESS=0
 CHROME_TARGET_SEQUENCE=0
 ACTIVE_TARGET_URL=""
@@ -118,8 +118,7 @@ mobile_replace_page_target() {
   # A new CDP target gets a fresh document and fresh addInitScript registry. Do
   # not close the previous target here: Android Chrome can asynchronously carry
   # that close into the newly activated target after our health probe succeeds.
-  # The process-level batch limit bounds these retained targets and clears all of
-  # them at the next cold start.
+  # The next spec cold-starts Chrome, clearing all retained startup/test targets.
   local new_id target_url healthy_checks encoded_url
   CHROME_TARGET_SEQUENCE=$((CHROME_TARGET_SEQUENCE + 1))
   target_url="about:blank#dev-anywhere-e2e-$CHROME_TARGET_SEQUENCE"
@@ -243,10 +242,10 @@ mobile_cold_start_chrome() {
 }
 
 # Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
-# 每个 spec 用 /json/new 创建一个有唯一 URL 的干净 target；批次内保留旧 target，
-# 避免 Android Chrome 的异步 close 杀掉刚激活的新 target。同一进程最多承载固定
-# 数量的 spec，再主动冷启动，一次清理所有旧 target。分批回收同时给 target 和进程
-# 生命周期设置上界。
+# 每个 spec 冷启动一次 Chrome，再用 /json/new 创建有唯一 URL 的干净 target。
+# Android Chrome 在同一进程内反复 attach CDP 时会异步回收仍在使用的 target；进程级
+# 隔离消除这个竞态，同时仍只使用一台模拟器。环境变量可供专用设备显式调大复用数，
+# 发布门禁默认保持一 spec 一进程。
 reset_chrome() {
   if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
     echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2

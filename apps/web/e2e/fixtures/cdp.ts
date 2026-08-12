@@ -122,8 +122,7 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
       // CDP-connected Browser from Playwright can hang or tear down the device-side
       // DevTools socket after a timed-out test, which makes retries connect to a
       // dead endpoint. Let the worker process drop the websocket; the script creates
-      // and activates a clean target before closing the previous spec's target, and
-      // periodically recycles the Chrome process before its DevTools socket degrades.
+      // and activates a clean target in a fresh Chrome process for each spec.
     },
     { scope: "worker" },
   ],
@@ -137,7 +136,8 @@ export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
   //    fake relay 的 init script 重复叠加.
   //
   // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 创建并激活一个有唯一
-  // URL 的干净 target；批次内保留旧 target，达到批次上限时冷启动进程统一清理。
+  // URL 的干净 target；发布门禁为每个 spec 冷启动 Chrome，避免跨 worker CDP
+  // attach 触发 Android Chrome 的异步 target 回收。
   // 同 spec file 内多个 test 共享这一个 page, 通过 spec 内的 setupPtyChat /
   // installFakeRelay+reload 各自 reset.
   emuPage: [
