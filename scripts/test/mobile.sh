@@ -185,10 +185,39 @@ mobile_wait_for_chrome_exit() {
 }
 
 mobile_cold_start_chrome() {
+  local chrome_activity start_output
   adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
   mobile_wait_for_chrome_exit || return 1
   e2e_mobile_remove_forward_port "$CDP_PORT"
-  adb shell am start -W -a android.intent.action.VIEW -d "$DEVICE_BASE_URL/" >/dev/null 2>&1
+
+  # After force-stop, an implicit VIEW intent can be accepted without bringing
+  # Chrome back to the foreground on the hosted emulator. Resolve Chrome's own
+  # activity and launch that component explicitly. Resolve instead of hardcoding
+  # com.google.android.apps.chrome.Main so this survives Chrome package changes.
+  chrome_activity="$(
+    adb shell cmd package resolve-activity --brief \
+      -a android.intent.action.VIEW \
+      -c android.intent.category.BROWSABLE \
+      -p com.android.chrome \
+      -d "$DEVICE_BASE_URL/" \
+      2>/dev/null | tr -d '\r' | tail -n 1
+  )"
+  if [[ "$chrome_activity" != com.android.chrome/* ]]; then
+    echo "ERROR: could not resolve Chrome VIEW activity: ${chrome_activity:-<empty>}" >&2
+    return 1
+  fi
+
+  if ! start_output="$(
+    adb shell am start -W \
+      -n "$chrome_activity" \
+      -a android.intent.action.VIEW \
+      -c android.intent.category.BROWSABLE \
+      -d "$DEVICE_BASE_URL/" 2>&1
+  )"; then
+    echo "ERROR: failed to start Chrome activity $chrome_activity" >&2
+    echo "$start_output" >&2
+    return 1
+  fi
   e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
   mobile_wait_for_cdp_page || {
     echo "ERROR: Chrome cold start produced no CDP page target" >&2
