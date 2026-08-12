@@ -223,6 +223,15 @@ mobile_cold_start_chrome() {
     echo "ERROR: Chrome cold start produced no CDP page target" >&2
     return 1
   }
+
+  # The VIEW intent's startup target is owned by Chrome's native launch flow
+  # and may be replaced when tab/session restoration finishes. Never hand that
+  # ephemeral target to Playwright. Create the same dedicated, foreground,
+  # consecutively-healthy target used for ordinary spec isolation.
+  mobile_replace_page_target || {
+    echo "ERROR: Chrome cold start did not produce a stable test page target" >&2
+    return 1
+  }
 }
 
 # Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
