@@ -43,6 +43,7 @@ jobs:
     # in pnpm-lock.yaml instead of inheriting a moving hosted-runner image.
     container:
       image: mcr.microsoft.com/playwright:v1.52.0-noble
+      options: --ipc=host
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4

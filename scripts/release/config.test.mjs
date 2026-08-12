@@ -83,6 +83,7 @@ assert.match(ciWorkflow, /pnpm release:check/);
 assert.match(ciWorkflow, /pnpm test:layout -- --workers=1 --reporter=line/);
 assert.match(ciWorkflow, /pnpm test:pc -- --workers=1 --reporter=line/);
 assert.match(ciWorkflow, /mcr\.microsoft\.com\/playwright:v1\.52\.0-noble/);
+assert.match(ciWorkflow, /options: --ipc=host/);
 assert.match(ciWorkflow, /apt-get install -y --no-install-recommends build-essential/);
 assert.doesNotMatch(ciWorkflow, /playwright install --with-deps chromium/);
 
