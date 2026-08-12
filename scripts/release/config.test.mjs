@@ -33,6 +33,19 @@ for (const path of versionFiles) {
 }
 
 const releasePleaseWorkflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
+const expectedCiNodeVersion = "22.22.0";
+const assertPinnedCiNode = (workflow, path) => {
+  const versions = [...workflow.matchAll(/node-version:\s*["']?([^\s"']+)/g)].map(
+    ([, version]) => version,
+  );
+  assert.ok(versions.length > 0, `${path} must configure a Node runtime`);
+  assert.deepEqual(
+    [...new Set(versions)],
+    [expectedCiNodeVersion],
+    `${path} must not float across unverified Node patch releases`,
+  );
+};
+
 assert.match(releasePleaseWorkflow, /googleapis\/release-please-action@v4/);
 assert.match(releasePleaseWorkflow, /group: release-please-\$\{\{ github\.ref \}\}/);
 assert.match(releasePleaseWorkflow, /cancel-in-progress: true/);
@@ -61,12 +74,15 @@ assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/release\.yml
 assert.match(releasePleaseWorkflow, /secrets: inherit/);
 
 const ciWorkflow = fs.readFileSync(".github/workflows/ci.yml", "utf8");
+assertPinnedCiNode(ciWorkflow, ".github/workflows/ci.yml");
+assertPinnedCiNode(releasePleaseWorkflow, ".github/workflows/release-please.yml");
 assert.match(ciWorkflow, /pull_request:/);
 assert.match(ciWorkflow, /workflow_call:/);
 assert.match(ciWorkflow, /pnpm test/);
 assert.match(ciWorkflow, /pnpm release:check/);
 
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
+assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");
 assert.match(publishWorkflow, /workflow_call:/);
 assert.match(publishWorkflow, /workflow_dispatch:/);
 assert.match(publishWorkflow, /provenance: false/);
