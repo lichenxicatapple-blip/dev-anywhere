@@ -166,7 +166,10 @@ mobile_wait_for_chrome_exit() {
     # grep -E uses POSIX ERE, not PCRE. A non-capturing group (`(?:...)`)
     # makes GNU grep reject the pattern and falsely report that Chrome exited,
     # racing the following start against the still-running force-stop.
-    if ! grep -Eq '^com\.android\.chrome(:|$)' <<<"$process_list"; then
+    # force-stop may leave an isolated `com.android.chrome:*` service behind on
+    # the hosted image. It cannot own the Activity or DevTools socket; the main
+    # package process is the lifecycle boundary that must be gone before start.
+    if ! grep -Fxq 'com.android.chrome' <<<"$process_list"; then
       absent_checks=$((absent_checks + 1))
       # force-stop tears down several Chrome processes and its Activity in
       # stages. A single empty ps sample is only a transition window; require a
@@ -179,7 +182,9 @@ mobile_wait_for_chrome_exit() {
     fi
     sleep 0.1
   done
-  echo "ERROR: Chrome processes did not exit after force-stop" >&2
+  echo "ERROR: Chrome main process did not exit after force-stop" >&2
+  echo "[mobile] Chrome processes still present:" >&2
+  grep -E '^com\.android\.chrome(:|$)' <<<"$process_list" >&2 || true
   return 1
 }
 
