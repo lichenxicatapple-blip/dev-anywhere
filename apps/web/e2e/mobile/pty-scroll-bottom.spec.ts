@@ -603,14 +603,16 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await sendPtyLines(emuPage, { count: 240, prefix: "frozen-history" });
     await expectPtyScrollable(emuPage, 200);
 
-    const box = await ptyTerminal(emuPage).boundingBox();
-    if (!box) throw new Error("PTY terminal is not visible");
-    const x = box.x + box.width / 2;
-    await touchDrag(
-      emuPage,
-      { x, y: box.y + box.height * 0.35 },
-      { x, y: box.y + box.height * 0.75 },
-    );
+    // Touch gesture recognition is covered by the preceding Android cases. Keep
+    // this continuous-output case focused on review-frame freezing by entering
+    // the prerequisite state deterministically and verifying it explicitly.
+    await scrollPtyToTop(emuPage);
+    await expect
+      .poll(() => readPtyDebugSnapshot(emuPage).then((debug) => debug?.verticalIntent.mode))
+      .toBe("reviewing");
+    await expect
+      .poll(() => readPtyScrollMetrics(emuPage).then((metrics) => metrics.bottomGap))
+      .toBeGreaterThan(200);
 
     const snapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
     await expect(snapshot).toBeVisible();
