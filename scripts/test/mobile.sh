@@ -213,7 +213,8 @@ else
   SPECS=(e2e/mobile/*.spec.ts)
 fi
 
-mobile_run_playwright_suite() {
+mobile_run_playwright_spec() {
+  local spec="$1"
   if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
@@ -224,7 +225,7 @@ mobile_run_playwright_suite() {
       --retries=0 \
       --max-failures=1 \
       "${PLAYWRIGHT_FLAKY_ARGS[@]}" \
-      "${SPECS[@]}"
+      "$spec"
   else
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
@@ -234,7 +235,7 @@ mobile_run_playwright_suite() {
       --workers=1 \
       --retries=0 \
       --max-failures=1 \
-      "${SPECS[@]}"
+      "$spec"
   fi
 }
 
@@ -250,15 +251,20 @@ TEST_START_MS="$(mobile_now_ms)"
 
 # WEB_BASE_URL 给 helpers.ts 的 BASE_URL (selectFakeProxy / gotoWithFakeProxy 等),
 # mobile 跑独立 vite 在 5174 不是 host 5173, 不让 emu 带去 connection refused。
-if mobile_run_playwright_suite; then
-  EXIT_CODE=0
-else
-  EXIT_CODE="$?"
-fi
+EXIT_CODE=0
+for spec in "${SPECS[@]}"; do
+  echo "[mobile] spec=$spec"
+  if mobile_run_playwright_spec "$spec"; then
+    continue
+  else
+    EXIT_CODE="$?"
+    break
+  fi
+done
 TEST_MS="$(mobile_elapsed_ms "$TEST_START_MS")"
 TOTAL_MS="$(mobile_elapsed_ms "$SUITE_START_MS")"
 printf 'scope\tstatus\treset_s\ttest_s\ttotal_s\n' >"$TIMING_REPORT"
-printf 'all-mobile-specs\t%s\t%.3f\t%.3f\t%.3f\n' \
+printf 'serial-mobile-specs\t%s\t%.3f\t%.3f\t%.3f\n' \
   "$([[ "$EXIT_CODE" -eq 0 ]] && echo passed || echo "failed($EXIT_CODE)")" \
   "$(awk -v ms="$RESET_MS" 'BEGIN { print ms / 1000 }')" \
   "$(awk -v ms="$TEST_MS" 'BEGIN { print ms / 1000 }')" \
