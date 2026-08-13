@@ -903,9 +903,9 @@ describe("SettingsDialog", () => {
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
     await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
 
-    expect(screen.getByText("Qwen3 ASR Flash Realtime")).not.toBeNull();
-    expect(screen.getByText("CosyVoice V3 Flash")).not.toBeNull();
-    expect(screen.getByText("龙安洋")).not.toBeNull();
+    expect(await screen.findByText("Qwen3 ASR Flash Realtime")).not.toBeNull();
+    expect(await screen.findByText("CosyVoice V3 Flash")).not.toBeNull();
+    expect(await screen.findByText("龙安洋")).not.toBeNull();
     expect(screen.queryByText("读取语音能力列表超时")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "语音识别模型" }));
     expect(screen.getByRole("option", { name: "Qwen3 ASR Flash Realtime" })).not.toBeNull();
