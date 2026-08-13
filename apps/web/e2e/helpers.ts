@@ -1,5 +1,4 @@
 import type { Page } from "@playwright/test";
-import { addPersistentInitScript } from "./fixtures/persistent-init-script";
 import { expect } from "@playwright/test";
 
 // 本地 Vite 默认端口 5173；CI 或外部 relay-served 部署可通过 WEB_BASE_URL 覆盖
@@ -1059,7 +1058,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;
   };
-  await addPersistentInitScript(page, "fake-relay", installFakeRelayInDocument);
+  await page.addInitScript(installFakeRelayInDocument);
 }
 
 export async function selectFakeProxy(page: Page): Promise<void> {

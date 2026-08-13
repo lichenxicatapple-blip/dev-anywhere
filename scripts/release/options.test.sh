@@ -64,24 +64,20 @@ if grep -q 'service_status | grep -q' <<<"$chaos_script"; then
 fi
 grep -q 'Upload Chaos service logs' <<<"$release_please_workflow"
 grep -q 'process-chaos-service-logs-' <<<"$release_please_workflow"
-grep -q 'verify-android:' <<<"$release_please_workflow"
-grep -q -- '- verify-android' <<<"$release_please_workflow"
-grep -q 'TEST_MOBILE_REQUIRE_EMULATOR=1 TEST_MOBILE_FAIL_FAST=1 pnpm test:mobile' <<<"$release_please_workflow"
+if grep -qE 'verify-android:|android-emulator-runner|pnpm test:mobile' <<<"$release_please_workflow"; then
+  echo "GitHub Release Please must not run the local Android emulator gate" >&2
+  exit 1
+fi
 grep -q 'mobile_run_playwright_spec' scripts/test/mobile.sh
 grep -q -- '--workers=1' scripts/test/mobile.sh
 grep -q -- '--retries=0' scripts/test/mobile.sh
 grep -q -- '--max-failures=1' scripts/test/mobile.sh
-if grep -q 'mobile_run_playwright_suite' scripts/test/mobile.sh; then
-  echo "default mobile gate must bound each serial spec to one Playwright/CDP process" >&2
-  exit 1
-fi
 publish_dependencies="$(sed -n '/^  publish:/,/^    runs-on:\|^    uses:/p' <<<"$release_please_workflow")"
 grep -q -- '- verify' <<<"$publish_dependencies"
 grep -q -- '- verify-chaos' <<<"$publish_dependencies"
-grep -q -- '- verify-android' <<<"$publish_dependencies"
 grep -q -- '- release-please' <<<"$publish_dependencies"
-if grep -q 'TEST_MOBILE_PARALLEL_WORKERS' <<<"$release_please_workflow"; then
-  echo "release workflow must use the intrinsically serial test:mobile entrypoint" >&2
+if grep -q -- '- verify-android' <<<"$publish_dependencies"; then
+  echo "GitHub publish must not depend on a hosted Android emulator" >&2
   exit 1
 fi
 

@@ -1,17 +1,15 @@
 // L4 mobile spec 的 Playwright fixture: 通过 CDP 挂到 Android emu 的 Chrome 上.
 // 入口前置: scripts/test/mobile.sh 已建 adb forward tcp:9222 -> chrome_devtools_remote.
-import { chromium, type Browser, type Disposable, type Page } from "@playwright/test";
+import { chromium, type Browser, type Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
-import { isPersistentInitScript } from "./persistent-init-script";
 
 const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
 const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://127.0.0.1:5174";
 const execFileAsync = promisify(execFile);
 const MOBILE_NETWORK_ERROR =
   /(?:net::ERR_(?:EMPTY_RESPONSE|SOCKET_NOT_CONNECTED|CONNECTION_REFUSED)|chrome-error:\/\/chromewebdata)/;
-let testDocumentRevision = 0;
 
 async function restoreAdbReverse(): Promise<void> {
   const serialArgs = process.env.ANDROID_SERIAL ? ["-s", process.env.ANDROID_SERIAL] : [];
@@ -67,11 +65,7 @@ async function navigateWithTransportRecovery<T>(
   throw lastError;
 }
 
-const navigationRecoveryInstalled = new WeakSet<Page>();
-
 function installNavigationTransportRecovery(page: Page): void {
-  if (navigationRecoveryInstalled.has(page)) return;
-  navigationRecoveryInstalled.add(page);
   const originalGoto = page.goto.bind(page);
   const originalReload = page.reload.bind(page);
 
@@ -89,69 +83,35 @@ function installNavigationTransportRecovery(page: Page): void {
   }) as Page["reload"];
 }
 
-interface MobileTestFixtures {
+interface MobileWorkerFixtures {
+  emuBrowser: Browser;
   emuPage: Page;
 }
 
-interface MobileWorkerFixtures {
-  emuBrowser: Browser;
-}
-
-async function currentAndroidPage(browser: Browser): Promise<Page> {
-  const context = browser.contexts()[0];
-  if (!context) throw new Error("Android Chrome did not expose its default context");
-  const existing = context.pages().findLast((page) => !page.isClosed());
-  const page = existing ?? (await context.newPage());
-  installNavigationTransportRecovery(page);
-  return page;
-}
-
-async function stageAndroidTestDocument(browser: Browser): Promise<Page> {
-  const cleanDocumentUrl = new URL(VITE_BASE_URL);
-  cleanDocumentUrl.pathname = "/__dev_anywhere_mobile_test_blank";
-  cleanDocumentUrl.searchParams.set("__mobile_test", String(++testDocumentRevision));
-
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const page = await currentAndroidPage(browser);
-    const blankRoute = async (route: import("@playwright/test").Route) => {
-      await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html>" });
-    };
+// emu 上 page.goto 偶发 ERR_ABORTED / Target closed (CDP-over-Android 的 navigation
+// race 限制). 失败 sleep 后重试一次, 配合 worker scope 单 page 实测能把全套稳住.
+async function safeGoto(page: Page, url: string): Promise<void> {
+  await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
+  for (let attempt = 0; attempt < 3; attempt++) {
     try {
-      await page.route(cleanDocumentUrl.href, blankRoute);
-      await page.goto(cleanDocumentUrl.href, { waitUntil: "domcontentloaded", timeout: 20_000 });
-      await page.unroute(cleanDocumentUrl.href, blankRoute);
-      await page.evaluate(() => {
-        localStorage.clear();
-        sessionStorage.clear();
-      });
-      return page;
-    } catch (error) {
-      if (!page.isClosed() || attempt === 2) throw error;
-      await new Promise((resolve) => setTimeout(resolve, 250));
+      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      await page.waitForFunction(
+        () => {
+          const root = document.querySelector("#root");
+          return root !== null && root.childElementCount > 0;
+        },
+        undefined,
+        { timeout: 10_000 },
+      );
+      return;
+    } catch (err) {
+      if (attempt === 2) throw err;
+      await new Promise((r) => setTimeout(r, 800));
     }
   }
-  throw new Error("Android Chrome did not expose a stable page target");
 }
 
-function trackInitScripts(page: Page): () => Promise<void> {
-  const originalAddInitScript = page.addInitScript.bind(page);
-  const disposables: Disposable[] = [];
-  page.addInitScript = (async (...args: unknown[]) => {
-    const disposable = (await Reflect.apply(originalAddInitScript, page, args)) as Disposable;
-    disposables.push(disposable);
-    return disposable;
-  }) as Page["addInitScript"];
-
-  return async () => {
-    page.addInitScript = originalAddInitScript;
-    for (const disposable of disposables.reverse()) {
-      if (isPersistentInitScript(disposable)) continue;
-      await disposable.dispose();
-    }
-  };
-}
-
-export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
+export const test = base.extend<Record<never, never>, MobileWorkerFixtures>({
   // 整个 worker 复用一个 browser 连接, 减少 CDP attach 抖动.
   emuBrowser: [
     async ({}, use) => {
@@ -160,31 +120,41 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
       // The Android Chrome instance is owned by scripts/test/mobile.sh. Closing the
       // CDP-connected Browser from Playwright can hang or tear down the device-side
       // DevTools socket after a timed-out test, which makes retries connect to a
-      // dead endpoint. Let the worker process drop the websocket; the script creates
-      // and owns one CDP connection for the complete serial suite.
+      // dead endpoint. Let the worker process drop the websocket; the script
+      // force-stops Chrome before each spec file.
     },
     { scope: "worker" },
   ],
 
-  // Android Chrome over CDP 的限制决定了整套测试复用一个 target:
+  // emuPage 是 worker scope 共享同一个 page. Android Chrome over CDP 的三条限制
+  // 决定了这种实现方式:
   // 1. Target.createBrowserContext 失败, 不能 newContext 隔离;
   // 2. page.close 在 emu 上不会从 chrome 删 tab (CDP 会标 page object closed,
-  //    但 emu chrome 里的实际 tab 仍保留);
-  // 3. 创建/关闭相邻 target 会发生误杀下一 target 的设备端竞态.
+  //    但 emu chrome 里的实际 tab 仍保留, 多次 newPage 会让 chrome 里 tab 单调累积);
+  // 3. addInitScript 没有 unregister API, 跨 spec 共用 page 时多次 install 会让
+  //    fake relay 的 init script 重复叠加.
   //
-  // 每条测试仍有独立的 init-script 与 route 生命周期：init script 直接经 CDP
-  // 注册并按 identifier 移除，route 在 teardown 清空。页面存储也在 setup 清空。
+  // 跨 spec file 隔离: scripts/test/mobile.sh 每个 spec file 调用前 force-stop
+  // chrome, 让该 spec file 拿到全新 chrome process. 同 spec file 内多个 test 共享
+  // 这一个 page, 通过 spec 内的 setupPtyChat / installFakeRelay+reload 各自 reset.
   emuPage: [
     async ({ emuBrowser }, use) => {
-      const page = await stageAndroidTestDocument(emuBrowser);
-      const removeInitScripts = trackInitScripts(page);
+      const contexts = emuBrowser.contexts();
+      const context = contexts[0] ?? (await emuBrowser.newContext());
+      const pages = context.pages();
+      const page = pages[0] ?? (await context.newPage());
+      installNavigationTransportRecovery(page);
+      await safeGoto(page, VITE_BASE_URL);
+      // force-stop restarts Chrome but preserves this origin's storage. Clear it before
+      // each spec installs its init scripts so a previous fake proxy/session selection
+      // cannot redirect the next spec to stale offline state.
+      await page.evaluate(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
       await use(page);
-      await removeInitScripts();
-      if (!page.isClosed()) await page.unrouteAll({ behavior: "wait" });
     },
-    // Keep setup/teardown outside the per-test assertion budget. Android Chrome
-    // navigation has its own bounded transport-recovery timeout above.
-    { scope: "test", timeout: 100_000 },
+    { scope: "worker" },
   ],
 });
 

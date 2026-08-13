@@ -10,8 +10,11 @@ test.describe("L4 mobile / master-detail navigation", () => {
   test("clicking a session row enters chat detail; back button returns to list", async ({
     emuPage,
   }) => {
-    await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/`);
+    await installFakeRelay(emuPage);
+    // emu Chrome 是 long-lived page (cdp.ts 复用 contexts[0].pages[0]),
+    // addInitScript 只在 navigation 生效, reload 一次让 fake relay 注入.
+    await emuPage.reload();
 
     // mobile 视口默认进 proxy 选择 hero. fakeRelay 注入 1 个 fake proxy.
     await expect(emuPage.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]')).toBeVisible({

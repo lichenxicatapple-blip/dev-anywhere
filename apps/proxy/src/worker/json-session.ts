@@ -84,6 +84,7 @@ export class JsonSession {
   private child: ChildProcess | null = null;
   private readonly interruptedChildren = new WeakSet<ChildProcess>();
   private readonly interruptedExitResolvers = new WeakMap<ChildProcess, () => void>();
+  private interruptPending = false;
   private stderrChunks: string[] = [];
   private writeQueue: Promise<void> = Promise.resolve();
   private claudeSessionId: string | null = null;
@@ -167,34 +168,40 @@ export class JsonSession {
   }
 
   async interruptCurrentTurn(gracePeriodMs = 5000): Promise<boolean> {
+    if (this.interruptPending) return false;
     const child = this.child;
     if (!child || !this.isChildAlive(child)) return false;
+    this.interruptPending = true;
 
-    this.interruptedChildren.add(child);
-    const drained = new Promise<void>((resolve) => {
-      this.interruptedExitResolvers.set(child, resolve);
-    });
+    try {
+      this.interruptedChildren.add(child);
+      const drained = new Promise<void>((resolve) => {
+        this.interruptedExitResolvers.set(child, resolve);
+      });
 
-    const signaled = child.kill("SIGINT");
-    if (!signaled) {
-      this.interruptedChildren.delete(child);
-      this.interruptedExitResolvers.delete(child);
-      return false;
+      const signaled = child.kill("SIGINT");
+      if (!signaled) {
+        this.interruptedChildren.delete(child);
+        this.interruptedExitResolvers.delete(child);
+        return false;
+      }
+
+      const start = Date.now();
+      while (Date.now() - start < gracePeriodMs) {
+        if (!this.isChildAlive(child)) break;
+        await new Promise((r) => setTimeout(r, 100));
+      }
+      if (this.isChildAlive(child)) {
+        child.kill("SIGKILL");
+      }
+
+      await Promise.race([drained, new Promise((resolve) => setTimeout(resolve, 1500))]);
+      if (this.child === child) this.child = null;
+      this.startChild(this.claudeSessionId ?? this.resumeSessionId ?? undefined);
+      return true;
+    } finally {
+      this.interruptPending = false;
     }
-
-    const start = Date.now();
-    while (Date.now() - start < gracePeriodMs) {
-      if (!this.isChildAlive(child)) break;
-      await new Promise((r) => setTimeout(r, 100));
-    }
-    if (this.isChildAlive(child)) {
-      child.kill("SIGKILL");
-    }
-
-    await Promise.race([drained, new Promise((resolve) => setTimeout(resolve, 1500))]);
-    if (this.child === child) this.child = null;
-    this.startChild(this.claudeSessionId ?? this.resumeSessionId ?? undefined);
-    return true;
   }
 
   isAlive(): boolean {

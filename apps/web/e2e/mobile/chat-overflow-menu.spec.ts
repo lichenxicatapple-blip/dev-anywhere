@@ -11,6 +11,7 @@ test.describe("L4 mobile / chat overflow menu", () => {
   }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/hist-sess?mode=json`);
+    await emuPage.reload();
 
     await emuPage.getByRole("button", { name: "会话操作" }).click();
     const menu = emuPage.locator('[data-slot="chat-overflow-menu"]');

@@ -77,6 +77,7 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(() => isJsonScrollTraceEnabled());
   const [stopPending, setStopPending] = useState(false);
+  const stopPendingRef = useRef(false);
   const [findOpen, setFindOpen] = useState(false);
   const [findQuery, setFindQuery] = useState("");
   const [activeFindMessageId, setActiveFindMessageId] = useState<string | null>(null);
@@ -636,15 +637,29 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   const hasPendingApprovals = pendingApprovalQueue.length > 0;
 
   useEffect(() => {
-    if (!isWorking) setStopPending(false);
+    if (!isWorking) {
+      stopPendingRef.current = false;
+      setStopPending(false);
+    }
   }, [isWorking]);
 
+  useEffect(() => {
+    stopPendingRef.current = false;
+    setStopPending(false);
+  }, [sessionId]);
+
   const handleStopTurn = useCallback(() => {
-    if (stopPending) return;
+    // React state only disables the button after a render. Keep a synchronous
+    // lock as the actual single-flight boundary for rapid double clicks.
+    if (stopPendingRef.current) return;
+    stopPendingRef.current = true;
     setStopPending(true);
     const sent = relayClientRef?.sendControl({ type: "session_worker_abort", sessionId });
-    if (sent === false || !relayClientRef) setStopPending(false);
-  }, [sessionId, stopPending]);
+    if (sent === false || !relayClientRef) {
+      stopPendingRef.current = false;
+      setStopPending(false);
+    }
+  }, [sessionId]);
 
   const turnControlTarget = getTurnControlTarget({
     messages,

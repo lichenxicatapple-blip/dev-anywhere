@@ -8,7 +8,8 @@ import { expectNoHorizontalDocumentOverflow } from "../mobile-helpers";
 test.describe("L4 mobile / chat presentation", () => {
   test.setTimeout(90_000);
 
-  test("异常会话回退后, proxy 掉线面板在移动视口下完整可见", async ({ emuPage }) => {
+  test("auto-restore 落到已死 session 时静默退到 /sessions", async ({ emuPage }) => {
+    await emuPage.goto(`${mobileBaseUrl}/#/`);
     await installFakeRelay(emuPage);
     await emuPage.addInitScript(() => {
       localStorage.setItem("dev-anywhere:last-chat-route", "/chat/dead-session?mode=json");
@@ -16,7 +17,7 @@ test.describe("L4 mobile / chat presentation", () => {
       // sessionStorage 跨 reload 持久, 清掉 RESTORED_FLAG 才能触发 cold-start 路径。
       sessionStorage.removeItem("dev-anywhere:route-restored");
     });
-    await emuPage.goto(`${mobileBaseUrl}/#/`);
+    await emuPage.reload();
 
     await expect(emuPage).toHaveURL(/#\/sessions/, { timeout: 30_000 });
     await expect(emuPage.locator('[data-slot="terminated-session-panel"]')).toHaveCount(0);
@@ -26,21 +27,21 @@ test.describe("L4 mobile / chat presentation", () => {
         .filter({ hasText: "上次会话已结束" })
         .first(),
     ).toBeVisible({ timeout: 10_000 });
+  });
 
-    // Keep both presentation checks in one document lifecycle. Android Chrome's
-    // DevTools script registry is unreliable when the same relay init script is
-    // removed and re-added for the immediately following test.
+  test("ConnectionLostPanel(proxy) 在移动视口下完整可见, 不水平溢出", async ({ emuPage }) => {
+    await emuPage.goto(`${mobileBaseUrl}/#/`);
+    await installFakeRelay(emuPage);
     await emuPage.evaluate(() => {
       localStorage.removeItem("dev-anywhere:last-chat-route");
       localStorage.setItem("dev_anywhere_proxyId", "proxy-1");
       sessionStorage.removeItem("dev-anywhere:route-restored");
       sessionStorage.removeItem("dev-anywhere:restored-target");
     });
-    // json-sess intentionally carries a pending approval. This scenario needs an
-    // idle composer before it switches the proxy offline.
-    await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await expect(emuPage).toHaveURL(/#\/chat\/test-sess\?mode=json/);
-    await expect.poll(() => emuPage.evaluate(() => Boolean(window.__devAnywhereE2E))).toBe(true);
+    await emuPage.goto(`${mobileBaseUrl}/#/chat/json-sess?mode=json`);
+    await expect(emuPage.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
+      timeout: 30_000,
+    });
 
     await emuPage.evaluate(() => {
       window.__devAnywhereE2E?.setProxyOnline(false);

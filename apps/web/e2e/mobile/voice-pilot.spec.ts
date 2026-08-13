@@ -138,6 +138,7 @@ async function openJsonVoicePilot(page: Page, sessionId = "test-sess"): Promise<
   await installFakeVoiceRuntime(page);
   await installFakeRelay(page);
   await page.goto(`${mobileBaseUrl}/#/chat/${sessionId}?mode=json`);
+  await page.reload();
   await expect(page.getByLabel("输入聊天消息")).toBeVisible({ timeout: 30_000 });
 
   await page.getByRole("button", { name: "会话操作" }).click();

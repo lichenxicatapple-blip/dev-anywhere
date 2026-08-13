@@ -75,45 +75,6 @@ jobs:
           include-hidden-files: true
           retention-days: 7
 
-  verify-android:
-    name: Verify Android Chrome
-    runs-on: ubuntu-latest
-    # The 23-spec single-emulator gate includes real UIAutomator keyboard and
-    # orientation cycles. Keep a job-level safety ceiling above their summed,
-    # per-operation bounded timeouts; the runner still stops on the first reset
-    # or assertion failure (no retries).
-    timeout-minutes: 40
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: pnpm/action-setup@v4
-        with:
-          version: 9
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "22.22.2"
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Enable KVM
-        run: |
-          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
-          sudo udevadm control --reload-rules
-          sudo udevadm trigger --name-match=kvm
-
-      - name: Run Android Chrome release gate
-        uses: reactivecircus/android-emulator-runner@v2
-        with:
-          api-level: 35
-          arch: x86_64
-          target: google_apis_playstore
-          profile: pixel_6
-          disable-animations: true
-          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
-          script: TEST_MOBILE_REQUIRE_EMULATOR=1 TEST_MOBILE_FAIL_FAST=1 pnpm test:mobile
-
   release-please:
     name: Prepare or create release
     runs-on: ubuntu-latest
@@ -133,7 +94,6 @@ jobs:
     needs:
       - verify
       - verify-chaos
-      - verify-android
       - release-please
     if: needs.release-please.outputs.release_created == 'true'
     uses: ./.github/workflows/release.yml

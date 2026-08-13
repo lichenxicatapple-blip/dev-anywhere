@@ -520,6 +520,37 @@ describe("JsonSession", () => {
 
       killProbe.mockRestore();
     });
+
+    it("coalesces rapid duplicate interrupts without restarting Claude twice", async () => {
+      const { spawn } = await import("node:child_process");
+      const session = new JsonSession();
+      session.start();
+
+      const firstChild = mockChild;
+      const replacementChild = createChildProcessFake();
+      let alive = true;
+      const killProbe = vi.spyOn(process, "kill").mockImplementation(() => {
+        if (alive) return true;
+        throw new Error("ESRCH");
+      });
+
+      const firstInterrupt = session.interruptCurrentTurn(500);
+      const duplicateInterrupt = session.interruptCurrentTurn(500);
+
+      expect(firstChild.kill).toHaveBeenCalledTimes(1);
+      expect(firstChild.kill).toHaveBeenCalledWith("SIGINT");
+      await expect(duplicateInterrupt).resolves.toBe(false);
+
+      mockChild = replacementChild;
+      alive = false;
+      firstChild.emit("exit", 130, "SIGINT");
+      firstChild.stdout!.emit("end");
+
+      await expect(firstInterrupt).resolves.toBe(true);
+      expect(spawn).toHaveBeenCalledTimes(2);
+
+      killProbe.mockRestore();
+    });
   });
 
   describe("isAlive", () => {

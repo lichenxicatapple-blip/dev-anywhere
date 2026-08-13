@@ -85,6 +85,7 @@ test.describe("L4 mobile / image preview", () => {
   test("keeps all preview actions clear of the Android bottom edge", async ({ emuPage }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    await emuPage.reload();
 
     await openPreview(emuPage);
 
@@ -132,6 +133,7 @@ test.describe("L4 mobile / image preview", () => {
   test("two-finger pinch zooms transform out of identity", async ({ emuPage }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    await emuPage.reload();
 
     await openPreview(emuPage);
     await dispatchBoundedPinch(emuPage);

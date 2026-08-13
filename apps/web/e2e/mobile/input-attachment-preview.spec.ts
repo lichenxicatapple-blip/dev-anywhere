@@ -5,15 +5,12 @@ import { dismissSoftKeyboard } from "./pty-soft-keyboard";
 test.describe("L4 mobile / chat attachment preview", () => {
   test.setTimeout(90_000);
 
-  test.afterEach(async ({ emuPage }) => {
-    await dismissSoftKeyboard(emuPage);
-  });
-
   test("keeps file and image previews inside the composer and preserves the agent payload", async ({
     emuPage,
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
@@ -93,6 +90,7 @@ test.describe("L4 mobile / chat attachment preview", () => {
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
@@ -149,6 +147,7 @@ test.describe("L4 mobile / chat attachment preview", () => {
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
@@ -171,8 +170,8 @@ test.describe("L4 mobile / chat attachment preview", () => {
     });
     const card = emuPage.locator('[data-slot="input-file-attachment"]');
     await expect(card).toBeVisible({ timeout: 15_000 });
-    // Upload completion intentionally restores the textarea focus. Freeze the
-    // visual viewport again before comparing attachment-only geometry.
+    // Upload completion restores textarea focus. Close the IME again so the
+    // attachment-only geometry is compared against the same visual viewport.
     await input.evaluate((node: HTMLTextAreaElement) => node.blur());
     await dismissSoftKeyboard(emuPage);
     await expect
@@ -211,6 +210,7 @@ test.describe("L4 mobile / chat attachment preview", () => {
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });

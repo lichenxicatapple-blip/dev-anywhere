@@ -39,6 +39,7 @@ DEVICE_BASE_URL="${TEST_MOBILE_DEVICE_BASE_URL:-$BASE_URL}"
 CDP_PORT="${TIER_MOBILE_CDP_PORT:-9222}"
 CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
+RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
 TIMING_REPORT="$ARTIFACT_DIR/mobile-timing.tsv"
 PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
@@ -108,84 +109,64 @@ mobile_wait_for_cdp_page() {
   mobile_cdp_ready && mobile_cdp_has_page
 }
 
-mobile_wait_for_chrome_exit() {
-  local process_list absent_checks=0
-  for _ in $(seq 1 100); do
-    process_list="$(adb shell ps -A -o NAME 2>/dev/null | tr -d '\r' || true)"
-    # grep -E uses POSIX ERE, not PCRE. A non-capturing group (`(?:...)`)
-    # makes GNU grep reject the pattern and falsely report that Chrome exited,
-    # racing the following start against the still-running force-stop.
-    # force-stop may leave an isolated `com.android.chrome:*` service behind on
-    # the hosted image. It cannot own the Activity or DevTools socket; the main
-    # package process is the lifecycle boundary that must be gone before start.
-    if ! grep -Fxq 'com.android.chrome' <<<"$process_list"; then
-      absent_checks=$((absent_checks + 1))
-      # force-stop tears down several Chrome processes and its Activity in
-      # stages. A single empty ps sample is only a transition window; require a
-      # full second of stable absence before launching the replacement process.
-      if [[ "$absent_checks" -ge 10 ]]; then
+mobile_replace_page_target() {
+  # A new CDP target gets a fresh document and fresh addInitScript registry, so
+  # spec isolation does not require restarting Chrome. Restarting per spec makes
+  # Android accumulate hidden Chrome document tasks until DevTools stops exposing
+  # a page even though its socket is alive.
+  local new_id stale_ids
+  new_id="$(curl --noproxy '*' -sS -m 5 -X PUT \
+    "http://localhost:$CDP_PORT/json/new?about%3Ablank" | python3 -c \
+    "import json, sys; print(json.load(sys.stdin).get('id', ''))" 2>/dev/null || true)"
+  if [[ -z "$new_id" ]]; then
+    echo "ERROR: failed to create a clean Chrome page target" >&2
+    return 1
+  fi
+
+  stale_ids="$(curl --noproxy '*' -s -m 2 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
+    "import json, os, sys
+targets = json.load(sys.stdin)
+pages = [t for t in targets if t.get('type') == 'page' and t.get('id')]
+keep = os.environ['NEW_ID']
+print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null || true)"
+
+  for id in $stale_ids; do
+    curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json/close/$id" >/dev/null || true
+  done
+
+  # Avoid a blind sleep. Most closes settle immediately, but poll briefly so the
+  # next Playwright attach does not race stale tab removal.
+  for _ in $(seq 1 20); do
+    if curl --noproxy '*' -s -m 1 "http://localhost:$CDP_PORT/json" | NEW_ID="$new_id" python3 -c \
+      "import json, os, sys; targets=json.load(sys.stdin); pages=[t for t in targets if t.get('type') == 'page']; sys.exit(0 if len(pages) == 1 and pages[0].get('id') == os.environ['NEW_ID'] else 1)" \
+      >/dev/null 2>&1; then
+      if curl --noproxy '*' -fsS -m 2 "http://localhost:$CDP_PORT/json/activate/$new_id" \
+        >/dev/null 2>&1; then
         return 0
       fi
-    else
-      absent_checks=0
     fi
     sleep 0.1
   done
-  echo "ERROR: Chrome main process did not exit after force-stop" >&2
-  echo "[mobile] Chrome processes still present:" >&2
-  grep -E '^com\.android\.chrome(:|$)' <<<"$process_list" >&2 || true
+  echo "ERROR: stale Chrome page targets did not close" >&2
   return 1
 }
 
-mobile_cold_start_chrome() {
-  local chrome_activity start_output
-  adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
-  mobile_wait_for_chrome_exit || return 1
-  e2e_mobile_remove_forward_port "$CDP_PORT"
-
-  # After force-stop, an implicit VIEW intent can be accepted without bringing
-  # Chrome back to the foreground on the hosted emulator. Resolve Chrome's own
-  # activity and launch that component explicitly. Resolve instead of hardcoding
-  # com.google.android.apps.chrome.Main so this survives Chrome package changes.
-  chrome_activity="$(
-    adb shell cmd package resolve-activity --brief \
-      -a android.intent.action.VIEW \
-      -c android.intent.category.BROWSABLE \
-      -p com.android.chrome \
-      -d "$DEVICE_BASE_URL/" \
-      2>/dev/null | tr -d '\r' | tail -n 1
-  )"
-  if [[ "$chrome_activity" != com.android.chrome/* ]]; then
-    echo "ERROR: could not resolve Chrome VIEW activity: ${chrome_activity:-<empty>}" >&2
-    return 1
-  fi
-
-  if ! start_output="$(
-    adb shell am start -W \
-      -n "$chrome_activity" \
-      -a android.intent.action.VIEW \
-      -c android.intent.category.BROWSABLE \
-      -d "$DEVICE_BASE_URL/" 2>&1
-  )"; then
-    echo "ERROR: failed to start Chrome activity $chrome_activity" >&2
-    echo "$start_output" >&2
-    return 1
-  fi
-  e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
-  mobile_wait_for_cdp_page || {
-    echo "ERROR: Chrome cold start produced no CDP page target" >&2
-    echo "[mobile] Chrome start result:" >&2
-    echo "$start_output" >&2
-    echo "[mobile] Chrome processes after failed start:" >&2
-    adb shell ps -A -o PID,NAME 2>/dev/null | grep -E '(^|[[:space:]])com\.android\.chrome(:|$)' >&2 || true
-    return 1
-  }
-
+mobile_wait_for_chrome_exit() {
+  local process_list
+  for _ in $(seq 1 100); do
+    process_list="$(adb shell ps -A -o NAME 2>/dev/null | tr -d '\r' || true)"
+    if ! grep -Eq '^com\.android\.chrome(?::|$)' <<<"$process_list"; then
+      return 0
+    fi
+    sleep 0.1
+  done
+  echo "ERROR: Chrome processes did not exit after force-stop" >&2
+  return 1
 }
 
-# Android Chrome over CDP 不支持 newContext 隔离。整套门禁只启动一次 Chrome，
-# Playwright 也只 attach 一次并复用启动 target；fixtures/cdp.ts 为每个 test 清理
-# addInitScript、route 和页面状态。避免反复 attach、force-stop 和 target 增删竞态。
+# Android Chrome over CDP 不支持 newContext 隔离，addInitScript 也不能 unregister。
+# 每个 spec 用 /json/new 创建干净 target、关闭旧 target；Chrome 进程只在整套首次
+# 不可用时冷启动。这样既隔离 init script，也不会因逐 spec force-stop 累积 hidden task。
 reset_chrome() {
   if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
     echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
@@ -201,9 +182,18 @@ reset_chrome() {
   adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null 2>&1 || true
 
   if ! mobile_cdp_ready; then
-    mobile_cold_start_chrome || return 1
+    adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
+    mobile_wait_for_chrome_exit || return 1
+    e2e_mobile_remove_forward_port "$CDP_PORT"
+    adb shell am start -W -a android.intent.action.VIEW -d "$DEVICE_BASE_URL/" >/dev/null 2>&1
+    e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
+    mobile_wait_for_cdp_page || {
+      echo "ERROR: Chrome cold start produced no CDP page target" >&2
+      return 1
+    }
   fi
-  mobile_wait_for_cdp_page
+
+  mobile_replace_page_target
 }
 
 if [[ "$#" -gt 0 ]]; then
@@ -213,63 +203,100 @@ else
   SPECS=(e2e/mobile/*.spec.ts)
 fi
 
+EXIT_CODE=0
+REPORT_SPEC=()
+REPORT_STATUS=()
+REPORT_RESET_MS=()
+REPORT_TEST_MS=()
+REPORT_TOTAL_MS=()
+
+mobile_record_timing() {
+  REPORT_SPEC+=("$1")
+  REPORT_STATUS+=("$2")
+  REPORT_RESET_MS+=("$3")
+  REPORT_TEST_MS+=("$4")
+  REPORT_TOTAL_MS+=("$5")
+}
+
 mobile_run_playwright_spec() {
   local spec="$1"
   if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
-      ./node_modules/.bin/playwright test \
-      --project=device-mobile-android \
-      --workers=1 \
-      --retries=0 \
-      --max-failures=1 \
-      "${PLAYWRIGHT_FLAKY_ARGS[@]}" \
-      "$spec"
+      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 --retries=0 --max-failures=1 "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"
   else
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
-      ./node_modules/.bin/playwright test \
-      --project=device-mobile-android \
-      --workers=1 \
-      --retries=0 \
-      --max-failures=1 \
-      "$spec"
+      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 --retries=0 --max-failures=1 "$spec"
   fi
 }
 
-SUITE_START_MS="$(mobile_now_ms)"
-RESET_START_MS="$SUITE_START_MS"
-if ! reset_chrome; then
-  RESET_MS="$(mobile_elapsed_ms "$RESET_START_MS")"
-  echo "[mobile] suite browser start failed after $(mobile_format_ms "$RESET_MS")" >&2
-  exit 1
-fi
-RESET_MS="$(mobile_elapsed_ms "$RESET_START_MS")"
-TEST_START_MS="$(mobile_now_ms)"
+mobile_print_timing_report() {
+  local count i total_reset_ms total_test_ms total_ms top_n
+  count="${#REPORT_SPEC[@]}"
+  total_reset_ms=0
+  total_test_ms=0
+  total_ms=0
+  top_n="${TEST_MOBILE_TIMING_TOP_N:-8}"
 
-# WEB_BASE_URL 给 helpers.ts 的 BASE_URL (selectFakeProxy / gotoWithFakeProxy 等),
-# mobile 跑独立 vite 在 5174 不是 host 5173, 不让 emu 带去 connection refused。
-EXIT_CODE=0
-for spec in "${SPECS[@]}"; do
-  echo "[mobile] spec=$spec"
-  if mobile_run_playwright_spec "$spec"; then
-    continue
-  else
-    EXIT_CODE="$?"
-    break
+  printf 'spec\tstatus\treset_s\ttest_s\ttotal_s\n' >"$TIMING_REPORT"
+  for ((i = 0; i < count; i++)); do
+    total_reset_ms=$((total_reset_ms + REPORT_RESET_MS[i]))
+    total_test_ms=$((total_test_ms + REPORT_TEST_MS[i]))
+    total_ms=$((total_ms + REPORT_TOTAL_MS[i]))
+    printf '%s\t%s\t%.3f\t%.3f\t%.3f\n' \
+      "${REPORT_SPEC[i]}" \
+      "${REPORT_STATUS[i]}" \
+      "$(awk -v ms="${REPORT_RESET_MS[i]}" 'BEGIN { print ms / 1000 }')" \
+      "$(awk -v ms="${REPORT_TEST_MS[i]}" 'BEGIN { print ms / 1000 }')" \
+      "$(awk -v ms="${REPORT_TOTAL_MS[i]}" 'BEGIN { print ms / 1000 }')" \
+      >>"$TIMING_REPORT"
+  done
+
+  echo ""
+  echo "[mobile] timing report: $TIMING_REPORT"
+  echo "[mobile] total reset=$(mobile_format_ms "$total_reset_ms") test=$(mobile_format_ms "$total_test_ms") wall=$(mobile_format_ms "$total_ms")"
+  if [[ "$count" -gt 0 ]]; then
+    echo "[mobile] slowest specs:"
+    tail -n +2 "$TIMING_REPORT" | sort -t "$(printf '\t')" -k5,5nr | head -n "$top_n" | awk -F '\t' '{ printf "  %s total=%ss reset=%ss test=%ss status=%s\n", $1, $5, $3, $4, $2 }'
   fi
+}
+
+for spec in "${SPECS[@]}"; do
+  echo ""
+  echo "=== $spec ==="
+  SPEC_START_MS="$(mobile_now_ms)"
+  RESET_START_MS="$(mobile_now_ms)"
+  if ! reset_chrome; then
+    RESET_MS="$(mobile_elapsed_ms "$RESET_START_MS")"
+    TOTAL_MS="$(mobile_elapsed_ms "$SPEC_START_MS")"
+    echo "[mobile] $spec reset failed after $(mobile_format_ms "$RESET_MS")"
+    mobile_record_timing "$spec" "reset-failed" "$RESET_MS" 0 "$TOTAL_MS"
+    EXIT_CODE=1
+    if [[ "$RESET_FAIL_FAST" == "1" ]]; then
+      break
+    fi
+    continue
+  fi
+  RESET_MS="$(mobile_elapsed_ms "$RESET_START_MS")"
+  # WEB_BASE_URL 给 helpers.ts 的 BASE_URL (selectFakeProxy / gotoWithFakeProxy 等),
+  # mobile 跑独立 vite 在 5174 不是 host 5173, 不让 helpers 默认值 5173 把 emu 带去
+  # connection refused。
+  TEST_START_MS="$(mobile_now_ms)"
+  if mobile_run_playwright_spec "$spec"; then
+    SPEC_STATUS="passed"
+  else
+    SPEC_RC="$?"
+    SPEC_STATUS="failed($SPEC_RC)"
+    EXIT_CODE="$SPEC_RC"
+  fi
+  TEST_MS="$(mobile_elapsed_ms "$TEST_START_MS")"
+  TOTAL_MS="$(mobile_elapsed_ms "$SPEC_START_MS")"
+  echo "[mobile] $spec $SPEC_STATUS reset=$(mobile_format_ms "$RESET_MS") test=$(mobile_format_ms "$TEST_MS") total=$(mobile_format_ms "$TOTAL_MS")"
+  mobile_record_timing "$spec" "$SPEC_STATUS" "$RESET_MS" "$TEST_MS" "$TOTAL_MS"
 done
-TEST_MS="$(mobile_elapsed_ms "$TEST_START_MS")"
-TOTAL_MS="$(mobile_elapsed_ms "$SUITE_START_MS")"
-printf 'scope\tstatus\treset_s\ttest_s\ttotal_s\n' >"$TIMING_REPORT"
-printf 'serial-mobile-specs\t%s\t%.3f\t%.3f\t%.3f\n' \
-  "$([[ "$EXIT_CODE" -eq 0 ]] && echo passed || echo "failed($EXIT_CODE)")" \
-  "$(awk -v ms="$RESET_MS" 'BEGIN { print ms / 1000 }')" \
-  "$(awk -v ms="$TEST_MS" 'BEGIN { print ms / 1000 }')" \
-  "$(awk -v ms="$TOTAL_MS" 'BEGIN { print ms / 1000 }')" \
-  >>"$TIMING_REPORT"
-echo "[mobile] timing report: $TIMING_REPORT"
-echo "[mobile] total reset=$(mobile_format_ms "$RESET_MS") test=$(mobile_format_ms "$TEST_MS") wall=$(mobile_format_ms "$TOTAL_MS")"
+
+mobile_print_timing_report
 exit "$EXIT_CODE"

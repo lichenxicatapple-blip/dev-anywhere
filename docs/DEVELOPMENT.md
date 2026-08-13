@@ -274,7 +274,7 @@ RELEASE_DEEP_SCOPE=chaos pnpm release:deep
 RELEASE_DEEP_SCOPE=mobile pnpm release:deep
 ```
 
-其中 `chaos` 和 `mobile` scope 都会由 `pnpm release` 自动执行并阻塞打 tag；Release Please 在 `main` 上创建版本前也有独立 Chaos 与 Android Chrome 必需检查，自动发布无法绕过。`real` 文件链路保持按需运行：
+其中 `chaos` 和 `mobile` scope 都会由本地 `pnpm release` 自动执行并阻塞打 tag。Android Chrome 依赖开发机上的专用模拟器，因此只作为本地发布门禁；GitHub Release Please 保留普通 CI 与独立 Chaos 检查。`real` 文件链路保持按需运行：
 
 - Relay/Proxy 重连与进程生命周期：Chaos 每次正式发布必跑；真实文件链路按需运行。
 - Android E2E：每次正式发布必跑；移动端软键盘、触摸、长按选区、横竖屏或 Voice Pilot 改动还应在开发过程中提前运行。

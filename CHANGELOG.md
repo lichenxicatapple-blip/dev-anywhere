@@ -4,6 +4,21 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.35] - 2026-08-13
+
+### 修复
+
+- 修复 Chat 模式快速连续点击两次“停止响应”时重复发送中断请求、可能重复重启 Claude 子进程并导致会话异常结束的问题；停止操作现在在前端和 Worker 两层保持幂等。
+- 恢复经过本地稳定性验证的 Android Chrome E2E 生命周期模型，移除为 GitHub hosted 模拟器引入的页面 staging、跨进程复用与相关竞态。
+
+### 改进
+
+- Android Chrome 全量 E2E 保留为本地正式发布硬门禁，不再让每次 GitHub Release Please 流水线启动 hosted Android 模拟器；GitHub 继续运行普通 CI、桌面浏览器与 Chaos 门禁。
+
+### 测试
+
+- 补充重复中断只允许一次 SIGINT 和一次 Claude 重启的回归测试；完整本地 Android Chrome 门禁、Proxy 与 Web 全量单测、类型检查和生产构建均通过。
+
 ## [0.5.34] - 2026-08-12
 
 ### 改进

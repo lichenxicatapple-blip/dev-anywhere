@@ -52,15 +52,14 @@ assert.match(releasePleaseWorkflow, /cancel-in-progress: true/);
 assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/ci\.yml/);
 assert.match(
   releasePleaseWorkflow,
-  /needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- verify-android/,
+  /needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- release-please/,
 );
 assert.match(releasePleaseWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1/);
 assert.match(releasePleaseWorkflow, /Configure isolated local runtime/);
 assert.match(releasePleaseWorkflow, /ws:\/\/localhost:3100/);
 assert.match(releasePleaseWorkflow, /path: ~\/\.dev-anywhere/);
 assert.match(releasePleaseWorkflow, /include-hidden-files: true/);
-assert.match(releasePleaseWorkflow, /reactivecircus\/android-emulator-runner@v2/);
-assert.match(releasePleaseWorkflow, /TEST_MOBILE_REQUIRE_EMULATOR=1/);
+assert.doesNotMatch(releasePleaseWorkflow, /verify-android|android-emulator-runner|pnpm test:mobile/);
 assert.match(releasePleaseWorkflow, /release_created == 'true'/);
 assert.match(
   releasePleaseWorkflow,
@@ -68,7 +67,7 @@ assert.match(
 );
 assert.match(
   releasePleaseWorkflow,
-  /publish:\s*\n(?:.|\n)*?needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- verify-android\s*\n\s*- release-please/,
+  /publish:\s*\n(?:.|\n)*?needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- release-please/,
 );
 assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/release\.yml/);
 assert.match(releasePleaseWorkflow, /secrets: inherit/);

@@ -106,6 +106,7 @@ test.describe("L4 mobile / @ file picker attach", () => {
         await installFakeRelay(emuPage);
         // test-sess: fakeRelay 默认无 pending approval (json-sess 自带, 会卡 send disable).
         await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+        await emuPage.reload();
       });
 
       const input = emuPage.getByLabel("输入聊天消息");
