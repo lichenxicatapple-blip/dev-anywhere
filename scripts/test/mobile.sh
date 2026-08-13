@@ -184,8 +184,8 @@ mobile_cold_start_chrome() {
 }
 
 # Android Chrome over CDP 不支持 newContext 隔离。整套门禁只启动一次 Chrome，
-# Playwright 也只 attach 一次；fixtures/cdp.ts 为每个 test 创建独立 target，隔离
-# addInitScript 和页面状态。避免跨进程反复 attach 和 force-stop 的两类 Chrome 竞态。
+# Playwright 也只 attach 一次并复用启动 target；fixtures/cdp.ts 为每个 test 清理
+# addInitScript、route 和页面状态。避免反复 attach、force-stop 和 target 增删竞态。
 reset_chrome() {
   if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
     echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2

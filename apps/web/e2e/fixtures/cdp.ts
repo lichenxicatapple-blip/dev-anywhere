@@ -1,6 +1,6 @@
 // L4 mobile spec 的 Playwright fixture: 通过 CDP 挂到 Android emu 的 Chrome 上.
 // 入口前置: scripts/test/mobile.sh 已建 adb forward tcp:9222 -> chrome_devtools_remote.
-import { chromium, type Browser, type Page } from "@playwright/test";
+import { chromium, type Browser, type Disposable, type Page } from "@playwright/test";
 import { test as base } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
@@ -89,6 +89,7 @@ interface MobileTestFixtures {
 
 interface MobileWorkerFixtures {
   emuBrowser: Browser;
+  emuWorkerPage: Page;
 }
 
 // emu 上 page.goto 偶发 ERR_ABORTED / Target closed (CDP-over-Android 的 navigation
@@ -114,26 +115,21 @@ async function safeGoto(page: Page, url: string): Promise<void> {
   }
 }
 
-async function closeAndroidTargetAndWait(page: Page): Promise<void> {
-  const session = await page.context().newCDPSession(page);
-  const { targetInfo } = await session.send("Target.getTargetInfo");
-  const targetId = targetInfo.targetId;
-  await fetch(`${CDP_ENDPOINT}/json/close/${targetId}`).catch(() => undefined);
+function trackInitScripts(page: Page): () => Promise<void> {
+  const originalAddInitScript = page.addInitScript.bind(page);
+  const disposables: Disposable[] = [];
+  page.addInitScript = (async (...args: unknown[]) => {
+    const disposable = (await Reflect.apply(originalAddInitScript, page, args)) as Disposable;
+    disposables.push(disposable);
+    return disposable;
+  }) as Page["addInitScript"];
 
-  let absentChecks = 0;
-  for (let attempt = 0; attempt < 30; attempt += 1) {
-    const targets = (await fetch(`${CDP_ENDPOINT}/json`)
-      .then((response) => response.json())
-      .catch(() => [])) as Array<{ id?: string }>;
-    if (!targets.some((target) => target.id === targetId)) {
-      absentChecks += 1;
-      if (absentChecks >= 5) return;
-    } else {
-      absentChecks = 0;
+  return async () => {
+    page.addInitScript = originalAddInitScript;
+    for (const disposable of disposables.reverse()) {
+      await disposable.dispose();
     }
-    await new Promise((resolve) => setTimeout(resolve, 100));
-  }
-  throw new Error(`Android Chrome target did not close: ${targetId}`);
+  };
 }
 
 export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
@@ -151,36 +147,39 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
     { scope: "worker" },
   ],
 
-  // emuPage 每个 test 创建一个 page. Android Chrome over CDP 的三条限制
-  // 决定了这种实现方式:
+  // Chrome is launched with one page target by scripts/test/mobile.sh. Keep that
+  // exact target for the whole suite: Android Chrome can race target deletion with
+  // the next Target.createTarget even when DevTools reports the old target gone.
+  emuWorkerPage: [
+    async ({ emuBrowser }, use) => {
+      const context = emuBrowser.contexts()[0];
+      const page = context?.pages()[0];
+      if (!page) throw new Error("Android Chrome did not expose its startup page target");
+      installNavigationTransportRecovery(page);
+      await use(page);
+    },
+    { scope: "worker" },
+  ],
+
+  // Android Chrome over CDP 的限制决定了整套测试复用一个 target:
   // 1. Target.createBrowserContext 失败, 不能 newContext 隔离;
   // 2. page.close 在 emu 上不会从 chrome 删 tab (CDP 会标 page object closed,
-  //    但 emu chrome 里的实际 tab 仍保留, 多次 newPage 会让 chrome 里 tab 单调累积);
-  // 3. addInitScript 没有 unregister API, 跨 spec 共用 page 时多次 install 会让
-  //    fake relay 的 init script 重复叠加.
+  //    但 emu chrome 里的实际 tab 仍保留);
+  // 3. 创建/关闭相邻 target 会发生误杀下一 target 的设备端竞态.
   //
-  // 整套发布门禁只建立一次 browser CDP connection；每个 test 使用独立 target，
-  // 提供独立 document 和 addInitScript registry。测试结束后先通过 DevTools HTTP
-  // 关闭当前 target，并等它稳定消失；下一 test 才创建新 target。这个顺序避免旧页
-  // 后台运行，也不会重现“先建新页、再异步 close 旧页”误杀新 target 的竞态。
+  // 每条测试仍有独立的 init-script 与 route 生命周期：init script 直接经 CDP
+  // 注册并按 identifier 移除，route 在 teardown 清空。页面存储也在 setup 清空。
   emuPage: [
-    async ({ emuBrowser }, use) => {
-      const contexts = emuBrowser.contexts();
-      const context = contexts[0] ?? (await emuBrowser.newContext());
-      // Keep Chrome's startup page as a passive anchor so closing a test target
-      // never leaves DevTools without any page target.
-      const page = await context.newPage();
-      installNavigationTransportRecovery(page);
-      await safeGoto(page, VITE_BASE_URL);
-      // Target replacement preserves this origin's storage. Clear it before each spec
-      // installs its init scripts so a previous fake proxy/session selection cannot
-      // redirect the next spec to stale offline state.
+    async ({ emuWorkerPage: page }, use) => {
+      const removeInitScripts = trackInitScripts(page);
       await page.evaluate(() => {
         localStorage.clear();
         sessionStorage.clear();
       });
+      await safeGoto(page, VITE_BASE_URL);
       await use(page);
-      await closeAndroidTargetAndWait(page);
+      await removeInitScripts();
+      await page.unrouteAll({ behavior: "wait" });
     },
     // safeGoto has three bounded recovery attempts (20s navigation + 10s shell
     // readiness each). Do not let the global 30s test timeout cut the worker
