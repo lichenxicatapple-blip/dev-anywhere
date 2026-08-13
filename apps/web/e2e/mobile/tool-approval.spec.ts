@@ -8,7 +8,6 @@ async function setupApprovalChat(page: import("@playwright/test").Page): Promise
   await installFakeRelay(page);
   // json-sess 在 fakeRelay 默认带 1 个 pending approval (Bash command "pnpm test").
   await page.goto(`${mobileBaseUrl}/#/chat/json-sess?mode=json`);
-  await page.reload();
   const card = page.locator('[data-slot="tool-approval-card"][data-status="pending"]');
   await expect(card).toBeVisible({ timeout: 30_000 });
 }

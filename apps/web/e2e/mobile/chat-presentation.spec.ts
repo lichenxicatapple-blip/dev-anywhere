@@ -9,7 +9,6 @@ test.describe("L4 mobile / chat presentation", () => {
   test.setTimeout(90_000);
 
   test("auto-restore 落到已死 session 时静默退到 /sessions", async ({ emuPage }) => {
-    await emuPage.goto(`${mobileBaseUrl}/#/`);
     await installFakeRelay(emuPage);
     await emuPage.addInitScript(() => {
       localStorage.setItem("dev-anywhere:last-chat-route", "/chat/dead-session?mode=json");
@@ -17,7 +16,7 @@ test.describe("L4 mobile / chat presentation", () => {
       // sessionStorage 跨 reload 持久, 清掉 RESTORED_FLAG 才能触发 cold-start 路径。
       sessionStorage.removeItem("dev-anywhere:route-restored");
     });
-    await emuPage.reload();
+    await emuPage.goto(`${mobileBaseUrl}/#/`);
 
     await expect(emuPage).toHaveURL(/#\/sessions/, { timeout: 30_000 });
     await expect(emuPage.locator('[data-slot="terminated-session-panel"]')).toHaveCount(0);
@@ -41,9 +40,6 @@ test.describe("L4 mobile / chat presentation", () => {
     // json-sess intentionally carries a pending approval. This scenario needs an
     // idle composer before it switches the proxy offline.
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    // The route change above is hash-only; reload once so installFakeRelay's
-    // addInitScript runs in a new document.
-    await emuPage.reload();
     await expect(emuPage.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
       timeout: 30_000,
     });

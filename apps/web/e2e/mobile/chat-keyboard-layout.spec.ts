@@ -13,7 +13,6 @@ test.describe("L4 mobile / JSON chat keyboard and bubble layout", () => {
   test("keeps the complete composer above the Android keyboard toolbar", async ({ emuPage }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
@@ -60,7 +59,6 @@ test.describe("L4 mobile / JSON chat keyboard and bubble layout", () => {
   }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await emuPage.reload();
     await expect(emuPage.getByLabel("输入聊天消息")).toBeVisible({ timeout: 30_000 });
 
     await emuPage.evaluate(() => {
@@ -102,7 +100,6 @@ test.describe("L4 mobile / JSON chat keyboard and bubble layout", () => {
   test("keeps a wrapped JSON bubble file link tappable for download", async ({ emuPage }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await emuPage.reload();
     await expect(emuPage.getByLabel("输入聊天消息")).toBeVisible({ timeout: 30_000 });
 
     const path = "deep/" + "very-long-directory/".repeat(10) + "README.md";

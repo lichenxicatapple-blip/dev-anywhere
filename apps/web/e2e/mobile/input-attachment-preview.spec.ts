@@ -14,7 +14,6 @@ test.describe("L4 mobile / chat attachment preview", () => {
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
@@ -94,7 +93,6 @@ test.describe("L4 mobile / chat attachment preview", () => {
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
@@ -151,7 +149,6 @@ test.describe("L4 mobile / chat attachment preview", () => {
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
@@ -214,7 +211,6 @@ test.describe("L4 mobile / chat attachment preview", () => {
   }, testInfo) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await emuPage.reload();
 
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });

@@ -10,6 +10,7 @@ const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://127.0.0.1:5174
 const execFileAsync = promisify(execFile);
 const MOBILE_NETWORK_ERROR =
   /(?:net::ERR_(?:EMPTY_RESPONSE|SOCKET_NOT_CONNECTED|CONNECTION_REFUSED)|chrome-error:\/\/chromewebdata)/;
+let testDocumentRevision = 0;
 
 async function restoreAdbReverse(): Promise<void> {
   const serialArgs = process.env.ANDROID_SERIAL ? ["-s", process.env.ANDROID_SERIAL] : [];
@@ -176,7 +177,9 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
         localStorage.clear();
         sessionStorage.clear();
       });
-      await safeGoto(page, VITE_BASE_URL);
+      const cleanDocumentUrl = new URL(VITE_BASE_URL);
+      cleanDocumentUrl.searchParams.set("__mobile_test", String(++testDocumentRevision));
+      await safeGoto(page, cleanDocumentUrl.href);
       await use(page);
       await removeInitScripts();
       await page.unrouteAll({ behavior: "wait" });

@@ -9,7 +9,6 @@ test.describe("L4 mobile / adaptive initial PTY geometry", () => {
   }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/`);
-    await emuPage.reload();
     await selectFakeProxy(emuPage);
     await emuPage.locator('[data-slot="create-session-mobile-trigger"]:visible').click();
     await emuPage.locator('[data-slot="create-terminal-session-sheet-item"]').click();

@@ -45,7 +45,6 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
   }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/fo-sess?mode=json`);
-    await emuPage.reload();
     // 先等 input-bar 出现 (chat view mount 完毕). 此时 message-list 还可能因为
     // 0 message 没渲染容器, 灌 message 后再断言.
     await expect(emuPage.getByLabel("输入聊天消息")).toBeVisible({ timeout: 30_000 });
@@ -96,7 +95,6 @@ test.describe("L4 mobile / JSON streaming respects user reading position", () =>
   }) => {
     await installFakeRelay(emuPage);
     await emuPage.goto(`${mobileBaseUrl}/#/chat/fo-sess?mode=json`);
-    await emuPage.reload();
     const input = emuPage.getByLabel("输入聊天消息");
     await expect(input).toBeVisible({ timeout: 30_000 });
 
