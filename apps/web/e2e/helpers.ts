@@ -107,7 +107,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     });
   });
 
-  await page.addInitScript(() => {
+  const installFakeRelayInDocument = () => {
     if (window.__devAnywhereFakeRelayInstalled) return;
     Object.defineProperty(window, "__devAnywhereFakeRelayInstalled", {
       configurable: true,
@@ -1057,7 +1057,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
     };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;
-  });
+  };
+  await page.addInitScript(installFakeRelayInDocument);
+  await page.evaluate(installFakeRelayInDocument);
 }
 
 export async function selectFakeProxy(page: Page): Promise<void> {
