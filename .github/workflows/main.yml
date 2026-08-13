@@ -1,4 +1,4 @@
-name: Release Please
+name: Main Verification
 
 on:
   push:
@@ -6,15 +6,11 @@ on:
       - main
 
 concurrency:
-  group: release-please-${{ github.ref }}
+  group: main-verification-${{ github.ref }}
   cancel-in-progress: true
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  packages: write
-  id-token: write
+  contents: read
 
 jobs:
   verify:
@@ -62,7 +58,7 @@ jobs:
       - name: Install Chromium
         run: pnpm --filter @dev-anywhere/web exec playwright install --with-deps chromium
 
-      - name: Run process Chaos release gate
+      - name: Run process Chaos verification
         run: RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
 
       - name: Upload Chaos service logs
@@ -74,29 +70,3 @@ jobs:
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 7
-
-  release-please:
-    name: Prepare or create release
-    runs-on: ubuntu-latest
-    outputs:
-      release_created: ${{ steps.release.outputs.release_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - name: Maintain Release PR
-        id: release
-        uses: googleapis/release-please-action@v4
-        with:
-          config-file: release-please-config.json
-          manifest-file: .release-please-manifest.json
-
-  publish:
-    name: Publish release artifacts
-    needs:
-      - verify
-      - verify-chaos
-      - release-please
-    if: needs.release-please.outputs.release_created == 'true'
-    uses: ./.github/workflows/release.yml
-    with:
-      tag_name: ${{ needs.release-please.outputs.tag_name }}
-    secrets: inherit

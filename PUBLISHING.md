@@ -14,64 +14,57 @@ A single `vX.Y.Z` git tag produces three public artifacts:
 
 ## Release pipeline
 
-普通改动合并到 `main` 后，`.github/workflows/release-please.yml` 会创建或更新一个 Release PR。这个 PR 集中维护：
+本地 `pnpm release X.Y.Z` 是唯一创建版本的入口。脚本会：
 
-- 下一个语义化版本；
-- 根目录和四个 workspace package 的版本号；
-- `.release-please-manifest.json`；
-- `CHANGELOG.md`。
+1. 确认当前分支是与 `origin/main` 一致的 `main`，并校验目标版本和 CHANGELOG。
+2. 运行发布检查、快速 smoke、进程/网络 Chaos 和完整 Android Chrome 门禁。
+3. 同步根目录和四个 workspace package 的版本号。
+4. 创建 release commit 和 `vX.Y.Z` tag，再推送 commit 与 tag。
 
-所有贡献 PR 都会通过 `.github/workflows/ci.yml` 运行单元测试和发布包检查。Release PR 合并到 `main` 后还会复用同一门禁；只有门禁通过，Release Please 才会创建 tag 和 GitHub Release。
+所有贡献 PR 都会通过 `.github/workflows/ci.yml` 运行单元测试和发布包检查。普通改动推送到 `main` 后，`.github/workflows/main.yml` 会再次运行同一套 CI 和独立 Chaos 检查，但不会修改版本、创建 PR、创建 tag 或发布产物。
 
-合并 Release PR 后，Release Please 会创建 `vX.Y.Z` tag 和 GitHub Release，并直接调用 `.github/workflows/release.yml`：
+本地脚本推送 `vX.Y.Z` tag 后，`.github/workflows/release.yml` 会执行：
 
 1. `publish-images` 构建 `dev-anywhere-relay`，向 GHCR 以及可选的阿里云 ACR 推送 `latest`、`vX.Y.Z`、`X.Y.Z`、`X.Y` 和 `X`。
 2. `publish-npm` 构建 workspace，先发布 `@dev-anywhere/relay`，再发布依赖相同 Relay 版本的 `@dev-anywhere/proxy`。
 3. `ensure-github-release` 确保手工 tag 的应急发布同样具有 GitHub Release。
 
-发布 workflow 仍监听手工推送的 `v*.*.*` tag，作为 Release Please 无法使用时的兜底。Release Please 直接调用发布 workflow，是因为它用仓库的 `GITHUB_TOKEN` 创建 tag 时，GitHub 不会为该 tag 再触发一轮 workflow。
+发布 workflow 的正常入口只有 `v*.*.*` tag push。`workflow_dispatch` 仅用于对已经存在的 tag 做故障恢复，不负责决定版本或创建 tag。
 
 GHCR 使用 workflow 的 `GITHUB_TOKEN`；npm 发布需要 `NPM_TOKEN`。阿里云 ACR 发布需要 `ACR_REGISTRY`、`ACR_NAMESPACE`、`ACR_USERNAME` 和 `ACR_PASSWORD`。
 
 ## Preparing changes
 
-Release Please 根据 Conventional Commits 判断版本：
-
-- `fix:` 生成 patch 版本；
-- `feat:` 生成 minor 版本；
-- `feat!:`、`fix!:` 或包含 `BREAKING CHANGE:` 的提交生成 breaking release；在 `1.0.0` 之前，本项目将它映射为 minor 版本；
-- `docs:`、`test:`、`chore:` 等维护提交不会单独生成版本。
-
-提交和 PR 标题都建议使用这个格式，尤其是在使用 squash merge 时：
+提交和 PR 标题建议使用 Conventional Commits 格式，方便理解变更范围：
 
 ```text
 fix(proxy): restore Codex session titles
 feat(web): add attachment previews
 ```
 
-日常发布不再手工修改版本号、CHANGELOG 或 tag。确认 Release PR 内容和发布门禁后，合并它即可发布。
+发布前先决定明确的 `X.Y.Z` 版本，并在 `CHANGELOG.md` 添加 `## [X.Y.Z] - YYYY-MM-DD`。不要手工修改 package 版本或创建 tag，发布脚本会统一处理。
 
-涉及移动端行为时，在合并 Release PR 前仍需完成 Android 或 iPad 对应验收。
+涉及移动端行为时，在正式发布前仍需完成 Android 或 iPad 对应验收。
 
 发布开始后可以这样跟踪：
 
 ```bash
-gh run list --workflow "Release Please" --limit 5
+gh run list --workflow "Main Verification" --limit 5
 gh run list --workflow Release --limit 5
 gh run watch <run-id> --exit-status
 ```
 
 如果发布 workflow 失败，可在 GitHub Actions 中重新运行失败任务；发布步骤会跳过已经存在的 npm 版本。不要移动或覆盖已经公开的 tag。
 
-## Emergency manual release
+## Local release
 
-需要明确指定版本并绕过 Release PR 时，先补充 CHANGELOG 条目，再运行：
+补充 CHANGELOG 条目后，在与远端一致的本地 `main` 运行：
 
 ```bash
 pnpm release X.Y.Z
 ```
 
-脚本仍会执行完整发布检查，并同步 Release Please manifest、所有 package 版本、release commit 和 tag。`--emergency` 只跳过耗时的 release smoke，不会跳过构建和包完整性检查：
+脚本会执行完整发布检查，并同步所有 package 版本、release commit 和 tag。`--emergency` 只跳过快速 smoke，不会跳过 `release:check`、Chaos 或 Android 门禁：
 
 ```bash
 pnpm run release -- --emergency X.Y.Z
@@ -80,14 +73,14 @@ pnpm run release -- --emergency X.Y.Z
 ## First-time repo setup
 
 1. 在 GitHub 仓库 Settings -> Secrets and variables -> Actions 中添加 `NPM_TOKEN`，它需要能够发布两个 npm 包。
-2. Settings -> Actions -> General 中允许 workflow 使用写权限，并启用 “Allow GitHub Actions to create and approve pull requests”。
+2. GitHub Actions 默认保持只读；只有 Release workflow 的 npm、镜像和 GitHub Release 步骤使用所需的最小写权限。
 3. 阿里云 ACR 发布需要 `ACR_REGISTRY`、`ACR_NAMESPACE`、`ACR_USERNAME` 和 `ACR_PASSWORD`。
 4. 保持阿里云 ACR 仓库公开，VPS 才能在未登录时执行 `docker pull`。
 5. 第一次发布会创建 GHCR package；如果要通过 `REGISTRY_BASE=ghcr.io/lichenxicatapple-blip` 使用它，需要将 package 设为公开。
 
 ## Version policy
 
-- DEV Anywhere 只使用一个产品版本；Release Please 会同步根 package、Proxy、Relay、Web 和 Shared 的版本。
+- DEV Anywhere 只使用一个产品版本；本地发布脚本会同步根 package、Proxy、Relay、Web 和 Shared 的版本。
 - Pre-`1.0.0`: minor bumps may include breaking changes. Document user-facing breakage in release notes or the changelog.
 
 ## VPS deploy

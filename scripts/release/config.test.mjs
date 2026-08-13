@@ -4,8 +4,6 @@ import fs from "node:fs";
 const readJson = (path) => JSON.parse(fs.readFileSync(path, "utf8"));
 
 const rootPackage = readJson("package.json");
-const manifest = readJson(".release-please-manifest.json");
-const config = readJson("release-please-config.json");
 const versionFiles = [
   "apps/proxy/package.json",
   "apps/relay/package.json",
@@ -14,25 +12,11 @@ const versionFiles = [
 ];
 
 assert.match(rootPackage.version, /^\d+\.\d+\.\d+$/);
-assert.equal(manifest["."], rootPackage.version);
-assert.equal(config["release-type"], "node");
-assert.equal(config["include-v-in-tag"], true);
-assert.equal(config["include-component-in-tag"], false);
-assert.equal(config.packages["."] !== undefined, true);
-
-const configuredFiles = config.packages["."]["extra-files"];
-assert.deepEqual(configuredFiles.map(({ path }) => path).sort(), versionFiles.toSorted());
-
-for (const entry of configuredFiles) {
-  assert.equal(entry.type, "json");
-  assert.equal(entry.jsonpath, "$.version");
-}
-
 for (const path of versionFiles) {
   assert.equal(readJson(path).version, rootPackage.version, `${path} version drifted`);
 }
 
-const releasePleaseWorkflow = fs.readFileSync(".github/workflows/release-please.yml", "utf8");
+const mainWorkflow = fs.readFileSync(".github/workflows/main.yml", "utf8");
 const expectedCiNodeVersion = "22.22.2";
 const assertPinnedCiNode = (workflow, path) => {
   const versions = [...workflow.matchAll(/node-version:\s*["']?([^\s"']+)/g)].map(
@@ -46,35 +30,23 @@ const assertPinnedCiNode = (workflow, path) => {
   );
 };
 
-assert.match(releasePleaseWorkflow, /googleapis\/release-please-action@v4/);
-assert.match(releasePleaseWorkflow, /group: release-please-\$\{\{ github\.ref \}\}/);
-assert.match(releasePleaseWorkflow, /cancel-in-progress: true/);
-assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/ci\.yml/);
-assert.match(
-  releasePleaseWorkflow,
-  /needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- release-please/,
-);
-assert.match(releasePleaseWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1/);
-assert.match(releasePleaseWorkflow, /Configure isolated local runtime/);
-assert.match(releasePleaseWorkflow, /ws:\/\/localhost:3100/);
-assert.match(releasePleaseWorkflow, /path: ~\/\.dev-anywhere/);
-assert.match(releasePleaseWorkflow, /include-hidden-files: true/);
-assert.doesNotMatch(releasePleaseWorkflow, /verify-android|android-emulator-runner|pnpm test:mobile/);
-assert.match(releasePleaseWorkflow, /release_created == 'true'/);
-assert.match(
-  releasePleaseWorkflow,
-  /release-please:\s*\n\s*name: Prepare or create release\s*\n\s*runs-on:/,
-);
-assert.match(
-  releasePleaseWorkflow,
-  /publish:\s*\n(?:.|\n)*?needs:\s*\n\s*- verify\s*\n\s*- verify-chaos\s*\n\s*- release-please/,
-);
-assert.match(releasePleaseWorkflow, /uses: \.\/\.github\/workflows\/release\.yml/);
-assert.match(releasePleaseWorkflow, /secrets: inherit/);
+assert.match(mainWorkflow, /name: Main Verification/);
+assert.match(mainWorkflow, /group: main-verification-\$\{\{ github\.ref \}\}/);
+assert.match(mainWorkflow, /cancel-in-progress: true/);
+assert.match(mainWorkflow, /permissions:\s*\n\s*contents: read/);
+assert.match(mainWorkflow, /uses: \.\/\.github\/workflows\/ci\.yml/);
+assert.match(mainWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1/);
+assert.match(mainWorkflow, /Configure isolated local runtime/);
+assert.match(mainWorkflow, /ws:\/\/localhost:3100/);
+assert.match(mainWorkflow, /path: ~\/\.dev-anywhere/);
+assert.match(mainWorkflow, /include-hidden-files: true/);
+assert.doesNotMatch(mainWorkflow, /verify-android|android-emulator-runner|pnpm test:mobile/);
+assert.doesNotMatch(mainWorkflow, /release-please|release_created|Publish release artifacts/);
+assert.doesNotMatch(mainWorkflow, /uses: \.\/\.github\/workflows\/release\.yml/);
 
 const ciWorkflow = fs.readFileSync(".github/workflows/ci.yml", "utf8");
 assertPinnedCiNode(ciWorkflow, ".github/workflows/ci.yml");
-assertPinnedCiNode(releasePleaseWorkflow, ".github/workflows/release-please.yml");
+assertPinnedCiNode(mainWorkflow, ".github/workflows/main.yml");
 assert.match(ciWorkflow, /pull_request:/);
 assert.match(ciWorkflow, /workflow_call:/);
 assert.match(ciWorkflow, /pnpm test/);
@@ -93,8 +65,9 @@ assert.match(smokeCommon, /shared-build\.log/);
 
 const publishWorkflow = fs.readFileSync(".github/workflows/release.yml", "utf8");
 assertPinnedCiNode(publishWorkflow, ".github/workflows/release.yml");
-assert.match(publishWorkflow, /workflow_call:/);
 assert.match(publishWorkflow, /workflow_dispatch:/);
+assert.match(publishWorkflow, /push:\s*\n\s*tags:\s*\n\s*- "v\*\.\*\.\*"/);
+assert.doesNotMatch(publishWorkflow, /workflow_call:/);
 assert.match(publishWorkflow, /provenance: false/);
 assert.match(publishWorkflow, /sbom: false/);
 assert.match(publishWorkflow, /type=raw,value=\$\{\{ needs\.resolve-release\.outputs\.tag \}\}/);

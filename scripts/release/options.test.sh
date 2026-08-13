@@ -48,36 +48,38 @@ if grep -q '"test:mobile":"bash scripts/test/mobile-parallel.sh"' <<<"$mobile_pa
   exit 1
 fi
 
-release_please_workflow="$(cat .github/workflows/release-please.yml)"
-grep -q 'verify-chaos:' <<<"$release_please_workflow"
-grep -q -- '- verify-chaos' <<<"$release_please_workflow"
-grep -q 'RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep' <<<"$release_please_workflow"
-grep -q 'Configure isolated local runtime' <<<"$release_please_workflow"
-grep -q 'ws://localhost:3100' <<<"$release_please_workflow"
-grep -q 'group: release-please-' <<<"$release_please_workflow"
-grep -q 'cancel-in-progress: true' <<<"$release_please_workflow"
-grep -q 'path: ~/.dev-anywhere' <<<"$release_please_workflow"
-grep -q 'include-hidden-files: true' <<<"$release_please_workflow"
+main_workflow="$(cat .github/workflows/main.yml)"
+grep -q 'verify-chaos:' <<<"$main_workflow"
+grep -q 'RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep' <<<"$main_workflow"
+grep -q 'Configure isolated local runtime' <<<"$main_workflow"
+grep -q 'ws://localhost:3100' <<<"$main_workflow"
+grep -q 'group: main-verification-' <<<"$main_workflow"
+grep -q 'cancel-in-progress: true' <<<"$main_workflow"
+grep -q 'path: ~/.dev-anywhere' <<<"$main_workflow"
+grep -q 'include-hidden-files: true' <<<"$main_workflow"
 if grep -q 'service_status | grep -q' <<<"$chaos_script"; then
   echo "Chaos status probes must not use grep -q under pipefail" >&2
   exit 1
 fi
-grep -q 'Upload Chaos service logs' <<<"$release_please_workflow"
-grep -q 'process-chaos-service-logs-' <<<"$release_please_workflow"
-if grep -qE 'verify-android:|android-emulator-runner|pnpm test:mobile' <<<"$release_please_workflow"; then
-  echo "GitHub Release Please must not run the local Android emulator gate" >&2
+grep -q 'Upload Chaos service logs' <<<"$main_workflow"
+grep -q 'process-chaos-service-logs-' <<<"$main_workflow"
+if grep -qE 'verify-android:|android-emulator-runner|pnpm test:mobile' <<<"$main_workflow"; then
+  echo "GitHub main verification must not run the local Android emulator gate" >&2
+  exit 1
+fi
+if grep -qE 'release-please|release_created|Publish release artifacts|workflows/release\.yml' <<<"$main_workflow"; then
+  echo "GitHub main verification must never create or publish releases" >&2
   exit 1
 fi
 grep -q 'mobile_run_playwright_spec' scripts/test/mobile.sh
 grep -q -- '--workers=1' scripts/test/mobile.sh
 grep -q -- '--retries=0' scripts/test/mobile.sh
 grep -q -- '--max-failures=1' scripts/test/mobile.sh
-publish_dependencies="$(sed -n '/^  publish:/,/^    runs-on:\|^    uses:/p' <<<"$release_please_workflow")"
-grep -q -- '- verify' <<<"$publish_dependencies"
-grep -q -- '- verify-chaos' <<<"$publish_dependencies"
-grep -q -- '- release-please' <<<"$publish_dependencies"
-if grep -q -- '- verify-android' <<<"$publish_dependencies"; then
-  echo "GitHub publish must not depend on a hosted Android emulator" >&2
+publish_workflow="$(cat .github/workflows/release.yml)"
+grep -Fq -- '- "v*.*.*"' <<<"$publish_workflow"
+grep -q 'workflow_dispatch:' <<<"$publish_workflow"
+if grep -q 'workflow_call:' <<<"$publish_workflow"; then
+  echo "GitHub release must only accept a pushed tag or manual recovery dispatch" >&2
   exit 1
 fi
 

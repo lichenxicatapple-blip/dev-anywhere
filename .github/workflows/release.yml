@@ -12,12 +12,6 @@ on:
         description: Existing vX.Y.Z tag to publish
         required: true
         type: string
-  workflow_call:
-    inputs:
-      tag_name:
-        description: Existing vX.Y.Z tag to publish
-        required: true
-        type: string
 
 permissions:
   contents: read
