@@ -455,6 +455,10 @@ export function usePtySelectionController(
   const hasPtySelectionHandles = ptySelectionHandles !== null;
   useLayoutEffect(() => {
     if (!hasPtySelectionHandles) return;
+    // A long press can create the selection after Android has already started closing the
+    // keyboard, so the visualViewport listeners below may miss the first resize event. Mark the
+    // transition here as well, before relayout can produce a browser-driven container scroll.
+    selectionViewportTransitionUntilRef.current = performance.now() + VIEWPORT_SELECTION_SETTLE_MS;
     scrollControllerRef.current?.relayout();
     refreshSelectionHandles();
   }, [hasPtySelectionHandles, keyboardOffset, refreshSelectionHandles, scrollControllerRef]);
