@@ -22,7 +22,7 @@ import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import { attachPtyReviewSnapshot } from "@/lib/pty-review-snapshot";
 import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
-import { isOnlyPtyMouseInput } from "@/lib/pty-mouse-input";
+import { isOnlyPtyNonTypingInput } from "@/lib/pty-non-typing-input";
 import {
   attachPtyScrollController,
   type PtyPageResumeState,
@@ -325,7 +325,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const connection = usePtyConnectionState();
   const follow = usePtyFollowState();
   const traceEnabled = usePtyScrollTraceEnabled();
-  const { isOpen: imagePreviewOpen, openImagePreview } = useImagePreview();
+  const { openImagePreview } = useImagePreview();
 
   // === 私有 ref（仅供 hook 内部使用，不暴露给 JSX）===
   const terminalRef = useRef<Terminal | null>(null);
@@ -351,9 +351,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const pageResumeHadNewFrameRef = useRef(false);
   const keepAliveHadNewFrameRef = useRef(false);
   const pageResumeFrameRef = useRef<number | null>(null);
-  const imagePreviewReviewStateRef = useRef<
-    Extract<PtyPageResumeState, { mode: "reviewing" }> | undefined
-  >(undefined);
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
     hasSeenSoftKeyboard: false,
@@ -463,32 +460,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     cancelAnimationFrame(pageResumeFrameRef.current);
     pageResumeFrameRef.current = null;
   }, []);
-
-  const openPtyImagePreview = useCallback(
-    (path: string): void => {
-      const scroll = scrollControllerRef.current;
-      const reviewState = scroll?.capturePageResumeState();
-      if (reviewState?.mode === "reviewing") {
-        imagePreviewReviewStateRef.current = reviewState;
-        scroll?.preparePageResumeRestore(reviewState);
-      }
-
-      openImagePreview(path);
-    },
-    [openImagePreview],
-  );
-
-  useEffect(() => {
-    if (imagePreviewOpen) return;
-    const reviewState = imagePreviewReviewStateRef.current;
-    if (!reviewState) return;
-    imagePreviewReviewStateRef.current = undefined;
-    scrollControllerRef.current?.restorePageResume(reviewState);
-  }, [imagePreviewOpen]);
-
-  useEffect(() => {
-    imagePreviewReviewStateRef.current = undefined;
-  }, [sessionId]);
 
   const rememberHiddenPtyState = useCallback((): void => {
     if (!pageResumePendingRef.current) pageResumeHadNewFrameRef.current = false;
@@ -734,7 +705,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     onTap: handlePtyTap,
     isTapCandidate: isPtyTapCandidate,
     onDownloadPath: downloadPtyPath,
-    onPreviewPath: openPtyImagePreview,
+    onPreviewPath: openImagePreview,
   });
   ptySelectionActiveRef.current = selection.ptySelectionHandles !== null;
 
@@ -849,7 +820,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     };
 
     const onRawInput = (data: string): void => {
-      if (isOnlyPtyMouseInput(data)) return;
+      if (isOnlyPtyNonTypingInput(data)) return;
       scheduleRawInputFollow("rawInput", { force: true });
       resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
     };
@@ -890,7 +861,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           setFindResult(result);
         });
         setFindReady(true);
-        const imageLinkRegistration = registerImagePreviewLinkProvider(xterm, openPtyImagePreview);
+        const imageLinkRegistration = registerImagePreviewLinkProvider(xterm, openImagePreview);
         imageLinkDispose = imageLinkRegistration.dispose;
         registerPtyLinkProvider(sessionId, "image-preview", imageLinkRegistration.provider);
         const fileDownloadLinkRegistration = registerFileDownloadLinkProvider(
@@ -1104,7 +1075,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     getPtyPlainEnterBehavior,
     isPtyPhysicalKeyboardMode,
     downloadPtyPath,
-    openPtyImagePreview,
+    openImagePreview,
     suppressPtyFocus,
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,

@@ -276,6 +276,10 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         : `terminal history ${String(index).padStart(3, "0")}`,
     );
     await emitPtyLine(page, `${lines.join("\r\n")}\r\n`);
+    // Codex and other TUIs enable DECSET 1004. Opening the preview then makes xterm emit the
+    // three-byte CSI O focus-out report through onData; it must reach the PTY without being
+    // mistaken for keyboard input that should return the viewport to the live prompt.
+    await emitPtyLine(page, "\x1b[?1004h");
     await waitForBufferContains(page, path);
 
     const terminalScroller = page.locator('[data-slot="pty-terminal"]');
@@ -348,17 +352,25 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     expect(before).not.toBeNull();
     expect(before!.bottomGap).toBeGreaterThan(100);
 
+    await page.evaluate(() => {
+      const element = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      const term = window.__ccTestPtyTerminals?.get("claude-pty");
+      if (!element || !term) return;
+      const samples: Array<{ scrollTop: number; viewportY: number }> = [];
+      const record = (): void => {
+        samples.push({ scrollTop: element.scrollTop, viewportY: term.buffer.active.viewportY });
+        element.dataset.e2eScrollSamples = JSON.stringify(samples);
+      };
+      element.addEventListener("scroll", record);
+      term.onScroll(record);
+      record();
+    });
+
     await page.keyboard.down("Meta");
     await page.mouse.click(clickPoint!.x, clickPoint!.y);
     await page.keyboard.up("Meta");
     await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
     await expect(page.locator('[data-slot="image-preview-loading"]')).toBeVisible();
-    await terminalScroller.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
-    await page.setViewportSize({ width: 1279, height: 800 });
-    await emitPtyLine(page, "live output while historical image preview opens\r\n");
     await page.evaluate(() => window.__devAnywhereE2E?.releaseImagePreviews());
     await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
     await page.evaluate(
@@ -385,19 +397,30 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     expect(after!.viewportY).toBe(before!.viewportY);
     expect(after!.bottomGap).toBeGreaterThan(100);
 
+    const samples = await terminalScroller.evaluate((element) =>
+      JSON.parse(element.dataset.e2eScrollSamples ?? "[]"),
+    );
+    expect(samples.length).toBeGreaterThan(0);
+    for (const sample of samples) {
+      expect(sample.scrollTop).toBeCloseTo(before!.scrollTop, 0);
+      expect(sample.viewportY).toBe(before!.viewportY);
+    }
+
+    await expect
+      .poll(async () => {
+        const sent = await sentFakeRelayMessages(page);
+        return sent.some(
+          (message: FakeRelayMessage) =>
+            message.type === "remote_input_raw" && message.data === "\x1b[O",
+        );
+      })
+      .toBe(true);
+
     await page.locator('[data-slot="image-preview-dialog"] [data-slot="dialog-close"]').click();
     await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeHidden();
-    await terminalScroller.evaluate((element) => {
-      element.scrollTop = element.scrollHeight;
-      element.dispatchEvent(new Event("scroll", { bubbles: true }));
-    });
     await expect
-      .poll(() =>
-        terminalScroller.evaluate(
-          (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
-        ),
-      )
-      .toBeLessThanOrEqual(8);
+      .poll(() => terminalScroller.evaluate((element) => element.scrollTop))
+      .toBeCloseTo(before!.scrollTop, 0);
   });
 
   test("selected image path opens preview from the terminal selection toolbar", async ({

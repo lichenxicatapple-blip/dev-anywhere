@@ -1,17 +1,22 @@
 const CSI = "\x1b[";
 
-// xterm exposes terminal mouse reports through the same onData channel as keyboard input.
-// They must not be treated as an intent to return to the live prompt while the user is
-// interacting with historical output (for example Cmd/Ctrl-clicking a file link).
-export function isOnlyPtyMouseInput(data: string): boolean {
+// Focus-aware terminal applications enable DECSET 1004. xterm then emits CSI I / CSI O through
+// the same onData channel as keyboard input whenever its helper textarea gains or loses focus.
+// Mouse reports use that channel as well. These reports must still reach the PTY, but they are
+// protocol state rather than an instruction from the user to abandon history and follow the cursor.
+export function isOnlyPtyNonTypingInput(data: string): boolean {
   if (data === "") return false;
   let rest = data;
   while (rest.length > 0) {
-    const consumed = mouseInputSequenceLength(rest);
+    const consumed = mouseInputSequenceLength(rest) || focusInputSequenceLength(rest);
     if (consumed === 0) return false;
     rest = rest.slice(consumed);
   }
   return true;
+}
+
+function focusInputSequenceLength(data: string): number {
+  return data.startsWith(`${CSI}I`) || data.startsWith(`${CSI}O`) ? 3 : 0;
 }
 
 function mouseInputSequenceLength(data: string): number {
