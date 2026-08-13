@@ -141,6 +141,7 @@ export function usePtySelectionController(
     null,
   );
   const selectionViewportTransitionUntilRef = useRef(0);
+  const previousKeyboardOffsetRef = useRef(keyboardOffset);
   const selectedPathActionRef = useRef<PtySelectionPathAction | null>(null);
   const selectedPtyTextRef = useRef("");
   const stopPtySelectionGestureRef = useRef<(() => void) | null>(null);
@@ -454,11 +455,17 @@ export function usePtySelectionController(
 
   const hasPtySelectionHandles = ptySelectionHandles !== null;
   useLayoutEffect(() => {
-    if (!hasPtySelectionHandles) return;
+    const keyboardOffsetChanged = previousKeyboardOffsetRef.current !== keyboardOffset;
+    previousKeyboardOffsetRef.current = keyboardOffset;
     // A long press can create the selection after Android has already started closing the
-    // keyboard, so the visualViewport listeners below may miss the first resize event. Mark the
-    // transition here as well, before relayout can produce a browser-driven container scroll.
-    selectionViewportTransitionUntilRef.current = performance.now() + VIEWPORT_SELECTION_SETTLE_MS;
+    // keyboard, so the visualViewport listeners below may miss the first resize event. Extend the
+    // transition only for a real keyboard geometry change; ordinary desktop selection must still
+    // be dismissed immediately when the user scrolls.
+    if (keyboardOffsetChanged) {
+      selectionViewportTransitionUntilRef.current =
+        performance.now() + VIEWPORT_SELECTION_SETTLE_MS;
+    }
+    if (!hasPtySelectionHandles) return;
     scrollControllerRef.current?.relayout();
     refreshSelectionHandles();
   }, [hasPtySelectionHandles, keyboardOffset, refreshSelectionHandles, scrollControllerRef]);
