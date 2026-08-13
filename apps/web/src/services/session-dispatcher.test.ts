@@ -12,13 +12,14 @@ function session(sessionId: string, state: SessionInfo["state"] = "idle"): Sessi
 function envelope(
   type: "session_list" | "session_status",
   payload: Record<string, unknown>,
+  timestamp = 1,
 ): MessageEnvelope {
   return {
     type,
     ...(type === "session_status" ? { sessionId: String(payload.sessionId) } : {}),
     payload,
     seq: 1,
-    timestamp: 1,
+    timestamp,
     source: "proxy",
     version: "1",
   } as MessageEnvelope;
@@ -39,6 +40,32 @@ describe("session-dispatcher lifecycle reconciliation", () => {
 
     expect(Object.keys(useChatStore.getState().bySessionId)).toEqual(["alive"]);
     expect(useChatStore.getState().bySessionId.alive.inputDraft).toBe("keep");
+  });
+
+  it("ignores an older empty list that arrives after a reconnected terminal list", () => {
+    useChatStore.getState().setInputDraft("reconnected", "keep");
+    const handler = createSessionMessageHandler();
+
+    handler(envelope("session_list", { sessions: [session("reconnected")] }, 200));
+    handler(envelope("session_list", { sessions: [] }, 100));
+
+    expect(useSessionStore.getState().sessions.map((item) => item.sessionId)).toEqual([
+      "reconnected",
+    ]);
+    expect(useChatStore.getState().bySessionId.reconnected.inputDraft).toBe("keep");
+  });
+
+  it("accepts an older clock after an explicit proxy switch reset", () => {
+    const handler = createSessionMessageHandler();
+    handler(envelope("session_list", { sessions: [session("old-binding")] }, 200));
+
+    useSessionStore.getState().prepareForProxySwitch("Other proxy");
+    useAppStore.setState({ selectedProxyId: "proxy-2" });
+    handler(envelope("session_list", { sessions: [session("new-binding")] }, 10));
+
+    expect(useSessionStore.getState().sessions.map((item) => item.sessionId)).toEqual([
+      "new-binding",
+    ]);
   });
 
   it("fails the active turn and clears approvals when the worker channel errors", () => {

@@ -10,14 +10,26 @@ import { useAppStore } from "@/stores/app-store";
 import { registerDispatcher } from "./dispatcher-registry";
 import { notifySessionIdleTransition } from "./session-idle-notification";
 
+const latestSessionListTimestampByProxy = new Map<string, number>();
+
 function handleSessionList(env: Extract<MessageEnvelope, { type: "session_list" }>): void {
-  if (!useAppStore.getState().selectedProxyId) return;
+  const proxyId = useAppStore.getState().selectedProxyId;
+  if (!proxyId) return;
+  const sessionStore = useSessionStore.getState();
+  // A restarted Proxy can first publish an empty list and then republish its reconnected local
+  // terminals. Relay chaos may reorder those envelopes. Once a list has loaded for this binding,
+  // never let an older snapshot erase newer session lifecycle state.
+  if (!sessionStore.sessionListLoaded) latestSessionListTimestampByProxy.delete(proxyId);
+  const latestTimestamp = latestSessionListTimestampByProxy.get(proxyId);
+  if (latestTimestamp !== undefined && env.timestamp < latestTimestamp) return;
+  latestSessionListTimestampByProxy.set(proxyId, env.timestamp);
+
   const activeSessionIds = new Set(env.payload.sessions.map((session) => session.sessionId));
   const chatStore = useChatStore.getState();
   for (const sessionId of Object.keys(chatStore.bySessionId)) {
     if (!activeSessionIds.has(sessionId)) chatStore.clearSession(sessionId);
   }
-  useSessionStore.getState().setSessions(env.payload.sessions);
+  sessionStore.setSessions(env.payload.sessions);
 }
 
 function handleSessionStatus(env: Extract<MessageEnvelope, { type: "session_status" }>): void {
