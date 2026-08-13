@@ -41,6 +41,9 @@ test.describe("L4 mobile / chat presentation", () => {
     // json-sess intentionally carries a pending approval. This scenario needs an
     // idle composer before it switches the proxy offline.
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
+    // The route change above is hash-only; reload once so installFakeRelay's
+    // addInitScript runs in a new document.
+    await emuPage.reload();
     await expect(emuPage.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
       timeout: 30_000,
     });
