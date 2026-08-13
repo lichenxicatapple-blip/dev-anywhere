@@ -93,29 +93,6 @@ interface MobileWorkerFixtures {
   emuWorkerPage: Page;
 }
 
-// emu 上 page.goto 偶发 ERR_ABORTED / Target closed (CDP-over-Android 的 navigation
-// race 限制). 失败 sleep 后重试一次, 配合 worker scope 单 page 实测能把全套稳住.
-async function safeGoto(page: Page, url: string): Promise<void> {
-  await page.waitForLoadState("domcontentloaded", { timeout: 10_000 }).catch(() => {});
-  for (let attempt = 0; attempt < 3; attempt++) {
-    try {
-      await page.goto(url, { waitUntil: "domcontentloaded", timeout: 20_000 });
-      await page.waitForFunction(
-        () => {
-          const root = document.querySelector("#root");
-          return root !== null && root.childElementCount > 0;
-        },
-        undefined,
-        { timeout: 10_000 },
-      );
-      return;
-    } catch (err) {
-      if (attempt === 2) throw err;
-      await new Promise((r) => setTimeout(r, 800));
-    }
-  }
-}
-
 function trackInitScripts(page: Page): () => Promise<void> {
   const originalAddInitScript = page.addInitScript.bind(page);
   const disposables: Disposable[] = [];
@@ -173,20 +150,25 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
   emuPage: [
     async ({ emuWorkerPage: page }, use) => {
       const removeInitScripts = trackInitScripts(page);
+      const cleanDocumentUrl = new URL(VITE_BASE_URL);
+      cleanDocumentUrl.pathname = "/__dev_anywhere_mobile_test_blank";
+      cleanDocumentUrl.searchParams.set("__mobile_test", String(++testDocumentRevision));
+      const blankRoute = async (route: import("@playwright/test").Route) => {
+        await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html>" });
+      };
+      await page.route(cleanDocumentUrl.href, blankRoute);
+      await page.goto(cleanDocumentUrl.href, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      await page.unroute(cleanDocumentUrl.href, blankRoute);
       await page.evaluate(() => {
         localStorage.clear();
         sessionStorage.clear();
       });
-      const cleanDocumentUrl = new URL(VITE_BASE_URL);
-      cleanDocumentUrl.searchParams.set("__mobile_test", String(++testDocumentRevision));
-      await safeGoto(page, cleanDocumentUrl.href);
       await use(page);
       await removeInitScripts();
       await page.unrouteAll({ behavior: "wait" });
     },
-    // safeGoto has three bounded recovery attempts (20s navigation + 10s shell
-    // readiness each). Do not let the global 30s test timeout cut the worker
-    // fixture off halfway through its documented recovery budget.
+    // Keep setup/teardown outside the per-test assertion budget. Android Chrome
+    // navigation has its own bounded transport-recovery timeout above.
     { scope: "test", timeout: 100_000 },
   ],
 });
