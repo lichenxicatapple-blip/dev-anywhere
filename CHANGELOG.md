@@ -4,6 +4,22 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.5.35](https://github.com/lichenxicatapple-blip/dev-anywhere/compare/v0.5.34...v0.5.35) (2026-08-13)
+
+
+### 修复
+
+* avoid pipefail false negatives in chaos ([5f348a7](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/5f348a76b767c19ac20c17f624c38492660abad8))
+* build web workspace dependencies for smoke gates ([a148f6b](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/a148f6b17bc65d98f5b67f250ce7c4cab9493098))
+* configure hosted chaos runtime ([fd65d1a](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/fd65d1a7189969cbd3c21314f2d89acc0989f2bd))
+* probe dev services through HTTP health ([fc09f40](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/fc09f40173857725ea404a1a05f515144b11c5ae))
+* restore kept-alive PTY after reconnect ([3d7b60c](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/3d7b60cd3955620208a211d0b8199ecb298e534b))
+* stabilize chat interrupts and local Android gate ([55743f6](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/55743f678e18f4962df60d3b7510bafe7fbfbfe7))
+* stabilize hosted release gates ([424cf89](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/424cf89f2250cc740f4a6c735cb24efd3cc7d088))
+* support ACR-compatible release retries ([a53e7f2](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/a53e7f235e688552e64b2d35e294e49c02a1f90f))
+* upgrade hosted browser gate runtime ([042c698](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/042c6988f5c145f2f4bb7b8d68ab82417f16eaa7))
+* use portable service port probes ([40b439e](https://github.com/lichenxicatapple-blip/dev-anywhere/commit/40b439e4df1fa4807b6914e9dc45e6daf185b959))
+
 ## [0.5.35] - 2026-08-13
 
 ### 修复
