@@ -67,7 +67,11 @@ async function navigateWithTransportRecovery<T>(
   throw lastError;
 }
 
+const navigationRecoveryInstalled = new WeakSet<Page>();
+
 function installNavigationTransportRecovery(page: Page): void {
+  if (navigationRecoveryInstalled.has(page)) return;
+  navigationRecoveryInstalled.add(page);
   const originalGoto = page.goto.bind(page);
   const originalReload = page.reload.bind(page);
 
@@ -91,7 +95,42 @@ interface MobileTestFixtures {
 
 interface MobileWorkerFixtures {
   emuBrowser: Browser;
-  emuWorkerPage: Page;
+}
+
+async function currentAndroidPage(browser: Browser): Promise<Page> {
+  const context = browser.contexts()[0];
+  if (!context) throw new Error("Android Chrome did not expose its default context");
+  const existing = context.pages().findLast((page) => !page.isClosed());
+  const page = existing ?? (await context.newPage());
+  installNavigationTransportRecovery(page);
+  return page;
+}
+
+async function stageAndroidTestDocument(browser: Browser): Promise<Page> {
+  const cleanDocumentUrl = new URL(VITE_BASE_URL);
+  cleanDocumentUrl.pathname = "/__dev_anywhere_mobile_test_blank";
+  cleanDocumentUrl.searchParams.set("__mobile_test", String(++testDocumentRevision));
+
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const page = await currentAndroidPage(browser);
+    const blankRoute = async (route: import("@playwright/test").Route) => {
+      await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html>" });
+    };
+    try {
+      await page.route(cleanDocumentUrl.href, blankRoute);
+      await page.goto(cleanDocumentUrl.href, { waitUntil: "domcontentloaded", timeout: 20_000 });
+      await page.unroute(cleanDocumentUrl.href, blankRoute);
+      await page.evaluate(() => {
+        localStorage.clear();
+        sessionStorage.clear();
+      });
+      return page;
+    } catch (error) {
+      if (!page.isClosed() || attempt === 2) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  throw new Error("Android Chrome did not expose a stable page target");
 }
 
 function trackInitScripts(page: Page): () => Promise<void> {
@@ -127,20 +166,6 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
     { scope: "worker" },
   ],
 
-  // Chrome is launched with one page target by scripts/test/mobile.sh. Keep that
-  // exact target for the whole suite: Android Chrome can race target deletion with
-  // the next Target.createTarget even when DevTools reports the old target gone.
-  emuWorkerPage: [
-    async ({ emuBrowser }, use) => {
-      const context = emuBrowser.contexts()[0];
-      const page = context?.pages()[0];
-      if (!page) throw new Error("Android Chrome did not expose its startup page target");
-      installNavigationTransportRecovery(page);
-      await use(page);
-    },
-    { scope: "worker" },
-  ],
-
   // Android Chrome over CDP 的限制决定了整套测试复用一个 target:
   // 1. Target.createBrowserContext 失败, 不能 newContext 隔离;
   // 2. page.close 在 emu 上不会从 chrome 删 tab (CDP 会标 page object closed,
@@ -150,24 +175,12 @@ export const test = base.extend<MobileTestFixtures, MobileWorkerFixtures>({
   // 每条测试仍有独立的 init-script 与 route 生命周期：init script 直接经 CDP
   // 注册并按 identifier 移除，route 在 teardown 清空。页面存储也在 setup 清空。
   emuPage: [
-    async ({ emuWorkerPage: page }, use) => {
+    async ({ emuBrowser }, use) => {
+      const page = await stageAndroidTestDocument(emuBrowser);
       const removeInitScripts = trackInitScripts(page);
-      const cleanDocumentUrl = new URL(VITE_BASE_URL);
-      cleanDocumentUrl.pathname = "/__dev_anywhere_mobile_test_blank";
-      cleanDocumentUrl.searchParams.set("__mobile_test", String(++testDocumentRevision));
-      const blankRoute = async (route: import("@playwright/test").Route) => {
-        await route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html>" });
-      };
-      await page.route(cleanDocumentUrl.href, blankRoute);
-      await page.goto(cleanDocumentUrl.href, { waitUntil: "domcontentloaded", timeout: 20_000 });
-      await page.unroute(cleanDocumentUrl.href, blankRoute);
-      await page.evaluate(() => {
-        localStorage.clear();
-        sessionStorage.clear();
-      });
       await use(page);
       await removeInitScripts();
-      await page.unrouteAll({ behavior: "wait" });
+      if (!page.isClosed()) await page.unrouteAll({ behavior: "wait" });
     },
     // Keep setup/teardown outside the per-test assertion budget. Android Chrome
     // navigation has its own bounded transport-recovery timeout above.
