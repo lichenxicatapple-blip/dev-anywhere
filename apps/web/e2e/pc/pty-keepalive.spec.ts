@@ -76,7 +76,10 @@ test.describe("PTY keep-alive", () => {
 
     await page.locator('[data-slot="session-row"][data-session-id="codex-pty"]:visible').click();
     await expect(page).toHaveURL(/\/chat\/codex-pty\?mode=pty/);
-    await expect(activePty(page).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+    await expect(ptyEntry(page, "codex-pty")).toHaveAttribute("data-active", "true");
+    await expect(
+      ptyEntry(page, "codex-pty").locator('[data-slot="pty-host"] .xterm'),
+    ).toBeVisible();
 
     await ptyEntry(page, "claude-pty")
       .locator('[data-slot="pty-terminal"]')
