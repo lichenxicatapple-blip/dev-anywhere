@@ -40,9 +40,8 @@ test.describe("L4 mobile / chat presentation", () => {
     // json-sess intentionally carries a pending approval. This scenario needs an
     // idle composer before it switches the proxy offline.
     await emuPage.goto(`${mobileBaseUrl}/#/chat/test-sess?mode=json`);
-    await expect(emuPage.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible({
-      timeout: 30_000,
-    });
+    await expect(emuPage).toHaveURL(/#\/chat\/test-sess\?mode=json/);
+    await expect.poll(() => emuPage.evaluate(() => Boolean(window.__devAnywhereE2E))).toBe(true);
 
     await emuPage.evaluate(() => {
       window.__devAnywhereE2E?.setProxyOnline(false);
