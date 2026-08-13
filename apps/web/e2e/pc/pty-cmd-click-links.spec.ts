@@ -265,6 +265,141 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
       .toBe(true);
   });
 
+  test("real cmd+click previews a historical image without jumping to the PTY bottom", async ({
+    page,
+  }) => {
+    await gotoPty(page);
+    const path = "./screenshots/history-preview.png";
+    const lines = Array.from({ length: 180 }, (_, index) =>
+      index === 48
+        ? `historical image ${path}`
+        : `terminal history ${String(index).padStart(3, "0")}`,
+    );
+    await emitPtyLine(page, `${lines.join("\r\n")}\r\n`);
+    await waitForBufferContains(page, path);
+
+    const terminalScroller = page.locator('[data-slot="pty-terminal"]');
+    const target = await page.evaluate((needle) => {
+      const term = window.__ccTestPtyTerminals?.get("claude-pty");
+      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+      const scroller = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      if (!term || !screen || !scroller) return null;
+      const buffer = term.buffer.active;
+      for (let lineIndex = 0; lineIndex < buffer.length; lineIndex += 1) {
+        const text = buffer.getLine(lineIndex)?.translateToString(true) ?? "";
+        const columnIndex = text.indexOf(needle);
+        if (columnIndex < 0) continue;
+        const cellHeight = screen.clientHeight / term.rows;
+        scroller.scrollTop = Math.max(0, (lineIndex - 4) * cellHeight);
+        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
+        return { lineIndex, columnIndex };
+      }
+      return null;
+    }, path);
+    expect(target).not.toBeNull();
+
+    await expect
+      .poll(() =>
+        page.evaluate(({ lineIndex }) => {
+          const term = window.__ccTestPtyTerminals?.get("claude-pty");
+          if (!term) return false;
+          const row = lineIndex - term.buffer.active.viewportY;
+          return row >= 1 && row < term.rows - 1;
+        }, target!),
+      )
+      .toBe(true);
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const term = window.__ccTestPtyTerminals?.get("claude-pty");
+          return term?.buffer.active.viewportY ?? -1;
+        }),
+      )
+      .toBeGreaterThan(0);
+
+    const clickPoint = await page.evaluate(({ lineIndex, columnIndex }) => {
+      const term = window.__ccTestPtyTerminals?.get("claude-pty");
+      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+      if (!term || !screen) return null;
+      const rect = screen.getBoundingClientRect();
+      const cellWidth = screen.clientWidth / term.cols;
+      const cellHeight = screen.clientHeight / term.rows;
+      const viewportRow = lineIndex - term.buffer.active.viewportY;
+      return {
+        x: rect.left + (columnIndex + 2.5) * cellWidth,
+        y: rect.top + (viewportRow + 0.5) * cellHeight,
+      };
+    }, target!);
+    expect(clickPoint).not.toBeNull();
+
+    await page.mouse.move(clickPoint!.x, clickPoint!.y);
+    await page.evaluate(() => window.__devAnywhereE2E?.holdImagePreviews());
+    const before = await page.evaluate(() => {
+      const element = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      const term = window.__ccTestPtyTerminals?.get("claude-pty");
+      if (!element || !term) return null;
+      return {
+        scrollTop: element.scrollTop,
+        bottomGap: element.scrollHeight - element.clientHeight - element.scrollTop,
+        viewportY: term.buffer.active.viewportY,
+      };
+    });
+    expect(before).not.toBeNull();
+    expect(before!.bottomGap).toBeGreaterThan(100);
+
+    await page.keyboard.down("Meta");
+    await page.mouse.click(clickPoint!.x, clickPoint!.y);
+    await page.keyboard.up("Meta");
+    await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
+    await expect(page.locator('[data-slot="image-preview-loading"]')).toBeVisible();
+    await terminalScroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await page.setViewportSize({ width: 1279, height: 800 });
+    await emitPtyLine(page, "live output while historical image preview opens\r\n");
+    await page.evaluate(() => window.__devAnywhereE2E?.releaseImagePreviews());
+    await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          );
+        }),
+    );
+
+    const after = await page.evaluate(() => {
+      const element = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+      const term = window.__ccTestPtyTerminals?.get("claude-pty");
+      if (!element || !term) return null;
+      return {
+        scrollTop: element.scrollTop,
+        bottomGap: element.scrollHeight - element.clientHeight - element.scrollTop,
+        viewportY: term.buffer.active.viewportY,
+      };
+    });
+    expect(after).not.toBeNull();
+    expect(after!.scrollTop).toBeCloseTo(before!.scrollTop, 0);
+    expect(after!.viewportY).toBe(before!.viewportY);
+    expect(after!.bottomGap).toBeGreaterThan(100);
+
+    await page.locator('[data-slot="image-preview-dialog"] [data-slot="dialog-close"]').click();
+    await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeHidden();
+    await terminalScroller.evaluate((element) => {
+      element.scrollTop = element.scrollHeight;
+      element.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await expect
+      .poll(() =>
+        terminalScroller.evaluate(
+          (element) => element.scrollHeight - element.clientHeight - element.scrollTop,
+        ),
+      )
+      .toBeLessThanOrEqual(8);
+  });
+
   test("selected image path opens preview from the terminal selection toolbar", async ({
     page,
   }) => {

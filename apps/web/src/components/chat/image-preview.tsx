@@ -53,12 +53,14 @@ type ImagePreviewNaturalSize = ImagePreviewSize & {
 };
 
 type ImagePreviewContextValue = {
+  isOpen: boolean;
   openImagePreview: (path: string) => void;
   requestImagePreviewUrl: (path: string) => Promise<{ url: string; path: string }>;
 };
 
 const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null);
 const NOOP_IMAGE_PREVIEW_CONTEXT: ImagePreviewContextValue = {
+  isOpen: false,
   openImagePreview: () => undefined,
   requestImagePreviewUrl: () => Promise.reject(new Error("图片预览不可用")),
 };
@@ -145,8 +147,8 @@ export function ImagePreviewProvider({
   }, [sessionId]);
 
   const value = useMemo(
-    () => ({ openImagePreview, requestImagePreviewUrl }),
-    [openImagePreview, requestImagePreviewUrl],
+    () => ({ isOpen: open, openImagePreview, requestImagePreviewUrl }),
+    [open, openImagePreview, requestImagePreviewUrl],
   );
 
   return (
