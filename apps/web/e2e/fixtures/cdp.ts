@@ -4,6 +4,7 @@ import { chromium, type Browser, type Disposable, type Page } from "@playwright/
 import { test as base } from "@playwright/test";
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import { isPersistentInitScript } from "./persistent-init-script";
 
 const CDP_ENDPOINT = process.env.MOBILE_CDP_ENDPOINT ?? "http://127.0.0.1:9222";
 const VITE_BASE_URL = process.env.MOBILE_VITE_BASE_URL ?? "http://127.0.0.1:5174";
@@ -105,6 +106,7 @@ function trackInitScripts(page: Page): () => Promise<void> {
   return async () => {
     page.addInitScript = originalAddInitScript;
     for (const disposable of disposables.reverse()) {
+      if (isPersistentInitScript(disposable)) continue;
       await disposable.dispose();
     }
   };
