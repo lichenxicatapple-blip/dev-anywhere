@@ -119,13 +119,14 @@ async function resolvePtyImageLinkRange(
           const buffer = term.buffer.active;
           for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
             if (!buffer.getLine(row)?.translateToString(true).includes(targetPath)) continue;
-            let match: { start: number; end: number } | null = null;
+            const match: { start?: number; end?: number } = {};
             provider.provideLinks(row + 1, (links) => {
               const link = links?.find((candidate) => candidate.text === targetPath);
               if (!link || link.range.start.y !== row + 1 || link.range.end.y !== row + 1) return;
-              match = { start: link.range.start.x, end: link.range.end.x };
+              match.start = link.range.start.x;
+              match.end = link.range.end.x;
             });
-            if (match) {
+            if (match.start !== undefined && match.end !== undefined) {
               return {
                 cols: term.cols,
                 linkStartColumn: match.start,
