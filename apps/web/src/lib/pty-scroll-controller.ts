@@ -19,6 +19,7 @@ import {
   decideCursorAwareClamp,
   decideScrollToBottomAction,
   resolvePtyNativeScrollMax,
+  shouldWheelCommitPtySemanticBottom,
 } from "./pty-follow-policy";
 import { attachPtyScrollDomAdapter } from "./pty-scroll-dom-adapter";
 import { createPtyScrollTraceAdapter } from "./pty-scroll-trace-adapter";
@@ -629,11 +630,29 @@ export function attachPtyScrollController(
   const scrollByWheelDelta = (deltaY: number): void => {
     if (deltaY === 0) return;
     trace("wheel");
-    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const anchor = getCurrentAnchor();
+    const previous = container.scrollTop;
+    if (
+      shouldWheelCommitPtySemanticBottom({
+        reviewing: userHasVerticalScrollIntent(),
+        deltaY,
+        currentScrollTop: previous,
+        bottomScrollTop: anchor.bottomScrollTop,
+        atBottomThreshold,
+      })
+    ) {
+      trace("wheel:semantic-bottom");
+      // The semantic bottom is a coupled viewportY / host.top / scrollTop target. Reuse the
+      // canonical commit instead of first mapping the target through a review anchor: that
+      // mapping can stop one row short and leave `isAtBottom` and review intent split.
+      scrollToBottom("wheel", { force: true });
+      return;
+    }
+
+    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const maxScrollTop = resolvePtyNativeScrollMax({
       reviewing: userHasVerticalScrollIntent(),
-      referenceScrollTop: container.scrollTop,
+      referenceScrollTop: previous,
       bottomScrollTop: anchor.bottomScrollTop,
       domMaxScrollTop,
       atBottomThreshold,
@@ -642,7 +661,6 @@ export function attachPtyScrollController(
       trace("wheel:max-zero");
       return;
     }
-    const previous = container.scrollTop;
     const next = Math.max(0, Math.min(maxScrollTop, previous + deltaY));
     if (next === previous) {
       // 已经 clamp 到边界 (顶 / 底), 真实 scrollTop 不动 — 不该把 intent 再 set 一遍,

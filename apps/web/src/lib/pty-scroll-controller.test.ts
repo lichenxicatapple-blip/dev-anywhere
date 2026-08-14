@@ -2360,6 +2360,79 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("commits the exact semantic frame when a review wheel crosses bottom", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 99: "live prompt" });
+    terminal.buffer.active.cursorY = 19;
+    const onReviewSnapshotCapture = vi.fn(() => true);
+    const onReviewSnapshotClear = vi.fn();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onReviewSnapshotCapture,
+      onReviewSnapshotClear,
+    });
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.buffer.active.viewportY).toBe(80);
+
+    // The 299px accumulated review delta is one pixel short of 15 complete rows. Mapping
+    // 1600px back through that review anchor would therefore stop at viewportY=79, which
+    // excludes the cursor on absolute row 99 and leaves review intent stuck at pixel bottom.
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -299, cancelable: true }));
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, cancelable: true }));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(terminal.buffer.active.viewportY).toBe(67);
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 10_000, cancelable: true }));
+
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.buffer.active.viewportY).toBe(80);
+    expect(host.style.top).toBe("1600px");
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(onReviewSnapshotClear).toHaveBeenCalledTimes(1);
+  });
+
+  it("closes stale review state on a downward wheel already clamped at semantic bottom", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 99: "live prompt" });
+    terminal.buffer.active.cursorY = 19;
+    terminal.buffer.active.viewportY = 79;
+    container.scrollTop = 1600;
+    host.style.top = "1580px";
+    const onReviewSnapshotCapture = vi.fn(() => true);
+    const onReviewSnapshotClear = vi.fn();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      initialUserHasVerticalScrollIntent: true,
+      onReviewSnapshotCapture,
+      onReviewSnapshotClear,
+    });
+    controller.refreshReviewSnapshot();
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(onReviewSnapshotCapture).toHaveBeenCalledWith(79, terminal.rows);
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.buffer.active.viewportY).toBe(80);
+    expect(host.style.top).toBe("1600px");
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(onReviewSnapshotClear).toHaveBeenCalledTimes(1);
+  });
+
   it("does not wheel down past semantic bottom in longHost mode", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 300 });
@@ -2652,6 +2725,7 @@ describe("attachPtyScrollController", () => {
     const { terminal } = createTerminal({ 87: "live prompt" });
     terminal.buffer.active.cursorY = 7;
 
+    const onReviewSnapshotClear = vi.fn();
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2661,6 +2735,7 @@ describe("attachPtyScrollController", () => {
       consumeNewFrame: vi.fn(),
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway: vi.fn(),
+      onReviewSnapshotClear,
     });
     expect(container.scrollTop).toBe(1500);
     container.dispatchEvent(new WheelEvent("wheel", { deltaY: -50, cancelable: true }));
@@ -2686,6 +2761,7 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1450);
     expect(terminal.buffer.active.viewportY).toBe(72);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(onReviewSnapshotClear).not.toHaveBeenCalled();
 
     // Wheel-up remains ordinary review navigation even while scrollTop is numerically above
     // the semantic bottom preserved for the following state.

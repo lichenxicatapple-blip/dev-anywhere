@@ -63,6 +63,33 @@ export function resolvePtyNativeScrollMax({
   return usesPreservedReviewRange ? domMaxScrollTop : Math.min(domMaxScrollTop, bottomScrollTop);
 }
 
+export function shouldWheelCommitPtySemanticBottom({
+  reviewing,
+  deltaY,
+  currentScrollTop,
+  bottomScrollTop,
+  atBottomThreshold,
+}: {
+  reviewing: boolean;
+  deltaY: number;
+  currentScrollTop: number;
+  bottomScrollTop: number;
+  atBottomThreshold: number;
+}): boolean {
+  if (!reviewing || deltaY <= 0) return false;
+
+  // A keyboard/viewport relayout can preserve a reviewed DOM offset beyond the new
+  // semantic live tail. A downward wheel at that native boundary must not reverse
+  // direction by snapping back to the smaller semantic coordinate.
+  if (currentScrollTop > bottomScrollTop + atBottomThreshold) return false;
+
+  // Once an ordinary review gesture reaches the semantic boundary, commit the exact
+  // semantic frame instead of reconstructing it through the review pixel-to-row anchor.
+  // The latter can legitimately land one row short when the accumulated pixel delta is
+  // fractional. This also closes stale review state when pixels are already at bottom.
+  return currentScrollTop + deltaY >= bottomScrollTop - atBottomThreshold;
+}
+
 export function decideCursorAwareClamp(input: CursorAwareClampInput): CursorAwareClampResult {
   const maxScrollTop = resolvePtyNativeScrollMax(input);
   if (input.rawScrollTop <= maxScrollTop + 1) {

@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { decideCursorAwareClamp, decideScrollToBottomAction } from "./pty-follow-policy";
+import {
+  decideCursorAwareClamp,
+  decideScrollToBottomAction,
+  shouldWheelCommitPtySemanticBottom,
+} from "./pty-follow-policy";
 
 describe("PTY follow policy", () => {
   describe("decideScrollToBottomAction", () => {
@@ -138,6 +142,58 @@ describe("PTY follow policy", () => {
           atBottomThreshold: 8,
         }),
       ).toEqual({ action: "clamp", scrollTop: 1600 });
+    });
+  });
+
+  describe("shouldWheelCommitPtySemanticBottom", () => {
+    it("commits an ordinary review gesture that crosses the semantic bottom", () => {
+      expect(
+        shouldWheelCommitPtySemanticBottom({
+          reviewing: true,
+          deltaY: 10_000,
+          currentScrollTop: 314,
+          bottomScrollTop: 494,
+          atBottomThreshold: 8,
+        }),
+      ).toBe(true);
+    });
+
+    it("closes stale review state when a downward wheel is already clamped at semantic bottom", () => {
+      expect(
+        shouldWheelCommitPtySemanticBottom({
+          reviewing: true,
+          deltaY: 120,
+          currentScrollTop: 494,
+          bottomScrollTop: 494,
+          atBottomThreshold: 8,
+        }),
+      ).toBe(true);
+    });
+
+    it("preserves a post-relayout review offset beyond semantic bottom", () => {
+      expect(
+        shouldWheelCommitPtySemanticBottom({
+          reviewing: true,
+          deltaY: 50,
+          currentScrollTop: 1450,
+          bottomScrollTop: 1360,
+          atBottomThreshold: 8,
+        }),
+      ).toBe(false);
+    });
+
+    it("does not commit an upward or non-reviewing wheel", () => {
+      const input = {
+        currentScrollTop: 480,
+        bottomScrollTop: 494,
+        atBottomThreshold: 8,
+      };
+      expect(shouldWheelCommitPtySemanticBottom({ ...input, reviewing: true, deltaY: -120 })).toBe(
+        false,
+      );
+      expect(shouldWheelCommitPtySemanticBottom({ ...input, reviewing: false, deltaY: 120 })).toBe(
+        false,
+      );
     });
   });
 });

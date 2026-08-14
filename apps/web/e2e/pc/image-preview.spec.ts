@@ -98,6 +98,52 @@ async function getTransformScale(transform: Locator): Promise<number> {
   return transform.evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).a);
 }
 
+async function resolvePtyImageLinkRange(
+  page: Page,
+  sessionId: string,
+  path: string,
+): Promise<{
+  cols: number;
+  linkStartColumn: number;
+  linkEndColumn: number;
+}> {
+  type LinkRange = { cols: number; linkStartColumn: number; linkEndColumn: number };
+  let resolvedRange: LinkRange | null = null;
+  await expect
+    .poll(async () => {
+      resolvedRange = await page.evaluate(
+        ({ sid, targetPath }) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          const provider = window.__ccTestPtyLinkProviders?.get(`${sid}/image-preview`);
+          if (!term || !provider || term.cols <= 0) return null;
+          const buffer = term.buffer.active;
+          for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
+            if (!buffer.getLine(row)?.translateToString(true).includes(targetPath)) continue;
+            let match: { start: number; end: number } | null = null;
+            provider.provideLinks(row + 1, (links) => {
+              const link = links?.find((candidate) => candidate.text === targetPath);
+              if (!link || link.range.start.y !== row + 1 || link.range.end.y !== row + 1) return;
+              match = { start: link.range.start.x, end: link.range.end.x };
+            });
+            if (match) {
+              return {
+                cols: term.cols,
+                linkStartColumn: match.start,
+                linkEndColumn: match.end,
+              };
+            }
+          }
+          return null;
+        },
+        { sid: sessionId, targetPath: path },
+      );
+      return resolvedRange !== null;
+    })
+    .toBe(true);
+  if (!resolvedRange) throw new Error(`image link provider did not expose ${JSON.stringify(path)}`);
+  return resolvedRange;
+}
+
 async function dragUntilTransformChanges(
   page: Page,
   transform: Locator,
@@ -299,26 +345,28 @@ test.describe("image preview", () => {
         .poll(() => page.evaluate(() => window.__ccTest?.pty.serialize("claude-pty") ?? ""))
         .toContain(path);
 
-      const point = await page.evaluate(() => {
-        const screen = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
-        const metrics = window.__ccTest?.pty.metrics("claude-pty");
-        if (!screen || !metrics) return null;
-        const rect = screen.getBoundingClientRect();
-        const cellWidth = metrics.screenWidth / metrics.cols;
-        const cellHeight = metrics.screenHeight / metrics.rows;
-        const linkColumn = 33;
-        return {
-          x: rect.left + cellWidth * (linkColumn - 0.5),
-          y: rect.top + cellHeight * 1.5,
-        };
-      });
-      expect(point).not.toBeNull();
-      await page.mouse.move(point!.x, point!.y);
-      // link provider 的 activate gate 要求 cmd/ctrl 修饰: 普通 click 不触发预览,
-      // 通过 keyboard.down("Meta") 在 click 期间持有修饰键。
-      await page.keyboard.down("Meta");
-      await page.mouse.click(point!.x, point!.y);
-      await page.keyboard.up("Meta");
+      // "$ " 占 2 格，13 个 CJK 字符/标点占 26 格，空格占 1 格，所以 provider
+      // 刻意纳入 link range 的 @ 必须从 1-based 第 30 列开始；第 33 列落在路径内部。
+      const expectedLinkStartColumn = 30;
+      const linkColumn = 33;
+      const range = await resolvePtyImageLinkRange(page, "claude-pty", path);
+      expect(range.linkStartColumn).toBe(expectedLinkStartColumn);
+      expect(range.linkEndColumn).toBeGreaterThanOrEqual(linkColumn);
+
+      const screen = page.locator('[data-slot="pty-host"] .xterm-screen');
+      const renderedRow = screen.locator(":scope > .xterm-rows > div").filter({ hasText: path });
+      await expect(renderedRow).toHaveCount(1);
+      const rowBox = await renderedRow.boundingBox();
+      if (!rowBox) throw new Error("rendered image link row has no geometry");
+      const position = {
+        x: ((linkColumn - 0.5) * rowBox.width) / range.cols,
+        y: rowBox.height / 2,
+      };
+      // xterm rows intentionally ignore pointer events. A forced locator-relative action still
+      // resolves the live row box at action time while the browser hit-tests the xterm screen.
+      await renderedRow.hover({ position, force: true });
+      await expect(screen).toHaveClass(/xterm-cursor-pointer/);
+      await renderedRow.click({ position, modifiers: ["Meta"], force: true });
 
       await expectPreviewReady(page, path);
     });
