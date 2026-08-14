@@ -21,6 +21,8 @@ export interface PtyHorizontalScrollMetrics {
 
 export interface PtyRenderedGeometry {
   anchorAtBottom: boolean;
+  liveBackfillRequired: boolean;
+  paintedTopGap: number;
   cursorInViewport: boolean;
   hostTopDrift: number;
   pendingContainerSyncRetry: boolean;
@@ -139,14 +141,23 @@ export async function readPtyRenderedGeometry(page: Page): Promise<PtyRenderedGe
       ) ?? document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
     const screen = container?.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
     const reviewSnapshot = screen?.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
+    const liveBackfill = screen?.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
     const snapshot = window.__devAnywherePtyDebug?.();
     if (!container || !screen || !snapshot) return null;
 
     const containerRect = container.getBoundingClientRect();
     const screenRect = screen.getBoundingClientRect();
     const reviewSnapshotRect = reviewSnapshot?.getBoundingClientRect() ?? null;
+    const liveBackfillRect = liveBackfill?.getBoundingClientRect() ?? null;
+    const style = getComputedStyle(container);
+    const contentTop = containerRect.top + (Number.parseFloat(style.paddingTop) || 0);
+    const rawLiveTopGap = Math.max(0, screenRect.top - contentTop);
+    const paintedTop = Math.min(screenRect.top, liveBackfillRect?.top ?? screenRect.top);
     return {
       anchorAtBottom: snapshot.anchor.atBottom,
+      liveBackfillRequired:
+        rawLiveTopGap > 1 && snapshot.term.viewportY * snapshot.cell.h >= rawLiveTopGap,
+      paintedTopGap: Math.max(0, paintedTop - contentTop),
       cursorInViewport: snapshot.anchor.cursorInViewport,
       hostTopDrift: snapshot.host.topDrift,
       pendingContainerSyncRetry: snapshot.pendingContainerSyncRetry,
@@ -191,6 +202,9 @@ function renderedGeometryFailure(
     return `host-outside-viewport:${geometry.viewportHostCoverage}`;
   }
   if (options.bottomThresholdPx === undefined) return "ready";
+  if (geometry.liveBackfillRequired && geometry.paintedTopGap > options.bottomThresholdPx) {
+    return `painted-top-gap:${geometry.paintedTopGap}`;
+  }
   if (!geometry.anchorAtBottom) return "semantic-bottom:false";
   if (!geometry.cursorInViewport) return "cursor-in-viewport:false";
   if (Math.abs(geometry.scrollTopDeltaToBottom) > options.bottomThresholdPx) {

@@ -4,9 +4,9 @@ export type PtyVerticalIntentSource =
   | "none"
   | "initial"
   | "wheel"
-  | "native-scroll"
   | "touch"
   | "ratio-scroll"
+  | "selection-autoscroll"
   | "programmatic-bottom";
 
 export const PTY_VERTICAL_INTENT_TRANSITION_IDS = [
@@ -16,6 +16,7 @@ export const PTY_VERTICAL_INTENT_TRANSITION_IDS = [
   "bottom.passive.following",
   "bottom.force",
   "ratio.reviewing",
+  "selection-autoscroll.reviewing",
   "wheel.clamped",
   "wheel.up",
   "wheel.down.not-bottom",
@@ -23,9 +24,6 @@ export const PTY_VERTICAL_INTENT_TRANSITION_IDS = [
   "container.programmatic-follow",
   "container.programmatic-bottom",
   "container.external-sync",
-  "container.user.away",
-  "container.user.bottom-small-delta",
-  "container.user.bottom-down",
   "touch.start",
   "touch.move.below-threshold",
   "touch.move.review",
@@ -54,6 +52,12 @@ export type PtyVerticalIntentEvent =
   | { type: "scroll-to-bottom"; force: boolean; reason: string }
   | { type: "scroll-to-ratio"; ratio: number; scrollTop: number }
   | {
+      type: "mark-review";
+      source: "selection-autoscroll";
+      scrollTop: number;
+      reason: string;
+    }
+  | {
       type: "wheel";
       deltaY: number;
       previousScrollTop: number;
@@ -62,10 +66,8 @@ export type PtyVerticalIntentEvent =
     }
   | {
       type: "container-scroll";
-      source: "user" | "programmatic-follow" | "programmatic-bottom" | "external-sync";
+      source: "programmatic-follow" | "programmatic-bottom" | "external-sync";
       scrollTop: number;
-      atCursorAwareBottom: boolean;
-      verticalDelta: number;
     }
   | { type: "touch-start"; clientY: number | null; scrollTop: number }
   | { type: "touch-move"; clientY: number | null; reviewThresholdPx: number }
@@ -274,6 +276,13 @@ export function reducePtyVerticalIntent(
         `ratio=${event.ratio}`,
       );
     }
+    case "mark-review": {
+      return finish(
+        state,
+        withReview(state, event.source, event.scrollTop, "selection-autoscroll.reviewing"),
+        `source=${event.source} reason=${event.reason}`,
+      );
+    }
     case "wheel": {
       if (event.nextScrollTop === event.previousScrollTop) {
         return finish(
@@ -303,43 +312,14 @@ export function reducePtyVerticalIntent(
       );
     }
     case "container-scroll": {
-      if (event.source !== "user") {
-        return finish(
-          state,
-          {
-            ...state,
-            lastScrollTop: event.scrollTop,
-            lastTransitionId: `container.${event.source}`,
-          },
-          `source=${event.source} scrollTop=${event.scrollTop}`,
-        );
-      }
-      if (!event.atCursorAwareBottom) {
-        return finish(
-          state,
-          withReview(state, "native-scroll", event.scrollTop, "container.user.away"),
-          `scrollTop=${event.scrollTop} atBottom=false`,
-        );
-      }
-      if (
-        event.verticalDelta > atBottomThreshold &&
-        state.mode === "reviewing" &&
-        !state.touchActive
-      ) {
-        return finish(
-          state,
-          withFollowing(state, "none", event.scrollTop, "container.user.bottom-down"),
-          `delta=${event.verticalDelta} threshold=${atBottomThreshold}`,
-        );
-      }
       return finish(
         state,
         {
           ...state,
           lastScrollTop: event.scrollTop,
-          lastTransitionId: "container.user.bottom-small-delta",
+          lastTransitionId: `container.${event.source}`,
         },
-        `delta=${event.verticalDelta} threshold=${atBottomThreshold}`,
+        `source=${event.source} scrollTop=${event.scrollTop}`,
       );
     }
     case "touch-start": {

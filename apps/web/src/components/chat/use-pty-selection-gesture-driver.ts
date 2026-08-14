@@ -39,6 +39,7 @@ interface UsePtySelectionGestureDriverOptions {
   onLongPressStart: (point: PtySelectionClientPoint) => void;
   onLongPressMove: (point: PtySelectionClientPoint) => void;
   onLongPressEnd: (point: PtySelectionClientPoint) => void;
+  onVerticalScrollIntent?: (reason: string) => void;
   onHorizontalScrollIntent?: (reason: string) => void;
   onSelectionAutoscroll?: (position: { scrollLeft: number; scrollTop: number }) => void;
   onHandleDragStart: (kind: PtySelectionHandleKind) => void;
@@ -72,6 +73,7 @@ export function usePtySelectionGestureDriver({
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
+  onVerticalScrollIntent,
   onHorizontalScrollIntent,
   onSelectionAutoscroll,
   onHandleDragStart,
@@ -82,6 +84,7 @@ export function usePtySelectionGestureDriver({
   const autoscrollFrameRef = useRef<number | null>(null);
   const autoscrollPointRef = useRef<PtySelectionClientPoint | null>(null);
   const autoscrollApplyRef = useRef<((point: PtySelectionClientPoint) => void) | null>(null);
+  const verticalScrollIntentMarkedRef = useRef(false);
   const suppressNativeTouchScrollRef = useRef(false);
   const handleDragCleanupRef = useRef<(() => void) | null>(null);
 
@@ -90,6 +93,7 @@ export function usePtySelectionGestureDriver({
     handleDragCleanupRef.current = null;
     autoscrollPointRef.current = null;
     autoscrollApplyRef.current = null;
+    verticalScrollIntentMarkedRef.current = false;
     suppressNativeTouchScrollRef.current = false;
     if (autoscrollFrameRef.current === null) return;
     cancelAnimationFrame(autoscrollFrameRef.current);
@@ -120,7 +124,13 @@ export function usePtySelectionGestureDriver({
       onHorizontalScrollIntent?.(`selectionGestureAutoscroll dx=${Math.round(dx)}`);
       containerEl.scrollLeft += dx;
     }
-    if (dy !== 0) containerEl.scrollTop += dy;
+    if (dy !== 0) {
+      if (!verticalScrollIntentMarkedRef.current) {
+        onVerticalScrollIntent?.(`selectionGestureAutoscroll dy=${Math.round(dy)}`);
+        verticalScrollIntentMarkedRef.current = true;
+      }
+      containerEl.scrollTop += dy;
+    }
     if (dx !== 0 || dy !== 0) {
       onSelectionAutoscroll?.({
         scrollLeft: containerEl.scrollLeft,
@@ -130,7 +140,13 @@ export function usePtySelectionGestureDriver({
     }
 
     autoscrollFrameRef.current = requestAnimationFrame(runPtySelectionAutoscroll);
-  }, [containerEl, isSelectionActive, onHorizontalScrollIntent, onSelectionAutoscroll]);
+  }, [
+    containerEl,
+    isSelectionActive,
+    onHorizontalScrollIntent,
+    onSelectionAutoscroll,
+    onVerticalScrollIntent,
+  ]);
 
   const updatePtySelectionAutoscroll = useCallback(
     (point: PtySelectionClientPoint, applyMove: (point: PtySelectionClientPoint) => void): void => {
@@ -261,6 +277,7 @@ export function usePtySelectionGestureDriver({
       event.preventDefault();
       event.stopPropagation();
       suppressNativeTouchScrollRef.current = true;
+      verticalScrollIntentMarkedRef.current = false;
       onHandleDragStart(kind);
 
       let cleanup = (): void => {};

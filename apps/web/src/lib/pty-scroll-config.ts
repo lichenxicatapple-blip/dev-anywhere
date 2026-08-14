@@ -10,12 +10,6 @@ export const PTY_SCROLL_CONFIG = {
     // active font metrics instead of tying cursor follow to a particular device width.
     cursorFollowRightMarginColumns: 8,
   },
-  rawInput: {
-    // Input/focus follow can briefly shrink/re-expand the DOM scroll range before the next render
-    // settles. Keep this scoped to scheduled follow-to-bottom paths; keyboard visualViewport drift
-    // is intentionally not restored here.
-    recentLayoutDriftMs: 1_000,
-  },
   touch: {
     // Only repair native scroll positions that are physically impossible for the active gesture.
     // Smaller deltas are left to the browser, otherwise slow finger drags become jittery.

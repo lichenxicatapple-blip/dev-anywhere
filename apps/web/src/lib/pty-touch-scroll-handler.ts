@@ -43,7 +43,6 @@ interface PtyTouchScrollHandlerOptions {
   hasHorizontalOverflow: () => boolean;
   clearHorizontalIntentIfUnscrollable: (site: string) => boolean;
   markHorizontalUserInput: (details: string) => void;
-  onTouchBoundaryPrevent?: () => void;
   notifyAtBottom: () => void;
   flushPendingTouchScrollNotify: () => void;
 }
@@ -80,7 +79,6 @@ export function createPtyTouchScrollHandler({
   hasHorizontalOverflow,
   clearHorizontalIntentIfUnscrollable,
   markHorizontalUserInput,
-  onTouchBoundaryPrevent,
   notifyAtBottom,
   flushPendingTouchScrollNotify,
 }: PtyTouchScrollHandlerOptions): PtyTouchScrollHandler {
@@ -339,7 +337,6 @@ export function createPtyTouchScrollHandler({
       reviewThresholdPx: PTY_SCROLL_CONFIG.touch.gestureSlopPx,
     });
     if (result.notifyTouchReviewStart) {
-      onTouchBoundaryPrevent?.();
       trace("touchmove:review");
     }
   };

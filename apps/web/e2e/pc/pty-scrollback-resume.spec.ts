@@ -70,7 +70,7 @@ test.describe("PTY scrollback resume", () => {
       window.__ptySmoke.sendPty(`=== ${token} ===\r\n`);
     }, PROBE_TOKEN);
 
-    await expect(page.locator('[data-slot="pty-host"] .xterm-rows').last()).toContainText(
+    await expect(page.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows')).toContainText(
       PROBE_TOKEN,
     );
     await expectPtyCursorAwareBottom(page);

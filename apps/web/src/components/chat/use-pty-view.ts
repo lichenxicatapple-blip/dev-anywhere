@@ -5,7 +5,7 @@
 // 关键设计：单一 effect 在 attachPtyTerminalController 的 onTerminalReady 回调里
 // 就近挂 scroll/debug——typed handshake（term 直接作为入参传入），跨 effect
 // 没有隐式 ref 协议。font-size effect 因为依赖 store 状态独立 trigger 单独保留。
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type {
   ClipboardEvent,
   DragEvent as ReactDragEvent,
@@ -19,15 +19,11 @@ import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { xtermFixedDarkSearchDecorations } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
-import { attachPtyReviewSnapshot } from "@/lib/pty-review-snapshot";
+import { attachPtyHistoryProjection } from "@/lib/pty-history-projection";
 import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { isOnlyPtyNonTypingInput } from "@/lib/pty-non-typing-input";
-import {
-  attachPtyScrollController,
-  type PtyPageResumeState,
-  type PtyScrollState,
-} from "@/lib/pty-scroll-controller";
+import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
@@ -148,12 +144,12 @@ interface UsePtyViewResult {
 interface ScrollControllerHandle {
   relayout: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
-  capturePageResumeState: () => PtyPageResumeState;
-  preparePageResumeRestore: (state: PtyPageResumeState) => void;
-  restorePageResume: (state: PtyPageResumeState) => void;
+  preparePageResumeRestore: () => void;
+  restorePageResume: () => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
+  markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
@@ -335,7 +331,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const scrollControllerRef = useRef<ScrollControllerHandle | null>(null);
   const activeRef = useRef(active);
   const previousActiveRef = useRef(active);
-  const keepAliveReviewStateRef = useRef<PtyPageResumeState | null>(null);
   const readyRef = useRef(false);
   const pendingNewFrameRef = useRef(false);
   const userHasVerticalScrollIntentRef = useRef(false);
@@ -347,10 +342,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const physicalKeyboardModeRef = useRef(false);
   const ptySelectionActiveRef = useRef(false);
   const pageResumePendingRef = useRef(false);
-  const pageResumeStateRef = useRef<PtyPageResumeState>({ mode: "following" });
-  const pageResumeHadNewFrameRef = useRef(false);
-  const keepAliveHadNewFrameRef = useRef(false);
-  const pageResumeFrameRef = useRef<number | null>(null);
   const mobileLayoutDebugRef = useRef({
     keyboardOffset: 0,
     hasSeenSoftKeyboard: false,
@@ -434,7 +425,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   };
 
   const clearNewFramesWhileAway = follow.clearNewFramesWhileAway;
-  const setHasNewFramesWhileAway = follow.setHasNewFramesWhileAway;
 
   // === scheduler（首次访问 lazy 创建，组件卸载时清理）===
   if (!relayoutSchedulerRef.current) {
@@ -442,10 +432,15 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       scrollControllerRef.current?.relayout();
     });
   }
+  const cancelPendingResumeForLiveFollow = useCallback((): void => {
+    pageResumePendingRef.current = false;
+  }, []);
+
   if (!rawInputFollowSchedulerRef.current) {
     rawInputFollowSchedulerRef.current = createRafScheduler(() => {
       const pending = pendingRawInputFollowRef.current ?? { reason: "rawInput", force: false };
       pendingRawInputFollowRef.current = null;
+      if (pending.force) cancelPendingResumeForLiveFollow();
       scrollControllerRef.current?.traceRawInputFollowFire();
       scrollControllerRef.current?.scrollToBottom(
         pending.reason,
@@ -455,70 +450,40 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     });
   }
 
-  const cancelPendingResumeFrame = useCallback((): void => {
-    if (pageResumeFrameRef.current === null) return;
-    cancelAnimationFrame(pageResumeFrameRef.current);
-    pageResumeFrameRef.current = null;
-  }, []);
-
   const rememberHiddenPtyState = useCallback((): void => {
-    if (!pageResumePendingRef.current) pageResumeHadNewFrameRef.current = false;
+    // `active=false`, `visibilitychange` and `pagehide` can all describe the same lifecycle edge.
+    // Keep one boolean marker only; no pixel, row, font metric or historical review coordinate is
+    // retained across it.
+    if (pageResumePendingRef.current) return;
     const scroll = scrollControllerRef.current;
     if (scroll) {
-      pageResumeStateRef.current =
-        keepAliveReviewStateRef.current ?? scroll.capturePageResumeState();
-      // 从 hidden 开始就冻结语义状态；Chrome 可能在真正恢复前回放陈旧 scroll 事件。
-      scroll.preparePageResumeRestore(pageResumeStateRef.current);
+      // Lifecycle restore does not retain a historical pixel/row coordinate. Mark the interval so
+      // Chrome's hidden DOM replay cannot mutate the active scroll model before we return live.
+      scroll.preparePageResumeRestore();
     }
     pageResumePendingRef.current = true;
-    if (keepAliveHadNewFrameRef.current) pageResumeHadNewFrameRef.current = true;
-    cancelPendingResumeFrame();
-  }, [cancelPendingResumeFrame]);
+  }, []);
 
   const scheduleResumeRestore = useCallback((): void => {
     if (!pageResumePendingRef.current || document.visibilityState === "hidden") return;
-    const scheduledController = scrollControllerRef.current;
-    scheduledController?.preparePageResumeRestore(pageResumeStateRef.current);
-    cancelPendingResumeFrame();
-    pageResumeFrameRef.current = requestAnimationFrame(() => {
-      pageResumeFrameRef.current = requestAnimationFrame(() => {
-        pageResumeFrameRef.current = null;
-        // Keepalive can mark the entry active before a reconnect has attached
-        // the replacement terminal controller. Do not let the stale controller
-        // consume the restore request; onTerminalReady will apply it after the
-        // new controller is ready.
-        if (
-          !activeRef.current ||
-          !readyRef.current ||
-          scheduledController !== scrollControllerRef.current
-        ) {
-          return;
-        }
-        const scroll = scrollControllerRef.current;
-        if (!scroll) return;
-        const resumeState = pageResumeStateRef.current;
-        scroll.restorePageResume(resumeState);
-        if (resumeState.mode === "following") {
-          clearNewFramesWhileAway();
-        } else if (pageResumeHadNewFrameRef.current || keepAliveHadNewFrameRef.current) {
-          setHasNewFramesWhileAway(true);
-        }
-        pageResumeHadNewFrameRef.current = false;
-        keepAliveHadNewFrameRef.current = false;
-        pageResumePendingRef.current = false;
-      });
-    });
-  }, [cancelPendingResumeFrame, clearNewFramesWhileAway, setHasNewFramesWhileAway]);
+    // Activation is a one-shot semantic transition, not a render retry. If reconnect has not
+    // attached the replacement controller yet, onTerminalReady consumes the same marker later.
+    if (!activeRef.current || !readyRef.current) return;
+    const scroll = scrollControllerRef.current;
+    if (!scroll) return;
+    scroll.restorePageResume();
+    clearNewFramesWhileAway();
+    pageResumePendingRef.current = false;
+  }, [clearNewFramesWhileAway]);
 
   useEffect(() => {
     return () => {
       relayoutSchedulerRef.current?.dispose();
       rawInputFollowSchedulerRef.current?.dispose();
-      cancelPendingResumeFrame();
       relayoutSchedulerRef.current = null;
       rawInputFollowSchedulerRef.current = null;
     };
-  }, [cancelPendingResumeFrame]);
+  }, []);
 
   useEffect(() => {
     const rememberHiddenState = (): void => {
@@ -543,11 +508,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       window.removeEventListener("pagehide", rememberHiddenState);
       window.removeEventListener("pageshow", scheduleResumeRestore);
       window.removeEventListener("focus", scheduleResumeRestore);
-      cancelPendingResumeFrame();
     };
-  }, [cancelPendingResumeFrame, rememberHiddenPtyState, scheduleResumeRestore]);
+  }, [rememberHiddenPtyState, scheduleResumeRestore]);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     const wasActive = previousActiveRef.current;
     previousActiveRef.current = active;
     if (!active) {
@@ -794,7 +758,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let imageLinkDispose: (() => void) | null = null;
     let fileDownloadLinkDispose: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
-    let reviewSnapshotDispose: (() => void) | null = null;
+    let historyProjectionDispose: (() => void) | null = null;
     let dragSelectDispose: (() => void) | null = null;
     let searchResultsRegistration: { dispose(): void } | null = null;
     let terminalSerializeAddon:
@@ -803,12 +767,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
-      if (pageResumePendingRef.current) pageResumeHadNewFrameRef.current = true;
-      if (keepAliveReviewStateRef.current) {
-        pageResumeHadNewFrameRef.current = true;
-        keepAliveHadNewFrameRef.current = true;
-        follow.setHasNewFramesWhileAway(true);
-      }
       if (userHasVerticalScrollIntentRef.current && !follow.hasNewFramesWhileAwayRef.current) {
         follow.setHasNewFramesWhileAway(true);
       }
@@ -877,7 +835,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
-        const reviewSnapshot = attachPtyReviewSnapshot(host, {
+        const historyProjection = attachPtyHistoryProjection(host, {
           serializeRangeAsHtml: (startLine, endLine) =>
             terminalSerializeAddon?.serializeAsHTML({
               range: {
@@ -890,11 +848,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
               scrollback: 0,
             }) ?? "",
         });
-        reviewSnapshotDispose = reviewSnapshot.dispose;
+        historyProjectionDispose = historyProjection.dispose;
 
         const shouldRestorePageResumeOnAttach = pageResumePendingRef.current;
         if (shouldRestorePageResumeOnAttach) {
-          userHasVerticalScrollIntentRef.current = pageResumeStateRef.current.mode === "reviewing";
+          userHasVerticalScrollIntentRef.current = false;
         }
 
         const scrollCtrl = attachPtyScrollController({
@@ -916,25 +874,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           onUserVerticalScrollIntentChange: (value) => {
             userHasVerticalScrollIntentRef.current = value;
           },
-          onReviewStateCapture: (state) => {
-            keepAliveReviewStateRef.current = state;
-          },
           onTouchReviewStart: suppressPtyFocus,
-          onTouchBoundaryPrevent: suppressPtyFocus,
-          onReviewSnapshotCapture: reviewSnapshot.captureRange,
-          onReviewSnapshotClear: reviewSnapshot.clear,
+          onHistoryProjectionChange: historyProjection.render,
         });
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
         if (shouldRestorePageResumeOnAttach) {
-          const resumeState = pageResumeStateRef.current;
-          scrollCtrl.restorePageResume(resumeState);
-          if (resumeState.mode === "following") {
-            clearNewFramesWhileAway();
-          } else if (pageResumeHadNewFrameRef.current) {
-            setHasNewFramesWhileAway(true);
-          }
-          pageResumeHadNewFrameRef.current = false;
+          scrollCtrl.restorePageResume();
+          clearNewFramesWhileAway();
           pageResumePendingRef.current = false;
         }
 
@@ -1009,6 +956,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         const dragSelect = attachPtyDragSelectAutoscroll({
           container,
           host,
+          onVerticalScrollIntent: (reason) =>
+            scrollControllerRef.current?.markSelectionAutoscrollIntent(reason),
           onHorizontalScrollIntent: (reason) =>
             scrollControllerRef.current?.markHorizontalScrollIntent(reason),
         });
@@ -1028,7 +977,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return () => {
       dragSelectDispose?.();
       scrollDispose?.();
-      reviewSnapshotDispose?.();
+      historyProjectionDispose?.();
       searchResultsRegistration?.dispose();
       unregisterPtyDebugSnapshotProvider();
       imageLinkDispose?.();
@@ -1099,9 +1048,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   // reason 默认 "viewExternal" — 当 BackToBottom 按钮等明确入口外调时, caller 可传具体 label。
   const scrollToBottom = useCallback(
     (reason: string = "viewExternal", opts?: { force?: boolean }): void => {
+      if (opts?.force) cancelPendingResumeForLiveFollow();
       scrollControllerRef.current?.scrollToBottom(reason, opts);
     },
-    [],
+    [cancelPendingResumeForLiveFollow],
   );
   const refreshReviewSnapshot = useCallback((): void => {
     scrollControllerRef.current?.refreshReviewSnapshot();

@@ -15,6 +15,7 @@ interface Harness {
   pendingFrame: (() => void) | null;
   flushFrame: () => void;
   getSnapshot: () => DragSelectDebugSnapshot;
+  onVerticalScrollIntent: ReturnType<typeof vi.fn<(reason: string) => void>>;
   onHorizontalScrollIntent: ReturnType<typeof vi.fn<(reason: string) => void>>;
   dispose: () => void;
 }
@@ -58,11 +59,13 @@ function createHarness(opts: {
   const cancelFrame = (): void => {
     pendingFrame = null;
   };
+  const onVerticalScrollIntent = vi.fn<(reason: string) => void>();
   const onHorizontalScrollIntent = vi.fn<(reason: string) => void>();
 
   const handle = attachPtyDragSelectAutoscroll({
     container,
     host,
+    onVerticalScrollIntent,
     onHorizontalScrollIntent,
     requestFrame,
     cancelFrame,
@@ -85,6 +88,7 @@ function createHarness(opts: {
       fn?.();
     },
     getSnapshot: handle.getDebugSnapshot,
+    onVerticalScrollIntent,
     onHorizontalScrollIntent,
     dispose() {
       handle.dispose();
@@ -286,16 +290,25 @@ describe("pty drag-select autoscroll", () => {
     expect(snap.dispatchTargetTag).toBe("unknown");
   });
 
-  it("scrolls vertically when pointer hits top/bottom edge", () => {
+  it("marks vertical review once before the first effective drag autoscroll write", () => {
     h = createHarness({ scrollHeight: 800, clientHeight: 400 });
     h.container.scrollTop = 200;
+    const scrollTopsAtIntent: number[] = [];
+    h.onVerticalScrollIntent.mockImplementation(() => {
+      scrollTopsAtIntent.push(h.container.scrollTop);
+    });
     pointerDown(h.container, { x: 400, y: 100 });
     pointerMove({ x: 400, y: 5 }); // top edge
     h.flushFrame();
     expect(h.container.scrollTop).toBeLessThan(200);
+    expect(scrollTopsAtIntent).toEqual([200]);
+    expect(h.onVerticalScrollIntent).toHaveBeenCalledWith(
+      expect.stringContaining("dragSelectAutoscroll"),
+    );
 
-    pointerMove({ x: 400, y: 395 }); // bottom edge
+    const afterFirstFrame = h.container.scrollTop;
     h.flushFrame();
-    expect(h.container.scrollTop).toBeGreaterThan(0);
+    expect(h.container.scrollTop).toBeLessThan(afterFirstFrame);
+    expect(h.onVerticalScrollIntent).toHaveBeenCalledTimes(1);
   });
 });

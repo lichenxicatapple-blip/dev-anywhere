@@ -29,6 +29,73 @@ async function isNativeSoftKeyboardVisible(serialArgs: string[]): Promise<boolea
   return /mImeShowing=true/.test(stdout) || /type=ime[^\n]*visible=true/.test(stdout);
 }
 
+type AndroidPtyDismissGesture = {
+  css: {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  };
+  native: {
+    startX: number;
+    startY: number;
+    endX: number;
+    endY: number;
+  };
+};
+
+function parseAndroidBounds(node: string | undefined): [number, number, number, number] | null {
+  const bounds = node?.match(/bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"/);
+  if (!bounds) return null;
+  return [Number(bounds[1]), Number(bounds[2]), Number(bounds[3]), Number(bounds[4])];
+}
+
+async function readAndroidWindowHierarchy(serialArgs: string[]): Promise<string> {
+  const dumpPath = "/sdcard/dev-anywhere-window.xml";
+  let lastError: unknown;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await execFileAsync("adb", [...serialArgs, "shell", "uiautomator", "dump", dumpPath]);
+      const { stdout } = await execFileAsync("adb", [...serialArgs, "shell", "cat", dumpPath]);
+      return stdout;
+    } catch (error) {
+      lastError = error;
+      if (attempt < 4) await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+  }
+  throw new Error(
+    `Could not read Android window hierarchy: ${lastError instanceof Error ? lastError.message : String(lastError)}`,
+  );
+}
+
+async function waitForViewportFramesToSettle(page: Page): Promise<void> {
+  await page.evaluate(
+    () =>
+      new Promise<void>((resolve) => {
+        let previous = "";
+        let stableFrames = 0;
+        const sample = () => {
+          const viewport = window.visualViewport;
+          const current = JSON.stringify({
+            innerHeight: window.innerHeight,
+            innerWidth: window.innerWidth,
+            viewportHeight: viewport?.height ?? window.innerHeight,
+            viewportWidth: viewport?.width ?? window.innerWidth,
+            viewportTop: viewport?.offsetTop ?? 0,
+          });
+          stableFrames = current === previous ? stableFrames + 1 : 0;
+          previous = current;
+          if (stableFrames >= 3) {
+            resolve();
+            return;
+          }
+          requestAnimationFrame(sample);
+        };
+        requestAnimationFrame(sample);
+      }),
+  );
+}
+
 export async function tapWithAdb(locator: Locator): Promise<void> {
   const label = await locator.getAttribute("aria-label");
   if (!label) throw new Error("Android tap target needs an aria-label");
@@ -391,6 +458,254 @@ export async function dismissSoftKeyboard(page: Page): Promise<void> {
       },
     )
     .toBe(0);
+}
+
+export async function swipeDownPtyToDismissSoftKeyboard(
+  page: Page,
+): Promise<AndroidPtyDismissGesture> {
+  const serialArgs = await adbArgs();
+  if (!(await isNativeSoftKeyboardVisible(serialArgs))) {
+    throw new Error("Android soft keyboard must be visible before the PTY dismiss gesture");
+  }
+
+  const geometry = await page.evaluate(() => {
+    const terminal = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    const screen = terminal?.querySelector<HTMLElement>(".xterm-screen");
+    if (!terminal || !screen) return null;
+
+    const terminalRect = terminal.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const viewport = {
+      width: window.visualViewport?.width ?? window.innerWidth,
+      height: window.visualViewport?.height ?? window.innerHeight,
+      offsetLeft: window.visualViewport?.offsetLeft ?? 0,
+      offsetTop: window.visualViewport?.offsetTop ?? 0,
+    };
+    const visibleLeft = Math.max(terminalRect.left, screenRect.left, viewport.offsetLeft);
+    const visibleRight = Math.min(
+      terminalRect.right,
+      screenRect.right,
+      viewport.offsetLeft + viewport.width,
+    );
+    const visibleTop = Math.max(terminalRect.top, screenRect.top, viewport.offsetTop);
+    const visibleBottom = Math.min(
+      terminalRect.bottom,
+      screenRect.bottom,
+      viewport.offsetTop + viewport.height,
+    );
+    const visibleHeight = visibleBottom - visibleTop;
+    if (visibleRight - visibleLeft < 80 || visibleHeight < 160) return null;
+
+    const startX = (visibleLeft + visibleRight) / 2;
+    const startY = visibleTop + visibleHeight * 0.28;
+    const endY = Math.min(visibleBottom - 24, startY + Math.min(140, visibleHeight * 0.42));
+    const startTarget = document.elementFromPoint(startX, startY);
+    const endTarget = document.elementFromPoint(startX, endY);
+    return {
+      terminalRect: {
+        left: terminalRect.left,
+        top: terminalRect.top,
+        right: terminalRect.right,
+        bottom: terminalRect.bottom,
+      },
+      screenRect: {
+        left: screenRect.left,
+        top: screenRect.top,
+        right: screenRect.right,
+        bottom: screenRect.bottom,
+      },
+      viewport,
+      startX,
+      startY,
+      endX: startX,
+      endY,
+      startHitsXterm: startTarget instanceof Element && Boolean(startTarget.closest(".xterm")),
+      endHitsXterm: endTarget instanceof Element && Boolean(endTarget.closest(".xterm")),
+    };
+  });
+  if (!geometry) {
+    throw new Error("Android PTY does not expose a large enough visible xterm area for swipe");
+  }
+  if (!geometry.startHitsXterm || !geometry.endHitsXterm) {
+    throw new Error(
+      `PTY dismiss gesture does not stay on xterm: ${JSON.stringify({
+        startHitsXterm: geometry.startHitsXterm,
+        endHitsXterm: geometry.endHitsXterm,
+        terminalRect: geometry.terminalRect,
+        screenRect: geometry.screenRect,
+        viewport: geometry.viewport,
+      })}`,
+    );
+  }
+
+  const hierarchy = await readAndroidWindowHierarchy(serialArgs);
+  const nodes = [...hierarchy.matchAll(/<node\b[^>]*>/g)].map(([node]) => node);
+  const webViewBounds = parseAndroidBounds(
+    nodes.find(
+      (node) =>
+        node.includes('package="com.android.chrome"') &&
+        (node.includes('class="android.webkit.WebView"') ||
+          node.includes('content-desc="Web View"')),
+    ),
+  );
+  const toolbarBounds = parseAndroidBounds(
+    nodes.find((node) => node.includes('resource-id="com.android.chrome:id/control_container"')),
+  );
+  if (!webViewBounds) {
+    throw new Error("Android Chrome WebView bounds are missing from the window hierarchy");
+  }
+
+  const [webLeft, webTop, webRight, webBottom] = webViewBounds;
+  const contentTop = toolbarBounds ? Math.max(webTop, toolbarBounds[3]) : webTop;
+  const scale = (webRight - webLeft) / geometry.viewport.width;
+  const toNativeX = (clientX: number) =>
+    Math.round(webLeft + (clientX - geometry.viewport.offsetLeft) * scale);
+  const toNativeY = (clientY: number) =>
+    Math.round(contentTop + (clientY - geometry.viewport.offsetTop) * scale);
+  const native = {
+    startX: toNativeX(geometry.startX),
+    startY: toNativeY(geometry.startY),
+    endX: toNativeX(geometry.endX),
+    endY: toNativeY(geometry.endY),
+  };
+  if (
+    native.startX < webLeft ||
+    native.startX > webRight ||
+    native.endX < webLeft ||
+    native.endX > webRight ||
+    native.startY < contentTop ||
+    native.startY > webBottom ||
+    native.endY < contentTop ||
+    native.endY > webBottom
+  ) {
+    throw new Error(
+      `Projected PTY swipe leaves Android Chrome WebView: ${JSON.stringify({ native, webViewBounds, contentTop, geometry })}`,
+    );
+  }
+
+  await page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())));
+  await execFileAsync("adb", [
+    ...serialArgs,
+    "shell",
+    "input",
+    "touchscreen",
+    "swipe",
+    `${native.startX}`,
+    `${native.startY}`,
+    `${native.endX}`,
+    `${native.endY}`,
+    "400",
+  ]);
+  await expect
+    .poll(async () => !(await isNativeSoftKeyboardVisible(serialArgs)), {
+      timeout: 10_000,
+      message: "The real downward PTY gesture did not close Android's soft keyboard",
+    })
+    .toBe(true);
+  await expect
+    .poll(
+      () =>
+        page.evaluate(() =>
+          Number(
+            document
+              .querySelector("[data-keyboard-offset]")
+              ?.getAttribute("data-keyboard-offset") ?? "0",
+          ),
+        ),
+      { timeout: 10_000, message: "Web viewport did not settle after the PTY dismiss gesture" },
+    )
+    .toBe(0);
+  await waitForViewportFramesToSettle(page);
+
+  return {
+    css: {
+      startX: geometry.startX,
+      startY: geometry.startY,
+      endX: geometry.endX,
+      endY: geometry.endY,
+    },
+    native,
+  };
+}
+
+export async function setAndroidEmulatorDisplaySize(
+  page: Page,
+  size: { width: number; height: number } | "baseline",
+): Promise<void> {
+  const serialArgs = await adbArgs();
+  const serial = serialArgs.at(-1) ?? "";
+  if (!serial.startsWith("emulator-")) {
+    throw new Error(
+      `Refusing to change display size on non-emulator device: ${serial || "unknown"}`,
+    );
+  }
+
+  if (size === "baseline") {
+    await execFileAsync("adb", [...serialArgs, "shell", "wm", "size", "reset"]);
+    await execFileAsync("adb", [...serialArgs, "shell", "wm", "density", "reset"]);
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "user_rotation",
+      "0",
+    ]);
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "accelerometer_rotation",
+      "1",
+    ]);
+  } else {
+    if (
+      !Number.isInteger(size.width) ||
+      !Number.isInteger(size.height) ||
+      size.width <= 0 ||
+      size.height <= 0
+    ) {
+      throw new Error(`Invalid Android emulator display size: ${JSON.stringify(size)}`);
+    }
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "accelerometer_rotation",
+      "0",
+    ]);
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "settings",
+      "put",
+      "system",
+      "user_rotation",
+      "0",
+    ]);
+    await execFileAsync("adb", [
+      ...serialArgs,
+      "shell",
+      "wm",
+      "size",
+      `${size.width}x${size.height}`,
+    ]);
+  }
+
+  if (!page.isClosed()) {
+    await expect
+      .poll(() => page.evaluate(() => window.innerWidth < window.innerHeight), {
+        timeout: 10_000,
+        message: "Android emulator did not settle in portrait after display-size change",
+      })
+      .toBe(true);
+    await waitForViewportFramesToSettle(page);
+  }
 }
 
 export async function setAndroidEmulatorOrientation(

@@ -51,9 +51,9 @@ export interface PtyDebugSnapshot {
       | "none"
       | "initial"
       | "wheel"
-      | "native-scroll"
       | "touch"
       | "ratio-scroll"
+      | "selection-autoscroll"
       | "programmatic-bottom";
     transitionId: string;
   };

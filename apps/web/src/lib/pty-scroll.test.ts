@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeHostTop,
   computePtyHostLayout,
+  computePtyLiveBackfill,
   computePtyLiveBottom,
   computeScrollAnchor,
   computeScrollTarget,
@@ -376,6 +377,61 @@ describe("PTY scroll geometry", () => {
 
     it("clamps to >= 0 when ydisp is negative", () => {
       expect(computeHostTop({ ydisp: -3, rows: 24, cellH: 20 })).toBe(0);
+    });
+  });
+
+  describe("computePtyLiveBackfill", () => {
+    it("fills the exact short-host gap with preceding scrollback rows", () => {
+      expect(
+        computePtyLiveBackfill({
+          ydisp: 2010,
+          rows: 25,
+          cellH: 20,
+          visibleContentHeight: 597,
+        }),
+      ).toEqual({
+        startLine: 2005,
+        endLine: 2009,
+        rowCount: 5,
+        rowHeight: 20,
+        topOffset: -100,
+      });
+    });
+
+    it("does not invent history for a fresh or full-height terminal", () => {
+      expect(
+        computePtyLiveBackfill({
+          ydisp: 0,
+          rows: 25,
+          cellH: 20,
+          visibleContentHeight: 597,
+        }),
+      ).toBeNull();
+      expect(
+        computePtyLiveBackfill({
+          ydisp: 100,
+          rows: 25,
+          cellH: 20,
+          visibleContentHeight: 480,
+        }),
+      ).toBeNull();
+    });
+
+    it("uses only available history when the buffer is still shallow", () => {
+      expect(
+        computePtyLiveBackfill({
+          ydisp: 3,
+          rows: 25,
+          cellH: 20,
+          visibleContentHeight: 597,
+        }),
+      ).toEqual({
+        startLine: 0,
+        endLine: 2,
+        rowCount: 3,
+        rowHeight: 20,
+        topOffset: -60,
+      });
     });
   });
 

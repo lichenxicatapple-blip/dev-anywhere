@@ -113,6 +113,10 @@ async function touchFlick(
 interface ReviewScrollSample {
   scrollTop: number;
   viewportY: number;
+  intentMode: string;
+  intentSource: string;
+  intentTransition: string;
+  touchActive: boolean;
   hostTopDrift: number;
   renderedLine: number | null;
   renderedLineContentTop: number | null;
@@ -173,6 +177,10 @@ async function startReviewScrollSampling(page: Page): Promise<void> {
         testWindow.__ptyReviewScrollSamples?.push({
           scrollTop: snapshot.container.scrollTop,
           viewportY: snapshot.term.viewportY,
+          intentMode: snapshot.verticalIntent.mode,
+          intentSource: snapshot.verticalIntent.source,
+          intentTransition: snapshot.verticalIntent.transitionId,
+          touchActive: snapshot.touchScrollActive,
           hostTopDrift: snapshot.host.topDrift,
           renderedLine,
           renderedLineContentTop,
@@ -240,9 +248,6 @@ function expectReviewScrollSamplesStable(
       ),
     ),
   );
-  const renderedLineViewportOffsets = new Set(
-    renderedSamples.map((sample) => sample.renderedLine - sample.viewportY),
-  );
   const scrollRange =
     Math.max(...samples.map((sample) => sample.scrollTop)) -
     Math.min(...samples.map((sample) => sample.scrollTop));
@@ -254,9 +259,9 @@ function expectReviewScrollSamplesStable(
   expect(samples.length).toBeGreaterThan(10);
   expect(scrollRange).toBeGreaterThan(options.minimumScrollRange);
   expect(maxHostTopDrift).toBeLessThanOrEqual(maxRenderedRowHeight + 1);
-  expect(renderedLineViewportOffsets).toEqual(
-    new Set([baseline.renderedLine - baseline.viewportY]),
-  );
+  // The frozen snapshot starts at the first physically visible buffer row, while xterm keeps a
+  // separate fixed-size viewport that covers the visible bottom edge. Their row indices are not
+  // expected to share a constant offset; physical line/content continuity below is the invariant.
   expect(maxRenderedGeometryDriftRows).toBeLessThanOrEqual(0.05);
   expect(maxRenderedBottomGap).toBeLessThanOrEqual(8);
 }
@@ -267,7 +272,11 @@ function expectViewportNeverPulledTowardBottom(samples: ReviewScrollSample[]): v
     .map((sample, index) => sample.viewportY - samples[index].viewportY);
   expect(samples.length).toBeGreaterThan(10);
   expect(Math.min(...samples.map((sample) => sample.viewportY))).toBeLessThan(samples[0].viewportY);
-  expect(Math.max(...viewportMoves)).toBeLessThanOrEqual(0);
+  const upwardMoves = samples
+    .slice(1)
+    .map((sample, index) => ({ previous: samples[index], sample }))
+    .filter(({ previous, sample }) => sample.viewportY > previous.viewportY);
+  expect(Math.max(...viewportMoves), JSON.stringify(upwardMoves, null, 2)).toBeLessThanOrEqual(0);
 }
 
 function expectReviewedFrameFrozen(samples: ReviewScrollSample[]): void {
@@ -306,6 +315,41 @@ async function readPtyScreenBottomGap(page: Page): Promise<number> {
   });
 }
 
+async function readPtyLiveTopCoverage(page: Page): Promise<{
+  rawLiveTopGap: number;
+  paintedTopGap: number;
+  backfillToScreenGap: number | null;
+  backfillText: string;
+}> {
+  return page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    const screen = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+    const backfill = screen?.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+    if (!container || !screen) {
+      return {
+        rawLiveTopGap: Number.POSITIVE_INFINITY,
+        paintedTopGap: Number.POSITIVE_INFINITY,
+        backfillToScreenGap: null,
+        backfillText: "",
+      };
+    }
+    const containerRect = container.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const paddingTop = Number.parseFloat(getComputedStyle(container).paddingTop) || 0;
+    const contentTop = containerRect.top + paddingTop;
+    const backfillRect = backfill?.getBoundingClientRect() ?? null;
+    return {
+      rawLiveTopGap: screenRect.top - contentTop,
+      paintedTopGap: Math.max(
+        0,
+        Math.min(screenRect.top, backfillRect?.top ?? screenRect.top) - contentTop,
+      ),
+      backfillToScreenGap: backfillRect ? screenRect.top - backfillRect.bottom : null,
+      backfillText: backfill?.textContent ?? "",
+    };
+  });
+}
+
 test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
   test.setTimeout(60_000);
 
@@ -319,6 +363,56 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expectPtyCursorAwareBottom(emuPage);
 
     await expect.poll(() => readPtyScreenBottomGap(emuPage)).toBeLessThanOrEqual(8);
+  });
+
+  test("an extra bottom swipe keeps a short live host filled from preceding scrollback", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-short-live-backfill`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      provider: "codex",
+      rows: 25,
+      cols: 122,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await sendPtyLines(emuPage, { count: 225, prefix: "short-live-history" });
+    await expectPtyCursorAwareBottom(emuPage);
+
+    const before = await readPtyLiveTopCoverage(emuPage);
+    expect(before.rawLiveTopGap).toBeGreaterThan(80);
+    expect(before.paintedTopGap).toBeLessThanOrEqual(1);
+    expect(Math.abs(before.backfillToScreenGap ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(1);
+    expect(before.backfillText).toContain("short-live-history");
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    const x = box.x + box.width / 2;
+    const startY = box.y + box.height * 0.72;
+    await touchDrag(emuPage, { x, y: startY }, { x, y: startY - 175 });
+
+    await expect
+      .poll(async () => {
+        const snapshot = await readPtyDebugSnapshot(emuPage);
+        return {
+          atBottom: snapshot?.anchor.atBottom,
+          mode: snapshot?.verticalIntent.mode,
+          reviewSnapshotCount: await emuPage.locator('[data-slot="pty-review-snapshot"]').count(),
+        };
+      })
+      .toEqual({ atBottom: true, mode: "following", reviewSnapshotCount: 0 });
+    await expect
+      .poll(() => readPtyLiveTopCoverage(emuPage))
+      .toEqual(
+        expect.objectContaining({
+          paintedTopGap: expect.any(Number),
+          backfillText: expect.stringContaining("short-live-history"),
+        }),
+      );
+    const after = await readPtyLiveTopCoverage(emuPage);
+    expect(after.paintedTopGap).toBeLessThanOrEqual(1);
+    expect(Math.abs(after.backfillToScreenGap ?? Number.POSITIVE_INFINITY)).toBeLessThanOrEqual(1);
   });
 
   test("scroll up shows back-to-bottom; tap returns to bottom", async ({ emuPage }) => {
@@ -377,7 +471,9 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
       .toContain("WORKING elapsed 02s");
     await expect
-      .poll(() => emuPage.locator('[data-slot="pty-host"] .xterm-rows').last().textContent())
+      .poll(() =>
+        emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows').textContent(),
+      )
       .toContain("WORKING elapsed 02s");
   });
 
@@ -459,9 +555,9 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     expect(afterUpdate.container.scrollTop).toBeCloseTo(beforeUpdate.container.scrollTop, 0);
     expect(afterUpdate.verticalIntent.mode).toBe("reviewing");
 
-    await ptyTerminal(emuPage).evaluate((element) => {
-      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
-    });
+    await ptyTerminal(emuPage).evaluate((element, deltaY) => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY, cancelable: true }));
+    }, -Math.ceil(beforeUpdate.cell.h));
     await expect
       .poll(async () => {
         const text = (await reviewSnapshot.textContent()) ?? "";
@@ -641,7 +737,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expectPtyCursorAwareBottom(emuPage);
     await expect(snapshot).toHaveCount(0);
     await expect(button).toHaveJSProperty("inert", true);
-    const liveRows = emuPage.locator('[data-slot="pty-host"] .xterm-rows').last();
+    const liveRows = emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows');
     await expect(liveRows).toContainText("mobile-live-append 12");
 
     await sendPtyOutput(emuPage, "mobile-live-after-return\r\n");

@@ -57,7 +57,7 @@ test.describe("PTY render chaos: stale render snapshots and outputSeq dedupe", (
     expect(screen).not.toContain("DUPLICATE-SEQ-2-SHOULD-NOT-RENDER");
 
     await expectPtyRendered(page);
-    const renderedRows = page.locator('[data-slot="pty-host"] .xterm-rows').last();
+    const renderedRows = page.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows');
     await expect(renderedRows).toContainText("SEQ-1");
     await expect(renderedRows).toContainText("SEQ-2");
     await expect(renderedRows).toContainText("SEQ-3");

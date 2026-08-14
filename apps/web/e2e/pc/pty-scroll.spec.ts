@@ -8,6 +8,7 @@ import {
   enterLongHostMode,
   expectBackToBottomClearance,
   expectPtyAtBottom,
+  expectPtyCursorAwareBottom,
   expectPtyRendered,
   expectPtyScrollable,
   expectPtySessionSubscribeCount,
@@ -98,9 +99,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expectPtySessionSubscribeCount(page, 2);
   });
 
-  test("restores the semantic PTY position after browser restores stale positions", async ({
-    page,
-  }) => {
+  test("discards stale browser positions and resumes the current live tail", async ({ page }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID });
     await expectPtyTerminalMounted(page);
 
@@ -131,12 +130,11 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await page.evaluate(() => window.dispatchEvent(new Event("pagehide")));
     await page.evaluate(() => window.dispatchEvent(new Event("pageshow")));
 
+    await expectPtyCursorAwareBottom(page);
     await expect
-      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
-      .toBeGreaterThan(100);
-    await expect
-      .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.scrollTop))
-      .toBeLessThanOrEqual(8);
+      .poll(() => ptyTerminal(page).evaluate((el) => (el as HTMLElement).scrollLeft))
+      .toBe(0);
+    await expect(backToBottom(page)).toHaveJSProperty("inert", true);
     await expectPtyRendered(page);
   });
 

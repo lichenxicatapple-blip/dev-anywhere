@@ -38,6 +38,14 @@ interface PtyScrollTarget {
   ydisp: number;
 }
 
+export interface PtyLiveBackfillPlan {
+  startLine: number;
+  endLine: number;
+  rowCount: number;
+  rowHeight: number;
+  topOffset: number;
+}
+
 function normalizeNearIntegerRows(value: number): number {
   const nearest = Math.round(value);
   const tolerance = Number.EPSILON * Math.max(1, Math.abs(value));
@@ -269,6 +277,34 @@ export function computeHostTop(input: HostTopInput): number {
       ? input.visibleContentHeight - hostHeight
       : 0;
   return Math.max(0, input.ydisp * input.cellH + verticalOffset);
+}
+
+/**
+ * Projects the scrollback rows immediately before xterm's live viewport into
+ * the otherwise unused space above a short, bottom-aligned server-owned PTY.
+ *
+ * This is derived rendering only: the remote rows, xterm viewport and semantic
+ * scroll position stay unchanged. A fresh terminal without preceding history
+ * deliberately keeps its normal top breathing room.
+ */
+export function computePtyLiveBackfill(input: HostTopInput): PtyLiveBackfillPlan | null {
+  if (input.cellH <= 0 || input.rows <= 0 || input.ydisp <= 0) return null;
+  const visibleContentHeight = Math.max(0, input.visibleContentHeight ?? 0);
+  const hostHeight = input.rows * input.cellH;
+  const gapHeight = Math.max(0, visibleContentHeight - hostHeight);
+  if (gapHeight <= 0) return null;
+
+  const requestedRows = Math.ceil(gapHeight / input.cellH);
+  const rowCount = Math.min(requestedRows, Math.floor(input.ydisp));
+  if (rowCount <= 0) return null;
+  const endLine = Math.floor(input.ydisp) - 1;
+  return {
+    startLine: endLine - rowCount + 1,
+    endLine,
+    rowCount,
+    rowHeight: input.cellH,
+    topOffset: -rowCount * input.cellH,
+  };
 }
 
 export function computeScrollTarget(scrollTop: number, metrics: PtyScrollMetrics): PtyScrollTarget {

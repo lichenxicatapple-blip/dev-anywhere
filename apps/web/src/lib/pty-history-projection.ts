@@ -1,14 +1,24 @@
-interface PtyReviewSnapshotController {
-  captureRange: (startLine: number, rowCount: number) => boolean;
-  clear: () => void;
+export type PtyHistoryProjectionKind = "review" | "live-backfill";
+
+export interface PtyHistoryProjection {
+  kind: PtyHistoryProjectionKind;
+  startLine: number;
+  endLine: number;
+  rowHeight: number;
+  topOffset: number;
+}
+
+interface PtyHistoryProjectionController {
+  render: (projection: PtyHistoryProjection | null) => boolean;
   dispose: () => void;
 }
 
-interface PtyReviewSnapshotOptions {
+interface PtyHistoryProjectionOptions {
   serializeRangeAsHtml?: (startLine: number, endLine: number) => string;
 }
 
-const SNAPSHOT_SLOT = "pty-review-snapshot";
+const REVIEW_SLOT = "pty-review-snapshot";
+const LIVE_BACKFILL_SLOT = "pty-live-backfill";
 
 function findRenderedRows(screen: HTMLElement): HTMLElement | null {
   return (
@@ -16,18 +26,23 @@ function findRenderedRows(screen: HTMLElement): HTMLElement | null {
       (child): child is HTMLElement =>
         child instanceof HTMLElement &&
         child.classList.contains("xterm-rows") &&
-        child.dataset.slot !== SNAPSHOT_SLOT,
+        child.dataset.slot !== REVIEW_SLOT,
     ) ?? null
   );
 }
 
-function createSnapshotShell(screen: HTMLElement, rows: HTMLElement): HTMLElement {
+function createSnapshotShell(
+  screen: HTMLElement,
+  rows: HTMLElement,
+  topOffset: number,
+  slot: typeof REVIEW_SLOT | typeof LIVE_BACKFILL_SLOT,
+): HTMLElement {
   const next = document.createElement("div");
-  next.dataset.slot = SNAPSHOT_SLOT;
+  next.dataset.slot = slot;
   next.setAttribute("aria-hidden", "true");
   Object.assign(next.style, {
     position: "absolute",
-    top: "0",
+    top: `${topOffset}px`,
     right: "0",
     left: "0",
     height: rows.style.height || "100%",
@@ -85,7 +100,7 @@ function restoreSerializedRowStyleCarry(rows: HTMLElement): void {
 function createSerializedRows(
   html: string,
   renderedRows: HTMLElement,
-  rowCount: number,
+  rowHeight: number,
 ): HTMLElement | null {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const serializedRows = parsed.querySelector<HTMLElement>("pre > div");
@@ -97,7 +112,6 @@ function createSerializedRows(
   restoreSerializedRowStyleCarry(rows);
   isolateSerializedForegroundOpacity(rows);
   const renderedStyle = getComputedStyle(renderedRows);
-  const rowHeight = rowCount > 0 ? renderedRows.clientHeight / rowCount : 0;
   const serializedRowCount = rows.childElementCount;
   Object.assign(rows.style, {
     position: "absolute",
@@ -126,57 +140,66 @@ function createSerializedRows(
 }
 
 /**
- * Keeps the visible PTY frame coherent while the user reviews history.
+ * Renders the single derived history layer used around xterm's server-owned viewport.
  *
- * xterm's DOM renderer reuses the same row elements for scrollback and the
- * mutable live screen. The controller serializes the requested buffer rows
- * before moving the live viewport, then clears that visual snapshot when live
- * following resumes. The real terminal keeps receiving and parsing data.
+ * `review` freezes the rows the user is reading. `live-backfill` paints the real
+ * rows immediately preceding a short, bottom-aligned live viewport. Both are
+ * projections of xterm's buffer, never independent scroll state, and this
+ * renderer owns exactly one projection node at a time.
  */
-export function attachPtyReviewSnapshot(
+export function attachPtyHistoryProjection(
   host: HTMLElement,
-  options: PtyReviewSnapshotOptions = {},
-): PtyReviewSnapshotController {
-  let snapshot: HTMLElement | null = null;
+  options: PtyHistoryProjectionOptions = {},
+): PtyHistoryProjectionController {
+  let renderedProjection: HTMLElement | null = null;
   const initialHostOverflow = host.style.overflow;
 
-  const replaceSnapshot = (next: HTMLElement): void => {
+  const replaceProjection = (next: HTMLElement): void => {
     const screen = host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) return;
     const selection = Array.from(screen.children).find(
       (child) => child instanceof HTMLElement && child.classList.contains("xterm-selection"),
     );
     screen.insertBefore(next, selection ?? null);
-    snapshot?.remove();
-    snapshot = next;
+    renderedProjection?.remove();
+    renderedProjection = next;
     host.style.overflow = "visible";
   };
 
   const clear = (): void => {
-    snapshot?.remove();
-    snapshot = null;
+    renderedProjection?.remove();
+    renderedProjection = null;
     host.style.overflow = initialHostOverflow;
   };
 
-  const captureRange = (startLine: number, rowCount: number): boolean => {
+  const render = (projection: PtyHistoryProjection | null): boolean => {
+    if (!projection) {
+      clear();
+      return true;
+    }
     const screen = host.querySelector<HTMLElement>(".xterm-screen");
     const renderedRows = screen ? findRenderedRows(screen) : null;
-    if (!screen || !renderedRows || !options.serializeRangeAsHtml || rowCount <= 0) return false;
+    if (
+      !screen ||
+      !renderedRows ||
+      !options.serializeRangeAsHtml ||
+      projection.endLine < projection.startLine ||
+      projection.rowHeight <= 0
+    ) {
+      return false;
+    }
 
-    // One extra buffer row keeps the bottom covered while native scrolling sits
-    // between xterm's integer viewport rows. It is visual overscan only; the
-    // server-owned PTY geometry remains unchanged.
-    const html = options.serializeRangeAsHtml(startLine, startLine + rowCount);
-    const rows = createSerializedRows(html, renderedRows, rowCount);
+    const html = options.serializeRangeAsHtml(projection.startLine, projection.endLine);
+    const rows = createSerializedRows(html, renderedRows, projection.rowHeight);
     if (!rows) return false;
-    const next = createSnapshotShell(screen, rows);
-    replaceSnapshot(next);
+    const slot = projection.kind === "review" ? REVIEW_SLOT : LIVE_BACKFILL_SLOT;
+    const next = createSnapshotShell(screen, rows, projection.topOffset, slot);
+    replaceProjection(next);
     return true;
   };
 
   return {
-    captureRange,
-    clear,
+    render,
     dispose: clear,
   };
 }

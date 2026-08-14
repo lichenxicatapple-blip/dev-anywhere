@@ -21,6 +21,7 @@ interface DragSelectOptions {
   host: HTMLElement;
   edgePx?: number;
   maxSpeedPx?: number;
+  onVerticalScrollIntent?: (reason: string) => void;
   onHorizontalScrollIntent?: (reason: string) => void;
   // 测试注入: 默认 requestAnimationFrame / cancelAnimationFrame。jsdom 下走 setTimeout 桩。
   requestFrame?: (cb: () => void) => number;
@@ -54,6 +55,7 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
     host,
     edgePx = DEFAULT_EDGE_PX,
     maxSpeedPx = DEFAULT_MAX_SPEED_PX,
+    onVerticalScrollIntent,
     onHorizontalScrollIntent,
     requestFrame = (cb) => requestAnimationFrame(cb),
     cancelFrame = (id) => cancelAnimationFrame(id),
@@ -67,6 +69,7 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
   // pointerup 才停)。两种语义混到一个 API 里只会让 scheduler 更复杂。
   let frame: number | null = null;
   let dispatchCount = 0;
+  let verticalScrollIntentMarked = false;
   let dispatchTargetTag: DragSelectDebugSnapshot["dispatchTargetTag"] = "unknown";
   let lastScrollDelta: DragSelectDebugSnapshot["lastScrollDelta"] = null;
   let lastDispatchedAt: number | null = null;
@@ -86,6 +89,7 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
 
   const stop = (): void => {
     dragging = false;
+    verticalScrollIntentMarked = false;
     if (frame !== null) {
       cancelFrame(frame);
       frame = null;
@@ -115,7 +119,13 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
       onHorizontalScrollIntent?.(`dragSelectAutoscroll dx=${Math.round(dx)}`);
       container.scrollLeft += dx;
     }
-    if (dy !== 0) container.scrollTop += dy;
+    if (dy !== 0) {
+      if (!verticalScrollIntentMarked) {
+        onVerticalScrollIntent?.(`dragSelectAutoscroll dy=${Math.round(dy)}`);
+        verticalScrollIntentMarked = true;
+      }
+      container.scrollTop += dy;
+    }
 
     if (dx !== 0 || dy !== 0) {
       // pointer 没动但 cell 下面的内容因为 scroll 改变了; 派发合成 mousemove
@@ -143,6 +153,7 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
     if (event.pointerType !== "mouse") return;
     if (event.button !== 0) return;
     dragging = true;
+    verticalScrollIntentMarked = false;
     pointerX = event.clientX;
     pointerY = event.clientY;
     if (frame === null) frame = requestFrame(tick);

@@ -31,6 +31,7 @@ function Harness({
   onHandleDragStart,
   onHandleDragMove,
   onHandleDragEnd,
+  onVerticalScrollIntent,
   onHorizontalScrollIntent,
 }: {
   onHandleDragStart: (kind: PtySelectionHandleKind) => void;
@@ -42,6 +43,7 @@ function Harness({
     kind: PtySelectionHandleKind,
     point: { clientX: number; clientY: number } | null,
   ) => void;
+  onVerticalScrollIntent?: (reason: string) => void;
   onHorizontalScrollIntent?: (reason: string) => void;
 }) {
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
@@ -55,6 +57,7 @@ function Harness({
     onLongPressStart: vi.fn(),
     onLongPressMove: vi.fn(),
     onLongPressEnd: vi.fn(),
+    onVerticalScrollIntent,
     onHorizontalScrollIntent,
     onHandleDragStart,
     onHandleDragMove,
@@ -164,5 +167,56 @@ describe("usePtySelectionGestureDriver", () => {
     expect(onHorizontalScrollIntent).toHaveBeenCalledWith(
       expect.stringContaining("selectionGestureAutoscroll"),
     );
+  });
+
+  it("marks vertical review once before the first effective handle autoscroll write", () => {
+    const rafState: { pendingFrame?: FrameRequestCallback } = {};
+    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
+      rafState.pendingFrame = cb;
+      return 1;
+    });
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+
+    const onHandleDragStart = vi.fn<(kind: PtySelectionHandleKind) => void>();
+    const onHandleDragMove =
+      vi.fn<(kind: PtySelectionHandleKind, point: { clientX: number; clientY: number }) => void>();
+    const onHandleDragEnd =
+      vi.fn<
+        (kind: PtySelectionHandleKind, point: { clientX: number; clientY: number } | null) => void
+      >();
+    const rootRef: { current: HTMLElement | null } = { current: null };
+    const scrollTopsAtIntent: number[] = [];
+    const onVerticalScrollIntent = vi.fn<(reason: string) => void>(() => {
+      if (rootRef.current) scrollTopsAtIntent.push(rootRef.current.scrollTop);
+    });
+    const rendered = render(
+      <Harness
+        onHandleDragStart={onHandleDragStart}
+        onHandleDragMove={onHandleDragMove}
+        onHandleDragEnd={onHandleDragEnd}
+        onVerticalScrollIntent={onVerticalScrollIntent}
+      />,
+    );
+
+    const root = rendered.getByTestId("root");
+    rootRef.current = root;
+    const handle = rendered.getByTestId("handle");
+    defineScrollableBox(root);
+    root.scrollTop = 200;
+
+    dispatchTouch("touchstart", handle, { clientX: 120, clientY: 220 });
+    dispatchTouch("touchmove", window, { clientX: 400, clientY: 5 });
+    rafState.pendingFrame?.(0);
+
+    expect(root.scrollTop).toBeLessThan(200);
+    expect(scrollTopsAtIntent).toEqual([200]);
+    expect(onVerticalScrollIntent).toHaveBeenCalledWith(
+      expect.stringContaining("selectionGestureAutoscroll"),
+    );
+
+    const afterFirstFrame = root.scrollTop;
+    rafState.pendingFrame?.(16);
+    expect(root.scrollTop).toBeLessThan(afterFirstFrame);
+    expect(onVerticalScrollIntent).toHaveBeenCalledTimes(1);
   });
 });
