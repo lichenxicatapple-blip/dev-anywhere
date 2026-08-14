@@ -1237,8 +1237,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         // relayout was scheduled above. Queue the forced follow after it so the bottom anchor
         // includes the keyboard controls' committed height instead of the previous frame's spacer.
         scheduleRawInputFollow("keyboardOffset", { force: true });
-      } else if (!keyboardOpen) {
-        scheduleRawInputFollow("keyboardOffset");
       }
     }
   }, [

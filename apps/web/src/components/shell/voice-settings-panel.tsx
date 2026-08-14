@@ -201,6 +201,7 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
   const testPlayerRef = useRef<PcmStreamPlayer | null>(null);
   const testPlaybackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const saveFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(false);
 
   useEffect(() => {
     const relay = relayClientRef;
@@ -261,7 +262,9 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
   }, [config.region, configLoaded]);
 
   useEffect(() => {
+    mountedRef.current = true;
     return () => {
+      mountedRef.current = false;
       stopTestPlayback();
       clearSaveFeedbackTimer();
     };
@@ -353,10 +356,12 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
     const saveStartedAt = performance.now();
     try {
       const result = await relay.updateVoiceConfig(update);
+      if (!mountedRef.current) return;
       const elapsedMs = performance.now() - saveStartedAt;
       if (elapsedMs < MIN_SAVE_PENDING_MS) {
         await sleep(MIN_SAVE_PENDING_MS - elapsedMs);
       }
+      if (!mountedRef.current) return;
       if (!result.success || result.error || !result.config) {
         setState({ kind: "error", message: result.error ?? "保存语音设置失败" });
         return;
@@ -375,14 +380,17 @@ export function VoiceSettingsPanel({ scrollRef }: { scrollRef?: Ref<HTMLDivEleme
           region: result.config.region,
         })
         .then((capabilitiesResult) => {
+          if (!mountedRef.current) return;
           if (capabilitiesResult.capabilities) {
             setCapabilities(capabilitiesResult.capabilities);
           }
         })
         .catch(() => {
+          if (!mountedRef.current) return;
           setCapabilities(createBundledBailianVoiceCapabilities());
         });
     } catch (err) {
+      if (!mountedRef.current) return;
       setState({ kind: "error", message: err instanceof Error ? err.message : "保存语音设置失败" });
     }
   }

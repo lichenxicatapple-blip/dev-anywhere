@@ -30,8 +30,11 @@ export function decideScrollToBottomAction(
 
 interface CursorAwareClampInput {
   rawScrollTop: number;
+  referenceScrollTop: number;
   bottomScrollTop: number;
   domMaxScrollTop: number;
+  reviewing: boolean;
+  atBottomThreshold: number;
 }
 
 interface CursorAwareClampResult {
@@ -39,10 +42,31 @@ interface CursorAwareClampResult {
   scrollTop: number;
 }
 
+export function resolvePtyNativeScrollMax({
+  reviewing,
+  referenceScrollTop,
+  bottomScrollTop,
+  domMaxScrollTop,
+  atBottomThreshold,
+}: {
+  reviewing: boolean;
+  referenceScrollTop: number;
+  bottomScrollTop: number;
+  domMaxScrollTop: number;
+  atBottomThreshold: number;
+}): number {
+  // Following is bounded by the semantic live tail. Reviewing uses the DOM range
+  // only when the gesture started inside the preserved range that may temporarily
+  // sit beyond the new live-tail coordinate after a viewport/keyboard relayout.
+  const usesPreservedReviewRange =
+    reviewing && referenceScrollTop > bottomScrollTop + atBottomThreshold;
+  return usesPreservedReviewRange ? domMaxScrollTop : Math.min(domMaxScrollTop, bottomScrollTop);
+}
+
 export function decideCursorAwareClamp(input: CursorAwareClampInput): CursorAwareClampResult {
-  const hasCursorAwareBottom = input.bottomScrollTop < input.domMaxScrollTop - 1;
-  if (!hasCursorAwareBottom || input.rawScrollTop <= input.bottomScrollTop + 1) {
+  const maxScrollTop = resolvePtyNativeScrollMax(input);
+  if (input.rawScrollTop <= maxScrollTop + 1) {
     return { action: "keep", scrollTop: input.rawScrollTop };
   }
-  return { action: "clamp", scrollTop: input.bottomScrollTop };
+  return { action: "clamp", scrollTop: maxScrollTop };
 }

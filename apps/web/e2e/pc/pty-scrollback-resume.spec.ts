@@ -7,6 +7,7 @@
 // 如果 bug 在 e2e 能复现, 这条 spec 就是 fail; 修好之后变 green。
 import { expect, test } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
+import { expectPtyCursorAwareBottom, expectPtyRendered } from "../pty-scroll-helpers";
 
 const SESSION_ID = "pty-scrollback-resume";
 const PROBE_TOKEN = "PROBE-AFTER-SCROLLBACK-RESUME";
@@ -45,6 +46,7 @@ test.describe("PTY scrollback resume", () => {
     for (let i = 0; i < 5; i++) {
       await page.mouse.wheel(0, -120);
     }
+    await expectPtyRendered(page);
     const reviewedScrollTop = await terminal.evaluate((node) => node.scrollTop);
 
     // 回看期间仍继续写 xterm，不能把输出藏在前端队列里等下一次用户交互唤醒。
@@ -57,21 +59,20 @@ test.describe("PTY scrollback resume", () => {
       .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
       .toContain("mid 09");
     expect(await terminal.evaluate((node) => node.scrollTop)).toBeCloseTo(reviewedScrollTop, 0);
+    await expectPtyRendered(page);
 
-    // 小 wheel 滚回底部。
-    for (let i = 0; i < 6; i++) {
-      await page.mouse.wheel(0, 120);
-    }
+    // 走 controller-owned wheel 路径回到底部，并在发送探针前先证明已经恢复 follow。
+    await page.mouse.wheel(0, 10_000);
+    await expectPtyCursorAwareBottom(page);
 
     // 探针: 滚回底之后再 sendPty 一行, 必须能在合理时间内看见 (说明渲染没冻)。
     await page.evaluate((token) => {
       window.__ptySmoke.sendPty(`=== ${token} ===\r\n`);
     }, PROBE_TOKEN);
 
-    await expect
-      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID), {
-        timeout: 10_000,
-      })
-      .toContain(PROBE_TOKEN);
+    await expect(page.locator('[data-slot="pty-host"] .xterm-rows').last()).toContainText(
+      PROBE_TOKEN,
+    );
+    await expectPtyCursorAwareBottom(page);
   });
 });

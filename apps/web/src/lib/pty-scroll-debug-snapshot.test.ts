@@ -67,7 +67,7 @@ const probe = (overrides: Partial<PtyScrollDebugProbe> = {}): PtyScrollDebugProb
   cellW: 10,
   paddingTop: 0,
   paddingBottom: 0,
-  canvasLastY: -1,
+  liveLastY: -1,
   userHasVerticalScrollIntent: false,
   verticalIntentMode: "following",
   verticalIntentSource: "none",

@@ -3,6 +3,8 @@ import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
 import {
   backToBottom,
   backToBottomNewIndicator,
+  expectPtyCursorAwareBottom,
+  expectPtyRendered,
   ptyTerminal,
   sendPtyOutput,
 } from "../pty-scroll-helpers";
@@ -84,6 +86,7 @@ test("keeps a coherent frame while live rows update across the scrollback bounda
   await page.mouse.wheel(0, 10_000);
   await expect(snapshot).toHaveCount(0);
   await expect(backToBottom(page)).toHaveJSProperty("inert", true);
+  await expectPtyCursorAwareBottom(page);
 });
 
 test("keeps the reviewed frame frozen while live output appends new lines", async ({ page }) => {
@@ -213,7 +216,7 @@ test("preserves BCE-only padding around Codex prompts in the reviewed frame", as
     .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
     .toContain("真实 Codex 历史输入");
 
-  await ptyTerminal(page).evaluate((container, sessionId) => {
+  const targetLine = await ptyTerminal(page).evaluate((container, sessionId) => {
     const terminal = window.__ccTestPtyTerminals?.get(sessionId);
     if (!terminal) throw new Error("PTY terminal is unavailable");
     let targetLine = -1;
@@ -231,9 +234,31 @@ test("preserves BCE-only padding around Codex prompts in the reviewed frame", as
     if (targetLine < 0) throw new Error("Codex prompt row is unavailable");
     const renderedRow = container.querySelector<HTMLElement>(".xterm-rows > div");
     const cellHeight = renderedRow?.getBoundingClientRect().height ?? 18;
-    container.scrollTop = Math.max(0, (targetLine - 5) * cellHeight);
-    container.dispatchEvent(new Event("scroll"));
+    const targetScrollTop = Math.max(0, (targetLine - 5) * cellHeight);
+    container.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: targetScrollTop - container.scrollTop,
+      }),
+    );
+    return targetLine;
   }, SESSION_ID);
+
+  await expect
+    .poll(() =>
+      page.evaluate(
+        ({ sessionId, line }) => {
+          const terminal = window.__ccTestPtyTerminals?.get(sessionId);
+          if (!terminal) return false;
+          const row = line - terminal.buffer.active.viewportY;
+          return row >= 1 && row < terminal.rows - 1;
+        },
+        { sessionId: SESSION_ID, line: targetLine },
+      ),
+    )
+    .toBe(true);
+  await expectPtyRendered(page);
 
   const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
   await expect(snapshot).toContainText("真实 Codex 历史输入");

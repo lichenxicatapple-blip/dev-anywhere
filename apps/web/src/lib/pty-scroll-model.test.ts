@@ -186,7 +186,7 @@ describe("pty scroll model", () => {
           currentY: 350,
           touchStartedAtCursorAwareBottom: true,
           bottomScrollTop: 1000,
-          domMaxScrollTop: 1200,
+          maxScrollTop: 1000,
         }),
       ).toMatchObject({
         gestureBaseScrollTop: 1000,
@@ -205,7 +205,7 @@ describe("pty scroll model", () => {
           currentY: 100,
           touchStartedAtCursorAwareBottom: false,
           bottomScrollTop: 820,
-          domMaxScrollTop: 1200,
+          maxScrollTop: 820,
         }),
       ).toMatchObject({
         gestureBaseScrollTop: 700,

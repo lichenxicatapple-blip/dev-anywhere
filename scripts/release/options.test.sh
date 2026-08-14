@@ -39,6 +39,10 @@ grep -q 'run_timed_stage "real-file-chain"' <<<"$deep_script"
 grep -q 'run_timed_stage "process-chaos"' <<<"$deep_script"
 grep -q 'run_timed_stage "android-e2e"' <<<"$deep_script"
 grep -q 'RELEASE_DEEP_SCOPE' <<<"$deep_script"
+grep -q 'RELEASE_MOBILE_BASE_PORT="${DEV_ANYWHERE_MOBILE_BASE_PORT:-5570}"' <<<"$deep_script"
+grep -q 'RELEASE_MOBILE_SERIAL="emulator-${RELEASE_MOBILE_BASE_PORT}"' <<<"$deep_script"
+grep -q 'DEV_ANYWHERE_MOBILE_BASE_PORT="$RELEASE_MOBILE_BASE_PORT"' <<<"$deep_script"
+grep -q 'ANDROID_SERIAL="$RELEASE_MOBILE_SERIAL"' <<<"$deep_script"
 
 mobile_package_scripts="$(node -e 'const p=require("./package.json"); process.stdout.write(JSON.stringify(p.scripts))')"
 grep -q '"test:mobile":"bash scripts/test/mobile.sh"' <<<"$mobile_package_scripts"
@@ -75,6 +79,30 @@ grep -q 'mobile_run_playwright_spec' scripts/test/mobile.sh
 grep -q -- '--workers=1' scripts/test/mobile.sh
 grep -q -- '--retries=0' scripts/test/mobile.sh
 grep -q -- '--max-failures=1' scripts/test/mobile.sh
+grep -q 'FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-1}"' scripts/test/mobile.sh
+grep -q 'RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-$FAIL_FAST}"' scripts/test/mobile.sh
+grep -q -- '--output "$output_dir"' scripts/test/mobile.sh
+grep -q 'lock_path="$MOBILE_LOCK_ROOT/$safe_resource.lock"' scripts/test/mobile.sh
+if grep -q 'command -v shlock\|\.lock\.d' scripts/test/mobile.sh; then
+  echo "mobile resource locks must use one canonical mkdir path on every host" >&2
+  exit 1
+fi
+grep -q 'mobile_acquire_run_lock "device-${ANDROID_SERIAL}"' scripts/test/mobile.sh
+grep -q 'mobile_acquire_run_lock "tcp-${CDP_PORT}"' scripts/test/mobile.sh
+grep -q 'mobile_acquire_run_lock "tcp-${TIER_MOBILE_VITE_PORT}"' scripts/test/mobile.sh
+grep -q 'mobile_acquire_run_lock "tcp-${TIER_MOBILE_RELAY_PORT}"' scripts/test/mobile.sh
+grep -q 'DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:${TIER_MOBILE_RELAY_PORT}"' scripts/test/mobile.sh
+grep -q -- '--strictPort' scripts/lib/smoke-common.sh
+grep -q 'smoke_capture_started_vite_ownership' scripts/lib/smoke-common.sh
+grep -Fq "grep -Fxq 'com.android.chrome'" scripts/test/mobile.sh
+if grep -q 'adb shell ps .*|| true' scripts/test/mobile.sh; then
+  echo "mobile Chrome exit checks must not count adb failures as process absence" >&2
+  exit 1
+fi
+if grep -q 'com\\.android\\.chrome(?:' scripts/test/mobile.sh; then
+  echo "mobile Chrome process checks must use a portable exact main-process match" >&2
+  exit 1
+fi
 publish_workflow="$(cat .github/workflows/release.yml)"
 grep -Fq -- '- "v*.*.*"' <<<"$publish_workflow"
 grep -q 'workflow_dispatch:' <<<"$publish_workflow"
@@ -87,5 +115,7 @@ if RELEASE_DEEP_SCOPE=invalid RELEASE_DEEP_SKIP_FAST=1 bash scripts/release/deep
   echo "deep release validation must reject an invalid scope" >&2
   exit 1
 fi
+
+bash scripts/test/mobile-runner.test.sh
 
 echo "release options test passed"

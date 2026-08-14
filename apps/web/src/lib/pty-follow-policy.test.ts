@@ -79,8 +79,11 @@ describe("PTY follow policy", () => {
       expect(
         decideCursorAwareClamp({
           rawScrollTop: 5166,
+          referenceScrollTop: 5013,
           bottomScrollTop: 5013,
           domMaxScrollTop: 5166,
+          reviewing: false,
+          atBottomThreshold: 8,
         }),
       ).toEqual({ action: "clamp", scrollTop: 5013 });
     });
@@ -89,8 +92,11 @@ describe("PTY follow policy", () => {
       expect(
         decideCursorAwareClamp({
           rawScrollTop: 4900,
+          referenceScrollTop: 4900,
           bottomScrollTop: 5013,
           domMaxScrollTop: 5166,
+          reviewing: false,
+          atBottomThreshold: 8,
         }),
       ).toEqual({ action: "keep", scrollTop: 4900 });
     });
@@ -99,10 +105,39 @@ describe("PTY follow policy", () => {
       expect(
         decideCursorAwareClamp({
           rawScrollTop: 5166,
+          referenceScrollTop: 5166,
           bottomScrollTop: 5166,
           domMaxScrollTop: 5166,
+          reviewing: false,
+          atBottomThreshold: 8,
         }),
       ).toEqual({ action: "keep", scrollTop: 5166 });
+    });
+
+    it("keeps the preserved DOM review range after the semantic bottom moves upward", () => {
+      expect(
+        decideCursorAwareClamp({
+          rawScrollTop: 1450,
+          referenceScrollTop: 1450,
+          bottomScrollTop: 1360,
+          domMaxScrollTop: 1450,
+          reviewing: true,
+          atBottomThreshold: 8,
+        }),
+      ).toEqual({ action: "keep", scrollTop: 1450 });
+    });
+
+    it("still clamps an ordinary review gesture to the semantic bottom", () => {
+      expect(
+        decideCursorAwareClamp({
+          rawScrollTop: 1700,
+          referenceScrollTop: 1300,
+          bottomScrollTop: 1600,
+          domMaxScrollTop: 1700,
+          reviewing: true,
+          atBottomThreshold: 8,
+        }),
+      ).toEqual({ action: "clamp", scrollTop: 1600 });
     });
   });
 });

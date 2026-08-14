@@ -8,7 +8,6 @@ import {
   backToBottom,
   backToBottomNewIndicator,
   enterLongHostMode,
-  expectPtyAtBottom,
   expectPtyCursorAwareBottom,
   expectPtyScrollable,
   ptyTerminal,
@@ -232,26 +231,33 @@ function expectReviewScrollSamplesStable(
   );
   const baseline = renderedSamples[0];
   if (!baseline) throw new Error("PTY rendered row samples are not available");
-  const baselineRenderedOffset =
-    baseline.renderedLineContentTop - baseline.renderedLine * baseline.renderedRowHeight;
-  const maxRenderedGeometryDrift = Math.max(
+  const maxRenderedGeometryDriftRows = Math.max(
     ...renderedSamples.map((sample) =>
       Math.abs(
-        sample.renderedLineContentTop -
-          sample.renderedLine * baseline.renderedRowHeight -
-          baselineRenderedOffset,
+        (sample.renderedLineContentTop - baseline.renderedLineContentTop) /
+          baseline.renderedRowHeight -
+          (sample.renderedLine - baseline.renderedLine),
       ),
     ),
+  );
+  const renderedLineViewportOffsets = new Set(
+    renderedSamples.map((sample) => sample.renderedLine - sample.viewportY),
   );
   const scrollRange =
     Math.max(...samples.map((sample) => sample.scrollTop)) -
     Math.min(...samples.map((sample) => sample.scrollTop));
+  const maxRenderedRowHeight = Math.max(
+    ...renderedSamples.map((sample) => sample.renderedRowHeight),
+  );
   const maxRenderedBottomGap = Math.max(...samples.map((sample) => sample.renderedBottomGap ?? 0));
 
   expect(samples.length).toBeGreaterThan(10);
   expect(scrollRange).toBeGreaterThan(options.minimumScrollRange);
-  expect(maxHostTopDrift).toBeLessThanOrEqual(20);
-  expect(maxRenderedGeometryDrift).toBeLessThanOrEqual(20);
+  expect(maxHostTopDrift).toBeLessThanOrEqual(maxRenderedRowHeight + 1);
+  expect(renderedLineViewportOffsets).toEqual(
+    new Set([baseline.renderedLine - baseline.viewportY]),
+  );
+  expect(maxRenderedGeometryDriftRows).toBeLessThanOrEqual(0.05);
   expect(maxRenderedBottomGap).toBeLessThanOrEqual(8);
 }
 
@@ -310,7 +316,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await sendPtyLines(emuPage, { count: 120 });
-    await expectPtyAtBottom(emuPage);
+    await expectPtyCursorAwareBottom(emuPage);
 
     await expect.poll(() => readPtyScreenBottomGap(emuPage)).toBeLessThanOrEqual(8);
   });
@@ -332,7 +338,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expect(button).toHaveJSProperty("inert", false);
 
     await touchTap(emuPage, button);
-    await expectPtyAtBottom(emuPage);
+    await expectPtyCursorAwareBottom(emuPage);
     await expect(button).toHaveJSProperty("inert", true);
   });
 
@@ -632,7 +638,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
 
     await touchTap(emuPage, button);
 
-    await expectPtyAtBottom(emuPage);
+    await expectPtyCursorAwareBottom(emuPage);
     await expect(snapshot).toHaveCount(0);
     await expect(button).toHaveJSProperty("inert", true);
     const liveRows = emuPage.locator('[data-slot="pty-host"] .xterm-rows').last();
@@ -640,6 +646,6 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
 
     await sendPtyOutput(emuPage, "mobile-live-after-return\r\n");
     await expect(liveRows).toContainText("mobile-live-after-return");
-    await expectPtyAtBottom(emuPage);
+    await expectPtyCursorAwareBottom(emuPage);
   });
 });

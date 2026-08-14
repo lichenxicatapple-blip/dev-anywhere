@@ -19,6 +19,18 @@ export interface PtyHorizontalScrollMetrics {
   rightGap: number;
 }
 
+export interface PtyRenderedGeometry {
+  anchorAtBottom: boolean;
+  cursorInViewport: boolean;
+  hostTopDrift: number;
+  pendingContainerSyncRetry: boolean;
+  reviewSnapshotIntersectsContainer: boolean;
+  reviewSnapshotPresent: boolean;
+  screenIntersectsContainer: boolean;
+  scrollTopDeltaToBottom: number;
+  viewportHostCoverage: number;
+}
+
 export function ptyTerminal(page: Page): Locator {
   return page.locator('[data-slot="pty-terminal"]');
 }
@@ -119,18 +131,102 @@ export async function readPtyDebugSnapshot(page: Page): Promise<PtyDebugSnapshot
   return page.evaluate(() => window.__devAnywherePtyDebug?.() ?? null);
 }
 
+export async function readPtyRenderedGeometry(page: Page): Promise<PtyRenderedGeometry | null> {
+  return page.evaluate(() => {
+    const container =
+      document.querySelector<HTMLElement>(
+        '[data-slot="pty-keepalive-entry"][data-active="true"] [data-slot="pty-terminal"]',
+      ) ?? document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    const screen = container?.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+    const reviewSnapshot = screen?.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
+    const snapshot = window.__devAnywherePtyDebug?.();
+    if (!container || !screen || !snapshot) return null;
+
+    const containerRect = container.getBoundingClientRect();
+    const screenRect = screen.getBoundingClientRect();
+    const reviewSnapshotRect = reviewSnapshot?.getBoundingClientRect() ?? null;
+    return {
+      anchorAtBottom: snapshot.anchor.atBottom,
+      cursorInViewport: snapshot.anchor.cursorInViewport,
+      hostTopDrift: snapshot.host.topDrift,
+      pendingContainerSyncRetry: snapshot.pendingContainerSyncRetry,
+      reviewSnapshotIntersectsContainer:
+        reviewSnapshotRect !== null &&
+        reviewSnapshotRect.width > 0 &&
+        reviewSnapshotRect.height > 0 &&
+        reviewSnapshotRect.right > containerRect.left &&
+        reviewSnapshotRect.left < containerRect.right &&
+        reviewSnapshotRect.bottom > containerRect.top &&
+        reviewSnapshotRect.top < containerRect.bottom,
+      reviewSnapshotPresent: reviewSnapshot !== null,
+      screenIntersectsContainer:
+        screenRect.width > 0 &&
+        screenRect.height > 0 &&
+        screenRect.right > containerRect.left &&
+        screenRect.left < containerRect.right &&
+        screenRect.bottom > containerRect.top &&
+        screenRect.top < containerRect.bottom,
+      scrollTopDeltaToBottom: snapshot.anchor.scrollTopDeltaToBottom,
+      viewportHostCoverage: snapshot.viewportHostCoverage,
+    };
+  });
+}
+
+function renderedGeometryFailure(
+  geometry: PtyRenderedGeometry | null,
+  options: { bottomThresholdPx?: number } = {},
+): string {
+  if (!geometry) return "geometry-unavailable";
+  if (geometry.pendingContainerSyncRetry) return "container-sync-pending";
+  if (geometry.reviewSnapshotPresent) {
+    if (!geometry.reviewSnapshotIntersectsContainer) return "review-snapshot-outside-container";
+    if (options.bottomThresholdPx !== undefined) return "review-snapshot-at-semantic-bottom";
+    return "ready";
+  }
+  if (Math.abs(geometry.hostTopDrift) > 1) {
+    return `host-top-drift:${geometry.hostTopDrift}`;
+  }
+  if (!geometry.screenIntersectsContainer) return "screen-outside-container";
+  if (geometry.viewportHostCoverage <= 0) {
+    return `host-outside-viewport:${geometry.viewportHostCoverage}`;
+  }
+  if (options.bottomThresholdPx === undefined) return "ready";
+  if (!geometry.anchorAtBottom) return "semantic-bottom:false";
+  if (!geometry.cursorInViewport) return "cursor-in-viewport:false";
+  if (Math.abs(geometry.scrollTopDeltaToBottom) > options.bottomThresholdPx) {
+    return `bottom-delta:${geometry.scrollTopDeltaToBottom}`;
+  }
+  return "ready";
+}
+
+export async function expectPtyRendered(page: Page): Promise<void> {
+  await expect
+    .poll(async () => renderedGeometryFailure(await readPtyRenderedGeometry(page)))
+    .toBe("ready");
+}
+
 export async function scrollPtyToTop(
   page: Page,
   options: { wheelDeltaY?: number } = {},
 ): Promise<void> {
   await ptyTerminal(page).evaluate((el, wheelDeltaY) => {
-    if (typeof wheelDeltaY === "number") {
-      el.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: wheelDeltaY }));
-    }
     const node = el as HTMLElement;
-    node.scrollTop = 0;
-    node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
+    const requestedDelta = typeof wheelDeltaY === "number" ? wheelDeltaY : -maxScrollTop;
+    // Always travel far enough to reach the top, but enter review through the
+    // controller-owned wheel path. Assigning scrollTop before a synthetic
+    // scroll event pairs the moved DOM with xterm's previous painted viewport.
+    const deltaY = Math.min(requestedDelta, -maxScrollTop);
+    el.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY,
+      }),
+    );
   }, options.wheelDeltaY);
+
+  await expectPtyRendered(page);
 }
 
 export async function expectPtyScrollable(page: Page, minMaxScrollTop = 0): Promise<void> {
@@ -143,9 +239,7 @@ export async function expectPtyAtBottom(
   page: Page,
   thresholdPx = PTY_BOTTOM_THRESHOLD_PX,
 ): Promise<void> {
-  await expect
-    .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
-    .toBeLessThanOrEqual(thresholdPx);
+  await expectPtyCursorAwareBottom(page, thresholdPx);
 }
 
 export async function expectPtyCursorAwareBottom(
@@ -153,12 +247,12 @@ export async function expectPtyCursorAwareBottom(
   thresholdPx = PTY_BOTTOM_THRESHOLD_PX,
 ): Promise<void> {
   await expect
-    .poll(async () => {
-      const snapshot = await readPtyDebugSnapshot(page);
-      if (!snapshot?.anchor.atBottom) return Number.POSITIVE_INFINITY;
-      return Math.abs(snapshot.anchor.scrollTopDeltaToBottom);
-    })
-    .toBeLessThanOrEqual(thresholdPx);
+    .poll(async () =>
+      renderedGeometryFailure(await readPtyRenderedGeometry(page), {
+        bottomThresholdPx: thresholdPx,
+      }),
+    )
+    .toBe("ready");
 }
 
 export async function expectBackToBottomClearance(

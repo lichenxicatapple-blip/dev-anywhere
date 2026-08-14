@@ -14,6 +14,8 @@ TIMING_REPORT="$ARTIFACT_DIR/timing.tsv"
 RELEASE_MOBILE_EMULATORS="${RELEASE_MOBILE_EMULATORS:-1}"
 RELEASE_MOBILE_KEEP_EMULATORS="${RELEASE_MOBILE_KEEP_EMULATORS:-0}"
 RELEASE_MOBILE_GPU_MODE="${RELEASE_MOBILE_GPU_MODE:-swiftshader_indirect}"
+RELEASE_MOBILE_BASE_PORT="${DEV_ANYWHERE_MOBILE_BASE_PORT:-5570}"
+RELEASE_MOBILE_SERIAL="emulator-${RELEASE_MOBILE_BASE_PORT}"
 RELEASE_DEEP_SCOPE="${RELEASE_DEEP_SCOPE:-all}"
 
 case "$RELEASE_DEEP_SCOPE" in
@@ -28,7 +30,8 @@ cleanup_mobile_emulators() {
   if [[ "$RELEASE_MOBILE_KEEP_EMULATORS" == "1" ]]; then
     return
   fi
-  bash scripts/test/mobile-emulators.sh stop "$RELEASE_MOBILE_EMULATORS" >/dev/null 2>&1 || true
+  DEV_ANYWHERE_MOBILE_BASE_PORT="$RELEASE_MOBILE_BASE_PORT" \
+    bash scripts/test/mobile-emulators.sh stop "$RELEASE_MOBILE_EMULATORS" >/dev/null 2>&1 || true
 }
 
 mkdir -p "$ARTIFACT_DIR"
@@ -50,9 +53,11 @@ fi
 if [[ "$RELEASE_DEEP_SCOPE" == "all" || "$RELEASE_DEEP_SCOPE" == "mobile" ]]; then
   trap cleanup_mobile_emulators EXIT
   run_timed_stage "mobile-emulator-start" env \
+    DEV_ANYWHERE_MOBILE_BASE_PORT="$RELEASE_MOBILE_BASE_PORT" \
     DEV_ANYWHERE_MOBILE_GPU_MODE="$RELEASE_MOBILE_GPU_MODE" \
     bash scripts/test/mobile-emulators.sh start "$RELEASE_MOBILE_EMULATORS"
   run_timed_stage "android-e2e" env \
+    ANDROID_SERIAL="$RELEASE_MOBILE_SERIAL" \
     TEST_MOBILE_REQUIRE_EMULATOR=1 \
     TEST_MOBILE_RESET_FAIL_FAST=1 \
     pnpm test:mobile

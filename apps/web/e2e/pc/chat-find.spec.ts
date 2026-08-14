@@ -1,7 +1,12 @@
 import { expect, test } from "@playwright/test";
 import { BASE_URL, installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../helpers";
 import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "../pty-fixture";
-import { ptyInput, readPtyScrollMetrics, sendPtyOutput } from "../pty-scroll-helpers";
+import {
+  expectPtyRendered,
+  ptyInput,
+  readPtyScrollMetrics,
+  sendPtyOutput,
+} from "../pty-scroll-helpers";
 
 test.describe("会话内查找", () => {
   test("气泡模式会拉取完整历史并定位虚拟列表中的消息", async ({ page }) => {
@@ -82,6 +87,19 @@ test.describe("会话内查找", () => {
     await expect
       .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
       .toBeGreaterThan(100);
+    await expect
+      .poll(() =>
+        page.evaluate((sid) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          if (!term) return false;
+          const { viewportY } = term.buffer.active;
+          return Array.from({ length: term.rows }, (_, row) =>
+            term.buffer.active.getLine(viewportY + row)?.translateToString(true),
+          ).some((line) => line?.includes("SEARCH NEEDLE OLD"));
+        }, sessionId),
+      )
+      .toBe(true);
+    await expectPtyRendered(page);
     expect(await readRawPtyInput(page)).toBe(rawInputBeforeFind);
 
     await findInput.press("Enter");

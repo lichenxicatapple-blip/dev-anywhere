@@ -4,6 +4,7 @@ import type { Page } from "@playwright/test";
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "../pty-fixture";
 import {
+  expectPtyCursorAwareBottom,
   ptyInput,
   ptyTerminal,
   readPtyDebugSnapshot,
@@ -287,12 +288,6 @@ test.describe("L4 mobile / PTY input scroll", () => {
     await expect
       .poll(() => readPtyDebugSnapshot(emuPage).then((snapshot) => snapshot?.verticalIntent.mode))
       .toBe("following");
-    await expect
-      .poll(() =>
-        readPtyDebugSnapshot(emuPage).then((snapshot) =>
-          snapshot ? Math.abs(snapshot.anchor.scrollTopDeltaToBottom) : Number.POSITIVE_INFINITY,
-        ),
-      )
-      .toBeLessThanOrEqual(8);
+    await expectPtyCursorAwareBottom(emuPage);
   });
 });

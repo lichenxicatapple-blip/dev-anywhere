@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { attachPtyScrollController, type PtyScrollState } from "./pty-scroll-controller";
+import { buildPtyScrollDebugSnapshot } from "./pty-scroll-debug-snapshot";
 import {
   createPtyScrollDom as createDom,
   createPtyScrollTerminal as createTerminal,
@@ -39,7 +40,7 @@ describe("attachPtyScrollController", () => {
   // DOM scrollTop / host style / xterm viewportY side effects, not pure intent transitions.
   it("initializes spacer and host layout from xterm metrics", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
 
     attachPtyScrollController({
       container,
@@ -62,7 +63,7 @@ describe("attachPtyScrollController", () => {
 
   it("maps container scroll to a row-aligned xterm ydisp", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -95,7 +96,7 @@ describe("attachPtyScrollController", () => {
         addEventListener(type, listener, options);
       },
     );
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
 
     attachPtyScrollController({
       container,
@@ -113,7 +114,7 @@ describe("attachPtyScrollController", () => {
 
   it("positions the host before changing xterm viewport at a row boundary", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -124,8 +125,11 @@ describe("attachPtyScrollController", () => {
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway: vi.fn(),
     });
-    terminal.buffer.active.viewportY = 10;
-    host.style.top = "200px";
+    // Establish the row through the controller so DOM scrollTop, xterm viewportY and host.top
+    // describe one rendered frame before the next native event arrives.
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1400, cancelable: true }));
+    expect(terminal.buffer.active.viewportY).toBe(10);
+    expect(host.style.top).toBe("200px");
     terminal.scrollToLine.mockClear();
     let hostTopDuringScrollToLine = "";
     terminal.scrollToLine.mockImplementation((ydisp: number) => {
@@ -143,7 +147,7 @@ describe("attachPtyScrollController", () => {
 
   it("defers host row jumps during native touch scroll until xterm renders the new row", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -174,9 +178,9 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("180px");
   });
 
-  it("commits a native touch row atomically when a buffer preview is available", () => {
+  it("anchors review to the painted row before committing later native rows atomically", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const preview = vi.fn(() => true);
     attachPtyScrollController({
       container,
@@ -197,17 +201,88 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 199.7;
     container.dispatchEvent(new Event("scroll"));
 
+    // The DOM offset sits just below the 200px row boundary, but xterm has already
+    // painted viewport 10. Entering review must capture that rendered frame instead
+    // of flooring 199.7 / 20 to the previous row.
+    expect(preview).toHaveBeenCalledWith(10, terminal.rows);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(host.style.top).toBe("200px");
+
+    container.scrollTop = 179.7;
+    container.dispatchEvent(new Event("scroll"));
+
     expect(preview).toHaveBeenCalledWith(9, terminal.rows);
     expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
-    expect(preview.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(preview.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY).toBeLessThan(
       terminal.scrollToLine.mock.invocationCallOrder[0] ?? Number.POSITIVE_INFINITY,
     );
     expect(host.style.top).toBe("180px");
   });
 
+  it("maps an unexplained native jump from the last rendered frame before entering review", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal } = createTerminal({ 99: "prompt" });
+    const capture = vi.fn(() => true);
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onReviewSnapshotCapture: capture,
+    });
+
+    // Following has coherently painted viewport 80 at DOM scrollTop 1600. Chrome can then
+    // commit a large native scroll before the controller gets a chance to move xterm.
+    expect(controller.getDebugProbe().lastSeenScrollTop).toBe(1600);
+    expect(terminal.buffer.active.viewportY).toBe(80);
+    expect(host.style.top).toBe("1600px");
+    terminal.scrollToLine.mockClear();
+
+    container.scrollTop = 840;
+    container.dispatchEvent(new Event("scroll"));
+
+    // S0=1600/V0=80 and S1=840 resolve to V1=42. Snapshot V1 before moving xterm, then
+    // commit viewport and host together; pairing S1 directly with V0 would leave the screen
+    // hundreds of pixels outside the container.
+    expect(capture).toHaveBeenLastCalledWith(42, terminal.rows);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(42);
+    expect(capture.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY).toBeLessThan(
+      terminal.scrollToLine.mock.invocationCallOrder.at(-1) ?? Number.POSITIVE_INFINITY,
+    );
+    expect(terminal.buffer.active.viewportY).toBe(42);
+    expect(host.style.top).toBe("840px");
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+    container.scrollTop = 820;
+    container.dispatchEvent(new Event("scroll"));
+
+    // The original coherent anchor remains continuous for later native rows.
+    expect(capture).toHaveBeenLastCalledWith(41, terminal.rows);
+    expect(terminal.scrollToLine).toHaveBeenLastCalledWith(41);
+    expect(host.style.top).toBe("820px");
+
+    controller.scrollToBottom("test", { force: true });
+    capture.mockClear();
+    terminal.scrollToLine.mockClear();
+    container.scrollTop = 1599.75;
+    container.dispatchEvent(new Event("scroll"));
+
+    // A fractional native landing inside the semantic-bottom tolerance is still the same
+    // following frame; it must not enter the unexplained-review branch or lose row 80.
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(terminal.buffer.active.viewportY).toBe(80);
+    expect(host.style.top).toBe("1600px");
+    expect(capture).not.toHaveBeenCalled();
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+  });
+
   it("commits wheel row transitions atomically with xterm viewport changes", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -241,7 +316,7 @@ describe("attachPtyScrollController", () => {
 
   it("captures one coherent review frame and keeps it frozen across output renders", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     const capture = vi.fn(() => true);
     const clear = vi.fn();
     const controller = attachPtyScrollController({
@@ -275,7 +350,7 @@ describe("attachPtyScrollController", () => {
 
   it("keeps the review host and row anchor stable while the live buffer grows", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, emitRender, emitScroll } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender, emitScroll } = createTerminal({ 99: "prompt" });
     const capture = vi.fn(() => true);
     attachPtyScrollController({
       container,
@@ -309,7 +384,7 @@ describe("attachPtyScrollController", () => {
 
   it("does not refresh the review frame for a container scroll event without vertical movement", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     const capture = vi.fn(() => true);
     attachPtyScrollController({
       container,
@@ -344,7 +419,7 @@ describe("attachPtyScrollController", () => {
     );
     vi.stubGlobal("cancelAnimationFrame", vi.fn());
     const { container, spacer, host } = createDom();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -465,7 +540,7 @@ describe("attachPtyScrollController", () => {
   // side effects are wired to that FSM correctly.
   it("preserves browser scroll when xterm scrolls while user is away from bottom", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
+    const { terminal, emitScroll } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -491,7 +566,7 @@ describe("attachPtyScrollController", () => {
   it("keeps the xterm viewport on the reviewed history when new output scrolls the terminal", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
-    const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
+    const { terminal, emitScroll } = createTerminal({ 99: "prompt" });
     let hasNewFrame = true;
     attachPtyScrollController({
       container,
@@ -525,7 +600,7 @@ describe("attachPtyScrollController", () => {
       configurable: true,
       get: () => scrollHeight,
     });
-    const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
+    const { terminal, emitScroll } = createTerminal({ 99: "prompt", 109: "new prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -575,7 +650,8 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
     controller.relayout();
 
-    expect(container.scrollTop).toBe(1624);
+    // A DOM scrollHeight-only drift does not move the semantic live tail.
+    expect(container.scrollTop).toBe(1600);
     expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
   });
 
@@ -583,7 +659,7 @@ describe("attachPtyScrollController", () => {
     const { container, spacer, host } = createDom();
     const consumeNewFrame = vi.fn();
     const setNewFramesWhileAway = vi.fn();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -611,7 +687,7 @@ describe("attachPtyScrollController", () => {
       configurable: true,
       get: () => scrollHeight,
     });
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt", 109: "new prompt" });
     terminal.buffer.active.length = 100;
     attachPtyScrollController({
       container,
@@ -638,7 +714,7 @@ describe("attachPtyScrollController", () => {
   it("marks unseen frames when render happens away from bottom", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -661,7 +737,7 @@ describe("attachPtyScrollController", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     let hasNewFrame = true;
     attachPtyScrollController({
       container,
@@ -688,7 +764,7 @@ describe("attachPtyScrollController", () => {
   it("notifies when a touch gesture becomes vertical terminal review", () => {
     const { container, spacer, host } = createDom();
     const onTouchReviewStart = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -718,7 +794,7 @@ describe("attachPtyScrollController", () => {
   it("rejects catastrophic native touch scroll jumps while preserving the intended small review scroll", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -748,7 +824,7 @@ describe("attachPtyScrollController", () => {
   it("does not create review intent after a bottom tap without scroll movement", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -771,7 +847,7 @@ describe("attachPtyScrollController", () => {
   it("keeps sub-threshold touch movement pending without rewriting terminal scroll", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -851,7 +927,7 @@ describe("attachPtyScrollController", () => {
   it("lets native vertical touch scroll own scrollTop after gesture lock", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1123,15 +1199,15 @@ describe("attachPtyScrollController", () => {
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway: vi.fn(),
     });
-    expect(container.scrollTop).toBe(100446);
+    expect(container.scrollTop).toBe(100406);
     terminal.scrollToLine.mockClear();
 
     container.dispatchEvent(touchEvent("touchstart", 446));
-    container.scrollTop = 100437.7109375;
+    container.scrollTop = 100398.7109375;
     container.dispatchEvent(touchEvent("touchmove", 458));
     container.dispatchEvent(new Event("scroll"));
 
-    expect(container.scrollTop).toBeCloseTo(100437.7109375);
+    expect(container.scrollTop).toBeCloseTo(100398.7109375);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
     expect(terminal.scrollToLine).not.toHaveBeenCalled();
   });
@@ -1166,15 +1242,15 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBe(100446);
+    expect(container.scrollTop).toBe(100406);
     onUserVerticalScrollIntentChange.mockClear();
     terminal.scrollToLine.mockClear();
 
     container.dispatchEvent(touchEvent("touchstart", 478));
-    container.scrollTop = 100427.4296875;
+    container.scrollTop = 100387.4296875;
     container.dispatchEvent(touchEvent("touchmove", 545));
     container.dispatchEvent(new Event("scroll"));
-    container.scrollTop = 100399.140625;
+    container.scrollTop = 100359.140625;
     container.dispatchEvent(new Event("scroll"));
     container.dispatchEvent(touchEvent("touchend", 572));
 
@@ -1252,7 +1328,7 @@ describe("attachPtyScrollController", () => {
     defineSize(container, { clientHeight: 400, clientWidth: 360 });
     defineScrollWidth(container, 1200);
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1289,7 +1365,7 @@ describe("attachPtyScrollController", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 400, clientWidth: 360 });
     defineScrollWidth(container, 1200);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1325,7 +1401,7 @@ describe("attachPtyScrollController", () => {
     defineSize(container, { clientHeight: 400, clientWidth: 360 });
     defineScrollWidth(container, 1200);
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1361,7 +1437,7 @@ describe("attachPtyScrollController", () => {
     defineSize(container, { clientHeight: 400, clientWidth: 360 });
     defineScrollWidth(container, 1200);
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1390,7 +1466,7 @@ describe("attachPtyScrollController", () => {
   it("keeps bottom tap inert when keyboard padding moves the bottom before touchend", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1409,7 +1485,8 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(touchEvent("touchend", 300));
     controller.scrollToBottom("rawInput");
 
-    expect(container.scrollTop).toBe(1680);
+    // A layout-only DOM range change does not move the semantic live tail.
+    expect(container.scrollTop).toBe(1600);
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
 
@@ -1428,7 +1505,7 @@ describe("attachPtyScrollController", () => {
     });
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -1452,7 +1529,7 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
   });
 
-  it("restores cursor-aware bottom when a stationary long-host touch jumps to host top", () => {
+  it("restores semantic bottom when a stationary long-host touch jumps to host top", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -1484,7 +1561,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBe(20686);
+    expect(container.scrollTop).toBe(20646);
     expect(host.style.top).toBe("20240px");
 
     container.dispatchEvent(touchEvent("touchstart", 550));
@@ -1493,7 +1570,7 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
     container.dispatchEvent(touchEvent("touchend", 550));
 
-    expect(container.scrollTop).toBe(20686);
+    expect(container.scrollTop).toBe(20646);
     expect(host.style.top).toBe("20240px");
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
@@ -1530,20 +1607,20 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBe(100486);
+    expect(container.scrollTop).toBe(100446);
     expect(host.style.top).toBe("100000px");
 
     container.dispatchEvent(touchEvent("touchstart", 330));
     const move = touchEvent("touchmove", 321);
     container.dispatchEvent(move);
     expect(move.defaultPrevented).toBe(false);
-    expect(container.scrollTop).toBe(100486);
+    expect(container.scrollTop).toBe(100446);
 
     container.scrollTop = 100000;
     container.dispatchEvent(new Event("scroll"));
     container.dispatchEvent(touchEvent("touchend", 321));
 
-    expect(container.scrollTop).toBe(100486);
+    expect(container.scrollTop).toBe(100446);
     expect(terminal.buffer.active.viewportY).toBe(5000);
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
   });
@@ -1578,18 +1655,20 @@ describe("attachPtyScrollController", () => {
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway: vi.fn(),
     });
-    expect(container.scrollTop).toBe(100127);
+    expect(container.scrollTop).toBe(100087);
 
     container.scrollTop = 99919;
     container.dispatchEvent(new Event("scroll"));
     expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(true);
-    expect(host.style.top).toBe("99900px");
+    // Preserve the physical offset of the last painted frame. S0=100087/V0=5000 and
+    // S1=99919 resolve to V1=4991; absolute floor(S1 / 20) would jump four rows.
+    expect(host.style.top).toBe("99820px");
 
     container.dispatchEvent(touchEvent("touchstart", 355));
     container.scrollTop = 99897;
     container.dispatchEvent(new Event("scroll"));
     emitRender();
-    expect(host.style.top).toBe("99880px");
+    expect(host.style.top).toBe("99800px");
 
     container.dispatchEvent(touchEvent("touchmove", 468));
     terminal.scrollToLine.mockClear();
@@ -1597,10 +1676,10 @@ describe("attachPtyScrollController", () => {
     container.dispatchEvent(new Event("scroll"));
 
     expect(container.scrollTop).toBe(99884);
-    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(4989);
   });
 
-  it("does not restore tiny host-top-adjacent deltas at cursor-aware bottom", () => {
+  it("does not restore tiny host-top-adjacent deltas at semantic bottom", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 99: "prompt" });
 
@@ -1660,25 +1739,25 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBe(20686);
+    expect(container.scrollTop).toBe(20646);
 
     defineSize(container, { clientHeight: 365 });
     scrollHeight = 21400;
     controller.scrollToBottom("keyboardOffset", { force: true });
-    expect(container.scrollTop).toBe(21035);
+    expect(container.scrollTop).toBe(20915);
 
     container.dispatchEvent(touchEvent("touchstart", 210));
     defineSize(container, { clientHeight: 634 });
     scrollHeight = 21320;
     container.scrollTop = 20240;
     container.dispatchEvent(new Event("scroll"));
-    expect(container.scrollTop).toBe(20686);
+    expect(container.scrollTop).toBe(20646);
 
     onUserVerticalScrollIntentChange.mockClear();
     container.dispatchEvent(touchEvent("touchend", 210));
     controller.relayout();
 
-    expect(container.scrollTop).toBe(20686);
+    expect(container.scrollTop).toBe(20646);
     expect(host.style.top).toBe("20240px");
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
   });
@@ -1716,7 +1795,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBe(89513);
+    expect(container.scrollTop).toBe(89473);
 
     // Consume the initial programmatic-bottom scroll marker so this reproduces the later
     // raw-input path from the device trace, not just attach-time settling.
@@ -1735,7 +1814,7 @@ describe("attachPtyScrollController", () => {
     scrollHeight = 89860;
     emitRender();
 
-    expect(container.scrollTop).toBe(89513);
+    expect(container.scrollTop).toBe(89473);
     expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
   });
 
@@ -1772,7 +1851,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBe(89513);
+    expect(container.scrollTop).toBe(89473);
 
     container.dispatchEvent(new Event("scroll"));
     expect(controller.getDebugProbe().pendingProgrammaticScrollTop).toBeNull();
@@ -1789,14 +1868,14 @@ describe("attachPtyScrollController", () => {
     scrollHeight = 89860;
     emitRender();
 
-    expect(container.scrollTop).toBe(89513);
+    expect(container.scrollTop).toBe(89473);
     expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
   });
 
   it("treats native container scrolling away from bottom as user review intent", () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     let hasNewFrame = false;
     attachPtyScrollController({
       container,
@@ -1822,7 +1901,7 @@ describe("attachPtyScrollController", () => {
 
   it("preserves user scroll intent when controller is reattached", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     container.scrollTop = 100;
 
     attachPtyScrollController({
@@ -1844,7 +1923,7 @@ describe("attachPtyScrollController", () => {
     const { container, spacer, host } = createDom();
     const consumeNewFrame = vi.fn();
     const setNewFramesWhileAway = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1871,7 +1950,7 @@ describe("attachPtyScrollController", () => {
   it("scrollToBottom respects user vertical scroll intent by default (no force)", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1901,7 +1980,7 @@ describe("attachPtyScrollController", () => {
   it("scrollToBottom with force overrides user intent (BackToBottom button semantics)", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1926,10 +2005,105 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
+  it("keeps the artifact semantic bottom after Chrome fractionally clamps a forced scroll", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 737, clientWidth: 800 });
+    defineScrollHeight(container, 5385);
+    defineScrollWidth(container, 800);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 485, clientWidth: 800 });
+
+    // Exact Android artifact geometry: baseY=230 and cellH=485/24 make the semantic
+    // live-tail target 4647.916..., while Chrome lands the fractional scrollTop at
+    // 4647.619.... ViewportY must remain the row-space value 230 rather than being
+    // reconstructed as floor(4647.916... / (485/24)) = 229.
+    const semanticBottom = (230 * 485) / 24;
+    const chromeLandedBottom = 4647.619140625;
+    let landedScrollTop = 0;
+    const scrollTopWrites: number[] = [];
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      get: () => landedScrollTop,
+      set: (value: number) => {
+        scrollTopWrites.push(value);
+        landedScrollTop = Math.max(0, Math.min(chromeLandedBottom, value));
+      },
+    });
+
+    const { terminal } = createTerminal({ 252: "live prompt" });
+    terminal.rows = 24;
+    terminal.buffer.active.length = 254;
+    terminal.buffer.active.cursorY = 23;
+    const onAtBottomChange = vi.fn();
+    const onReviewSnapshotCapture = vi.fn(() => true);
+    const onReviewSnapshotClear = vi.fn();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onAtBottomChange,
+      onReviewSnapshotCapture,
+      onReviewSnapshotClear,
+    });
+
+    expect(container.scrollTop).toBe(chromeLandedBottom);
+    expect(terminal.buffer.active.baseY).toBe(230);
+    expect(terminal.buffer.active.viewportY).toBe(230);
+    container.dispatchEvent(new Event("scroll"));
+
+    // Establish a review anchor outside the semantic threshold, then move the DOM back to
+    // within that threshold. The review anchor remains authoritative: semantic snapping must
+    // not change the reviewed xterm viewport just because the pixel position is near bottom.
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -20, cancelable: true }));
+    expect(container.scrollTop).toBeCloseTo(chromeLandedBottom - 20, 10);
+    expect(terminal.buffer.active.viewportY).toBe(228);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(onReviewSnapshotCapture).toHaveBeenCalled();
+
+    container.scrollTop = semanticBottom - 2;
+    container.dispatchEvent(new Event("scroll"));
+    expect(container.scrollTop).toBeCloseTo(semanticBottom - 2, 10);
+    expect(terminal.buffer.active.viewportY).toBe(228);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+    const writesBeforeForce = scrollTopWrites.length;
+    controller.scrollToBottom("backToBottomBtn", { force: true });
+
+    expect(scrollTopWrites[writesBeforeForce]).toBeCloseTo(semanticBottom, 10);
+    expect(container.scrollTop).toBe(chromeLandedBottom);
+    expect(terminal.buffer.active.viewportY).toBe(230);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(onReviewSnapshotClear).toHaveBeenCalledTimes(1);
+
+    // Chrome delivers the scroll event after the fractional write has already landed at the
+    // device-pixel maximum. It is still semantic bottom and must not regress viewportY to 229.
+    container.dispatchEvent(new Event("scroll"));
+    const snapshot = buildPtyScrollDebugSnapshot(controller.getDebugProbe, {
+      container,
+      spacer,
+      host,
+      term: terminal,
+    });
+    expect(container.scrollTop).toBe(chromeLandedBottom);
+    expect(terminal.buffer.active.viewportY).toBe(230);
+    expect(snapshot.anchor.bottomScrollTop).toBeCloseTo(semanticBottom, 10);
+    expect(snapshot.anchor.cursorInViewport).toBe(true);
+    expect(snapshot.anchor.atBottom).toBe(true);
+    expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
+  });
+
   it("restores page resume to bottom when the page was hidden while following", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1965,7 +2139,7 @@ describe("attachPtyScrollController", () => {
   it("keeps following intent while browser replays stale touch scroll during page resume", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2003,7 +2177,7 @@ describe("attachPtyScrollController", () => {
   it("preserves the viewed buffer row on page resume while reviewing", () => {
     const { container, spacer, host } = createDom();
     const onUserVerticalScrollIntentChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2040,7 +2214,7 @@ describe("attachPtyScrollController", () => {
   it("owns at-bottom state and exposes scrollToBottom", () => {
     const { container, spacer, host } = createDom();
     const onAtBottomChange = vi.fn();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2091,7 +2265,7 @@ describe("attachPtyScrollController", () => {
   it("publishes scroll state changes without duplicating identical snapshots", () => {
     const { container, spacer, host } = createDom();
     const onScrollStateChange = vi.fn<(state: PtyScrollState) => void>();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2135,7 +2309,7 @@ describe("attachPtyScrollController", () => {
 
   it("exposes ratio scrolling for a custom terminal scrollbar", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2154,14 +2328,14 @@ describe("attachPtyScrollController", () => {
     expect(terminal.scrollToLine).toHaveBeenCalledWith(40);
   });
 
-  // Wheel integration around cursor-aware bottom. Pure "should clear intent?" semantics are
+  // Wheel integration around semantic live bottom. Pure "should clear intent?" semantics are
   // FSM coverage; these tests verify controller geometry produces the right bottom signal.
   // 镜像反向: 用户主动向下滚到底, intent 应该释放, output 才能恢复跟随。
   it("releases vertical scroll intent when user wheels down back to bottom", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 300 });
     defineScrollHeight(container, 2000);
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     terminal.buffer.active.cursorY = 0;
 
     const onUserVerticalScrollIntentChange = vi.fn();
@@ -2186,13 +2360,14 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
 
-  it("does not wheel down past the cursor-aware bottom in longHost mode", () => {
+  it("does not wheel down past semantic bottom in longHost mode", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 300 });
     defineScrollHeight(container, 2000);
-    const { terminal } = createTerminal({ 19: "prompt" });
-    // longHost bottom is cursor-aware: DOM maxScrollTop is 1700, but the cursor-centered
-    // anchor is 1600. Continuing to wheel down at that anchor must not push the browser
+    const { terminal } = createTerminal({ 87: "prompt" });
+    // baseY=80 and cursorY=7 put the live prompt at absolute row 87. Semantic bottom
+    // bottom-aligns that row at 1460, below the DOM geometric maximum of 1700. Wheel-down
+    // at that anchor must not push the browser
     // to the DOM geometric bottom, or pending output will pull it back and visibly jitter.
     terminal.buffer.active.cursorY = 7;
 
@@ -2208,16 +2383,16 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBe(1600);
+    expect(container.scrollTop).toBe(1460);
     onUserVerticalScrollIntentChange.mockClear();
 
     container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
 
-    expect(container.scrollTop).toBe(1600);
+    expect(container.scrollTop).toBe(1460);
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
   });
 
-  it("clamps native touch scroll past cursor-aware bottom before pending output can snap back", () => {
+  it("clamps native touch scroll past semantic bottom before pending output can snap back", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -2249,15 +2424,15 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway,
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBeCloseTo(5013);
+    expect(container.scrollTop).toBeCloseTo(4726);
 
     container.dispatchEvent(touchEvent("touchstart", 320));
     onUserVerticalScrollIntentChange.mockClear();
     container.scrollTop = 5166;
     container.dispatchEvent(new Event("scroll"));
 
-    expect(container.scrollTop).toBeCloseTo(5013);
-    expect(terminal.buffer.active.viewportY).toBe(238);
+    expect(container.scrollTop).toBeCloseTo(4726);
+    expect(terminal.buffer.active.viewportY).toBe(236);
 
     container.dispatchEvent(touchEvent("touchend", 280));
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalled();
@@ -2265,11 +2440,11 @@ describe("attachPtyScrollController", () => {
     hasNewFrame = true;
     emitRender();
 
-    expect(container.scrollTop).toBeCloseTo(5013);
+    expect(container.scrollTop).toBeCloseTo(4726);
     expect(setNewFramesWhileAway).not.toHaveBeenCalledWith(true);
   });
 
-  it("does not expose native vertical scroll range below the cursor-aware bottom", () => {
+  it("does not expose native vertical scroll range below semantic bottom", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -2299,12 +2474,12 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    expect(container.scrollTop).toBe(3100);
+    expect(container.scrollTop).toBe(2786);
     expect(spacer.style.overflow).toBe("hidden");
-    expect(container.scrollHeight - container.clientHeight).toBe(3100);
+    expect(container.scrollHeight - container.clientHeight).toBe(2786);
   });
 
-  it("keeps cursor-aware bottom touchmove passive at the native boundary", () => {
+  it("keeps semantic-bottom touchmove passive at the native boundary", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -2334,7 +2509,7 @@ describe("attachPtyScrollController", () => {
       onUserVerticalScrollIntentChange,
       onTouchBoundaryPrevent,
     });
-    expect(container.scrollTop).toBeCloseTo(7593);
+    expect(container.scrollTop).toBeCloseTo(7306);
 
     container.dispatchEvent(touchEvent("touchstart", 320));
     onUserVerticalScrollIntentChange.mockClear();
@@ -2377,7 +2552,7 @@ describe("attachPtyScrollController", () => {
     expect(onTouchBoundaryPrevent).toHaveBeenCalledTimes(1);
   });
 
-  it("snaps to cursor-aware bottom when native scroll crosses into the bottom gap", () => {
+  it("snaps to semantic bottom when native scroll crosses into the bottom gap", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -2403,58 +2578,138 @@ describe("attachPtyScrollController", () => {
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway: vi.fn(),
     });
-    expect(container.scrollTop).toBeCloseTo(8613);
+    expect(container.scrollTop).toBeCloseTo(8326);
 
-    container.scrollTop = 8605;
+    container.scrollTop = 8318;
     container.dispatchEvent(touchEvent("touchstart", 320));
     const move = touchEvent("touchmove", 300);
     container.dispatchEvent(move);
 
     expect(move.defaultPrevented).toBe(false);
-    expect(container.scrollTop).toBe(8605);
+    expect(container.scrollTop).toBe(8318);
 
-    container.scrollTop = 8640;
+    container.scrollTop = 8353;
     container.dispatchEvent(new Event("scroll"));
 
-    expect(container.scrollTop).toBeCloseTo(8613);
+    expect(container.scrollTop).toBeCloseTo(8326);
   });
 
-  it("does not re-center on passive output when keyboard height jitters but cursor remains visible", () => {
+  it("re-aligns semantic live tail when keyboard close changes a long host into a short host", () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
-    container.style.paddingBottom = "112px";
-    defineSize(container, { clientHeight: 347, clientWidth: 360 });
-    defineScrollHeight(container, 8920);
-    defineScrollWidth(container, 2184);
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 300, clientWidth: 360 });
+    defineScrollHeight(container, 2000);
+    defineScrollWidth(container, 800);
     const screen = host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) throw new Error("missing xterm screen");
-    defineSize(screen, { clientHeight: 1000, clientWidth: 2160 });
-    const { terminal, emitRender } = createTerminal({ 417: "live prompt" });
-    terminal.rows = 50;
-    terminal.cols = 270;
-    terminal.buffer.active.length = 440;
-    terminal.buffer.active.cursorY = 27;
-    let hasNewFrame = false;
-
-    attachPtyScrollController({
+    defineSize(screen, { clientHeight: 400, clientWidth: 800 });
+    const { terminal } = createTerminal({ 87: "live prompt" });
+    terminal.buffer.active.cursorY = 7;
+    const controller = attachPtyScrollController({
       container,
       spacer,
       host,
       term: terminal,
-      hasNewFrame: () => hasNewFrame,
-      consumeNewFrame: () => {
-        hasNewFrame = false;
-      },
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
       hasNewFramesWhileAway: () => false,
       setNewFramesWhileAway: vi.fn(),
     });
-    expect(container.scrollTop).toBeCloseTo(8236.5);
+    // Keyboard-open visibleContentHeight=260 < hostHeight=400. Absolute live row 87
+    // is bottom-aligned and preceding history fills the narrow viewport.
+    expect(container.scrollTop).toBe(1500);
+    expect(terminal.buffer.active.viewportY).toBe(75);
 
-    defineSize(container, { clientHeight: 365 });
-    hasNewFrame = true;
-    emitRender();
+    // Keyboard close releases enough height to make visibleContentHeight=594 > hostHeight.
+    // The live buffer and server-owned row count stay unchanged.
+    defineSize(container, { clientHeight: 634 });
+    controller.relayout();
 
-    expect(container.scrollTop).toBeCloseTo(8236.5);
+    // Unified semantic anchoring crosses the long/short boundary without falling back to
+    // geometric buffer bottom: seven more history rows fill the released area.
+    expect(container.scrollTop).toBe(1360);
+    expect(terminal.buffer.active.viewportY).toBe(68);
+    const visibleBottom = container.scrollTop + container.clientHeight - 32;
+    const shortHostOffset = container.clientHeight - 8 - 32 - terminal.rows * 20;
+    const cursorBottom = 8 + shortHostOffset + (terminal.buffer.active.baseY + 7 + 1) * 20;
+    expect(cursorBottom).toBe(visibleBottom);
+  });
+
+  it("keeps the reviewed position when keyboard close crosses the same long/short boundary", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "32px";
+    defineSize(container, { clientHeight: 300, clientWidth: 360 });
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => (parseFloat(spacer.style.height || "0") || 0) + 40,
+    });
+    defineScrollWidth(container, 800);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 400, clientWidth: 800 });
+    const { terminal } = createTerminal({ 87: "live prompt" });
+    terminal.buffer.active.cursorY = 7;
+
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    expect(container.scrollTop).toBe(1500);
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -50, cancelable: true }));
+    const reviewedScrollTop = container.scrollTop;
+    const reviewedViewportY = terminal.buffer.active.viewportY;
+    expect(reviewedScrollTop).toBe(1450);
+    expect(reviewedViewportY).toBe(72);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+    defineSize(container, { clientHeight: 634 });
+    controller.relayout();
+
+    // Raw closed-keyboard semantic layout would end at scrollTop=1360. Extend the spacer
+    // just enough to keep this near-bottom review offset natively reachable instead of clamped.
+    expect(spacer.style.height).toBe("2044px");
+    expect(container.scrollTop).toBe(reviewedScrollTop);
+    expect(terminal.buffer.active.viewportY).toBe(reviewedViewportY);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+    // The preserved review offset is 90px beyond the new semantic bottom. Wheel-down at
+    // the native boundary must stay put, not reverse direction and jump back to 1360.
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 50, cancelable: true }));
+    expect(container.scrollTop).toBe(1450);
+    expect(terminal.buffer.active.viewportY).toBe(72);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+    // Wheel-up remains ordinary review navigation even while scrollTop is numerically above
+    // the semantic bottom preserved for the following state.
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -50, cancelable: true }));
+    expect(container.scrollTop).toBe(1400);
+    expect(terminal.buffer.active.viewportY).toBe(70);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+    // The same invariant applies to a native touch scroll: reviewing owns this extended
+    // range, so values above 1360 are valid and must not be force-clamped to live bottom.
+    container.dispatchEvent(touchEvent("touchstart", 300));
+    container.dispatchEvent(touchEvent("touchmove", 320));
+    container.scrollTop = 1380;
+    container.dispatchEvent(new Event("scroll"));
+    expect(container.scrollTop).toBe(1380);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    container.dispatchEvent(touchEvent("touchend", 320));
+
+    controller.scrollToBottom("backToBottomBtn", { force: true });
+
+    expect(container.scrollTop).toBe(1360);
+    expect(terminal.buffer.active.viewportY).toBe(68);
+    expect(controller.getDebugProbe().userHasVerticalScrollIntent).toBe(false);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
   });
 
   it("keeps vertical review intent on a small wheel-down while still far from bottom (longHost)", () => {
@@ -2521,7 +2776,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
       onUserVerticalScrollIntentChange,
     });
-    expect(container.scrollTop).toBeCloseTo(4533);
+    expect(container.scrollTop).toBeCloseTo(4226);
 
     container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1800, cancelable: true }));
 
@@ -2539,7 +2794,7 @@ describe("attachPtyScrollController", () => {
 
   it("owns wheel scrolling instead of leaving it to xterm internals", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2570,7 +2825,7 @@ describe("attachPtyScrollController", () => {
     defineSize(container, { clientHeight: 347, clientWidth: 360 });
     defineSize(screen, { clientHeight: 400, clientWidth: 800 });
     defineScrollWidth(container, 1_600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2595,7 +2850,7 @@ describe("attachPtyScrollController", () => {
   it("auto-scrolls horizontally to center the cursor when it leaves the viewport", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2622,7 +2877,7 @@ describe("attachPtyScrollController", () => {
     defineSize(container, { clientHeight: 347, clientWidth: 360 });
     defineSize(screen, { clientHeight: 1040, clientWidth: 2160 });
     defineScrollWidth(container, 2184);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     terminal.rows = 52;
     terminal.cols = 270;
     attachPtyScrollController({
@@ -2652,7 +2907,7 @@ describe("attachPtyScrollController", () => {
   it("preserves drag-select horizontal autoscroll before the browser scroll event arrives", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2677,7 +2932,7 @@ describe("attachPtyScrollController", () => {
   it("treats a large unmarked native horizontal scroll as user review intent", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2702,7 +2957,7 @@ describe("attachPtyScrollController", () => {
   it("clears stale horizontal intent when terminal content no longer overflows", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2729,7 +2984,7 @@ describe("attachPtyScrollController", () => {
   it("does not adjust horizontal scroll when the cursor is already in view", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2753,7 +3008,7 @@ describe("attachPtyScrollController", () => {
   it("auto-scrolls horizontally back when the cursor falls left of the viewport", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2776,7 +3031,7 @@ describe("attachPtyScrollController", () => {
   it("holds the line-start viewport after enter until the new cursor becomes visible", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2811,7 +3066,7 @@ describe("attachPtyScrollController", () => {
   it("clamps horizontal auto-scroll to the rightmost reachable scroll position", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2834,7 +3089,7 @@ describe("attachPtyScrollController", () => {
   it("leaves horizontal scroll alone when the terminal content fits the viewport", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 800); // == clientWidth, 不溢出
-    const { terminal, emitRender } = createTerminal({ 19: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -2856,7 +3111,7 @@ describe("attachPtyScrollController", () => {
   it("exposes ratio scrolling for a custom horizontal terminal scrollbar", () => {
     const { container, spacer, host } = createDom();
     defineScrollWidth(container, 1600);
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     const onScrollStateChange = vi.fn<(state: PtyScrollState) => void>();
     const controller = attachPtyScrollController({
       container,
@@ -2887,7 +3142,8 @@ describe("attachPtyScrollController", () => {
   // races and should not move into the pure intent FSM.
   it("relayout keeps cursor pinned in viewport after terminal metrics make host taller than container", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    // Default baseY=80 and cursorY=0: live-screen fixtures use absolute buffer rows.
+    const { terminal } = createTerminal({ 80: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2907,18 +3163,19 @@ describe("attachPtyScrollController", () => {
     defineScrollHeight(container, 3000);
     controller.relayout();
 
-    expect(spacer.style.height).toBe("2800px");
+    expect(spacer.style.height).toBe("2430px");
     expect(host.style.height).toBe("600px");
-    // scrollTop 不再是 scrollHeight-clientHeight (=2600), 而是 maxYdisp*cellH=2400, 把光标
-    // 行(buffer 第 80 行, cursorY=0)放到视窗顶部; 否则 host 上半段被剪到视窗外, 光标看不见。
-    // 用 cursor 而非几何底是因为 buffer 末尾常有 trailing empty rows, 几何贴底反而空。
-    expect(container.scrollTop).toBe(2400);
-    expect(host.style.top).toBe("2400px");
+    // Semantic bottom bottom-aligns the live cursor row (absolute row 80), so preceding
+    // history fills the viewport and the 19 trailing empty server-owned rows stay below it.
+    expect(container.scrollTop).toBeCloseTo(2030, 8);
+    expect(terminal.buffer.active.viewportY).toBe(67);
+    expect(host.style.top).toBe("2010px");
   });
 
   it("relayout preserves xterm viewport when user is away from bottom", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    // Default baseY=80 and cursorY=0: row 19 would be historical, not live-screen content.
+    const { terminal } = createTerminal({ 80: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -2938,7 +3195,7 @@ describe("attachPtyScrollController", () => {
     defineSize(screen, { clientHeight: 600, clientWidth: 800 });
     controller.relayout();
 
-    expect(spacer.style.height).toBe("2800px");
+    expect(spacer.style.height).toBe("2430px");
     expect(container.scrollTop).toBe(210);
     expect(host.style.top).toBe("210px");
   });
@@ -2980,6 +3237,7 @@ describe("attachPtyScrollController", () => {
       configurable: true,
       get: () => parseFloat(spacer.style.height || "0") || 0,
     });
+    // Cold-start buffer has baseY=0, so absolute row 19 is the actual live-screen tail.
     const { terminal, emitScroll } = createTerminal({ 19: "prompt" });
     terminal.buffer.active.length = 20;
 
@@ -3049,7 +3307,7 @@ describe("attachPtyScrollController", () => {
     // 必须把这次 stale 的 scroll 补上,否则 host 永远停在旧位置——视觉上就是上半截全黑。
     const { container, spacer, host, xterm } = createDom();
     const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
 
     const ctrl = attachPtyScrollController({
       container,
@@ -3090,7 +3348,7 @@ describe("attachPtyScrollController", () => {
     // 但测试要把这条路径也覆盖到,免得未来重构改 measure 实现时这条 invariant 失守。
     const { container, spacer, host } = createDom();
     host.querySelector(".xterm-screen")?.remove();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
 
     const ctrl = attachPtyScrollController({
       container,
@@ -3112,7 +3370,7 @@ describe("attachPtyScrollController", () => {
     // measureXtermCellSize 另一条 null 路径: term.cols<=0 || term.rows<=0。
     // 移动端键盘 show/hide 时 container 短暂被压扁, xterm 内部 reflow 可能让 cols 临时为 0。
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     // 先正常 attach (init 期间 cols=80 拿到正常 cellH), 再把 cols 砍掉
     const ctrl = attachPtyScrollController({
       container,
@@ -3136,7 +3394,7 @@ describe("attachPtyScrollController", () => {
     // flag 留 true 不破坏正确性 (再 sync 一遍是 no-op), 但语义不真——审计中应当显式 reset。
     const { container, spacer, host } = createDom();
     const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
 
     const ctrl = attachPtyScrollController({
       container,
@@ -3167,7 +3425,7 @@ describe("attachPtyScrollController", () => {
     // stale state"不真。
     const { container, spacer, host } = createDom();
     const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
 
     const ctrl = attachPtyScrollController({
       container,
@@ -3197,7 +3455,7 @@ describe("attachPtyScrollController", () => {
 
   it("only observes the scroll container (not host) to avoid feedback loop", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -3216,7 +3474,7 @@ describe("attachPtyScrollController", () => {
 
   it("does not rewrite host/spacer style when layout values are unchanged", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 19: "prompt" });
+    const { terminal } = createTerminal({ 99: "prompt" });
 
     const writeCounts: Record<string, number> = {};
     const trackStyle = (el: HTMLElement, label: string, props: string[]): void => {
@@ -3257,7 +3515,7 @@ describe("attachPtyScrollController", () => {
 
   it("cleans up DOM, xterm, and resize observers", () => {
     const { container, spacer, host } = createDom();
-    const { terminal, disposeScroll, disposeRender } = createTerminal({ 19: "prompt" });
+    const { terminal, disposeScroll, disposeRender } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -3282,7 +3540,7 @@ describe("attachPtyScrollController", () => {
 
   // proxy-hosted PTY: xterm.rows 来自 server (52 行, host=1040px), mobile 容器键盘弹起后
   // 压扁到 200px。host > viewport 时, buffer 末尾常常是 trailing empty rows (claude prompt
-  // 之后即空), 纯几何贴底反而显示空白把真内容推出视窗 → 用 cursor 行作为锚点。
+  // 之后即空), 纯几何贴底反而显示空白把真内容推出视窗 → 用 semantic live tail 锚定。
   describe("when host is taller than viewport (server-owned rows + mobile keyboard)", () => {
     function setupTallHost(opts: { cursorY: number; viewportY?: number }) {
       const { container, spacer, host, xterm } = createDom();
@@ -3317,45 +3575,45 @@ describe("attachPtyScrollController", () => {
       });
     }
 
-    it("anchors viewport on cursor row when host > vch on entry (geometric bottom would land on trailing empty rows)", () => {
+    it("bottom-aligns the semantic live tail on entry instead of trailing empty rows", () => {
       const params = setupTallHost({ cursorY: 0 });
       attach(params);
-      // 几何贴底是 17900, 但那块在 buffer trailing empty 区。光标在 row 853 (host top), 像素 17060。
-      // computeBottomScrollTop: target = 17060 - (200-20)/2 = 16970, 夹到 minScrollTop=17060
-      // (= maxYdisp*cellH, 再低就改 ydisp 了) → 光标停在视窗顶部行。
-      expect(params.container.scrollTop).toBe(17060);
+      // Empty test lines make cursorY=0 the semantic tail. Its bottom is 17080px, so a
+      // 200px viewport starts at 16880 and pulls nine rows of history above the cursor in.
+      expect(params.container.scrollTop).toBe(16880);
+      expect(params.terminal.buffer.active.viewportY).toBe(844);
     });
 
-    it("centers cursor when cursor sits mid-host on entry", () => {
+    it("bottom-aligns a mid-host cursor when it is the semantic live tail", () => {
       const params = setupTallHost({ cursorY: 25 });
       attach(params);
-      // cursorBufferRow=878, cursorPx=17560, target=17560-(200-20)/2=17470, 在 [17060, 17900] 内。
-      expect(params.container.scrollTop).toBe(17470);
+      // cursorBufferRow=878 ends at 17580px, hence semantic bottom is 17580-200=17380.
+      expect(params.container.scrollTop).toBe(17380);
     });
 
     it("first onRender after entry leaves scrollTop alone when cursor row is unchanged", () => {
       const params = setupTallHost({ cursorY: 25 });
       attach(params);
-      expect(params.container.scrollTop).toBe(17470);
+      expect(params.container.scrollTop).toBe(17380);
 
       // focus 切换 / theme 重绘 类的"无变动 onRender"不能掀构图。followCursorY 仅在光标行
       // 真的变了那一帧介入 (prevCursorBufferRow guard)。
       params.emitRender();
-      expect(params.container.scrollTop).toBe(17470);
+      expect(params.container.scrollTop).toBe(17380);
     });
 
     it("preserves the in-host scroll offset when relayout races with first review scroll", () => {
       const params = setupTallHost({ cursorY: 25 });
       const ctrl = attach(params);
-      expect(params.container.scrollTop).toBe(17470);
+      expect(params.container.scrollTop).toBe(17380);
 
       params.container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
-      expect(params.container.scrollTop).toBe(17469);
+      expect(params.container.scrollTop).toBe(17379);
 
       ctrl.relayout();
 
       expect(params.terminal.buffer.active.viewportY).toBe(853);
-      expect(params.container.scrollTop).toBe(17469);
+      expect(params.container.scrollTop).toBe(17379);
     });
 
     it("traces same-row followCursorY skips with zero cursor delta", () => {
@@ -3402,26 +3660,41 @@ describe("attachPtyScrollController", () => {
       ]);
     });
 
-    it("followCursorY re-centers when cursor moves to a row outside the current viewport", () => {
+    it("syncs bottom viewport and host before followCursorY scrolls to an escaped cursor", () => {
       const params = setupTallHost({ cursorY: 0 });
       attach(params);
-      // 进入: scrollTop=17060, 视窗 [17068, 17260]。光标 cursorBufferRow=853, pixel 17060,
-      // 在视窗顶 (cursorPx >= viewportTop)。
-      expect(params.container.scrollTop).toBe(17060);
+      // 进入: live tail row 853 的底边 17080 与可视区底边对齐。
+      expect(params.container.scrollTop).toBe(16880);
+      expect(params.terminal.buffer.active.viewportY).toBe(844);
 
-      // 光标跳到 row 25 (cursorBufferRow=878, pixel 17560), 不在 [17068, 17260] 内。
-      params.terminal.buffer.active.cursorY = 25;
+      const syncObservations: Array<{ ydisp: number; scrollTop: number; hostTop: string }> = [];
+      params.terminal.scrollToLine.mockClear();
+      params.terminal.scrollToLine.mockImplementation((ydisp: number) => {
+        syncObservations.push({
+          ydisp,
+          scrollTop: params.container.scrollTop,
+          hostTop: params.host.style.top,
+        });
+        params.terminal.buffer.active.viewportY = ydisp;
+      });
+
+      // Current xterm viewport is [844, 895]. Absolute cursor row 904 escapes it;
+      // follow must first render bottomViewportY=853 and position that host, then move DOM.
+      params.terminal.buffer.active.cursorY = 51;
       params.emitRender();
 
-      expect(params.container.scrollTop).toBe(17470);
+      expect(syncObservations).toEqual([{ ydisp: 853, scrollTop: 16880, hostTop: "17060px" }]);
+      expect(params.terminal.buffer.active.viewportY).toBe(853);
+      expect(params.host.style.top).toBe("17060px");
+      expect(params.container.scrollTop).toBe(17900);
     });
 
-    it("reports atBottom=true under cursor-aware path because cursor is in viewport", () => {
+    it("reports atBottom=true only at the semantic anchor with the cursor visible", () => {
       const params = setupTallHost({ cursorY: 25 });
       const onAtBottomChange = vi.fn();
       attach(params, { onAtBottomChange });
-      // scrollTop=17470 离几何底 17900 还有距离, 但 host > vch 分支看的是"光标在视窗内", 是 →
-      // BackToBottom 不该亮。
+      // scrollTop=17380 离几何底 17900 还有距离, 但它正好是 semantic live bottom，
+      // 且 cursor 可见，所以 BackToBottom 不该亮。
       expect(onAtBottomChange).toHaveBeenLastCalledWith(true);
     });
 

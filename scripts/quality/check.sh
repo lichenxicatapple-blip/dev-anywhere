@@ -37,7 +37,6 @@ run_check "format" pnpm format:check
 run_check "lint" pnpm lint
 run_check "typecheck" pnpm -r run typecheck
 run_check "knip" pnpm knip
-run_check "unit" pnpm test:unit
 
 failed=0
 for i in "${!PIDS[@]}"; do
@@ -51,6 +50,26 @@ for i in "${!PIDS[@]}"; do
     sed "s/^/[$name] /" "$log_file" >&2
   fi
 done
+
+if [ "$failed" -ne 0 ]; then
+  exit 1
+fi
+
+# Unit tests contain real timers, loopback WebSockets, and jsdom work. Running
+# them beside four CPU-heavy static jobs—and then running multiple workspaces in
+# parallel inside that job—can starve a healthy 3s protocol wait for seconds.
+# Keep the cheap static checks parallel, then give the behavior suite an
+# uncontended event loop. This removes nested concurrency instead of inflating
+# individual test timeouts.
+unit_log="$TMP_DIR/unit.log"
+echo "START unit"
+if pnpm test:unit >"$unit_log" 2>&1; then
+  echo "OK    unit"
+else
+  failed=1
+  echo "FAIL  unit" >&2
+  sed 's/^/[unit] /' "$unit_log" >&2
+fi
 
 if [ "$failed" -ne 0 ]; then
   exit 1

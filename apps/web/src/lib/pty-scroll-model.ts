@@ -36,7 +36,7 @@ interface TouchScrollExpectationInput {
   currentY: number | null;
   touchStartedAtCursorAwareBottom: boolean;
   bottomScrollTop: number;
-  domMaxScrollTop: number;
+  maxScrollTop: number;
 }
 
 interface TouchScrollExpectation {
@@ -173,12 +173,12 @@ export function computeTouchScrollExpectation({
   currentY,
   touchStartedAtCursorAwareBottom,
   bottomScrollTop,
-  domMaxScrollTop,
+  maxScrollTop,
 }: TouchScrollExpectationInput): TouchScrollExpectation | false {
   if (!touchActive) return false;
   if (touchStartScrollTop === null || touchStartY === null || currentY === null) return false;
 
-  const cursorAwareMaxScrollTop = Math.min(domMaxScrollTop, bottomScrollTop);
+  const cursorAwareMaxScrollTop = maxScrollTop;
   const gestureBaseScrollTop = touchStartedAtCursorAwareBottom
     ? bottomScrollTop
     : touchStartScrollTop;

@@ -6,7 +6,13 @@ import {
   selectFakeProxy,
   sentFakeRelayMessages,
 } from "../../helpers";
-import { expectPtyAtBottom, expectPtyScrollable, ptyTerminal } from "../../pty-scroll-helpers";
+import {
+  expectPtyAtBottom,
+  expectPtyRendered,
+  expectPtyScrollable,
+  ptyTerminal,
+  scrollPtyToTop,
+} from "../../pty-scroll-helpers";
 
 async function holdNextConnectionAndDropSocket(
   page: import("@playwright/test").Page,
@@ -218,12 +224,7 @@ test.describe("WebSocket reconnect chaos", () => {
     await expect(page.locator('[data-slot="pty-scrollbar"]')).toHaveClass(/opacity-100/);
 
     const terminal = page.locator('[data-slot="pty-terminal"]');
-    await terminal.evaluate((el) => {
-      const node = el as HTMLElement;
-      node.scrollTop = 0;
-      node.dispatchEvent(new Event("scroll"));
-      node.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -600 }));
-    });
+    await scrollPtyToTop(page);
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
     const scrollTopBeforeReconnect = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
 
@@ -248,6 +249,7 @@ test.describe("WebSocket reconnect chaos", () => {
       (el) => (el as HTMLElement).scrollTop,
     );
     expect(scrollTopAfterReconnectOutput).toBeLessThanOrEqual(scrollTopBeforeReconnect + 8);
+    await expectPtyRendered(page);
   });
 
   test("restores PTY bottom when page resume fires before reconnect reattaches terminal", async ({

@@ -54,6 +54,55 @@ async function expectPtyCursorAboveKeyboard(page: Page, sessionId: string): Prom
     .toBeGreaterThanOrEqual(-2);
 }
 
+async function readClosedPtyLiveTailGeometry(page: Page, sessionId: string) {
+  return page.evaluate((sid) => {
+    const term = window.__ccTestPtyTerminals?.get(sid);
+    const terminal = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
+    const screen = host?.querySelector<HTMLElement>(".xterm-screen");
+    if (!term || !terminal || !host || !screen) return null;
+
+    const buffer = term.buffer.active;
+    let lastNonEmptyRow = -1;
+    for (let row = term.rows - 1; row >= 0; row -= 1) {
+      const line = buffer.getLine(buffer.baseY + row);
+      if (line?.translateToString(true).trimEnd()) {
+        lastNonEmptyRow = row;
+        break;
+      }
+    }
+
+    const style = getComputedStyle(terminal);
+    const paddingTop = Number.parseFloat(style.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(style.paddingBottom) || 0;
+    const hostStyle = getComputedStyle(host);
+    const hostTop = Number.parseFloat(hostStyle.top) || 0;
+    const hostPaddingTop = Number.parseFloat(hostStyle.paddingTop) || 0;
+    const cellHeight = screen.getBoundingClientRect().height / Math.max(term.rows, 1);
+    const liveTailRow = Math.max(buffer.cursorY, lastNonEmptyRow, 0);
+    const liveTailBufferRow = buffer.baseY + liveTailRow;
+    const liveTailViewportRow = liveTailBufferRow - buffer.viewportY;
+    const liveTailBottom =
+      paddingTop + hostTop + hostPaddingTop + (liveTailViewportRow + 1) * cellHeight;
+    const visibleBottom = terminal.scrollTop + terminal.clientHeight - paddingBottom;
+
+    return {
+      blankBelowLiveTail: visibleBottom - liveTailBottom,
+      cellHeight,
+      cursorInViewport: window.__devAnywherePtyDebug?.()?.anchor.cursorInViewport ?? false,
+      keyboardOffset: Number(
+        document.querySelector("[data-keyboard-offset]")?.getAttribute("data-keyboard-offset") ??
+          "0",
+      ),
+      hostPaddingTop,
+      hostTop,
+      liveTailViewportRow,
+      rows: term.rows,
+      viewportY: buffer.viewportY,
+    };
+  }, sessionId);
+}
+
 async function movePtyViewportAwayWhileKeyboardStaysOpen(
   page: Page,
   sessionId: string,
@@ -298,6 +347,54 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
         )
         .toBe(0);
     }
+  });
+
+  test("fills the released keyboard area with the live PTY tail after the keyboard closes", async ({
+    emuPage,
+  }) => {
+    test.setTimeout(90_000);
+    const sessionId = `${SESSION_ID}-keyboard-close-tail`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      baseUrl: mobileBaseUrl,
+      rows: 52,
+      cols: 80,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await emuPage.evaluate(() => {
+      window.__ptySmoke.sendPty(
+        `${Array.from(
+          { length: 220 },
+          (_, index) => `keyboard close history ${String(index).padStart(3, "0")}\r\n`,
+        ).join("")}\u001b[14;1H\u001b[Jkeyboard close live prompt`,
+      );
+    });
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("keyboard close live prompt");
+
+    const rowsBeforeKeyboard = await emuPage.evaluate(
+      (sid) => window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
+      sessionId,
+    );
+    await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
+    await expectPtyCursorAboveKeyboard(emuPage, sessionId);
+    await dismissSoftKeyboard(emuPage);
+
+    await expect
+      .poll(() => readClosedPtyLiveTailGeometry(emuPage, sessionId))
+      .toMatchObject({
+        keyboardOffset: 0,
+        cursorInViewport: true,
+        rows: rowsBeforeKeyboard,
+      });
+    await expect
+      .poll(async () => {
+        const geometry = await readClosedPtyLiveTailGeometry(emuPage, sessionId);
+        if (!geometry) return Number.POSITIVE_INFINITY;
+        return geometry.blankBelowLiveTail;
+      })
+      .toBeLessThanOrEqual(2);
   });
 
   test("returns to the live cursor when typing after keyboard-open history review", async ({

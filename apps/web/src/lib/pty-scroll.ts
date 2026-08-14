@@ -17,13 +17,36 @@ interface PtyHostLayout {
   hostPaddingTop: number;
 }
 
+interface PtyLiveBottomInput {
+  bufferLength: number;
+  baseY: number;
+  rows: number;
+  cursorY: number;
+  liveLastY: number;
+  cellH: number;
+  visibleContentHeight: number;
+  hostPaddingTop?: number;
+}
+
+interface PtyLiveBottom {
+  scrollTop: number;
+  viewportY: number;
+  liveTailY: number;
+}
+
 interface PtyScrollTarget {
   ydisp: number;
 }
 
+function normalizeNearIntegerRows(value: number): number {
+  const nearest = Math.round(value);
+  const tolerance = Number.EPSILON * Math.max(1, Math.abs(value));
+  return Math.abs(value - nearest) <= tolerance ? nearest : value;
+}
+
 export function computePtyHostLayout(
-  metrics: PtyScrollMetrics,
-  canvasLastY: number,
+  metrics: PtyScrollMetrics & { baseY: number },
+  liveLastY: number,
 ): PtyHostLayout | null {
   if (metrics.cellH <= 0 || metrics.cellW <= 0 || metrics.rows <= 0 || metrics.cols <= 0) {
     return null;
@@ -42,22 +65,31 @@ export function computePtyHostLayout(
   const visibleContentHeight = Math.max(0, metrics.visibleContentHeight ?? 0);
   const paddingBottomReference =
     visibleContentHeight > 0 ? Math.min(hostHeight, visibleContentHeight) : hostHeight;
-  const rowsOfContent = canvasLastY < 0 ? 1 : Math.max(1, canvasLastY + 1);
+  const clampedCursorY =
+    metrics.cursorY === undefined ? -1 : Math.max(0, Math.min(metrics.rows - 1, metrics.cursorY));
+  const clampedLiveLastY = Math.max(-1, Math.min(metrics.rows - 1, liveLastY));
+  const rowsOfContent = Math.max(1, Math.max(clampedCursorY, clampedLiveLastY) + 1);
   const hostPaddingTop = isColdStart
     ? Math.max(0, paddingBottomReference - rowsOfContent * metrics.cellH)
     : 0;
   const maxYdisp = Math.max(0, metrics.bufferLength - metrics.rows);
   const minSpacerHeightForLastViewport = maxYdisp * metrics.cellH + visibleContentHeight;
-  const longHost = visibleContentHeight > 0 && hostHeight > visibleContentHeight;
-  if (longHost && metrics.cursorY !== undefined) {
-    const cursorY = Math.max(0, Math.min(metrics.rows - 1, metrics.cursorY));
-    const minScrollTop = maxYdisp * metrics.cellH;
-    const maxHostScrollTop = minScrollTop + hostHeight - visibleContentHeight;
-    const target =
-      minScrollTop + cursorY * metrics.cellH - (visibleContentHeight - metrics.cellH) / 2;
-    const bottomScrollTop = Math.max(minScrollTop, Math.min(maxHostScrollTop, target));
+  if (visibleContentHeight > 0 && metrics.cursorY !== undefined) {
+    const liveBottom = computePtyLiveBottom({
+      bufferLength: metrics.bufferLength,
+      baseY: metrics.baseY,
+      rows: metrics.rows,
+      cursorY: metrics.cursorY,
+      liveLastY,
+      cellH: metrics.cellH,
+      visibleContentHeight,
+      hostPaddingTop,
+    });
     return {
-      spacerHeight: bottomScrollTop + visibleContentHeight,
+      // The DOM scroll range ends at the semantic live tail, not at the final
+      // server-owned row. Trailing empty PTY rows therefore cannot occupy the
+      // area released when a mobile keyboard closes.
+      spacerHeight: liveBottom.scrollTop + visibleContentHeight,
       spacerWidth: metrics.cols * metrics.cellW,
       hostWidth: metrics.cols * metrics.cellW,
       hostHeight,
@@ -73,19 +105,73 @@ export function computePtyHostLayout(
   };
 }
 
+/**
+ * Resolve the semantic live bottom without resizing the remote PTY.
+ *
+ * The browser may display fewer rows than the session owns, and the live cursor
+ * may sit above many empty server-owned rows. Fill the viewport with preceding
+ * scrollback, keep the cursor visible, and retain meaningful TUI rows below the
+ * cursor whenever they fit.
+ */
+export function computePtyLiveBottom({
+  bufferLength,
+  baseY,
+  rows,
+  cursorY,
+  liveLastY,
+  cellH,
+  visibleContentHeight,
+  hostPaddingTop = 0,
+}: PtyLiveBottomInput): PtyLiveBottom {
+  const liveBaseY = Math.max(0, Math.min(bufferLength, baseY));
+  if (rows <= 0 || cellH <= 0) {
+    return { scrollTop: 0, viewportY: liveBaseY, liveTailY: 0 };
+  }
+
+  const clampedCursorY = Math.max(0, Math.min(rows - 1, cursorY));
+  const clampedLiveLastY =
+    liveLastY < 0 ? clampedCursorY : Math.max(0, Math.min(rows - 1, liveLastY));
+  const liveTailY = Math.max(clampedCursorY, clampedLiveLastY);
+  const hostHeight = rows * cellH;
+  // Keep the semantic anchor in row coordinates until the final pixel write.
+  // Deriving viewportY back from scrollTop / cellH is lossy for repeating
+  // fractional cell heights: an exact row boundary such as 230 can become
+  // 229.99999999999997 and floor to the preceding row.
+  const capacityRows =
+    visibleContentHeight > 0 && visibleContentHeight < hostHeight
+      ? normalizeNearIntegerRows(visibleContentHeight / cellH)
+      : rows;
+  const hostPaddingRows = hostPaddingTop / cellH;
+  const cursorTopRows = hostPaddingRows + liveBaseY + clampedCursorY;
+  const tailBottomRows = hostPaddingRows + liveBaseY + liveTailY + 1;
+
+  // If cursor and tail fit together, align the tail to the visible bottom. If
+  // they do not, cursor visibility is the hard constraint and the lower TUI
+  // rows are necessarily clipped.
+  const scrollTopRows = Math.max(0, Math.min(tailBottomRows - capacityRows, cursorTopRows));
+  const scrollTop = scrollTopRows * cellH;
+  const viewportY = Math.max(0, Math.min(liveBaseY, Math.floor(scrollTopRows)));
+  return { scrollTop, viewportY, liveTailY };
+}
+
 interface ScrollAnchorInput {
   rows: number;
   cellH: number;
   bufferLength: number;
+  baseY: number;
+  viewportY: number;
   // 光标在 live buffer 中的绝对行 (term.buffer.active.baseY + .cursorY)。
   // viewportY 会随用户回看历史变化，不能用来定位 live cursor；否则回看时会把
   // 光标错误投影到历史视窗里，让 cursor-aware atBottom 误判为 true。
   cursorBufferRow: number;
+  // 从 baseY 开始扫描 live screen 得到的最后一条有效内容行（相对行号）。
+  liveLastY: number;
   // container.clientHeight 扣掉上下 padding
   visibleContentHeight: number;
   // container 自身的 padding-top, 用于把 buffer 行像素和 scrollTop 坐标对齐
   paddingTop: number;
   paddingBottom: number;
+  hostPaddingTop: number;
   containerScrollTop: number;
   containerScrollHeight: number;
   containerClientHeight: number;
@@ -96,6 +182,7 @@ interface ScrollAnchorOutput {
   isAtBottom: boolean;
   // 用户点 "back to bottom" 或程序触发 scrollToBottom 时容器应该被设到的 scrollTop
   bottomScrollTop: number;
+  bottomViewportY: number;
   cursorInViewport: boolean;
 }
 
@@ -103,42 +190,59 @@ interface ScrollAnchorOutput {
  * 一次算出"几何贴底"和"光标可见"两件事。controller 之前两个方法各自做局部条件判断,
  * 这里集中: host 高度跟可视区比较的分支只在这一处出现, 之后任何 anchor 类决策只走这条路。
  *
- * - host ≤ visible (短 host): 整个 host 在视窗内, 几何 scrollTop 贴底就能看到光标行,
- *   isAtBottom = scrollTop+clientHeight >= scrollHeight - threshold (老语义)。
- * - host > visible (长 host, 移动端 / 高 rows): buffer 末尾常是 trailing empty,
- *   几何贴底反而看不到内容; 此时锚定光标——isAtBottom = 光标像素落在视窗内,
- *   bottomScrollTop 把光标行像素居中放进视窗。
+ * semantic bottom 同时给出目标 scrollTop 与 xterm viewportY，调用方不再把
+ * “cursor 还看得见”误当成已经贴底，也不再把 viewportY 硬编码为 maxYdisp。
  */
 export function computeScrollAnchor(input: ScrollAnchorInput): ScrollAnchorOutput {
-  const cursorPx = input.paddingTop + input.cursorBufferRow * input.cellH;
+  const hostHeight = input.rows * input.cellH;
+  const hostVerticalOffset =
+    input.cellH > 0 && hostHeight < input.visibleContentHeight
+      ? input.visibleContentHeight - hostHeight
+      : 0;
+  const cursorPx =
+    input.paddingTop +
+    hostVerticalOffset +
+    input.hostPaddingTop +
+    input.cursorBufferRow * input.cellH;
   const viewportTop = input.containerScrollTop + input.paddingTop;
   const viewportBottom =
     input.containerScrollTop + input.containerClientHeight - input.paddingBottom;
   const cursorViewportTolerance = Math.max(1, input.atBottomThreshold);
+  const cursorRendered =
+    input.cursorBufferRow >= input.viewportY &&
+    input.cursorBufferRow < input.viewportY + input.rows;
   const cursorInViewport =
     input.cellH > 0 &&
+    cursorRendered &&
     cursorPx >= viewportTop - cursorViewportTolerance &&
     cursorPx + input.cellH <= viewportBottom + cursorViewportTolerance;
 
-  const maxScrollTop = Math.max(0, input.containerScrollHeight - input.containerClientHeight);
-  const hostHeight = input.rows * input.cellH;
-  const longHost = input.cellH > 0 && hostHeight > input.visibleContentHeight;
-
-  let isAtBottom: boolean;
-  let bottomScrollTop: number;
-  if (longHost) {
-    isAtBottom = cursorInViewport;
-    const target = cursorPx - input.paddingTop - (input.visibleContentHeight - input.cellH) / 2;
-    const maxYdisp = Math.max(0, input.bufferLength - input.rows);
-    const minScrollTop = maxYdisp * input.cellH;
-    bottomScrollTop = Math.max(minScrollTop, Math.min(maxScrollTop, target));
-  } else {
-    isAtBottom =
-      input.containerScrollTop + input.containerClientHeight >=
-      input.containerScrollHeight - input.atBottomThreshold;
-    bottomScrollTop = maxScrollTop;
-  }
-  return { isAtBottom, bottomScrollTop, cursorInViewport };
+  const maxYdisp = Math.max(0, input.bufferLength - input.rows);
+  const domMaxScrollTop = Math.max(0, input.containerScrollHeight - input.containerClientHeight);
+  const liveBottom = computePtyLiveBottom({
+    bufferLength: input.bufferLength,
+    baseY: input.baseY,
+    rows: input.rows,
+    cursorY: input.cursorBufferRow - input.baseY,
+    liveLastY: input.liveLastY,
+    cellH: input.cellH,
+    visibleContentHeight: input.visibleContentHeight,
+    hostPaddingTop: input.hostPaddingTop,
+  });
+  // Keep the semantic target even if the DOM scroll range is momentarily stale.
+  // Callers can retry on the next layout/render instead of treating a clamped,
+  // currently reachable value as the true bottom forever.
+  const bottomScrollTop = input.cellH > 0 ? liveBottom.scrollTop : domMaxScrollTop;
+  const bottomViewportY = input.cellH > 0 ? liveBottom.viewportY : maxYdisp;
+  const isAtBottom =
+    Math.abs(input.containerScrollTop - bottomScrollTop) <= input.atBottomThreshold &&
+    (input.cellH <= 0 || cursorInViewport);
+  return {
+    isAtBottom,
+    bottomScrollTop,
+    bottomViewportY,
+    cursorInViewport,
+  };
 }
 
 interface HostTopInput {

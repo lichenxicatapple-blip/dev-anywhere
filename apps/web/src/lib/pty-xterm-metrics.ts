@@ -14,11 +14,12 @@ export function measureXtermCellSize(
   };
 }
 
-// 从底行往上找第一行有可见内容的相对行号，全空返回 -1。
-// 用于 hostPaddingTop 的"冷启动留白"判断：当前 viewport 几乎全空时把 padding 顶到底。
-export function findCanvasLastNonEmptyRow(buffer: IBuffer, rows: number): number {
+// 从 live screen（baseY）底行往上找第一行有可见内容的相对行号，全空返回 -1。
+// 不能从 viewportY 开始扫描：semantic bottom 会主动把 viewport 移入历史，若再扫描
+// 当前 viewport，历史内容就会被误认成 live tail 并导致锚点来回振荡。
+export function findLiveScreenLastNonEmptyRow(buffer: IBuffer, rows: number): number {
   for (let ry = rows - 1; ry >= 0; ry--) {
-    const absY = buffer.viewportY + ry;
+    const absY = buffer.baseY + ry;
     if (absY < 0 || absY >= buffer.length) continue;
     const line = buffer.getLine(absY);
     if (line && line.translateToString(true).trimEnd().length > 0) return ry;

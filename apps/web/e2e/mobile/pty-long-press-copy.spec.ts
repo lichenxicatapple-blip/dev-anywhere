@@ -279,6 +279,165 @@ async function longPress(
   );
 }
 
+async function longPressTerminalTextAfterLayoutStable(
+  page: Page,
+  sessionId: string,
+  text: string,
+  columnOffsetCells: number,
+): Promise<void> {
+  await page.evaluate(
+    async ({ sid, targetText, targetColumnOffset }) => {
+      interface LayoutSample {
+        viewportY: number;
+        screenTop: number;
+        screenLeft: number;
+        screenWidth: number;
+        screenHeight: number;
+        hostPaddingTop: number;
+        containerScrollTop: number;
+      }
+
+      const nextAnimationFrame = () =>
+        new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
+      const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
+      const samePixel = (left: number, right: number) => Math.abs(left - right) <= 0.25;
+      const sameLayout = (left: LayoutSample, right: LayoutSample) =>
+        left.viewportY === right.viewportY &&
+        samePixel(left.screenTop, right.screenTop) &&
+        samePixel(left.screenLeft, right.screenLeft) &&
+        samePixel(left.screenWidth, right.screenWidth) &&
+        samePixel(left.screenHeight, right.screenHeight) &&
+        samePixel(left.hostPaddingTop, right.hostPaddingTop) &&
+        samePixel(left.containerScrollTop, right.containerScrollTop);
+
+      let previous: LayoutSample | null = null;
+      let stableSamples = 0;
+      let lastValidationError = "layout did not settle";
+      const deadline = performance.now() + 5_000;
+
+      while (performance.now() < deadline) {
+        await nextAnimationFrame();
+
+        const term = window.__ccTestPtyTerminals?.get(sid);
+        const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+        const host = term?.element?.closest<HTMLElement>('[data-slot="pty-host"]');
+        const container = host?.closest<HTMLElement>('[data-slot="pty-terminal"]');
+        if (!term || !screen || !host || !container || term.cols <= 0 || term.rows <= 0) {
+          lastValidationError = "terminal geometry is unavailable";
+          stableSamples = 0;
+          previous = null;
+          continue;
+        }
+
+        const rect = screen.getBoundingClientRect();
+        const sample: LayoutSample = {
+          viewportY: term.buffer.active.viewportY,
+          screenTop: rect.top,
+          screenLeft: rect.left,
+          screenWidth: rect.width,
+          screenHeight: rect.height,
+          hostPaddingTop: Number.parseFloat(window.getComputedStyle(host).paddingTop) || 0,
+          containerScrollTop: container.scrollTop,
+        };
+        stableSamples = previous && sameLayout(previous, sample) ? stableSamples + 1 : 1;
+        previous = sample;
+        if (stableSamples < 3) continue;
+
+        const cellWidth = screen.clientWidth / term.cols;
+        const cellHeight = screen.clientHeight / term.rows;
+        if (
+          !Number.isFinite(cellWidth) ||
+          !Number.isFinite(cellHeight) ||
+          cellWidth <= 0 ||
+          cellHeight <= 0
+        ) {
+          lastValidationError = `invalid cell geometry ${cellWidth}x${cellHeight}`;
+          continue;
+        }
+
+        const buffer = term.buffer.active;
+        let targetRow = -1;
+        let targetColumn = -1;
+        for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
+          const line = buffer.getLine(row)?.translateToString(true) ?? "";
+          const column = line.indexOf(targetText);
+          if (column < 0) continue;
+          targetRow = row;
+          targetColumn = column;
+          break;
+        }
+        if (targetRow < 0) {
+          lastValidationError = `target text ${JSON.stringify(targetText)} is not visible`;
+          continue;
+        }
+
+        const currentRect = screen.getBoundingClientRect();
+        const startPoint = {
+          x: currentRect.left + (targetColumn + targetColumnOffset) * cellWidth,
+          y: currentRect.top + (targetRow - buffer.viewportY + 0.5) * cellHeight,
+        };
+        const target = document.elementFromPoint(startPoint.x, startPoint.y);
+        const mappedRowInViewport = Math.floor((startPoint.y - currentRect.top) / cellHeight);
+        const mappedColumn = Math.floor((startPoint.x - currentRect.left) / cellWidth);
+        const mappedRow = buffer.viewportY + mappedRowInViewport;
+        const mappedLine = buffer.getLine(mappedRow)?.translateToString(true) ?? "";
+        const hitXterm = target instanceof Element && target.closest(".xterm") !== null;
+        const mapsToTarget =
+          mappedRow === targetRow &&
+          mappedLine.includes(targetText) &&
+          mappedColumn >= targetColumn &&
+          mappedColumn < targetColumn + targetText.length;
+        if (!target || !hitXterm || !mapsToTarget) {
+          lastValidationError = JSON.stringify({
+            startPoint,
+            targetRow,
+            targetColumn,
+            mappedRow,
+            mappedColumn,
+            mappedLine,
+            hit: target instanceof Element ? target.tagName : null,
+            hitXterm,
+            sample,
+          });
+          stableSamples = 0;
+          continue;
+        }
+
+        const pointerId = 9001;
+        const dispatch = (type: "pointerdown" | "pointerup") => {
+          target.dispatchEvent(
+            new PointerEvent(type, {
+              bubbles: true,
+              cancelable: true,
+              composed: true,
+              pointerId,
+              pointerType: "touch",
+              isPrimary: true,
+              button: 0,
+              buttons: type === "pointerup" ? 0 : 1,
+              clientX: startPoint.x,
+              clientY: startPoint.y,
+              width: 4,
+              height: 4,
+              pressure: type === "pointerup" ? 0 : 0.5,
+            }),
+          );
+        };
+
+        // Keep validation and pointerdown in the same browser task: no Playwright round trip may
+        // reopen the buffer-vs-layout race between resolving the cell and capturing the candidate.
+        dispatch("pointerdown");
+        await sleep(900);
+        dispatch("pointerup");
+        return;
+      }
+
+      throw new Error(`terminal layout did not become targetable: ${lastValidationError}`);
+    },
+    { sid: sessionId, targetText: text, targetColumnOffset: columnOffsetCells },
+  );
+}
+
 async function pointerTap(page: Page, point: { x: number; y: number }): Promise<void> {
   await page.evaluate(async (tapPoint) => {
     const sleep = (ms: number) => new Promise((resolve) => window.setTimeout(resolve, ms));
@@ -732,28 +891,7 @@ test.describe("L4 mobile / PTY long press copy", () => {
       .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
       .toContain("./build/out.tar.gz");
 
-    const target = await emuPage.evaluate((sid) => {
-      const term = window.__ccTestPtyTerminals?.get(sid);
-      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
-      if (!term || !screen) return null;
-      const buffer = term.buffer.active;
-      const rect = screen.getBoundingClientRect();
-      const cellWidth = screen.clientWidth / term.cols;
-      const cellHeight = screen.clientHeight / term.rows;
-      for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
-        const text = buffer.getLine(row)?.translateToString(true) ?? "";
-        const pathColumn = text.indexOf("./build/out.tar.gz");
-        if (pathColumn < 0) continue;
-        return {
-          x: rect.left + (pathColumn + 4) * cellWidth,
-          y: rect.top + (row - buffer.viewportY + 0.5) * cellHeight,
-        };
-      }
-      return null;
-    }, sessionId);
-    if (!target) throw new Error("file link target is not visible");
-
-    await longPress(emuPage, target);
+    await longPressTerminalTextAfterLayoutStable(emuPage, sessionId, "./build/out.tar.gz", 4);
 
     await expect
       .poll(() =>
@@ -1026,10 +1164,13 @@ test.describe("L4 mobile / PTY long press copy", () => {
 
     const terminal = emuPage.locator('[data-slot="pty-terminal"]');
     await terminal.evaluate((el) => {
-      const node = el as HTMLElement;
-      const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
-      node.scrollTop = Math.max(0, maxScrollTop - 760);
-      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+      el.dispatchEvent(
+        new WheelEvent("wheel", {
+          bubbles: true,
+          cancelable: true,
+          deltaY: -760,
+        }),
+      );
     });
     await expect
       .poll(() =>
@@ -1040,6 +1181,26 @@ test.describe("L4 mobile / PTY long press copy", () => {
         }),
       )
       .toBeGreaterThan(300);
+
+    await expect
+      .poll(() =>
+        emuPage.evaluate(() => {
+          const terminal = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+          const screen = document.querySelector<HTMLElement>(
+            '[data-slot="pty-host"] .xterm-screen',
+          );
+          const snapshot = window.__devAnywherePtyDebug?.();
+          if (!terminal || !screen || !snapshot) return null;
+          const terminalRect = terminal.getBoundingClientRect();
+          const screenRect = screen.getBoundingClientRect();
+          return {
+            mode: snapshot.verticalIntent.mode,
+            screenIntersectsViewport:
+              screenRect.bottom > terminalRect.top && screenRect.top < terminalRect.bottom,
+          };
+        }),
+      )
+      .toEqual({ mode: "reviewing", screenIntersectsViewport: true });
 
     const beforeScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
     const beforeBottomGap = await terminal.evaluate((el) => {

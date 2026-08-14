@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   computeHostTop,
   computePtyHostLayout,
+  computePtyLiveBottom,
   computeScrollAnchor,
   computeScrollTarget,
   ydispToScrollTop,
@@ -11,7 +12,15 @@ describe("PTY scroll geometry", () => {
   it("computes spacer and host dimensions from terminal metrics", () => {
     expect(
       computePtyHostLayout(
-        { bufferLength: 120, rows: 24, cols: 80, viewportY: 0, cellH: 20, cellW: 10 },
+        {
+          bufferLength: 120,
+          baseY: 96,
+          rows: 24,
+          cols: 80,
+          viewportY: 0,
+          cellH: 20,
+          cellW: 10,
+        },
         23,
       ),
     ).toEqual({
@@ -26,7 +35,15 @@ describe("PTY scroll geometry", () => {
   it("adds cold-start bottom padding when visible rows are mostly blank", () => {
     expect(
       computePtyHostLayout(
-        { bufferLength: 24, rows: 24, cols: 80, viewportY: 0, cellH: 20, cellW: 10 },
+        {
+          bufferLength: 24,
+          baseY: 0,
+          rows: 24,
+          cols: 80,
+          viewportY: 0,
+          cellH: 20,
+          cellW: 10,
+        },
         4,
       )?.hostPaddingTop,
     ).toBe(380);
@@ -37,6 +54,7 @@ describe("PTY scroll geometry", () => {
       computePtyHostLayout(
         {
           bufferLength: 371,
+          baseY: 323,
           rows: 48,
           cols: 212,
           viewportY: 270,
@@ -54,6 +72,7 @@ describe("PTY scroll geometry", () => {
       computePtyHostLayout(
         {
           bufferLength: 120,
+          baseY: 80,
           rows: 40,
           cols: 80,
           viewportY: 0,
@@ -66,9 +85,10 @@ describe("PTY scroll geometry", () => {
     ).toBe(2400);
   });
 
-  it("caps long-host spacer at the cursor-aware bottom when the live cursor is near the top", () => {
+  it("caps long-host spacer at the meaningful live tail when the cursor is near the top", () => {
     const metrics = {
       bufferLength: 209,
+      baseY: 155,
       rows: 54,
       cols: 270,
       viewportY: 155,
@@ -78,12 +98,13 @@ describe("PTY scroll geometry", () => {
       cursorY: 13,
     };
 
-    expect(computePtyHostLayout(metrics, 13)?.spacerHeight).toBe(3694);
+    expect(computePtyHostLayout(metrics, 13)?.spacerHeight).toBe(3380);
   });
 
-  it("keeps enough long-host spacer to center a mid-screen cursor without exposing trailing rows", () => {
+  it("keeps enough long-host spacer to bottom-align a mid-screen live tail", () => {
     const metrics = {
       bufferLength: 905,
+      baseY: 853,
       rows: 52,
       cols: 80,
       viewportY: 853,
@@ -93,7 +114,124 @@ describe("PTY scroll geometry", () => {
       cursorY: 25,
     };
 
-    expect(computePtyHostLayout(metrics, 25)?.spacerHeight).toBe(17670);
+    expect(computePtyHostLayout(metrics, 25)?.spacerHeight).toBe(17580);
+  });
+
+  it("keeps one semantic anchor when keyboard close changes a host from long to short", () => {
+    const metrics = {
+      bufferLength: 124,
+      baseY: 100,
+      rows: 24,
+      cols: 80,
+      viewportY: 100,
+      cursorY: 10,
+      cellH: 20,
+      cellW: 10,
+    };
+    const keyboardOpen = computePtyHostLayout({ ...metrics, visibleContentHeight: 260 }, 10);
+    const keyboardClosed = computePtyHostLayout({ ...metrics, visibleContentHeight: 600 }, 10);
+
+    expect(keyboardOpen!.spacerHeight - 260).toBe(1960);
+    expect(keyboardClosed!.spacerHeight - 600).toBe(1740);
+  });
+
+  it("uses scrollback to fill the viewport below a mid-screen live prompt", () => {
+    expect(
+      computePtyLiveBottom({
+        bufferLength: 221,
+        baseY: 169,
+        rows: 52,
+        cursorY: 13,
+        liveLastY: 13,
+        cellH: 20,
+        visibleContentHeight: 828,
+      }),
+    ).toEqual({ scrollTop: 2832, viewportY: 141, liveTailY: 13 });
+  });
+
+  it("keeps the cursor visible when a full-screen TUI tail cannot fit with it", () => {
+    expect(
+      computePtyLiveBottom({
+        bufferLength: 905,
+        baseY: 853,
+        rows: 52,
+        cursorY: 0,
+        liveLastY: 51,
+        cellH: 20,
+        visibleContentHeight: 200,
+      }),
+    ).toEqual({ scrollTop: 17060, viewportY: 853, liveTailY: 51 });
+  });
+
+  it("keeps an exact viewport row with a repeating fractional cell height", () => {
+    const cellH = 485 / 24;
+    const liveBottom = computePtyLiveBottom({
+      bufferLength: 254,
+      baseY: 230,
+      rows: 24,
+      cursorY: 23,
+      liveLastY: 23,
+      cellH,
+      visibleContentHeight: 697,
+    });
+
+    // Pixel-first arithmetic produces 229.99999999999997 here and loses the
+    // cursor row. The row-space anchor must remain exactly 230.
+    expect(liveBottom.scrollTop).toBe(230 * cellH);
+    expect(liveBottom.viewportY).toBe(230);
+    expect(liveBottom.liveTailY).toBe(23);
+  });
+
+  it("still floors a genuinely fractional viewport row", () => {
+    const liveBottom = computePtyLiveBottom({
+      bufferLength: 124,
+      baseY: 100,
+      rows: 24,
+      cursorY: 10,
+      liveLastY: 10,
+      cellH: 20,
+      visibleContentHeight: 244,
+    });
+
+    expect(liveBottom.scrollTop).toBe(1976);
+    expect(liveBottom.viewportY).toBe(98);
+  });
+
+  it.each([
+    { visibleContentHeight: 114, scrollTop: 115, viewportY: 7 },
+    { visibleContentHeight: 115, scrollTop: 115, viewportY: 7 },
+    { visibleContentHeight: 116, scrollTop: 114, viewportY: 6 },
+  ])(
+    "normalizes only floating-point noise at a partial-capacity row boundary ($visibleContentHeight px)",
+    ({ visibleContentHeight, scrollTop, viewportY }) => {
+      const liveBottom = computePtyLiveBottom({
+        bufferLength: 21,
+        baseY: 7,
+        rows: 14,
+        cursorY: 0,
+        liveLastY: 6,
+        cellH: 230 / 14,
+        visibleContentHeight,
+      });
+
+      expect(liveBottom.scrollTop).toBeCloseTo(scrollTop, 8);
+      expect(liveBottom.viewportY).toBe(viewportY);
+    },
+  );
+
+  it("does not accumulate row error across a large scrollback base", () => {
+    const liveBottom = computePtyLiveBottom({
+      bufferLength: 5024,
+      baseY: 5000,
+      rows: 24,
+      cursorY: 10,
+      liveLastY: 10,
+      cellH: 20,
+      visibleContentHeight: 244,
+    });
+
+    expect(liveBottom.scrollTop).toBe(99_976);
+    expect(liveBottom.viewportY).toBe(4998);
   });
 
   // 移动端窄高度: rows*cellH 远大于 visibleContentHeight, cold-start padding 若按 host 自身
@@ -103,6 +241,7 @@ describe("PTY scroll geometry", () => {
     const layout = computePtyHostLayout(
       {
         bufferLength: 54,
+        baseY: 0,
         rows: 54,
         cols: 80,
         viewportY: 0,
@@ -118,10 +257,41 @@ describe("PTY scroll geometry", () => {
     expect(layout!.hostPaddingTop + 9 * 20).toBeLessThanOrEqual(729);
   });
 
+  it("uses the cold-start cursor extent when the live-screen scan is empty", () => {
+    const cursorY = 8;
+    const layout = computePtyHostLayout(
+      {
+        bufferLength: 54,
+        baseY: 0,
+        rows: 54,
+        cols: 80,
+        viewportY: 0,
+        cursorY,
+        cellH: 20,
+        cellW: 27,
+        visibleContentHeight: 729,
+      },
+      -1,
+    );
+
+    expect(layout).not.toBeNull();
+    expect(layout!.hostPaddingTop).toBe(549);
+    // Even without a non-empty scanned line, the cursor row remains inside the visible area.
+    expect(layout!.hostPaddingTop + (cursorY + 1) * 20).toBe(729);
+  });
+
   it("treats an empty viewport as all but the last row blank", () => {
     expect(
       computePtyHostLayout(
-        { bufferLength: 24, rows: 24, cols: 80, viewportY: 0, cellH: 20, cellW: 10 },
+        {
+          bufferLength: 24,
+          baseY: 0,
+          rows: 24,
+          cols: 80,
+          viewportY: 0,
+          cellH: 20,
+          cellW: 10,
+        },
         -1,
       )?.hostPaddingTop,
     ).toBe(460);
@@ -135,6 +305,7 @@ describe("PTY scroll geometry", () => {
       computePtyHostLayout(
         {
           bufferLength: 538,
+          baseY: 486,
           rows: 52,
           cols: 270,
           viewportY: 486,
@@ -213,47 +384,55 @@ describe("PTY scroll geometry", () => {
       rows: 24,
       cellH: 20,
       bufferLength: 24,
+      baseY: 0,
+      viewportY: 0,
       cursorBufferRow: 0,
+      liveLastY: 0,
       visibleContentHeight: 600,
       paddingTop: 8,
       paddingBottom: 0,
+      hostPaddingTop: 0,
       containerScrollTop: 0,
       containerScrollHeight: 608,
       containerClientHeight: 608,
       atBottomThreshold: 8,
     } as const;
 
-    it("short host (host <= visible): atBottom from scrollTop+clientHeight vs scrollHeight", () => {
+    it("short host uses the same semantic live-tail bottom", () => {
       const a = computeScrollAnchor(baseShortHost);
       expect(a.isAtBottom).toBe(true);
       expect(a.bottomScrollTop).toBe(0);
     });
 
-    it("short host scrolled up: not at bottom; bottomScrollTop = maxScrollTop", () => {
+    it("short host scrolled away from its semantic bottom stays in review", () => {
       const a = computeScrollAnchor({
         ...baseShortHost,
         containerScrollTop: 100,
         containerScrollHeight: 1200,
       });
       expect(a.isAtBottom).toBe(false);
-      expect(a.bottomScrollTop).toBe(1200 - 608);
+      expect(a.bottomScrollTop).toBe(0);
     });
 
     const baseLongHost = {
       rows: 54,
       cellH: 20,
       bufferLength: 60,
+      baseY: 6,
+      viewportY: 0,
       cursorBufferRow: 8,
+      liveLastY: 2,
       visibleContentHeight: 729,
       paddingTop: 8,
       paddingBottom: 0,
+      hostPaddingTop: 0,
       containerScrollTop: 0,
       containerScrollHeight: 1200,
       containerClientHeight: 737,
       atBottomThreshold: 8,
     } as const;
 
-    it("long host (host > visible): atBottom = cursor pixel in viewport (not geometric bottom)", () => {
+    it("long host requires both semantic target alignment and cursor visibility", () => {
       // cursorBufferRow=8, cellH=20, paddingTop=8 → cursorPx = 8+160 = 168
       // viewportTop = 0+8 = 8, viewportBottom = 0+737-0 = 737
       // 168 ≥ 8 且 168+20 ≤ 737 ⇒ in viewport ⇒ at bottom
@@ -274,10 +453,14 @@ describe("PTY scroll geometry", () => {
         rows: 54,
         cellH: 20.185185185185187,
         bufferLength: 262,
+        baseY: 208,
+        viewportY: 208,
         cursorBufferRow: 261,
+        liveLastY: 53,
         visibleContentHeight: 697,
         paddingTop: 8,
         paddingBottom: 32,
+        hostPaddingTop: 0,
         containerScrollTop: 4590.85693359375,
         containerScrollHeight: 5329,
         containerClientHeight: 737,
@@ -288,14 +471,35 @@ describe("PTY scroll geometry", () => {
       expect(a.isAtBottom).toBe(true);
     });
 
-    it("long host: bottomScrollTop centers cursor in visible area, clamped", () => {
-      // cursorPx = 168, visibleContentHeight = 729, cellH = 20
-      // target = 168 - 8 - (729-20)/2 = 160 - 354.5 = -194.5
-      // maxYdisp = 60-54 = 6 → minScrollTop = 120
-      // maxScrollTop = 1200-737 = 463
-      // 夹钳到 [120, 463]: max(120, min(463, -194.5)) = 120
+    it("long host: bottomScrollTop aligns the meaningful tail without blank rows", () => {
       const a = computeScrollAnchor(baseLongHost);
-      expect(a.bottomScrollTop).toBe(120);
+      expect(a.bottomScrollTop).toBe(0);
+      expect(a.bottomViewportY).toBe(0);
+    });
+
+    it("keeps a semantic target beyond a temporarily stale DOM scroll maximum", () => {
+      const a = computeScrollAnchor({
+        rows: 52,
+        cellH: 20,
+        bufferLength: 905,
+        baseY: 853,
+        viewportY: 853,
+        cursorBufferRow: 878,
+        liveLastY: 25,
+        visibleContentHeight: 200,
+        paddingTop: 0,
+        paddingBottom: 0,
+        hostPaddingTop: 0,
+        // DOM can currently reach only 17000, while semantic live bottom is 17380.
+        containerScrollTop: 17000,
+        containerScrollHeight: 17200,
+        containerClientHeight: 200,
+        atBottomThreshold: 8,
+      });
+
+      expect(a.bottomScrollTop).toBe(17380);
+      expect(a.bottomViewportY).toBe(853);
+      expect(a.isAtBottom).toBe(false);
     });
 
     it("cellH 0 (DOM measure not ready): falls back to geometric atBottom", () => {

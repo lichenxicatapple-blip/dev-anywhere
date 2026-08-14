@@ -10,6 +10,11 @@ type ContainerScrollSourceDecision =
       nextPendingProgrammaticTop: null;
     }
   | {
+      action: "programmatic-bottom";
+      nextPendingFollowTop: null;
+      nextPendingProgrammaticTop: null;
+    }
+  | {
       action: "programmatic-drift";
       nextPendingFollowTop: null;
       nextPendingProgrammaticTop: null;
@@ -59,12 +64,18 @@ export function decideContainerScrollSource({
     pendingProgrammaticTop !== null &&
     Math.abs(effectiveScrollTop - pendingProgrammaticTop) <= tolerancePx &&
     canPassiveFollow;
-  if (!atBottom && isPendingProgrammatic) {
-    return {
-      action: "programmatic-drift",
-      nextPendingFollowTop: null,
-      nextPendingProgrammaticTop: null,
-    };
+  if (isPendingProgrammatic) {
+    return atBottom
+      ? {
+          action: "programmatic-bottom",
+          nextPendingFollowTop: null,
+          nextPendingProgrammaticTop: null,
+        }
+      : {
+          action: "programmatic-drift",
+          nextPendingFollowTop: null,
+          nextPendingProgrammaticTop: null,
+        };
   }
 
   return {

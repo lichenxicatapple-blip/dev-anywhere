@@ -1,4 +1,5 @@
 import { PTY_SCROLL_CONFIG } from "./pty-scroll-config";
+import { resolvePtyNativeScrollMax } from "./pty-follow-policy";
 import {
   computeTouchHorizontalExpectation,
   computeTouchMovement,
@@ -16,10 +17,11 @@ import {
   updatePtyTouchMove,
   type PtyTouchScrollState,
 } from "./pty-touch-scroll-state";
-import type {
-  PtyVerticalIntentEvent,
-  PtyVerticalIntentResult,
-  PtyVerticalIntentState,
+import {
+  isReviewing,
+  type PtyVerticalIntentEvent,
+  type PtyVerticalIntentResult,
+  type PtyVerticalIntentState,
 } from "./pty-vertical-intent-fsm";
 
 interface TouchAnchorSnapshot {
@@ -89,6 +91,13 @@ export function createPtyTouchScrollHandler({
     const anchor = getCurrentAnchor();
     const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const verticalIntent = getVerticalIntent();
+    const maxScrollTop = resolvePtyNativeScrollMax({
+      reviewing: isReviewing(verticalIntent),
+      referenceScrollTop: verticalIntent.touchStartScrollTop ?? container.scrollTop,
+      bottomScrollTop: anchor.bottomScrollTop,
+      domMaxScrollTop,
+      atBottomThreshold,
+    });
     return computeTouchScrollExpectation({
       touchActive: verticalIntent.touchActive,
       touchStartScrollTop: verticalIntent.touchStartScrollTop,
@@ -96,7 +105,7 @@ export function createPtyTouchScrollHandler({
       currentY,
       touchStartedAtCursorAwareBottom: state.startedAtCursorAwareBottom,
       bottomScrollTop: anchor.bottomScrollTop,
-      domMaxScrollTop,
+      maxScrollTop,
     });
   };
 

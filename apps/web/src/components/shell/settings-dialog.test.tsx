@@ -790,9 +790,9 @@ describe("SettingsDialog", () => {
     expect(screen.getByPlaceholderText("••••••••••••••••")).not.toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "清空" }));
     expect(screen.getByText("保存后会清空已保存的 key")).not.toBeNull();
-    fireEvent.click(screen.getByRole("button", { name: "保存" }));
-
-    await waitFor(() => {
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(screen.getByRole("button", { name: "保存" }));
       expect(updateVoiceConfig).toHaveBeenCalledWith({
         clearApiKey: true,
         region: "cn",
@@ -801,7 +801,68 @@ describe("SettingsDialog", () => {
         ttsVoice: "longanhuan-live",
         turnIdleSeconds: 3,
       });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(300);
+      });
+      expect(requestVoiceCapabilities).toHaveBeenCalledTimes(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not refresh voice capabilities after unmounting during a save", async () => {
+    let resolveUpdate!: (value: {
+      success: true;
+      config: {
+        provider: "aliyun-bailian";
+        configured: true;
+        region: "cn";
+        asrModel: string;
+        ttsModel: string;
+        ttsVoice: string;
+        turnIdleSeconds: number;
+      };
+    }) => void;
+    const updateRequest = new Promise<Parameters<typeof resolveUpdate>[0]>((resolve) => {
+      resolveUpdate = resolve;
     });
+    updateVoiceConfig.mockReturnValueOnce(updateRequest);
+    const rendered = render(<SettingsDialog open onOpenChange={vi.fn()} />);
+
+    fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
+    await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
+    const saveButton = screen.getByRole("button", { name: "保存" });
+    await waitFor(() => expect(saveButton).toBeEnabled());
+    requestVoiceCapabilities.mockClear();
+
+    vi.useFakeTimers();
+    try {
+      fireEvent.click(saveButton);
+      expect(updateVoiceConfig).toHaveBeenCalledTimes(1);
+      rendered.unmount();
+
+      await act(async () => {
+        resolveUpdate({
+          success: true,
+          config: {
+            provider: "aliyun-bailian",
+            configured: true,
+            region: "cn",
+            asrModel: "qwen3-asr-flash-realtime-live",
+            ttsModel: "cosyvoice-v3-flash-live",
+            ttsVoice: "longanhuan-live",
+            turnIdleSeconds: 3,
+          },
+        });
+        await updateRequest;
+        await vi.runAllTimersAsync();
+      });
+
+      expect(requestVoiceCapabilities).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("renders voice provider choices from relay capabilities instead of local option tables", async () => {
@@ -884,6 +945,10 @@ describe("SettingsDialog", () => {
   });
 
   it("falls back to bundled voice choices when relay capabilities time out", async () => {
+    let rejectCapabilities!: (reason: Error) => void;
+    const capabilitiesRequest = new Promise<never>((_resolve, reject) => {
+      rejectCapabilities = reject;
+    });
     requestVoiceConfig.mockResolvedValueOnce({
       config: {
         provider: "aliyun-bailian",
@@ -895,17 +960,26 @@ describe("SettingsDialog", () => {
         turnIdleSeconds: 3,
       },
     });
-    requestVoiceCapabilities.mockRejectedValueOnce(new Error("读取语音能力列表超时"));
+    requestVoiceCapabilities.mockReturnValueOnce(capabilitiesRequest);
 
     render(<SettingsDialog open onOpenChange={vi.fn()} />);
 
     fireEvent.click(screen.getByRole("button", { name: "Voice Pilot" }));
     await waitFor(() => expect(requestVoiceConfig).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalled());
+    await waitFor(() => expect(requestVoiceCapabilities).toHaveBeenCalledTimes(1));
 
-    expect(await screen.findByText("Qwen3 ASR Flash Realtime")).not.toBeNull();
-    expect(await screen.findByText("CosyVoice V3 Flash")).not.toBeNull();
-    expect(await screen.findByText("龙安洋")).not.toBeNull();
+    await act(async () => {
+      rejectCapabilities(new Error("读取语音能力列表超时"));
+      await capabilitiesRequest.catch(() => undefined);
+      // The component handles rejection on the promise returned by `.then()`,
+      // one microtask after the original request settles. Flush that explicit
+      // state transition instead of polling the DOM against a wall-clock timeout.
+      await Promise.resolve();
+    });
+
+    expect(screen.getByText("Qwen3 ASR Flash Realtime")).not.toBeNull();
+    expect(screen.getByText("CosyVoice V3 Flash")).not.toBeNull();
+    expect(screen.getByText("龙安洋")).not.toBeNull();
     expect(screen.queryByText("读取语音能力列表超时")).toBeNull();
     fireEvent.click(screen.getByRole("button", { name: "语音识别模型" }));
     expect(screen.getByRole("option", { name: "Qwen3 ASR Flash Realtime" })).not.toBeNull();

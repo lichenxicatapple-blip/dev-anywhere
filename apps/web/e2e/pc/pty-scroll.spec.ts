@@ -8,6 +8,7 @@ import {
   enterLongHostMode,
   expectBackToBottomClearance,
   expectPtyAtBottom,
+  expectPtyRendered,
   expectPtyScrollable,
   expectPtySessionSubscribeCount,
   ptyApprovalHint,
@@ -136,6 +137,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expect
       .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.scrollTop))
       .toBeLessThanOrEqual(8);
+    await expectPtyRendered(page);
   });
 
   test("owns the PTY scroll position across a full browser reload", async ({ page }) => {
@@ -210,6 +212,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     const afterOutput = await readPtyScrollMetrics(page);
     // 期望 scrollTop 没被拉回贴底 (允许 scrollHeight 涨, scrollTop 跟新 max 应保留相对位置)
     expect(afterOutput.scrollTop).toBeLessThan(afterOutput.maxScrollTop - 30);
+    await expectPtyRendered(page);
   });
 
   // 用户复现路径: 长 PTY 会话进入 /compact, 进度行不停 \r 重写 + 偶尔追加新行,
@@ -300,6 +303,7 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
 
     const finalState = await readPtyScrollMetrics(page);
     expect(finalState.scrollTop).toBeLessThan(finalState.maxScrollTop - 30);
+    await expectPtyRendered(page);
   });
 
   test("does not pin users to bottom when PTY output arrives during native touch scroll", async ({
@@ -345,5 +349,6 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
       .toBeLessThanOrEqual(scrollTopBeforeNewFrame + 80);
     const scrollAfterNewFrame = await readPtyScrollMetrics(page);
     expect(scrollAfterNewFrame.scrollTop).toBeLessThan(scrollAfterNewFrame.maxScrollTop - 30);
+    await expectPtyRendered(page);
   });
 });

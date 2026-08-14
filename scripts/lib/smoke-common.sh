@@ -2,6 +2,7 @@
 
 SMOKE_STARTED_VITE_PID="${SMOKE_STARTED_VITE_PID:-}"
 SMOKE_STARTED_VITE_PORT="${SMOKE_STARTED_VITE_PORT:-}"
+SMOKE_STARTED_VITE_LISTENER_PIDS="${SMOKE_STARTED_VITE_LISTENER_PIDS:-}"
 
 smoke_use_stable_node() {
   # Match the production and hosted-gate Node major when it is locally available.
@@ -60,6 +61,63 @@ smoke_report_web_entry_error() {
   echo "Restart the stale dev server, or pass --base-url with a clean local port." >&2
 }
 
+smoke_vite_listener_pids() {
+  local web_port="$1"
+  lsof -tiTCP:"$web_port" -sTCP:LISTEN 2>/dev/null | sort -u
+}
+
+smoke_pid_is_self_or_descendant() {
+  local candidate="$1"
+  local owner="$2"
+  local parent=""
+  local depth=0
+
+  [[ "$candidate" =~ ^[0-9]+$ && "$owner" =~ ^[0-9]+$ ]] || return 1
+  while [[ "$candidate" -gt 1 && "$depth" -lt 64 ]]; do
+    [[ "$candidate" == "$owner" ]] && return 0
+    parent="$(ps -o ppid= -p "$candidate" 2>/dev/null | awk 'NR == 1 { gsub(/[[:space:]]/, ""); print }')"
+    [[ "$parent" =~ ^[0-9]+$ && "$parent" != "$candidate" ]] || return 1
+    candidate="$parent"
+    depth=$((depth + 1))
+  done
+  return 1
+}
+
+smoke_capture_started_vite_ownership() {
+  local listener_pid
+  local listener_pids
+
+  [[ -n "$SMOKE_STARTED_VITE_PID" && -n "$SMOKE_STARTED_VITE_PORT" ]] || return 1
+  if ! kill -0 "$SMOKE_STARTED_VITE_PID" 2>/dev/null; then
+    echo "ERROR: started Vite process $SMOKE_STARTED_VITE_PID exited before ownership validation" >&2
+    return 1
+  fi
+
+  listener_pids="$(smoke_vite_listener_pids "$SMOKE_STARTED_VITE_PORT")"
+  if [[ -z "$listener_pids" ]]; then
+    echo "ERROR: no listener found for started Vite on port $SMOKE_STARTED_VITE_PORT" >&2
+    return 1
+  fi
+  for listener_pid in $listener_pids; do
+    if ! smoke_pid_is_self_or_descendant "$listener_pid" "$SMOKE_STARTED_VITE_PID"; then
+      echo "ERROR: Vite port $SMOKE_STARTED_VITE_PORT is owned by unrelated pid $listener_pid, not started pid $SMOKE_STARTED_VITE_PID" >&2
+      return 1
+    fi
+  done
+  SMOKE_STARTED_VITE_LISTENER_PIDS="$listener_pids"
+}
+
+smoke_discard_unverified_vite_process() {
+  local started_pid="$SMOKE_STARTED_VITE_PID"
+  if [[ -n "$started_pid" ]] && kill -0 "$started_pid" 2>/dev/null; then
+    kill "$started_pid" 2>/dev/null || true
+    wait "$started_pid" 2>/dev/null || true
+  fi
+  SMOKE_STARTED_VITE_PID=""
+  SMOKE_STARTED_VITE_PORT=""
+  SMOKE_STARTED_VITE_LISTENER_PIDS=""
+}
+
 smoke_start_vite_if_needed() {
   local root="$1"
   local artifact_dir="$2"
@@ -97,14 +155,18 @@ smoke_start_vite_if_needed() {
     tail -n 80 "$artifact_dir/shared-build.log" >&2 || true
     exit 1
   fi
-  pnpm --dir "$root/apps/web" exec vite --host "$vite_host" --port "$web_port" \
+  pnpm --dir "$root/apps/web" exec vite --host "$vite_host" --port "$web_port" --strictPort \
     >"$artifact_dir/vite.log" 2>&1 &
   SMOKE_STARTED_VITE_PID="$!"
   SMOKE_STARTED_VITE_PORT="$web_port"
 
   for _ in {1..40}; do
     if smoke_check_web_entry "$web_base_url"; then
-      return
+      if smoke_capture_started_vite_ownership; then
+        return
+      fi
+      smoke_discard_unverified_vite_process
+      return 1
     fi
     sleep 0.25
   done
@@ -162,18 +224,26 @@ smoke_require_local_real_chain() {
 }
 
 smoke_cleanup() {
+  local rc=0
   if [[ -n "$SMOKE_STARTED_VITE_PID" ]]; then
+    local listener_pid
+    local owned_listener_pids=""
+    for listener_pid in $SMOKE_STARTED_VITE_LISTENER_PIDS; do
+      if smoke_pid_is_self_or_descendant "$listener_pid" "$SMOKE_STARTED_VITE_PID"; then
+        owned_listener_pids="$owned_listener_pids $listener_pid"
+      fi
+    done
     kill "$SMOKE_STARTED_VITE_PID" 2>/dev/null || true
+    for listener_pid in $owned_listener_pids; do
+      if [[ "$listener_pid" != "$SMOKE_STARTED_VITE_PID" ]]; then
+        kill "$listener_pid" 2>/dev/null || true
+      fi
+    done
     # A following gate may immediately probe the same port. Do not let it see
     # the dying Vite process as healthy and then inherit an ownerless server.
     wait "$SMOKE_STARTED_VITE_PID" 2>/dev/null || true
     SMOKE_STARTED_VITE_PID=""
     if [[ -n "$SMOKE_STARTED_VITE_PORT" ]]; then
-      local listener_pids
-      listener_pids="$(lsof -tiTCP:"$SMOKE_STARTED_VITE_PORT" -sTCP:LISTEN 2>/dev/null || true)"
-      if [[ -n "$listener_pids" ]]; then
-        kill $listener_pids 2>/dev/null || true
-      fi
       for _ in $(seq 1 50); do
         if ! lsof -nP -iTCP:"$SMOKE_STARTED_VITE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
           break
@@ -182,9 +252,11 @@ smoke_cleanup() {
       done
       if lsof -nP -iTCP:"$SMOKE_STARTED_VITE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
         echo "ERROR: Vite port $SMOKE_STARTED_VITE_PORT did not close during cleanup" >&2
-        return 1
+        rc=1
       fi
       SMOKE_STARTED_VITE_PORT=""
     fi
+    SMOKE_STARTED_VITE_LISTENER_PIDS=""
   fi
+  return "$rc"
 }

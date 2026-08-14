@@ -1,5 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
+import { expectPtyCursorAwareBottom, expectPtyRendered } from "../pty-scroll-helpers";
 
 function subscribeCount(messages: Array<Record<string, unknown>>, sessionId: string): number {
   return messages.filter((msg) => msg.type === "session_subscribe" && msg.sessionId === sessionId)
@@ -12,15 +13,6 @@ function activePty(page: Page) {
 
 function ptyEntry(page: Page, sessionId: string) {
   return page.locator(`[data-slot="pty-keepalive-entry"][data-session-id="${sessionId}"]`);
-}
-
-async function activePtyBottomGap(page: Page): Promise<number> {
-  return activePty(page)
-    .locator('[data-slot="pty-terminal"]')
-    .evaluate((el) => {
-      const node = el as HTMLElement;
-      return Math.max(0, node.scrollHeight - node.clientHeight) - node.scrollTop;
-    });
 }
 
 test.describe("PTY keep-alive", () => {
@@ -72,7 +64,7 @@ test.describe("PTY keep-alive", () => {
         ).join(""),
       );
     });
-    await expect.poll(() => activePtyBottomGap(page)).toBeLessThanOrEqual(8);
+    await expectPtyCursorAwareBottom(page);
 
     await page.locator('[data-slot="session-row"][data-session-id="codex-pty"]:visible').click();
     await expect(page).toHaveURL(/\/chat\/codex-pty\?mode=pty/);
@@ -93,7 +85,7 @@ test.describe("PTY keep-alive", () => {
     await expect(page).toHaveURL(/\/chat\/claude-pty\?mode=pty/);
     await expect(activePty(page).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
 
-    await expect.poll(() => activePtyBottomGap(page)).toBeLessThanOrEqual(8);
+    await expectPtyCursorAwareBottom(page);
   });
 
   test("preserves a reviewing PTY position when re-activated and marks background output", async ({
@@ -109,7 +101,7 @@ test.describe("PTY keep-alive", () => {
         ).join(""),
       );
     });
-    await expect.poll(() => activePtyBottomGap(page)).toBeLessThanOrEqual(8);
+    await expectPtyCursorAwareBottom(page);
 
     const terminal = activePty(page).locator('[data-slot="pty-terminal"]');
     await terminal.hover();
@@ -118,6 +110,7 @@ test.describe("PTY keep-alive", () => {
       "inert",
       false,
     );
+    await expectPtyRendered(page);
     const reviewedScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
 
     await page.locator('[data-slot="session-row"][data-session-id="codex-pty"]:visible').click();
@@ -148,6 +141,7 @@ test.describe("PTY keep-alive", () => {
     await expect(
       activePty(page).locator('[data-slot="back-to-bottom-new-indicator"]'),
     ).toBeVisible();
+    await expectPtyRendered(page);
   });
 
   test("preserves a reviewing PTY across Chrome visibility background reconnect", async ({
@@ -160,7 +154,7 @@ test.describe("PTY keep-alive", () => {
         Array.from({ length: 180 }, (_, i) => `tab resume line ${i}\r\n`).join(""),
       );
     });
-    await expect.poll(() => activePtyBottomGap(page)).toBeLessThanOrEqual(8);
+    await expectPtyCursorAwareBottom(page);
 
     const terminal = activePty(page).locator('[data-slot="pty-terminal"]');
     await terminal.hover();
@@ -169,6 +163,7 @@ test.describe("PTY keep-alive", () => {
       "inert",
       false,
     );
+    await expectPtyRendered(page);
     const reviewedScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
 
     await page.evaluate(() => {
@@ -205,6 +200,7 @@ test.describe("PTY keep-alive", () => {
     await expect(
       activePty(page).locator('[data-slot="back-to-bottom-new-indicator"]'),
     ).toBeVisible();
+    await expectPtyRendered(page);
   });
 
   test("renders the active PTY after a hard reload on the chat route", async ({ page }) => {
@@ -219,5 +215,6 @@ test.describe("PTY keep-alive", () => {
         page.evaluate((sessionId) => window.__ccTest?.pty.serialize(sessionId) ?? "", "claude-pty"),
       )
       .not.toBe("");
+    await expectPtyRendered(page);
   });
 });

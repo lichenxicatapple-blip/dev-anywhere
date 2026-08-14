@@ -60,6 +60,23 @@ describe("pty container scroll model", () => {
     ).toBe("continue");
   });
 
+  it("keeps a matching at-bottom write owned by the programmatic transaction", () => {
+    expect(
+      decideContainerScrollSource({
+        syncingExternal: false,
+        effectiveScrollTop: 1980.19,
+        pendingFollowTop: null,
+        pendingProgrammaticTop: 1980.19,
+        atBottom: true,
+        canPassiveFollow: true,
+      }),
+    ).toEqual({
+      action: "programmatic-bottom",
+      nextPendingFollowTop: null,
+      nextPendingProgrammaticTop: null,
+    });
+  });
+
   it("continues as user/page handling after clearing stale pending markers", () => {
     expect(
       decideContainerScrollSource({

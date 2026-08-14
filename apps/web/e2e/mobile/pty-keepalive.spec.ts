@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { gotoWithFakeProxy, installFakeRelay } from "../helpers";
+import { expectPtyCursorAwareBottom } from "../pty-scroll-helpers";
 
 function activePty(page: Page) {
   return page.locator('[data-slot="pty-keepalive-entry"][data-active="true"]');
@@ -8,15 +9,6 @@ function activePty(page: Page) {
 
 function ptyEntry(page: Page, sessionId: string) {
   return page.locator(`[data-slot="pty-keepalive-entry"][data-session-id="${sessionId}"]`);
-}
-
-async function activePtyBottomGap(page: Page): Promise<number> {
-  return activePty(page)
-    .locator('[data-slot="pty-terminal"]')
-    .evaluate((el) => {
-      const node = el as HTMLElement;
-      return Math.max(0, node.scrollHeight - node.clientHeight) - node.scrollTop;
-    });
 }
 
 test.describe("L4 mobile / PTY keep-alive restore", () => {
@@ -41,7 +33,7 @@ test.describe("L4 mobile / PTY keep-alive restore", () => {
         ).join(""),
       );
     });
-    await expect.poll(() => activePtyBottomGap(emuPage)).toBeLessThanOrEqual(8);
+    await expectPtyCursorAwareBottom(emuPage);
 
     await emuPage.goto(`${mobileBaseUrl}/#/chat/codex-pty?mode=pty`);
     await expect(activePty(emuPage).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
@@ -57,6 +49,6 @@ test.describe("L4 mobile / PTY keep-alive restore", () => {
     await emuPage.goto(`${mobileBaseUrl}/#/chat/claude-pty?mode=pty`);
     await expect(activePty(emuPage).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
 
-    await expect.poll(() => activePtyBottomGap(emuPage)).toBeLessThanOrEqual(8);
+    await expectPtyCursorAwareBottom(emuPage);
   });
 });

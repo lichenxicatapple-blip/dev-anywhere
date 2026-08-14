@@ -16,7 +16,7 @@ export interface PtyScrollDebugProbe {
   cellW: number;
   paddingTop: number;
   paddingBottom: number;
-  canvasLastY: number;
+  liveLastY: number;
   userHasVerticalScrollIntent: boolean;
   verticalIntentMode: PtyVerticalIntentMode;
   verticalIntentSource: PtyVerticalIntentSource;
@@ -50,7 +50,7 @@ export function buildPtyScrollDebugSnapshot(
 ): Omit<PtyDebugSnapshot, "frame"> {
   const probe = getProbe();
   const { container, spacer, host, term } = refs;
-  const { cellH, cellW, paddingTop, paddingBottom, canvasLastY } = probe;
+  const { cellH, cellW, paddingTop, paddingBottom, liveLastY } = probe;
   const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
   const buffer = term.buffer.active;
 
@@ -59,6 +59,7 @@ export function buildPtyScrollDebugSnapshot(
     const layout = computePtyHostLayout(
       {
         bufferLength: buffer.length,
+        baseY: buffer.baseY,
         rows: term.rows,
         cols: term.cols,
         viewportY: buffer.viewportY,
@@ -67,9 +68,13 @@ export function buildPtyScrollDebugSnapshot(
         cellW,
         visibleContentHeight,
       },
-      canvasLastY,
+      liveLastY,
     );
-    expectedSpacerHeight = layout?.spacerHeight ?? 0;
+    const semanticSpacerHeight = layout?.spacerHeight ?? 0;
+    expectedSpacerHeight =
+      probe.userHasVerticalScrollIntent || probe.touchScrollActive
+        ? Math.max(semanticSpacerHeight, container.scrollTop + visibleContentHeight)
+        : semanticSpacerHeight;
   }
 
   const currentSpacerHeight = parsePx(spacer.style.height);
@@ -109,10 +114,14 @@ export function buildPtyScrollDebugSnapshot(
     rows: term.rows,
     cellH,
     bufferLength: buffer.length,
+    baseY: buffer.baseY,
+    viewportY: buffer.viewportY,
     cursorBufferRow,
+    liveLastY,
     visibleContentHeight,
     paddingTop,
     paddingBottom,
+    hostPaddingTop: currentHostPaddingTop,
     containerScrollTop: container.scrollTop,
     containerScrollHeight: container.scrollHeight,
     containerClientHeight: container.clientHeight,

@@ -2,6 +2,7 @@
 // 与功能性 PTY 行为分到 chaos/ 子目录).
 import { expect, test } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../../pty-fixture";
+import { expectPtyRendered } from "../../pty-scroll-helpers";
 
 const SESSION_ID = "pty-render-chaos";
 
@@ -54,5 +55,13 @@ test.describe("PTY render chaos: stale render snapshots and outputSeq dedupe", (
     expect(screen).not.toContain("DUPLICATE-SEQ-1-SHOULD-NOT-RENDER");
     expect(screen).not.toContain("OLDER-SEQ-0-SHOULD-NOT-RENDER");
     expect(screen).not.toContain("DUPLICATE-SEQ-2-SHOULD-NOT-RENDER");
+
+    await expectPtyRendered(page);
+    const renderedRows = page.locator('[data-slot="pty-host"] .xterm-rows').last();
+    await expect(renderedRows).toContainText("SEQ-1");
+    await expect(renderedRows).toContainText("SEQ-2");
+    await expect(renderedRows).toContainText("SEQ-3");
+    await expect(renderedRows).toContainText("SEQ-4");
+    await expect(renderedRows).not.toContainText("STALE SNAPSHOT SHOULD NOT RENDER");
   });
 });

@@ -2,6 +2,11 @@
 // + opacity + 位置布局, 没真验拖拽行为.
 import { expect, test } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
+import {
+  expectPtyCursorAwareBottom,
+  expectPtyRendered,
+  readPtyDebugSnapshot,
+} from "../pty-scroll-helpers";
 
 const SESSION_ID = "pty-scrollbar-drag";
 
@@ -16,6 +21,7 @@ test.describe("PTY scrollbar thumb drag", () => {
         Array.from({ length: 200 }, (_, i) => `vline ${String(i).padStart(3, "0")}\r\n`).join(""),
       );
     });
+    await expectPtyCursorAwareBottom(page);
 
     const terminal = page.locator('[data-slot="pty-terminal"]');
     const scrollbar = page.locator('[data-slot="pty-scrollbar"]');
@@ -28,6 +34,8 @@ test.describe("PTY scrollbar thumb drag", () => {
 
     const initialScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
     expect(initialScrollTop).toBeGreaterThan(0); // 灌完默认在底部, 自然 > 0.
+    const initialViewportY = (await readPtyDebugSnapshot(page))?.term.viewportY;
+    expect(initialViewportY).toBeGreaterThan(0);
 
     // 拖 thumb 到 scrollbar 顶端.
     const thumbBox = await thumb.boundingBox();
@@ -45,5 +53,9 @@ test.describe("PTY scrollbar thumb drag", () => {
     await expect
       .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
       .toBeLessThan(initialScrollTop / 2);
+    await expectPtyRendered(page);
+    const reviewed = await readPtyDebugSnapshot(page);
+    expect(reviewed?.verticalIntent.mode).toBe("reviewing");
+    expect(reviewed?.term.viewportY ?? Number.POSITIVE_INFINITY).toBeLessThan(initialViewportY!);
   });
 });

@@ -23,6 +23,7 @@ interface PtyScrollTraceAdapterOptions {
   atBottomThreshold: number;
   getDims: () => { cellH: number; cellW: number };
   getVerticalInsets: () => { paddingTop: number; paddingBottom: number };
+  getLiveLastY: () => number;
   getPrevCursorBufferRow: () => number | null;
   getPendingProgrammaticScrollTop: () => number | null;
   getPendingFollowCursorScrollTop: () => number | null;
@@ -45,6 +46,7 @@ export function createPtyScrollTraceAdapter({
   atBottomThreshold,
   getDims,
   getVerticalInsets,
+  getLiveLastY,
   getPrevCursorBufferRow,
   getPendingProgrammaticScrollTop,
   getPendingFollowCursorScrollTop,
@@ -90,10 +92,14 @@ export function createPtyScrollTraceAdapter({
       rows: term.rows,
       cellH,
       bufferLength: buffer.length,
+      baseY: buffer.baseY,
+      viewportY: buffer.viewportY,
       cursorBufferRow,
+      liveLastY: getLiveLastY(),
       visibleContentHeight,
       paddingTop,
       paddingBottom,
+      hostPaddingTop: parsePx(host.style.paddingTop),
       containerScrollTop: container.scrollTop,
       containerScrollHeight: container.scrollHeight,
       containerClientHeight: container.clientHeight,

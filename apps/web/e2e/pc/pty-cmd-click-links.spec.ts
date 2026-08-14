@@ -12,6 +12,7 @@ import {
   sentFakeRelayMessages,
   type FakeRelayMessage,
 } from "../helpers";
+import { expectPtyRendered, ptyTerminal } from "../pty-scroll-helpers";
 
 test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
 
@@ -36,6 +37,35 @@ async function gotoPty(page: Page): Promise<void> {
   await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
   await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
   await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+}
+
+async function scrollHistoricalPtyLineIntoView(page: Page, lineIndex: number): Promise<void> {
+  await ptyTerminal(page).evaluate((element, targetLine) => {
+    const term = window.__ccTestPtyTerminals?.get("claude-pty");
+    const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+    if (!term || !screen) throw new Error("PTY terminal geometry is unavailable");
+    const cellHeight = screen.clientHeight / term.rows;
+    const targetScrollTop = Math.max(0, (targetLine - 4) * cellHeight);
+    element.dispatchEvent(
+      new WheelEvent("wheel", {
+        bubbles: true,
+        cancelable: true,
+        deltaY: targetScrollTop - (element as HTMLElement).scrollTop,
+      }),
+    );
+  }, lineIndex);
+
+  await expect
+    .poll(() =>
+      page.evaluate((targetLine) => {
+        const term = window.__ccTestPtyTerminals?.get("claude-pty");
+        if (!term) return false;
+        const row = targetLine - term.buffer.active.viewportY;
+        return row >= 1 && row < term.rows - 1;
+      }, lineIndex),
+    )
+    .toBe(true);
+  await expectPtyRendered(page);
 }
 
 type LinkKind = "image-preview" | "file-download";
@@ -124,9 +154,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     const terminalScroller = page.locator('[data-slot="pty-terminal"]');
     const target = await page.evaluate((needle) => {
       const term = window.__ccTestPtyTerminals?.get("claude-pty");
-      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
-      const scroller = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
-      if (!term || !screen || !scroller) return null;
+      if (!term) return null;
       const buffer = term.buffer.active;
       let lineIndex = -1;
       let columnIndex = -1;
@@ -139,12 +167,10 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         break;
       }
       if (lineIndex < 0) return null;
-      const cellHeight = screen.clientHeight / term.rows;
-      scroller.scrollTop = Math.max(0, (lineIndex - 4) * cellHeight);
-      scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
       return { lineIndex, columnIndex };
     }, path);
     expect(target).not.toBeNull();
+    await scrollHistoricalPtyLineIntoView(page, target!.lineIndex);
 
     await expect
       .poll(() =>
@@ -285,22 +311,18 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     const terminalScroller = page.locator('[data-slot="pty-terminal"]');
     const target = await page.evaluate((needle) => {
       const term = window.__ccTestPtyTerminals?.get("claude-pty");
-      const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
-      const scroller = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
-      if (!term || !screen || !scroller) return null;
+      if (!term) return null;
       const buffer = term.buffer.active;
       for (let lineIndex = 0; lineIndex < buffer.length; lineIndex += 1) {
         const text = buffer.getLine(lineIndex)?.translateToString(true) ?? "";
         const columnIndex = text.indexOf(needle);
         if (columnIndex < 0) continue;
-        const cellHeight = screen.clientHeight / term.rows;
-        scroller.scrollTop = Math.max(0, (lineIndex - 4) * cellHeight);
-        scroller.dispatchEvent(new Event("scroll", { bubbles: true }));
         return { lineIndex, columnIndex };
       }
       return null;
     }, path);
     expect(target).not.toBeNull();
+    await scrollHistoricalPtyLineIntoView(page, target!.lineIndex);
 
     await expect
       .poll(() =>
@@ -471,14 +493,14 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     const initialScrollTop = await terminalScroller.evaluate((element) => element.scrollTop);
     expect(initialScrollTop).toBeGreaterThan(200);
 
-    await terminalScroller.evaluate((element) => {
-      element.scrollTop = Math.max(0, element.scrollTop - 200);
-    });
+    await terminalScroller.hover();
+    await page.mouse.wheel(0, -200);
 
     await expect(toolbar).toBeHidden();
     await expect
       .poll(() => page.evaluate(() => window.__ccTest?.pty.getSelection("claude-pty") ?? "missing"))
       .toBe("");
+    await expectPtyRendered(page);
   });
 
   test("cmd+click on relative paths and top-level filenames triggers download", async ({

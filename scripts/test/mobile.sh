@@ -30,6 +30,12 @@ if ! e2e_mobile_emulator_ready; then
   exit 0
 fi
 
+if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
+  echo "ERROR: refusing to configure or reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
+  echo "Set TEST_MOBILE_ALLOW_REAL_DEVICE_RESET=1 only for a dedicated test device." >&2
+  exit 2
+fi
+
 ARTIFACT_DIR="${TEST_MOBILE_ARTIFACT_DIR:-$ROOT/artifacts/test-mobile}"
 if [[ "$ARTIFACT_DIR" != /* ]]; then
   ARTIFACT_DIR="$ROOT/$ARTIFACT_DIR"
@@ -39,18 +45,123 @@ DEVICE_BASE_URL="${TEST_MOBILE_DEVICE_BASE_URL:-$BASE_URL}"
 CDP_PORT="${TIER_MOBILE_CDP_PORT:-9222}"
 CDP_READY_TIMEOUT_SECONDS="${TEST_MOBILE_CDP_READY_TIMEOUT_SECONDS:-60}"
 CDP_READY_POLL_SECONDS="${TEST_MOBILE_CDP_READY_POLL_SECONDS:-0.25}"
-RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-0}"
+FAIL_FAST="${TEST_MOBILE_FAIL_FAST:-1}"
+RESET_FAIL_FAST="${TEST_MOBILE_RESET_FAIL_FAST:-$FAIL_FAST}"
 TIMING_REPORT="$ARTIFACT_DIR/mobile-timing.tsv"
+MOBILE_LOCK_ROOT="${TEST_MOBILE_LOCK_ROOT:-${TMPDIR:-/tmp}/dev-anywhere-mobile-locks-${UID:-user}}"
+MOBILE_LOCK_PATHS=()
+MOBILE_ADB_CONFIGURED=0
 PLAYWRIGHT_FLAKY_ARGS=()
 if [[ "${PLAYWRIGHT_FAIL_ON_FLAKY_TESTS:-1}" != "0" ]]; then
   PLAYWRIGHT_FLAKY_ARGS+=(--fail-on-flaky-tests)
 fi
 unset NO_COLOR FORCE_COLOR
 
+mobile_release_run_locks() {
+  local i lock_path owner_pid rc
+  rc=0
+  if [[ "${#MOBILE_LOCK_PATHS[@]}" -eq 0 ]]; then
+    return
+  fi
+  # Release in the reverse of acquisition order. In particular, keep the
+  # device lock until every shared host port is free, so a same-device runner
+  # cannot enter the hand-off window and immediately fail on an older port lock.
+  for ((i = ${#MOBILE_LOCK_PATHS[@]} - 1; i >= 0; i--)); do
+    lock_path="${MOBILE_LOCK_PATHS[i]}"
+    owner_pid="$(cat "$lock_path/pid" 2>/dev/null || true)"
+    if [[ "$owner_pid" != "$$" ]]; then
+      echo "ERROR: refusing to release mobile lock not owned by this runner: $lock_path" >&2
+      rc=1
+      continue
+    fi
+    if ! rm -f "$lock_path/pid" || ! rmdir "$lock_path"; then
+      # Preserve an ownership hint for the explicit stale-lock diagnostic. The
+      # directory remains the fail-closed lock even if this write itself fails.
+      printf '%s\n' "$$" >"$lock_path/pid" 2>/dev/null || true
+      echo "ERROR: failed to release mobile test lock: $lock_path" >&2
+      rc=1
+    fi
+  done
+  MOBILE_LOCK_PATHS=()
+  return "$rc"
+}
+
+mobile_cleanup() {
+  local rc=0
+  if [[ "$MOBILE_ADB_CONFIGURED" == "1" ]]; then
+    e2e_mobile_remove_forward_port "$CDP_PORT" || rc="$?"
+    e2e_mobile_teardown_adb_reverse || rc="$?"
+  fi
+  smoke_cleanup || rc="$?"
+  mobile_release_run_locks || rc="$?"
+  return "$rc"
+}
+
+mobile_on_exit() {
+  local original_rc="$?"
+  local cleanup_rc=0
+  trap - EXIT
+  mobile_cleanup || cleanup_rc="$?"
+  if [[ "$original_rc" -ne 0 ]]; then
+    exit "$original_rc"
+  fi
+  exit "$cleanup_rc"
+}
+
+mobile_acquire_run_lock() {
+  local resource safe_resource lock_path owner_pid
+  resource="$1"
+  safe_resource="$(printf '%s' "$resource" | tr -c '[:alnum:]._-' '_')"
+  mkdir -p "$MOBILE_LOCK_ROOT"
+
+  # mkdir is the one canonical lock primitive on every supported host. It is
+  # atomic and fail-closed: an interrupted owner leaves one explicit stale
+  # directory, instead of allowing shlock/non-shlock runners to take two
+  # different lock paths for the same resource.
+  lock_path="$MOBILE_LOCK_ROOT/$safe_resource.lock"
+  if ! mkdir "$lock_path" 2>/dev/null; then
+    owner_pid="$(cat "$lock_path/pid" 2>/dev/null || true)"
+    echo "ERROR: mobile test resource '$resource' is already locked by pid ${owner_pid:-unknown}." >&2
+    if [[ "$owner_pid" =~ ^[0-9]+$ ]] && ! kill -0 "$owner_pid" 2>/dev/null; then
+      echo "The owner is gone; remove only this stale lock: $lock_path" >&2
+    else
+      echo "Wait for that test run to finish instead of sharing its emulator or ports." >&2
+    fi
+    return 1
+  fi
+  if ! printf '%s\n' "$$" >"$lock_path/pid"; then
+    rmdir "$lock_path" 2>/dev/null || true
+    echo "ERROR: failed to record ownership for mobile test resource '$resource'." >&2
+    return 1
+  fi
+  MOBILE_LOCK_PATHS+=("$lock_path")
+}
+
 mkdir -p "$ARTIFACT_DIR"
-trap 'e2e_mobile_remove_forward_port "$CDP_PORT"; e2e_mobile_teardown_adb_reverse; smoke_cleanup' EXIT
+trap mobile_on_exit EXIT
+mobile_acquire_run_lock "device-${ANDROID_SERIAL}"
+mobile_acquire_run_lock "tcp-${CDP_PORT}"
+mobile_acquire_run_lock "tcp-${TIER_MOBILE_VITE_PORT}"
+mobile_acquire_run_lock "tcp-${TIER_MOBILE_RELAY_PORT}"
 smoke_use_stable_node
+if lsof -nP -iTCP:"$TIER_MOBILE_RELAY_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "ERROR: mobile test Relay port $TIER_MOBILE_RELAY_PORT is already in use." >&2
+  echo "The first Android navigation must not connect to an unrelated Relay before test fixtures install." >&2
+  exit 2
+fi
+if curl --noproxy '*' -fsS -m 1 "$BASE_URL" >/dev/null 2>&1 || \
+  lsof -nP -iTCP:"$TIER_MOBILE_VITE_PORT" -sTCP:LISTEN >/dev/null 2>&1; then
+  echo "ERROR: mobile test Vite port $TIER_MOBILE_VITE_PORT is already in use." >&2
+  echo "The mobile gate requires a Vite process it started with an isolated Relay target." >&2
+  exit 2
+fi
+export DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:${TIER_MOBILE_RELAY_PORT}"
 smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" "$BASE_URL" "$TIER_MOBILE_VITE_PORT"
+if [[ -z "$SMOKE_STARTED_VITE_PID" || -z "$SMOKE_STARTED_VITE_LISTENER_PIDS" ]]; then
+  echo "ERROR: mobile test Vite listener ownership was not established." >&2
+  exit 2
+fi
+MOBILE_ADB_CONFIGURED=1
 e2e_mobile_setup_adb_reverse
 e2e_mobile_prepare_soft_keyboard
 adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null
@@ -152,15 +263,25 @@ print(' '.join(t.get('id') for t in pages if t.get('id') != keep))" 2>/dev/null 
 }
 
 mobile_wait_for_chrome_exit() {
-  local process_list
+  local process_list absent_samples
+  absent_samples=0
   for _ in $(seq 1 100); do
-    process_list="$(adb shell ps -A -o NAME 2>/dev/null | tr -d '\r' || true)"
-    if ! grep -Eq '^com\.android\.chrome(?::|$)' <<<"$process_list"; then
-      return 0
+    if ! process_list="$(adb shell ps -A -o NAME 2>/dev/null | tr -d '\r')"; then
+      absent_samples=0
+      sleep 0.1
+      continue
+    fi
+    if grep -Fxq 'com.android.chrome' <<<"$process_list"; then
+      absent_samples=0
+    else
+      absent_samples=$((absent_samples + 1))
+      if [[ "$absent_samples" -ge 3 ]]; then
+        return 0
+      fi
     fi
     sleep 0.1
   done
-  echo "ERROR: Chrome processes did not exit after force-stop" >&2
+  echo "ERROR: Chrome main process did not exit after force-stop" >&2
   return 1
 }
 
@@ -168,24 +289,40 @@ mobile_wait_for_chrome_exit() {
 # 每个 spec 用 /json/new 创建干净 target、关闭旧 target；Chrome 进程只在整套首次
 # 不可用时冷启动。这样既隔离 init script，也不会因逐 spec force-stop 累积 hidden task。
 reset_chrome() {
-  if [[ "${ANDROID_SERIAL:-}" != emulator-* && "${TEST_MOBILE_ALLOW_REAL_DEVICE_RESET:-0}" != "1" ]]; then
-    echo "ERROR: refusing to reset Chrome on real Android device ${ANDROID_SERIAL:-unknown}." >&2
-    echo "Set TEST_MOBILE_ALLOW_REAL_DEVICE_RESET=1 only for a dedicated test device." >&2
+  # A failed/interrupted orientation test cannot poison later specs.
+  if ! adb shell settings put system accelerometer_rotation 0 >/dev/null 2>&1; then
+    echo "ERROR: failed to disable Android auto-rotation" >&2
     return 1
   fi
-  # A failed/interrupted orientation test cannot poison later specs.
-  adb shell settings put system accelerometer_rotation 0 >/dev/null 2>&1
-  adb shell settings put system user_rotation 0 >/dev/null 2>&1
+  if ! adb shell settings put system user_rotation 0 >/dev/null 2>&1; then
+    echo "ERROR: failed to reset Android orientation" >&2
+    return 1
+  fi
   adb shell input keyevent KEYCODE_WAKEUP >/dev/null 2>&1 || true
   adb shell wm dismiss-keyguard >/dev/null 2>&1 || true
-  e2e_mobile_setup_adb_reverse
-  adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null 2>&1 || true
+  if ! e2e_mobile_setup_adb_reverse; then
+    echo "ERROR: failed to restore Android reverse ports" >&2
+    return 1
+  fi
+  if ! adb forward "tcp:$CDP_PORT" "localabstract:chrome_devtools_remote" >/dev/null 2>&1; then
+    echo "ERROR: failed to restore the Chrome DevTools forward" >&2
+    return 1
+  fi
 
   if ! mobile_cdp_ready; then
-    adb shell am force-stop com.android.chrome >/dev/null 2>&1 || true
+    if ! adb shell am force-stop com.android.chrome >/dev/null 2>&1; then
+      echo "ERROR: failed to stop Android Chrome for a cold start" >&2
+      return 1
+    fi
     mobile_wait_for_chrome_exit || return 1
-    e2e_mobile_remove_forward_port "$CDP_PORT"
-    adb shell am start -W -a android.intent.action.VIEW -d "$DEVICE_BASE_URL/" >/dev/null 2>&1
+    if ! adb -s "$ANDROID_SERIAL" forward --remove "tcp:$CDP_PORT" >/dev/null 2>&1; then
+      echo "ERROR: failed to remove the stale Chrome DevTools forward" >&2
+      return 1
+    fi
+    if ! adb shell am start -W -a android.intent.action.VIEW -d "$DEVICE_BASE_URL/" >/dev/null 2>&1; then
+      echo "ERROR: failed to cold-start Android Chrome" >&2
+      return 1
+    fi
     e2e_mobile_accept_chrome_first_run >/dev/null 2>&1 || true
     mobile_wait_for_cdp_page || {
       echo "ERROR: Chrome cold start produced no CDP page target" >&2
@@ -219,17 +356,20 @@ mobile_record_timing() {
 }
 
 mobile_run_playwright_spec() {
-  local spec="$1"
+  local spec="$1" spec_key output_dir
+  spec_key="$(basename "$spec" .spec.ts)"
+  output_dir="$ARTIFACT_DIR/playwright/$spec_key"
+  mkdir -p "$output_dir"
   if ((${#PLAYWRIGHT_FLAKY_ARGS[@]})); then
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
-      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 --retries=0 --max-failures=1 "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"
+      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 --retries=0 --max-failures=1 --output "$output_dir" "${PLAYWRIGHT_FLAKY_ARGS[@]}" "$spec"
   else
     WEB_BASE_URL="$BASE_URL" \
       MOBILE_VITE_BASE_URL="$DEVICE_BASE_URL" \
       MOBILE_CDP_ENDPOINT="http://127.0.0.1:$CDP_PORT" \
-      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 --retries=0 --max-failures=1 "$spec"
+      ./node_modules/.bin/playwright test --project=device-mobile-android --workers=1 --retries=0 --max-failures=1 --output "$output_dir" "$spec"
   fi
 }
 
@@ -296,6 +436,10 @@ for spec in "${SPECS[@]}"; do
   TOTAL_MS="$(mobile_elapsed_ms "$SPEC_START_MS")"
   echo "[mobile] $spec $SPEC_STATUS reset=$(mobile_format_ms "$RESET_MS") test=$(mobile_format_ms "$TEST_MS") total=$(mobile_format_ms "$TOTAL_MS")"
   mobile_record_timing "$spec" "$SPEC_STATUS" "$RESET_MS" "$TEST_MS" "$TOTAL_MS"
+  if [[ "$SPEC_STATUS" != "passed" && "$FAIL_FAST" == "1" ]]; then
+    echo "[mobile] stopping after first failed spec (set TEST_MOBILE_FAIL_FAST=0 only for diagnostics)"
+    break
+  fi
 done
 
 mobile_print_timing_report
