@@ -468,9 +468,9 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     const sessionId = `${SESSION_ID}-keyboard-close-tail`;
     try {
       // Reproduce the user's full-height Android Chrome viewport. The fixed 25-row,
-      // approximately 20px-cell xterm becomes shorter than the keyboard-closed viewport, while
-      // dismissing the IME releases a field-sized (197-312px) region. No reduced display is used
-      // to hide the uncovered area.
+      // approximately 20px-cell xterm becomes shorter than the keyboard-closed viewport.
+      // Do not pin this to a Gboard pixel height: keyboard suggestions/toolbars can change the
+      // reported occlusion while the product invariant is the newly visible PTY content area.
       await setAndroidEmulatorDisplaySize(emuPage, "baseline");
       await setupPtyChat(emuPage, {
         sessionId,
@@ -553,8 +553,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       expect(opened?.cursorY).toBe(24);
       expect(opened?.cellHeight ?? 0).toBeGreaterThanOrEqual(17);
       expect(opened?.cellHeight ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(21);
-      expect(opened?.keyboardOffset ?? 0).toBeGreaterThanOrEqual(197);
-      expect(opened?.keyboardOffset ?? Infinity).toBeLessThanOrEqual(312);
+      expect(opened?.keyboardOffset ?? 0).toBeGreaterThan(0);
       expect(opened?.verticalIntentMode).toBe("following");
       expect(opened?.semanticAtBottom).toBe(true);
       expect(Math.abs(opened?.scrollTopDeltaToBottom ?? Infinity)).toBeLessThanOrEqual(8);
@@ -568,6 +567,9 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       expect(closed?.rows).toBe(25);
       expect(closed?.baseY).toBe(202);
       expect(closed?.cursorY).toBe(24);
+      expect(
+        (closed?.visibleContentHeight ?? 0) - (opened?.visibleContentHeight ?? Infinity),
+      ).toBeGreaterThanOrEqual(opened?.cellHeight ?? Infinity);
       expect(closed?.hostHeight ?? Infinity).toBeLessThan(closed?.visibleContentHeight ?? 0);
       expect(closed?.verticalIntentMode).toBe("reviewing");
       expect(closed?.verticalIntentSource).toBe("touch");
