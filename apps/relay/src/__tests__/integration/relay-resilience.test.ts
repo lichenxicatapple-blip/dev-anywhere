@@ -61,11 +61,11 @@ function spawnRelay(opts: SpawnRelayOptions): ChildProcess {
   env.DATA_DIR = opts.dataDir || "";
   if (opts.heartbeatInterval) env.HEARTBEAT_INTERVAL = String(opts.heartbeatInterval);
   // 直接复用 Vitest 当前 Node，避免完整套件并发时 npx -> tsx -> node 的多层启动抖动。
-  // detached: true 创建新进程组，方便 killRelay 一次终止整个 Relay 进程。
+  // 这里已经没有中间启动器，不要 detached/unref；否则 Vitest 异常退出时会留下仍占端口的
+  // Relay 孤儿进程，并污染后续门禁。
   const proc = spawn(process.execPath, ["--import", "tsx", RELAY_ENTRY], {
     env,
     stdio: ["ignore", "pipe", "pipe"],
-    detached: true,
   });
   const output = { stdout: "", stderr: "" };
   relayOutput.set(proc, output);
@@ -77,15 +77,13 @@ function spawnRelay(opts: SpawnRelayOptions): ChildProcess {
   proc.stderr?.on("data", (chunk: string) => {
     output.stderr = (output.stderr + chunk).slice(-RELAY_OUTPUT_LIMIT);
   });
-  proc.unref();
   return proc;
 }
 
-// 杀掉整个进程组（npx → tsx → node）
 function killRelay(proc: ChildProcess, signal: NodeJS.Signals = "SIGKILL"): void {
-  if (proc.pid && proc.exitCode === null) {
+  if (proc.pid && proc.exitCode === null && proc.signalCode === null) {
     try {
-      process.kill(-proc.pid, signal);
+      proc.kill(signal);
     } catch {
       /* already dead */
     }
@@ -124,7 +122,7 @@ async function waitForReady(port: number, proc: ChildProcess, timeoutMs = 20_000
 
 function waitForExit(proc: ChildProcess, timeoutMs = 5000): Promise<number | null> {
   return new Promise((resolve) => {
-    if (proc.exitCode !== null) {
+    if (proc.exitCode !== null || proc.signalCode !== null) {
       resolve(proc.exitCode);
       return;
     }
@@ -132,11 +130,25 @@ function waitForExit(proc: ChildProcess, timeoutMs = 5000): Promise<number | nul
       killRelay(proc);
       resolve(null);
     }, timeoutMs);
-    proc.on("exit", (code) => {
+    proc.once("exit", (code) => {
       clearTimeout(timer);
       resolve(code);
     });
   });
+}
+
+async function waitForPortRelease(port: number, timeoutMs = 5_000): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const reusable = await new Promise<boolean>((resolve) => {
+      const probe = createServer();
+      probe.once("error", () => resolve(false));
+      probe.listen(port, () => probe.close(() => resolve(true)));
+    });
+    if (reusable) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`Relay port ${port} was not released after ${timeoutMs}ms`);
 }
 
 function waitForClose(ws: WebSocket): Promise<void> {
@@ -917,6 +929,7 @@ describe("disk persistence and relay restart", () => {
       killRelay(relay1);
       await waitForExit(relay1);
       await ws.cleanup();
+      await waitForPortRelease(port);
 
       const relay2 = spawnRelay({ port });
       procs.push(relay2);
