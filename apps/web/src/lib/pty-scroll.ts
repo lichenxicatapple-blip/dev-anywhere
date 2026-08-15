@@ -38,7 +38,7 @@ interface PtyScrollTarget {
   ydisp: number;
 }
 
-export interface PtyLiveBackfillPlan {
+interface PtyLiveBackfillPlan {
   startLine: number;
   endLine: number;
   rowCount: number;
