@@ -155,7 +155,6 @@ body {
   border-color: var(--border);
   background: color-mix(in srgb, var(--popover) 96%, transparent);
   color: var(--popover-foreground);
-  box-shadow: 0 -10px 24px color-mix(in srgb, var(--foreground) 12%, transparent);
   backdrop-filter: saturate(1.2) blur(10px);
   /* Some Android keyboards paint their toolbar into the visual viewport edge.
      Keep a separate overlap guard plus a visible component gap so the keyboard
