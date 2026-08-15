@@ -37,6 +37,10 @@ class FakeWebSocket extends EventTarget {
     this.readyState = FakeWebSocket.OPEN;
     this.dispatchEvent(new Event("open"));
   }
+
+  receive(data: string): void {
+    this.dispatchEvent(new MessageEvent("message", { data }));
+  }
 }
 
 const sockets: FakeWebSocket[] = [];
@@ -139,7 +143,38 @@ describe("WebSocketManager", () => {
       get: () => visibilityState,
     });
 
-    const manager = new WebSocketManager({ forceReconnectAfterBackground: false });
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: false });
+    const statuses: boolean[] = [];
+    manager.onStatusChange((connected) => statuses.push(connected));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    visibilityState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(5_001);
+    visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+    expect(ws1.sent).toEqual([]);
+    expect(statuses).toEqual([true]);
+
+    manager.close();
+  });
+
+  it("keeps an OPEN mobile socket when the long-background liveness probe succeeds", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    let visibilityState: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibilityState,
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     const statuses: boolean[] = [];
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
@@ -155,11 +190,52 @@ describe("WebSocketManager", () => {
     expect(sockets).toHaveLength(1);
     expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
     expect(statuses).toEqual([true]);
+    expect(ws1.sent).toHaveLength(1);
+    const probe = JSON.parse(ws1.sent[0]!) as { type: string; requestId: string };
+    expect(probe.type).toBe("latency_web_relay_ping");
+
+    ws1.receive(JSON.stringify({ type: "latency_web_relay_pong", requestId: probe.requestId }));
+    await vi.advanceTimersByTimeAsync(2_001);
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+    expect(statuses).toEqual([true]);
 
     manager.close();
   });
 
-  it("replaces an apparently OPEN mobile socket after returning from a long background period", async () => {
+  it("probes after a long mobile window blur when Android keeps visibilityState visible", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    window.dispatchEvent(new Event("blur"));
+    await vi.advanceTimersByTimeAsync(5_001);
+    window.dispatchEvent(new Event("focus"));
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.sent).toHaveLength(1);
+    const probe = JSON.parse(ws1.sent[0]!) as { type: string; requestId: string };
+    expect(probe.type).toBe("latency_web_relay_ping");
+
+    ws1.receive(JSON.stringify({ type: "latency_web_relay_pong", requestId: probe.requestId }));
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(sockets).toHaveLength(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+
+    manager.close();
+  });
+
+  it("replaces an OPEN mobile socket when the long-background liveness probe times out", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
@@ -169,7 +245,7 @@ describe("WebSocketManager", () => {
       get: () => visibilityState,
     });
 
-    const manager = new WebSocketManager({ forceReconnectAfterBackground: true });
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     const statuses: boolean[] = [];
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
@@ -182,11 +258,76 @@ describe("WebSocketManager", () => {
     visibilityState = "visible";
     document.dispatchEvent(new Event("visibilitychange"));
 
+    expect(sockets).toHaveLength(1);
+    expect(ws1.sent).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(2_001);
+
     expect(sockets).toHaveLength(2);
     expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
     expect(statuses).toEqual([true, false]);
     sockets[1]!.open();
     expect(statuses).toEqual([true, false, true]);
+
+    manager.close();
+  });
+
+  it("does not probe or replace a mobile socket after a short background period", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    let visibilityState: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibilityState,
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    visibilityState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(4_999);
+    visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+    expect(ws1.sent).toEqual([]);
+
+    manager.close();
+  });
+
+  it("cancels a pending background probe when the socket closes on its own", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-10T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    let visibilityState: DocumentVisibilityState = "visible";
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => visibilityState,
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    visibilityState = "hidden";
+    document.dispatchEvent(new Event("visibilitychange"));
+    await vi.advanceTimersByTimeAsync(5_001);
+    visibilityState = "visible";
+    document.dispatchEvent(new Event("visibilitychange"));
+    expect(ws1.sent).toHaveLength(1);
+
+    ws1.close();
+    await vi.advanceTimersByTimeAsync(1_001);
+    expect(sockets).toHaveLength(2);
+
+    // The old 2-second probe timeout must not replace the reconnect attempt a second time.
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(sockets).toHaveLength(2);
 
     manager.close();
   });
@@ -235,14 +376,18 @@ describe("WebSocketManager", () => {
     manager.connect("ws://relay/client");
 
     expect(docAdds).toContain("visibilitychange");
-    expect(winAdds).toEqual(expect.arrayContaining(["online", "focus", "pagehide", "pageshow"]));
+    expect(winAdds).toEqual(
+      expect.arrayContaining(["online", "blur", "focus", "pagehide", "pageshow"]),
+    );
 
     manager.close();
 
     // 每个被注册的 wake listener 在 close 时都该有一次匹配的 removeEventListener，
     // 否则 document/window 上残留匿名 lambda 引用，instance 永远拿不到 GC。
     expect(docRemoves).toContain("visibilitychange");
-    expect(winRemoves).toEqual(expect.arrayContaining(["online", "focus", "pagehide", "pageshow"]));
+    expect(winRemoves).toEqual(
+      expect.arrayContaining(["online", "blur", "focus", "pagehide", "pageshow"]),
+    );
 
     docAdd.mockRestore();
     docRemove.mockRestore();

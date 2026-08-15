@@ -11,12 +11,42 @@ const execFileAsync = promisify(execFile);
 const MOBILE_NETWORK_ERROR =
   /(?:net::ERR_(?:EMPTY_RESPONSE|SOCKET_NOT_CONNECTED|CONNECTION_REFUSED)|chrome-error:\/\/chromewebdata)/;
 
+function adbSerialArgs(): string[] {
+  return process.env.ANDROID_SERIAL ? ["-s", process.env.ANDROID_SERIAL] : [];
+}
+
 async function restoreAdbReverse(): Promise<void> {
-  const serialArgs = process.env.ANDROID_SERIAL ? ["-s", process.env.ANDROID_SERIAL] : [];
+  const serialArgs = adbSerialArgs();
   const vitePort = new URL(VITE_BASE_URL).port || "5174";
   const relayPort = process.env.TIER_MOBILE_RELAY_PORT ?? "6100";
   await execFileAsync("adb", [...serialArgs, "reverse", `tcp:${vitePort}`, `tcp:${vitePort}`]);
   await execFileAsync("adb", [...serialArgs, "reverse", `tcp:${relayPort}`, `tcp:${relayPort}`]);
+}
+
+export async function backgroundAndroidChrome(): Promise<void> {
+  await execFileAsync("adb", [...adbSerialArgs(), "shell", "input", "keyevent", "KEYCODE_HOME"]);
+}
+
+export async function foregroundAndroidChrome(): Promise<void> {
+  await execFileAsync("adb", [
+    ...adbSerialArgs(),
+    "shell",
+    "am",
+    "start",
+    "-W",
+    "-n",
+    "com.android.chrome/com.google.android.apps.chrome.Main",
+  ]);
+}
+
+export async function isAndroidChromeForeground(): Promise<boolean> {
+  const { stdout } = await execFileAsync(
+    "adb",
+    [...adbSerialArgs(), "shell", "dumpsys", "activity", "activities"],
+    { encoding: "utf8" },
+  );
+  const resumedActivity = stdout.match(/topResumedActivity=.*$/m)?.[0] ?? "";
+  return resumedActivity.includes("com.android.chrome/");
 }
 
 function isMobileNetworkError(error: unknown): boolean {

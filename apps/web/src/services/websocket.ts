@@ -11,11 +11,20 @@ type SendOptions = {
 // 避免在长时间离线 + 连续 send 的场景下无限增长把 tab 内存吃光。
 const MAX_PENDING_QUEUE_SIZE = 10000;
 // 手机锁屏/切后台后，浏览器可能保留一个 readyState=OPEN、实际已被系统回收的半开连接。
-// 短暂切应用不必抖动连接；超过这个窗口则在恢复前台时建立一条全新的连接。
+// 短暂切应用不必额外验活；超过这个窗口则在恢复前台时验证现有连接。
 const BACKGROUND_RECONNECT_THRESHOLD_MS = 5_000;
+// 浏览器 WebSocket API 不暴露协议层 ping。复用 Relay 的应用层 ping/pong，在这个窗口内
+// 能收到 pong 就保留原连接；只有超时才承担完整换链与状态重建的成本。
+const BACKGROUND_CONNECTION_PROBE_TIMEOUT_MS = 2_000;
 
 interface WebSocketManagerOptions {
-  forceReconnectAfterBackground?: boolean;
+  probeConnectionAfterBackground?: boolean;
+}
+
+interface BackgroundConnectionProbe {
+  socket: WebSocket;
+  requestId: string;
+  timeout: ReturnType<typeof setTimeout>;
 }
 
 export class WebSocketManager {
@@ -31,7 +40,9 @@ export class WebSocketManager {
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
   private backgroundedAt: number | null = null;
-  private readonly forceReconnectAfterBackground: boolean;
+  private backgroundProbe: BackgroundConnectionProbe | null = null;
+  private backgroundProbeSeq = 0;
+  private readonly probeConnectionAfterBackground: boolean;
   // 命名引用让 close() 能 removeEventListener；匿名 lambda 注册到 document/window 上
   // 后无法摘除，instance 不会被 GC，长寿 tab 上 close → reconnect 反复后能堆积大量回调。
   private readonly visibilityListener = (): void => {
@@ -41,17 +52,24 @@ export class WebSocketManager {
     }
     if (document.visibilityState === "visible") this.resumeFromBackground();
   };
-  private readonly wakeListener = (): void => this.wakeReconnect();
+  private readonly onlineListener = (): void => this.wakeReconnect();
+  private readonly blurListener = (): void => this.markBackgrounded();
+  private readonly focusListener = (): void => {
+    // Some Android Chrome builds emit only blur/focus when the whole activity is
+    // backgrounded. If visibility is genuinely hidden, wait for its visible event.
+    if (document.visibilityState !== "hidden") this.resumeFromBackground();
+  };
   private readonly pageHideListener = (): void => this.markBackgrounded();
   private readonly pageShowListener = (): void => this.resumeFromBackground();
 
   constructor(options: WebSocketManagerOptions = {}) {
     const deviceKind = describeCurrentClientDevice().deviceKind;
-    this.forceReconnectAfterBackground =
-      options.forceReconnectAfterBackground ?? (deviceKind === "phone" || deviceKind === "tablet");
+    this.probeConnectionAfterBackground =
+      options.probeConnectionAfterBackground ?? (deviceKind === "phone" || deviceKind === "tablet");
   }
 
   private markBackgrounded(): void {
+    this.cancelBackgroundProbe();
     this.backgroundedAt ??= Date.now();
   }
 
@@ -60,7 +78,66 @@ export class WebSocketManager {
     this.backgroundedAt = null;
     const wasBackgroundedLongEnough =
       backgroundedAt !== null && Date.now() - backgroundedAt >= BACKGROUND_RECONNECT_THRESHOLD_MS;
-    this.wakeReconnect(this.forceReconnectAfterBackground && wasBackgroundedLongEnough);
+    if (this.probeConnectionAfterBackground && wasBackgroundedLongEnough) {
+      this.probeBackgroundConnection();
+      return;
+    }
+    this.wakeReconnect();
+  }
+
+  private cancelBackgroundProbe(socket?: WebSocket): void {
+    const probe = this.backgroundProbe;
+    if (!probe || (socket && probe.socket !== socket)) return;
+    clearTimeout(probe.timeout);
+    this.backgroundProbe = null;
+  }
+
+  private probeBackgroundConnection(): void {
+    if (this.closed) return;
+    const socket = this.ws;
+    if (!this.connected || !socket || socket.readyState !== WebSocket.OPEN) {
+      // 没有可验证的 OPEN 连接。长后台可能冻结了 CONNECTING 尝试，直接换链恢复。
+      this.wakeReconnect(true);
+      return;
+    }
+
+    this.cancelBackgroundProbe();
+    this.backgroundProbeSeq += 1;
+    const requestId = `background-liveness-${Date.now().toString(36)}-${this.backgroundProbeSeq.toString(36)}`;
+    const timeout = setTimeout(() => {
+      const active = this.backgroundProbe;
+      if (!active || active.socket !== socket || active.requestId !== requestId) return;
+      this.backgroundProbe = null;
+      if (this.ws !== socket || this.closed) return;
+      this.wakeReconnect(true);
+    }, BACKGROUND_CONNECTION_PROBE_TIMEOUT_MS);
+    this.backgroundProbe = { socket, requestId, timeout };
+
+    try {
+      // WebSocketManager 只消费自己 requestId 对应的 pong；其他 Relay 消息仍按原路径分发。
+      socket.send(JSON.stringify({ type: "latency_web_relay_ping", requestId }));
+    } catch {
+      this.cancelBackgroundProbe(socket);
+      if (this.ws === socket && !this.closed) this.wakeReconnect(true);
+    }
+  }
+
+  private consumeBackgroundProbePong(socket: WebSocket, data: string): boolean {
+    const probe = this.backgroundProbe;
+    if (!probe || probe.socket !== socket) return false;
+
+    let message: { type?: unknown; requestId?: unknown };
+    try {
+      message = JSON.parse(data) as { type?: unknown; requestId?: unknown };
+    } catch {
+      return false;
+    }
+    if (message.type !== "latency_web_relay_pong" || message.requestId !== probe.requestId) {
+      return false;
+    }
+
+    this.cancelBackgroundProbe(socket);
+    return true;
   }
 
   private cancelReconnectTimer(): void {
@@ -71,6 +148,7 @@ export class WebSocketManager {
   }
 
   connect(url: string): void {
+    this.cancelBackgroundProbe();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -89,8 +167,9 @@ export class WebSocketManager {
     if (this.wakeListenersAttached || typeof window === "undefined") return;
     this.wakeListenersAttached = true;
     document.addEventListener("visibilitychange", this.visibilityListener);
-    window.addEventListener("online", this.wakeListener);
-    window.addEventListener("focus", this.wakeListener);
+    window.addEventListener("online", this.onlineListener);
+    window.addEventListener("blur", this.blurListener);
+    window.addEventListener("focus", this.focusListener);
     window.addEventListener("pagehide", this.pageHideListener);
     window.addEventListener("pageshow", this.pageShowListener);
   }
@@ -99,8 +178,9 @@ export class WebSocketManager {
     if (!this.wakeListenersAttached || typeof window === "undefined") return;
     this.wakeListenersAttached = false;
     document.removeEventListener("visibilitychange", this.visibilityListener);
-    window.removeEventListener("online", this.wakeListener);
-    window.removeEventListener("focus", this.wakeListener);
+    window.removeEventListener("online", this.onlineListener);
+    window.removeEventListener("blur", this.blurListener);
+    window.removeEventListener("focus", this.focusListener);
     window.removeEventListener("pagehide", this.pageHideListener);
     window.removeEventListener("pageshow", this.pageShowListener);
   }
@@ -111,6 +191,7 @@ export class WebSocketManager {
     // the connection is established" 警告且新建一份会跟它 race, stale 事件互相
     // 覆盖 this.ws 直到出 InvalidStateError CONNECTING。等它自己 OPEN 或 close。
     if (!force && this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
+    this.cancelBackgroundProbe();
     // 锁屏期间的失败次数不应该惩罚恢复后的第一次重连
     this.reconnectAttempt = 0;
     this.cancelReconnectTimer();
@@ -155,6 +236,7 @@ export class WebSocketManager {
 
   close(): void {
     this.closed = true;
+    this.cancelBackgroundProbe();
     this.cancelReconnectTimer();
     this.ws?.close();
     this.ws = null;
@@ -219,12 +301,14 @@ export class WebSocketManager {
         this.dispatchBinary(new Uint8Array(event.data));
       } else {
         const data = event.data as string;
+        if (this.consumeBackgroundProbePong(ws, data)) return;
         this.messageHandlers.forEach((h) => h(data));
       }
     });
 
     ws.addEventListener("close", (event) => {
       if (this.ws !== ws) return;
+      this.cancelBackgroundProbe(ws);
       if (event.code === RelayCloseCode.CLIENT_KICKED) {
         this.closed = true;
         this.cancelReconnectTimer();

@@ -53,6 +53,7 @@ declare global {
       setImagePreviewDataBase64(value: string): void;
       setProxySelectDelay(ms: number): void;
       setSessionListDelay(ms: number): void;
+      setRelayLivenessPongEnabled(enabled: boolean): void;
       setProxyOnline(online: boolean): void;
       voice: {
         asrSent: FakeVoiceSocketPayload[];
@@ -233,6 +234,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     let sessionListDelayMs = 0;
     let imagePreviewDelayMs = 0;
     let holdImagePreviews = false;
+    let relayLivenessPongEnabled = true;
     const heldImagePreviewResponses: Array<() => void> = [];
     const ptyBuffers = new Map<string, string>();
     const voiceAsrSent: FakeVoiceSocketPayload[] = [];
@@ -468,6 +470,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
         switch (msg.type) {
           case "client_register":
             this.emitJson({ type: "client_register_response", status: "new" });
+            break;
+          case "latency_web_relay_ping":
+            if (relayLivenessPongEnabled) {
+              this.emitJson({
+                type: "latency_web_relay_pong",
+                requestId: msg.requestId,
+                relayNow: Date.now(),
+              });
+            }
             break;
           case "proxy_list_request":
             this.emitProxyList(String(msg.requestId ?? ""));
@@ -1007,6 +1018,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
       setSessionListDelay(ms: number) {
         sessionListDelayMs = Math.max(0, ms);
+      },
+      setRelayLivenessPongEnabled(enabled: boolean) {
+        relayLivenessPongEnabled = enabled;
       },
       setProxyOnline(online: boolean) {
         if (proxyOnlineState === online) return;

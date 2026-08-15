@@ -126,6 +126,15 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
             return;
           }
 
+          if (msg.type === "latency_web_relay_ping") {
+            this.emitJson({
+              type: "latency_web_relay_pong",
+              requestId: msg.requestId,
+              relayNow: Date.now(),
+            });
+            return;
+          }
+
           if (msg.type === "proxy_list_request") {
             this.emitJson({
               type: "proxy_list_response",
