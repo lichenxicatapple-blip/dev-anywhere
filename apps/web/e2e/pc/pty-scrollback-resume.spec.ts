@@ -49,20 +49,45 @@ test.describe("PTY scrollback resume", () => {
     await expectPtyRendered(page);
     const reviewedScrollTop = await terminal.evaluate((node) => node.scrollTop);
 
-    // 回看期间仍继续写 xterm，不能把输出藏在前端队列里等下一次用户交互唤醒。
+    // 回看期间持续写 xterm，不能把输出藏在前端队列里等下一次用户交互唤醒。
     await page.evaluate(() => {
-      window.__ptySmoke.sendPty(
-        Array.from({ length: 10 }, (_, i) => `mid ${String(i).padStart(2, "0")}\r\n`).join(""),
-      );
+      const current = window as Window & {
+        __ptyScrollbackOutputCount?: number;
+        __ptyScrollbackOutputTimer?: number;
+      };
+      current.__ptyScrollbackOutputCount = 0;
+      current.__ptyScrollbackOutputTimer = window.setInterval(() => {
+        const index = current.__ptyScrollbackOutputCount ?? 0;
+        window.__ptySmoke.sendPty(`mid ${String(index).padStart(2, "0")}\r\n`);
+        current.__ptyScrollbackOutputCount = index + 1;
+      }, 20);
     });
     await expect
-      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
-      .toContain("mid 09");
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as Window & { __ptyScrollbackOutputCount?: number })
+              .__ptyScrollbackOutputCount ?? 0,
+        ),
+      )
+      .toBeGreaterThanOrEqual(10);
     expect(await terminal.evaluate((node) => node.scrollTop)).toBeCloseTo(reviewedScrollTop, 0);
     await expectPtyRendered(page);
 
-    // 走 controller-owned wheel 路径回到底部，并在发送探针前先证明已经恢复 follow。
-    await page.mouse.wheel(0, 10_000);
+    // 走 controller-owned wheel 路径回到底部。这里故意使用与离开历史相同量级的
+    // 普通滚轮步进，而不是一个 10_000px 巨跳：review 的可见末端仍是输出前的底部，
+    // 新增的 10 行位于该冻结边界之后。用户越过冻结边界时应恢复 live，不需要追逐
+    // 一个还会随输出继续增长的不可见像素目标。
+    for (let i = 0; i < 6; i++) {
+      await page.mouse.wheel(0, 120);
+    }
+    await page.evaluate(() => {
+      const current = window as Window & { __ptyScrollbackOutputTimer?: number };
+      if (current.__ptyScrollbackOutputTimer !== undefined) {
+        window.clearInterval(current.__ptyScrollbackOutputTimer);
+        delete current.__ptyScrollbackOutputTimer;
+      }
+    });
     await expectPtyCursorAwareBottom(page);
 
     // 探针: 滚回底之后再 sendPty 一行, 必须能在合理时间内看见 (说明渲染没冻)。

@@ -2552,6 +2552,52 @@ describe("attachPtyScrollController", () => {
     expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
   });
 
+  it("resumes live output when wheel-down reaches the frozen review boundary", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
+    terminal.buffer.active.cursorY = 19;
+    const renderProjection = createHistoryProjectionRenderer();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => true,
+      setNewFramesWhileAway: vi.fn(),
+      onHistoryProjectionChange: renderProjection,
+    });
+
+    expect(container.scrollTop).toBe(1600);
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1400);
+
+    // The reviewed frame ends at the old 1600px bottom. While it remains frozen, thirty new
+    // rows move the live semantic bottom to 2200px. A sequence of ordinary wheel deltas must not
+    // be forced to cross that invisible 600px gap in one event.
+    terminal.buffer.active.length += 30;
+    terminal.buffer.active.viewportY += 30;
+    defineScrollHeight(container, 2600);
+    emitScroll();
+    emitRender();
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1400);
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1520);
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(container.scrollTop).toBe(2200);
+    expect(terminal.buffer.active.viewportY).toBe(110);
+    expect(host.style.top).toBe("2200px");
+    expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
+  });
+
   it("closes stale review state on a downward wheel already clamped at semantic bottom", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 99: "live prompt" });

@@ -479,17 +479,13 @@ export function attachPtyScrollController(
   function computeReviewLayoutPlan(cellH: number): PtyReviewLayoutPlan | null {
     const anchor = reviewScrollAnchor;
     if (!anchor || cellH <= 0) return null;
-    const { paddingTop, paddingBottom } = getVerticalInsets();
-    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const { frozenEndLine, visibleRows, maxLogicalTop } = getReviewLogicalRange(anchor, cellH);
     const sourceCellH = anchor.cellH > 0 ? anchor.cellH : cellH;
     // The painted row and DOM scroll offset are an atomic pair. Mapping from that pair preserves
     // cases such as viewportY=10 at scrollTop=199.7; absolute floor(199.7 / 20) would invent row 9.
     const requestedLogicalTop = normalizeNearInteger(
       anchor.logicalTop + (container.scrollTop - anchor.scrollTop) / sourceCellH,
     );
-    const frozenEndLine = Math.max(1, Math.min(anchor.frozenEndLine, term.buffer.active.length));
-    const visibleRows = visibleContentHeight / cellH;
-    const maxLogicalTop = Math.max(0, frozenEndLine - visibleRows);
     const logicalTop = Math.max(0, Math.min(requestedLogicalTop, maxLogicalTop));
     const snapshotStartLine = Math.floor(logicalTop);
     const visibleEndLine = normalizeNearInteger(logicalTop + visibleRows);
@@ -513,6 +509,27 @@ export function attachPtyScrollController(
       maxEndLine: frozenEndLine - 1,
       layoutSignature: getReviewLayoutSignature(cellH),
     };
+  }
+
+  function getReviewLogicalRange(anchor: PtyReviewScrollAnchor, cellH: number) {
+    const { paddingTop, paddingBottom } = getVerticalInsets();
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const frozenEndLine = Math.max(1, Math.min(anchor.frozenEndLine, term.buffer.active.length));
+    const visibleRows = visibleContentHeight / cellH;
+    return {
+      frozenEndLine,
+      visibleRows,
+      maxLogicalTop: Math.max(0, frozenEndLine - visibleRows),
+    };
+  }
+
+  function getFrozenReviewScrollEnd(): number | null {
+    const anchor = reviewScrollAnchor;
+    if (!anchor) return null;
+    const { cellH } = getDims();
+    if (cellH <= 0) return null;
+    const { maxLogicalTop } = getReviewLogicalRange(anchor, cellH);
+    return Math.max(0, anchor.geometryOrigin + maxLogicalTop * cellH);
   }
 
   function getReviewProjection(plan: PtyReviewLayoutPlan): PtyHistoryProjection {
@@ -891,16 +908,31 @@ export function attachPtyScrollController(
     trace("wheel");
     const anchor = getCurrentAnchor();
     const previous = container.scrollTop;
-    if (
+    const frozenReviewScrollEnd = getFrozenReviewScrollEnd();
+    const frozenEndTolerance =
+      frozenReviewScrollEnd === null
+        ? 0
+        : Number.EPSILON *
+          Math.max(1, Math.abs(previous + deltaY), Math.abs(frozenReviewScrollEnd)) *
+          8;
+    // A captured review frame has one authoritative exit boundary: its frozen logical end.
+    // Falling back to the live semantic bottom is only for degraded/no-snapshot review. Mixing
+    // both boundaries makes users chase an invisible target while output keeps extending it.
+    const reachedFrozenReviewEnd =
+      deltaY > 0 &&
+      frozenReviewScrollEnd !== null &&
+      previous + deltaY >= frozenReviewScrollEnd - frozenEndTolerance;
+    const reachedFallbackSemanticBottom =
+      frozenReviewScrollEnd === null &&
       shouldWheelCommitPtySemanticBottom({
         reviewing: userHasVerticalScrollIntent(),
         deltaY,
         currentScrollTop: previous,
         bottomScrollTop: anchor.bottomScrollTop,
         atBottomThreshold,
-      })
-    ) {
-      trace("wheel:semantic-bottom");
+      });
+    if (reachedFrozenReviewEnd || reachedFallbackSemanticBottom) {
+      trace(reachedFrozenReviewEnd ? "wheel:frozen-review-end" : "wheel:semantic-bottom");
       // The semantic bottom is a coupled viewportY / host.top / scrollTop target. Reuse the
       // canonical commit instead of first mapping the target through a review anchor: that
       // mapping can stop one row short and leave `isAtBottom` and review intent split.
