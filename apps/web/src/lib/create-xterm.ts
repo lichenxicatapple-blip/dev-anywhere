@@ -34,6 +34,11 @@ export function buildXtermTerminalOptions(options: CreateXtermOptions = {}): ITe
     // 不显示更安全。
     cursorInactiveStyle: "none",
     disableStdin: false,
+    // PTY vertical geometry has one owner: pty-scroll-controller. xterm defaults this to true,
+    // which makes every local keystroke jump viewportY to baseY before the controller restores
+    // the semantic live viewport. A short server-owned host can legitimately follow at baseY - N,
+    // so the two owners otherwise move host.top by whole rows on every character.
+    scrollOnUserInput: false,
     theme: xtermFixedDarkTheme,
     allowProposedApi: true,
   };

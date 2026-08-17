@@ -380,6 +380,13 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await sendPtyLines(emuPage, { count: 225, prefix: "short-live-history" });
     await expectPtyCursorAwareBottom(emuPage);
 
+    // The binary frame reaches the page before xterm finishes parsing all 225 rows. The semantic
+    // bottom can therefore be valid for an intermediate buffer one task before the derived live
+    // backfill is mounted. Wait for that rendered layer itself; all geometry assertions below
+    // remain strict and still fail if it is misplaced or leaves a visible gap.
+    await expect
+      .poll(() => readPtyLiveTopCoverage(emuPage).then((coverage) => coverage.backfillToScreenGap))
+      .not.toBeNull();
     const before = await readPtyLiveTopCoverage(emuPage);
     expect(before.rawLiveTopGap).toBeGreaterThan(80);
     expect(before.paintedTopGap).toBeLessThanOrEqual(1);

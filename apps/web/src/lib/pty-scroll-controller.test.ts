@@ -137,6 +137,59 @@ describe("attachPtyScrollController", () => {
     });
   });
 
+  it("positions a short live host before publishing the repaired xterm viewport", () => {
+    const { container, spacer, host } = createDom();
+    container.style.paddingTop = "8px";
+    container.style.paddingBottom = "8px";
+    defineSize(container, { clientHeight: 910, clientWidth: 1640 });
+    defineScrollHeight(container, 21_322);
+    defineScrollWidth(container, 1640);
+    const screen = host.querySelector<HTMLElement>(".xterm-screen");
+    if (!screen) throw new Error("missing xterm screen");
+    defineSize(screen, { clientHeight: 666, clientWidth: 1432 });
+    const { terminal, emitRender } = createTerminal({ 1170: "last painted live row" });
+    terminal.rows = 37;
+    terminal.cols = 179;
+    terminal.buffer.active.length = 1172;
+    terminal.buffer.active.cursorY = 33;
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    expect(container.scrollTop).toBe(20_412);
+    expect(terminal.buffer.active.baseY).toBe(1135);
+    expect(terminal.buffer.active.viewportY).toBe(1134);
+    expect(host.style.top).toBe("20640px");
+
+    // Reproduce the split frame from the field trace: xterm has moved to its physical baseY and
+    // host followed it, while the semantic DOM bottom still belongs to viewport 1134. Repair must
+    // publish host + viewport from one plan; an xterm scroll observer must never see the new row
+    // paired with the stale 20658px host.
+    terminal.buffer.active.viewportY = 1135;
+    emitRender();
+    expect(host.style.top).toBe("20658px");
+    terminal.scrollToLine.mockClear();
+    const observations: Array<{ ydisp: number; hostTop: string; scrollTop: number }> = [];
+    terminal.scrollToLine.mockImplementation((ydisp: number) => {
+      observations.push({ ydisp, hostTop: host.style.top, scrollTop: container.scrollTop });
+      terminal.buffer.active.viewportY = ydisp;
+    });
+
+    controller.scrollToBottom("repair-split-frame", { force: true });
+
+    expect(observations).toEqual([{ ydisp: 1134, hostTop: "20640px", scrollTop: 20_412 }]);
+    expect(terminal.buffer.active.viewportY).toBe(1134);
+    expect(host.style.top).toBe("20640px");
+    expect(container.scrollTop).toBe(20_412);
+  });
+
   it("maps custom ratio scrolling to a row-aligned xterm ydisp", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 99: "prompt" });
@@ -3761,9 +3814,8 @@ describe("attachPtyScrollController", () => {
 
   // Observer/lifecycle hygiene.
   // syncing.{internal,external} 泄漏审查记录:
-  //   - syncing.internal: 仅在 scrollToYdisp / scrollToBottom 里围着 term.scrollToLine 那一行 set/restore,
-  //     try/finally 保证 scrollToLine 抛错也会复位。其它语句 (positionHostAt / scrollTop 写入 / notifyScroll)
-  //     运行时 syncing.internal 已经是 false, 抛错也不污染 flag。
+  //   - syncing.internal: 所有 frame commit 都只围住 term.scrollToLine 的同步回调；host 先写、
+  //     container 后写，但 native container scroll 仍保留自己的事件归属。try/finally 保证复位。
   //   - syncing.external: 仅在 onTermScroll 整段 try/finally 围住, finally 里 restore。
   // 模拟 scrollToLine throw 的回归测试在 jsdom 下被作为 unhandled error 上报,污染下一个 test。
   // 这条 invariant 改由静态审查 + cellH 恢复测试一起兜——前者保证 syncing 不卡, 后者保证 host 不卡。

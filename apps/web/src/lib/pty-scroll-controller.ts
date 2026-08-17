@@ -82,6 +82,27 @@ interface PtyReviewLayoutPlan {
   layoutSignature: string;
 }
 
+interface PtyLiveFrameSnapshot {
+  cellH: number;
+  visibleContentHeight: number;
+  viewportY: number;
+  cursorBufferRow: number;
+  anchor: ReturnType<typeof computeScrollAnchor>;
+}
+
+interface PtyVerticalFramePlan {
+  viewportY: number;
+  scrollTop: number;
+  cellH: number;
+  visibleContentHeight?: number;
+}
+
+interface PtyLiveFramePlan extends PtyVerticalFramePlan {
+  cursorBufferRow: number;
+}
+
+type PtyLiveFrameScrollOwner = "programmatic-bottom" | "follow-cursor";
+
 interface PtyScrollController {
   dispose: () => void;
   relayout: () => void;
@@ -171,9 +192,9 @@ export function attachPtyScrollController(
   // measure 不到尺寸 → 这条路径漏掉一次 sync。用这个标志让 relayout / onRender 在 cellH
   // 恢复后立刻补一次 sync,不依赖用户再滚一下。
   let pendingContainerSyncRetry = false;
-  // followCursorY 主动改写 scrollTop 后,容器 scroll 事件会走 onContainerScroll,几何上
-  // !atBottom 会被解释成"用户回看"并把 intent 置 true,下次 followCursorY 就被 intent 卡住。
-  // 用这个 mark 把"我们刚刚程序化滚到这里"这条信息透传给 onContainerScroll,让它别误判。
+  // followCursorY 主动改写 scrollTop 后,容器 scroll 事件仍需知道这次写入属于哪一个
+  // controller transaction。否则 bare-scroll 的 canonical follow 会接管并把 cursor-follow
+  // 目标覆盖成 semantic bottom。这个 mark 只做来源归属,不保存第二份滚动位置真相。
   let pendingFollowCursorScrollTop: number | null = null;
   // 横向同样需要区分 "我们刚刚 followCursorX 改 scrollLeft" vs "用户主动横向滚",
   // 否则用户滚到光标视窗外 → onRender → followCursorX snap 回 → onContainerScroll
@@ -302,22 +323,24 @@ export function attachPtyScrollController(
     onScrollStateChange(state);
   };
 
-  // anchor 集中化: isAtBottom / bottomScrollTop / cursorInViewport 三件事按
-  // host 是否高于可视区分两条路, 这条分支只在 computeScrollAnchor 里出现一次,
-  // 其他地方都拿这个快照。每次调用都从当前 DOM/term 取最新值, 不缓存。
-  const getCurrentAnchor = () => {
+  // Read every value that defines one live frame before any DOM/xterm write. Callers that commit
+  // a frame must keep this snapshot intact instead of recomputing the target halfway through the
+  // write sequence, when viewportY and host.top may already describe different rows.
+  const readLiveFrameSnapshot = (): PtyLiveFrameSnapshot => {
     const { cellH } = getDims();
     const { paddingTop, paddingBottom } = getVerticalInsets();
     const buffer = term.buffer.active;
-    return computeScrollAnchor({
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const cursorBufferRow = buffer.baseY + buffer.cursorY;
+    const anchor = computeScrollAnchor({
       rows: term.rows,
       cellH,
       bufferLength: buffer.length,
       baseY: buffer.baseY,
       viewportY: buffer.viewportY,
-      cursorBufferRow: buffer.baseY + buffer.cursorY,
+      cursorBufferRow,
       liveLastY: getCachedLiveLastY(),
-      visibleContentHeight: Math.max(0, container.clientHeight - paddingTop - paddingBottom),
+      visibleContentHeight,
       paddingTop,
       paddingBottom,
       hostPaddingTop: parsePx(host.style.paddingTop),
@@ -326,7 +349,17 @@ export function attachPtyScrollController(
       containerClientHeight: container.clientHeight,
       atBottomThreshold,
     });
+    return {
+      cellH,
+      visibleContentHeight,
+      viewportY: buffer.viewportY,
+      cursorBufferRow,
+      anchor,
+    };
   };
+
+  const getCurrentAnchor = (): ReturnType<typeof computeScrollAnchor> =>
+    readLiveFrameSnapshot().anchor;
 
   const notifyAtBottom = (): void => {
     const next = getCurrentAnchor().isAtBottom;
@@ -560,17 +593,11 @@ export function attachPtyScrollController(
     if (options.capture ?? true) {
       reviewProjectionRefreshPending = !renderReviewProjection(plan);
     }
-    positionHostAt(plan.ydisp, plan.cellH);
-    if (term.buffer.active.viewportY !== plan.ydisp) {
-      syncing.internal = true;
-      try {
-        term.scrollToLine(plan.ydisp);
-      } finally {
-        syncing.internal = false;
-      }
-    }
-    container.scrollTop = plan.scrollTop;
-    lastSeenScrollTop = container.scrollTop;
+    lastSeenScrollTop = commitVerticalFrameCoordinates({
+      viewportY: plan.ydisp,
+      scrollTop: plan.scrollTop,
+      cellH: plan.cellH,
+    });
     trace("review-layout:commit", {
       ydisp: plan.ydisp,
       details: `reason=${reason} rows=${plan.rowCount} scrollTop=${plan.scrollTop} hostTop=${plan.hostTop}`,
@@ -709,6 +736,61 @@ export function attachPtyScrollController(
     });
   };
 
+  function commitVerticalFrameCoordinates(plan: PtyVerticalFramePlan): number {
+    // Host first: xterm's synchronous onScroll observers must never see the new viewport row
+    // paired with the previous host position. `syncing.internal` only owns xterm's synchronous
+    // callback; keeping it set across the native container write changes review/touch event
+    // ownership and can collapse a real history gesture back onto xterm's live viewport.
+    if (plan.cellH > 0) {
+      positionHostAt(plan.viewportY, plan.cellH, plan.visibleContentHeight);
+    }
+    syncing.internal = true;
+    try {
+      if (term.buffer.active.viewportY !== plan.viewportY) {
+        term.scrollToLine(plan.viewportY);
+      }
+    } finally {
+      syncing.internal = false;
+    }
+    container.scrollTop = plan.scrollTop;
+    return container.scrollTop;
+  }
+
+  const commitLiveFrame = (plan: PtyLiveFramePlan, scrollOwner: PtyLiveFrameScrollOwner): void => {
+    // A live frame has one programmatic scroll owner. Publish the target before the DOM write so
+    // even a synchronous scroll event can identify the write; never leave a stale owner from an
+    // earlier cursor-follow or bottom-follow transaction competing with this one.
+    if (scrollOwner === "programmatic-bottom") {
+      pendingFollowCursorScrollTop = null;
+      pendingProgrammaticScrollTop = plan.scrollTop;
+    } else {
+      pendingProgrammaticScrollTop = null;
+      pendingFollowCursorScrollTop = plan.scrollTop;
+    }
+
+    let landedScrollTop: number;
+    try {
+      landedScrollTop = commitVerticalFrameCoordinates(plan);
+    } catch (error) {
+      if (scrollOwner === "programmatic-bottom") pendingProgrammaticScrollTop = null;
+      else pendingFollowCursorScrollTop = null;
+      throw error;
+    }
+
+    // The browser may clamp while a new spacer is committing. If the pending marker was not
+    // synchronously consumed, align it with the value that actually landed; the next layout can
+    // retry the immutable semantic target from a fresh snapshot.
+    if (scrollOwner === "programmatic-bottom") {
+      if (pendingProgrammaticScrollTop !== null) {
+        pendingProgrammaticScrollTop = landedScrollTop;
+      }
+    } else if (pendingFollowCursorScrollTop !== null) {
+      pendingFollowCursorScrollTop = landedScrollTop;
+    }
+    lastSeenScrollTop = landedScrollTop;
+    prevCursorBufferRow = plan.cursorBufferRow;
+  };
+
   const scrollToBottom = (reason: string = "internal", opts: { force?: boolean } = {}): void => {
     // 默认 respect intent: intent=true (用户在回看) 时整段 no-op, 不清 intent / 不 trace /
     // 不写 scrollTop / 不写 host。被动 caller (pendingFrame / relayout / termScroll)
@@ -724,12 +806,13 @@ export function attachPtyScrollController(
       // the next render after raw input already returned the user to the live tail.
       cancelPendingPageResumeRestore(`scroll-to-bottom:${reason}`);
     }
-    const anchor = getCurrentAnchor();
+    const frame = readLiveFrameSnapshot();
+    const anchor = frame.anchor;
     const expectedYdisp = anchor.bottomViewportY;
     const action = decideScrollToBottomAction({
       force: opts.force ?? false,
       reviewing: userHasVerticalScrollIntent() || verticalIntent.touchActive,
-      viewportY: term.buffer.active.viewportY,
+      viewportY: frame.viewportY,
       expectedYdisp,
       scrollTop: container.scrollTop,
       bottomScrollTop: anchor.bottomScrollTop,
@@ -748,30 +831,18 @@ export function attachPtyScrollController(
       force: opts.force ?? false,
       reason,
     });
-    const { cellH } = getDims();
-    syncing.internal = true;
-    try {
-      term.scrollToLine(expectedYdisp);
-    } finally {
-      syncing.internal = false;
-    }
-    if (cellH !== 0) positionHostAt(expectedYdisp, cellH);
-    const nextScrollTop = getCurrentAnchor().bottomScrollTop;
-    container.scrollTop = nextScrollTop;
-    // Browsers clamp writes while a just-updated spacer is still committing.
-    // Record the value that actually landed; the semantic target remains in
-    // computeScrollAnchor so a later layout/render can finish the follow.
-    pendingProgrammaticScrollTop = container.scrollTop;
-    // viewportY/host and the landed DOM position now describe one rendered frame. Keep
-    // lastSeen aligned even when the browser has not delivered the corresponding scroll
-    // event yet; an intervening native scroll must anchor from this frame, not attach-time 0.
-    lastSeenScrollTop = container.scrollTop;
-    // 把当前光标行作为基线记下: 紧接其后的 onRender 走 followCursorY 时, prev == current 跳过,
-    // 不会把刚刚摆到几何底的视口又拉成 cursor 居中。光标真的"动"了 (claude 重画 / 用户敲)
-    // 才让 followCursorY 接管。
-    prevCursorBufferRow = term.buffer.active.baseY + term.buffer.active.cursorY;
+    commitLiveFrame(
+      {
+        viewportY: expectedYdisp,
+        scrollTop: anchor.bottomScrollTop,
+        cellH: frame.cellH,
+        visibleContentHeight: frame.visibleContentHeight,
+        cursorBufferRow: frame.cursorBufferRow,
+      },
+      "programmatic-bottom",
+    );
     notifyScroll();
-    // 清零必须放在最末尾: container.scrollTop = nextScrollTop 会同步触发 onContainerScroll →
+    // 清零必须放在最末尾: container.scrollTop 写入会同步触发 onContainerScroll →
     // syncContainerScroll, 此时若 cellH=0 会重新置位 retry flag。开头清零的话这里又会被覆盖,
     // 让 scrollToBottom 的"重置 stale state"语义不真。在所有同步副作用后再清,确保边界干净。
     pendingContainerSyncRetry = false;
@@ -1516,13 +1587,9 @@ export function attachPtyScrollController(
   // 把视口拉到光标处。无变动的 onRender 帧 (focus 切换 / theme 重绘 / 同 buffer 重 paint)
   // 不该改 scrollTop, 否则进入瞬间就跳成 cursor 居中, 失去终端"贴底"心智。
   const followCursorY = (): void => {
-    const { cellH } = getDims();
-    const { paddingTop, paddingBottom } = getVerticalInsets();
-    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    const buffer = term.buffer.active;
-    const cursorBufferRow = buffer.baseY + buffer.cursorY;
+    const frame = readLiveFrameSnapshot();
+    const { cellH, visibleContentHeight, cursorBufferRow, anchor } = frame;
     const prevRow = prevCursorBufferRow;
-    const anchor = getCurrentAnchor();
     const decision = decideFollowCursorY({
       reviewing: userHasVerticalScrollIntent() || verticalIntent.touchActive,
       cellH,
@@ -1581,10 +1648,16 @@ export function attachPtyScrollController(
     }
     if (decision.action !== "follow") return;
     const prevScrollTop = container.scrollTop;
-    syncViewportAndHostAt(anchor.bottomViewportY, cellH);
-    container.scrollTop = decision.targetScrollTop;
-    pendingFollowCursorScrollTop = container.scrollTop;
-    lastSeenScrollTop = container.scrollTop;
+    commitLiveFrame(
+      {
+        viewportY: anchor.bottomViewportY,
+        scrollTop: decision.targetScrollTop,
+        cellH,
+        visibleContentHeight,
+        cursorBufferRow,
+      },
+      "follow-cursor",
+    );
     trace("followCursorY:hit", {
       cursorDeltaRows: decision.cursorDeltaRows,
       scrollDeltaToAnchor: prevScrollTop - decision.targetScrollTop,

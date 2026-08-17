@@ -2,7 +2,12 @@
 // 1. 小字号下 viewport 末端不留多余空隙 (xterm baseY 与 viewportY 对齐);
 // 2. 容器横向 overflow 时鼠标拖拽到边缘自动横向滚屏 (autoscroll 模块端到端).
 import { expect, test } from "@playwright/test";
-import { expectPtyTerminalMounted, installPtyFakeRelay, setupPtyChat } from "../pty-fixture";
+import {
+  expectPtyTerminalMounted,
+  installPtyFakeRelay,
+  readRawPtyInput,
+  setupPtyChat,
+} from "../pty-fixture";
 import { BASE_URL, resetLocalState } from "../helpers";
 
 const SESSION_ID = "pty-geometry";
@@ -123,6 +128,104 @@ test.describe("PTY geometry edges", () => {
         : null;
     }, SESSION_ID);
     expect(metrics?.viewportY).toBe(metrics?.baseY);
+  });
+
+  test("keeps a short live host on one rendered frame while the user types", async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 963 });
+    // 37 x 18px is shorter than the 894px desktop content viewport. The final CRLF leaves one
+    // meaningful row above the physical xterm bottom; moving the cursor up keeps the semantic
+    // live viewport at baseY - 1, matching the field trace that jittered on every keystroke.
+    const snapshotData =
+      Array.from(
+        { length: 1171 },
+        (_, index) => `short host line ${String(index).padStart(4, "0")}\r\n`,
+      ).join("") + "\x1b[3A";
+    const sessionId = `${SESSION_ID}-short-host-input`;
+    await setupPtyChat(page, {
+      sessionId,
+      sessionKind: "terminal",
+      ptyOwner: "local-terminal",
+      cols: 179,
+      rows: 37,
+      snapshotData,
+    });
+    await expectPtyTerminalMounted(page);
+
+    await expect
+      .poll(() =>
+        page.evaluate((sid) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
+          const debug = window.__devAnywherePtyDebug?.();
+          if (!term || !host || !debug?.anchor.atBottom) return null;
+          return {
+            baseY: term.buffer.active.baseY,
+            viewportY: term.buffer.active.viewportY,
+            hostTop: host.style.top,
+          };
+        }, sessionId),
+      )
+      .not.toBeNull();
+    const initial = await page.evaluate((sid) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
+      if (!term || !host) throw new Error("PTY geometry not ready");
+      const samples: Array<{ eventY: number; viewportY: number; hostTop: string }> = [];
+      term.onScroll((eventY) => {
+        samples.push({
+          eventY,
+          viewportY: term.buffer.active.viewportY,
+          hostTop: host.style.top,
+        });
+      });
+      (
+        window as unknown as {
+          __ptyShortHostInputSamples: typeof samples;
+        }
+      ).__ptyShortHostInputSamples = samples;
+      return {
+        baseY: term.buffer.active.baseY,
+        viewportY: term.buffer.active.viewportY,
+        hostTop: host.style.top,
+      };
+    }, sessionId);
+    expect(initial.baseY - initial.viewportY).toBe(1);
+
+    const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
+    await input.focus();
+    await page.keyboard.type("abcdef");
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) => {
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve()));
+        }),
+    );
+
+    const observed = await page.evaluate((sid) => {
+      const term = window.__ccTestPtyTerminals?.get(sid);
+      const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
+      const samples = (
+        window as unknown as {
+          __ptyShortHostInputSamples?: Array<{
+            eventY: number;
+            viewportY: number;
+            hostTop: string;
+          }>;
+        }
+      ).__ptyShortHostInputSamples;
+      if (!term || !host || !samples) throw new Error("PTY input samples missing");
+      return {
+        samples,
+        viewportY: term.buffer.active.viewportY,
+        hostTop: host.style.top,
+      };
+    }, sessionId);
+
+    expect(observed.viewportY).toBe(initial.viewportY);
+    expect(observed.hostTop).toBe(initial.hostTop);
+    expect(observed.samples.every((sample) => sample.eventY === initial.viewportY)).toBe(true);
+    expect(observed.samples.every((sample) => sample.hostTop === initial.hostTop)).toBe(true);
+    expect(await readRawPtyInput(page)).toContain("abcdef");
   });
 
   // 用户横向滚动后, followCursorX 不应在 onRender 时把 scrollLeft 拉回光标位置。

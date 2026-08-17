@@ -574,7 +574,16 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       expect(closed?.verticalIntentMode).toBe("reviewing");
       expect(closed?.verticalIntentSource).toBe("touch");
       expect(closed?.semanticAtBottom).toBe(false);
-      expect(closed?.viewportY ?? Infinity).toBeLessThan(closed?.baseY ?? 0);
+      // The frozen review projection is the user-visible viewport. The live xterm underneath may
+      // advance to baseY as output arrives or the keyboard releases more rows; requiring its
+      // private viewportY to remain below baseY contradicts that separation and is timing-racy.
+      // Prove the actual review instead: it is at least one row away from the live tail and the
+      // first painted history line precedes the live base.
+      expect(closed?.scrollTopDeltaToBottom ?? 0).toBeLessThan(-(closed?.cellHeight ?? Infinity));
+      const firstReviewedHistoryIndex = Number(
+        closed?.reviewVisibleText.match(/keyboard close history (\d+)/)?.[1] ?? NaN,
+      );
+      expect(firstReviewedHistoryIndex).toBeLessThan(closed?.baseY ?? 0);
       expect(closed?.pendingContainerSyncRetry).toBe(false);
       expect(closed?.backToBottomInert).toBe(false);
       expect(closed?.backToBottomPointerEvents).toBe("auto");

@@ -24,6 +24,10 @@ describe("buildXtermTerminalOptions", () => {
   it("uses the PTY fixed dark terminal profile", () => {
     expect(buildXtermTerminalOptions().theme).toBe(xtermFixedDarkTheme);
   });
+
+  it("leaves vertical follow ownership to the PTY scroll controller", () => {
+    expect(buildXtermTerminalOptions().scrollOnUserInput).toBe(false);
+  });
 });
 
 describe("createXtermTerminal font invalidation", () => {
