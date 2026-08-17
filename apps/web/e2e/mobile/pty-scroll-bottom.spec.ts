@@ -365,6 +365,35 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expect.poll(() => readPtyScreenBottomGap(emuPage)).toBeLessThanOrEqual(8);
   });
 
+  test("passive live output never leaves the terminal screen above the viewport bottom", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-passive-live-gap`;
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await enterLongHostMode(emuPage, { sessionId, cols: 270, rows: 57 });
+    await sendPtyLines(emuPage, { count: 520, prefix: "passive-live-history" });
+    await expectPtyCursorAwareBottom(emuPage);
+
+    await startReviewScrollSampling(emuPage);
+    for (let index = 1; index <= 120; index += 1) {
+      await sendPtyOutput(emuPage, `passive-live-output ${String(index).padStart(3, "0")}\r\n`);
+      await emuPage.waitForTimeout(8);
+    }
+    await emuPage.waitForTimeout(300);
+    const samples = await stopReviewScrollSampling(emuPage);
+    const bottomGapViolations = samples.filter((sample) => (sample.renderedBottomGap ?? 0) > 8);
+    const reviewViolations = samples.filter((sample) => sample.intentMode !== "following");
+
+    expect(samples.length).toBeGreaterThan(40);
+    expect(bottomGapViolations, JSON.stringify(bottomGapViolations, null, 2)).toEqual([]);
+    expect(reviewViolations, JSON.stringify(reviewViolations, null, 2)).toEqual([]);
+    await expectPtyCursorAwareBottom(emuPage);
+    await expect(
+      emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows'),
+    ).toContainText("passive-live-output 120");
+  });
+
   test("an extra bottom swipe keeps a short live host filled from preceding scrollback", async ({
     emuPage,
   }) => {
@@ -750,5 +779,60 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await sendPtyOutput(emuPage, "mobile-live-after-return\r\n");
     await expect(liveRows).toContainText("mobile-live-after-return");
     await expectPtyCursorAwareBottom(emuPage);
+  });
+
+  test("toward-live touch leaves a frozen review without exposing a bottom blank", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-touch-frozen-end`;
+    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await enterLongHostMode(emuPage, { sessionId, cols: 270, rows: 57 });
+    await sendPtyLines(emuPage, { count: 520, prefix: "touch-frozen-history" });
+    await expectPtyCursorAwareBottom(emuPage);
+
+    await ptyTerminal(emuPage).evaluate((element) => {
+      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -320, cancelable: true }));
+    });
+    await expect
+      .poll(() => readPtyDebugSnapshot(emuPage).then((debug) => debug?.verticalIntent.mode))
+      .toBe("reviewing");
+
+    for (let index = 1; index <= 12; index += 1) {
+      await sendPtyOutput(emuPage, `touch-frozen-live ${String(index).padStart(2, "0")}\r\n`);
+    }
+    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    await expect(reviewSnapshot).toBeVisible();
+    await expect(reviewSnapshot).not.toContainText("touch-frozen-live 12");
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    const x = box.x + box.width / 2;
+    await touchFlick(
+      emuPage,
+      { x, y: box.y + box.height * 0.78 },
+      { x, y: box.y + box.height * 0.18 },
+    );
+
+    await expectPtyCursorAwareBottom(emuPage);
+    await expect(reviewSnapshot).toHaveCount(0);
+    await expect(
+      emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows'),
+    ).toContainText("touch-frozen-live 12");
+    await expect.poll(() => readPtyScreenBottomGap(emuPage)).toBeLessThanOrEqual(8);
+
+    // Reaching the frozen boundary must clear logical review ownership, not merely make the
+    // current frame look aligned. The production failure stayed visually plausible at the old
+    // tail, then the next remote frame exposed that it was still frozen in review mode.
+    await sendPtyOutput(emuPage, "touch-frozen-after-return\r\n");
+    await expect(
+      emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows'),
+    ).toContainText("touch-frozen-after-return");
+    await expect
+      .poll(() => readPtyDebugSnapshot(emuPage).then((debug) => debug?.verticalIntent.mode))
+      .toBe("following");
+    await expect(reviewSnapshot).toHaveCount(0);
+    await expectPtyCursorAwareBottom(emuPage);
+    await expect.poll(() => readPtyScreenBottomGap(emuPage)).toBeLessThanOrEqual(8);
   });
 });

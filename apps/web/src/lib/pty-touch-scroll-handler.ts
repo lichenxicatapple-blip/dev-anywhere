@@ -8,8 +8,10 @@ import {
 } from "./pty-scroll-model";
 import {
   beginPtyTouchScroll,
+  consumePtyTouchReviewEndResume,
   createInitialPtyTouchScrollState,
   ensurePtyTouchPendingMode,
+  lockPtyTouchVerticalGesture,
   markPtyTouchHorizontalGesture,
   markPtyTouchGesture,
   resetPtyTouchScrollSession,
@@ -40,6 +42,8 @@ interface PtyTouchScrollHandlerOptions {
   dispatchVerticalIntent: (event: PtyVerticalIntentEvent) => PtyVerticalIntentResult;
   getCurrentAnchor: () => TouchAnchorSnapshot;
   getLastSeenScrollTop: () => number;
+  getFrozenReviewScrollEnd: () => number | null;
+  resumeLiveAtFrozenReviewEnd: (source: "touchmove" | "native-scroll") => void;
   hasHorizontalOverflow: () => boolean;
   clearHorizontalIntentIfUnscrollable: (site: string) => boolean;
   markHorizontalUserInput: (details: string) => void;
@@ -54,6 +58,10 @@ interface PtyTouchScrollHandler {
   onTouchCancel: () => void;
   isRecentNativeScroll: () => boolean;
   isRecentHorizontalGesture: () => boolean;
+  tryResumeLiveAtFrozenReviewEnd: (
+    candidateScrollTop: number,
+    source: "touchmove" | "native-scroll",
+  ) => boolean;
   getScrollExpectation: (
     currentYOverride?: number | null,
   ) => ReturnType<typeof computeTouchScrollExpectation>;
@@ -76,6 +84,8 @@ export function createPtyTouchScrollHandler({
   dispatchVerticalIntent,
   getCurrentAnchor,
   getLastSeenScrollTop,
+  getFrozenReviewScrollEnd,
+  resumeLiveAtFrozenReviewEnd,
   hasHorizontalOverflow,
   clearHorizontalIntentIfUnscrollable,
   markHorizontalUserInput,
@@ -89,13 +99,17 @@ export function createPtyTouchScrollHandler({
     const anchor = getCurrentAnchor();
     const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
     const verticalIntent = getVerticalIntent();
-    const maxScrollTop = resolvePtyNativeScrollMax({
-      reviewing: isReviewing(verticalIntent),
-      referenceScrollTop: verticalIntent.touchStartScrollTop ?? container.scrollTop,
-      bottomScrollTop: anchor.bottomScrollTop,
-      domMaxScrollTop,
-      atBottomThreshold,
-    });
+    const frozenReviewScrollEnd = state.reviewEndResumeEligible ? getFrozenReviewScrollEnd() : null;
+    const maxScrollTop =
+      frozenReviewScrollEnd === null
+        ? resolvePtyNativeScrollMax({
+            reviewing: isReviewing(verticalIntent),
+            referenceScrollTop: verticalIntent.touchStartScrollTop ?? container.scrollTop,
+            bottomScrollTop: anchor.bottomScrollTop,
+            domMaxScrollTop,
+            atBottomThreshold,
+          })
+        : Math.min(domMaxScrollTop, frozenReviewScrollEnd);
     return computeTouchScrollExpectation({
       touchActive: verticalIntent.touchActive,
       touchStartScrollTop: verticalIntent.touchStartScrollTop,
@@ -149,6 +163,31 @@ export function createPtyTouchScrollHandler({
     ].join(" ");
   };
 
+  const isWithinNativeInertiaWindow = (): boolean =>
+    getVerticalIntent().touchActive ||
+    (state.lastGestureAt !== null &&
+      performance.now() - state.lastGestureAt <= PTY_SCROLL_CONFIG.touch.nativeScrollRecentMs);
+
+  const tryResumeLiveAtFrozenReviewEnd = (
+    candidateScrollTop: number,
+    source: "touchmove" | "native-scroll",
+  ): boolean => {
+    if (!state.reviewEndResumeEligible || !isWithinNativeInertiaWindow()) return false;
+    const frozenReviewScrollEnd = getFrozenReviewScrollEnd();
+    if (
+      frozenReviewScrollEnd === null ||
+      candidateScrollTop < frozenReviewScrollEnd - atBottomThreshold
+    ) {
+      return false;
+    }
+    state = consumePtyTouchReviewEndResume(state);
+    trace("touch:frozen-review-end", {
+      details: `source=${source} candidate=${candidateScrollTop} boundary=${frozenReviewScrollEnd}`,
+    });
+    resumeLiveAtFrozenReviewEnd(source);
+    return true;
+  };
+
   const onTouchStart = (event: TouchEvent): void => {
     if (getPageResumePending()) {
       trace("touchstart:page-resume-pending");
@@ -159,8 +198,10 @@ export function createPtyTouchScrollHandler({
     const startY = touch?.clientY ?? null;
     clearHorizontalIntentIfUnscrollable("touchstart");
     const anchor = getCurrentAnchor();
+    const startedReviewing = isReviewing(getVerticalIntent());
     state = beginPtyTouchScroll(state, {
       startedAtCursorAwareBottom: anchor.isAtBottom,
+      startedReviewing,
       startClientX: startX,
       startClientY: startY,
       startScrollLeft: container.scrollLeft,
@@ -178,6 +219,7 @@ export function createPtyTouchScrollHandler({
         `startScroll=${Math.round(container.scrollTop)}`,
         `bottom=${Math.round(anchor.bottomScrollTop)}`,
         `atBottom=${anchor.isAtBottom ? 1 : 0}`,
+        `reviewing=${startedReviewing ? 1 : 0}`,
       ].join(" "),
     });
   };
@@ -259,9 +301,12 @@ export function createPtyTouchScrollHandler({
         }
         return;
       } else {
-        state = setPtyTouchGestureMode(state, "vertical");
+        state = lockPtyTouchVerticalGesture(
+          state,
+          movement.dy < 0 ? "toward-live" : "toward-history",
+        );
         trace("touchmove:vertical-lock", {
-          details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)} threshold=${PTY_SCROLL_CONFIG.touch.gestureSlopPx}`,
+          details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)} threshold=${PTY_SCROLL_CONFIG.touch.gestureSlopPx} direction=${state.verticalDirection}`,
         });
       }
     }
@@ -319,6 +364,9 @@ export function createPtyTouchScrollHandler({
           `touchDeltaY=${Math.round(expectation.touchDeltaY)}`,
         ].join(" "),
       });
+      if (tryResumeLiveAtFrozenReviewEnd(expectation.expectedScrollTop, "touchmove")) {
+        return;
+      }
     }
     const keepFollowingAtBottomBoundary =
       expectation &&
@@ -387,16 +435,14 @@ export function createPtyTouchScrollHandler({
     onTouchMove,
     onTouchEnd,
     onTouchCancel,
-    isRecentNativeScroll: () =>
-      getVerticalIntent().touchActive ||
-      (state.lastGestureAt !== null &&
-        performance.now() - state.lastGestureAt <= PTY_SCROLL_CONFIG.touch.nativeScrollRecentMs),
+    isRecentNativeScroll: isWithinNativeInertiaWindow,
     isRecentHorizontalGesture: () =>
       state.lastHorizontalGestureAt !== null &&
       performance.now() - state.lastHorizontalGestureAt <=
         PTY_SCROLL_CONFIG.touch.nativeScrollRecentMs,
     getScrollExpectation,
     describeScrollExpectation: describeTouchScrollExpectation,
+    tryResumeLiveAtFrozenReviewEnd,
     getState: () => state,
   };
 }

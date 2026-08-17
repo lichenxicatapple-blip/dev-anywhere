@@ -1247,6 +1247,25 @@ export function attachPtyScrollController(
     if (!isRecentTouchNativeScroll()) return false;
     const { cellH } = getDims();
     if (cellH === 0) return false;
+    if (userHasVerticalScrollIntent()) {
+      const plan = computeReviewLayoutPlan(cellH);
+      if (plan) {
+        const clampTolerance =
+          Number.EPSILON * Math.max(1, Math.abs(plan.scrollTop), Math.abs(effectiveScrollTop)) * 8;
+        // `getYdispForScrollTop` clamps through the frozen review range. At its live-side edge an
+        // Android inertia frame can therefore report the same xterm row even though the DOM has
+        // moved beyond the last serializable review pixel. That is not a harmless sub-row move:
+        // commitReviewLayout must pull the DOM back (or the owned toward-live gesture above will
+        // resume the live tail), otherwise the viewport can expose blank space below the capture.
+        if (Math.abs(plan.scrollTop - effectiveScrollTop) > clampTolerance) {
+          trace("container-sync:cannot-skip[review-clamp]", {
+            ydisp: plan.ydisp,
+            details: `scrollTop=${effectiveScrollTop} reviewEnd=${plan.scrollTop}`,
+          });
+          return false;
+        }
+      }
+    }
     const ydisp = getYdispForScrollTop(effectiveScrollTop, cellH);
     if (ydisp !== term.buffer.active.viewportY) return false;
     scheduleTouchScrollNotify();
@@ -1292,6 +1311,10 @@ export function attachPtyScrollController(
     dispatchVerticalIntent,
     getCurrentAnchor,
     getLastSeenScrollTop: () => lastSeenScrollTop,
+    getFrozenReviewScrollEnd,
+    resumeLiveAtFrozenReviewEnd: (source) => {
+      scrollToBottom(`touchFrozenReviewEnd:${source}`, { force: true });
+    },
     hasHorizontalOverflow,
     clearHorizontalIntentIfUnscrollable,
     markHorizontalUserInput,
@@ -1442,6 +1465,12 @@ export function attachPtyScrollController(
         scrollTop: effectiveScrollTop,
       });
       scrollToBottom("programmaticDrift");
+      return;
+    }
+    if (
+      !pageResumeRestorePending &&
+      touchHandler.tryResumeLiveAtFrozenReviewEnd(effectiveScrollTop, "native-scroll")
+    ) {
       return;
     }
     if (restoreImpossibleTouchScrollJump(effectiveScrollTop)) {

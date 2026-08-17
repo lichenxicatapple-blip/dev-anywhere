@@ -2598,6 +2598,139 @@ describe("attachPtyScrollController", () => {
     expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
   });
 
+  it("resumes live output when a review touch reaches the frozen review boundary", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
+    terminal.buffer.active.cursorY = 19;
+    const renderProjection = createHistoryProjectionRenderer();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => true,
+      setNewFramesWhileAway: vi.fn(),
+      onHistoryProjectionChange: renderProjection,
+    });
+
+    expect(container.scrollTop).toBe(1600);
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1400);
+
+    terminal.buffer.active.length += 30;
+    terminal.buffer.active.viewportY += 30;
+    defineScrollHeight(container, 2600);
+    emitScroll();
+    emitRender();
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1400);
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    const move = touchEvent("touchmove", 100);
+    container.dispatchEvent(move);
+
+    expect(move.defaultPrevented).toBe(false);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(container.scrollTop).toBe(2200);
+    expect(terminal.buffer.active.viewportY).toBe(110);
+    expect(host.style.top).toBe("2200px");
+    expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
+
+    container.dispatchEvent(touchEvent("touchend", 100));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+  });
+
+  it("resumes live output when post-touch inertia reaches the frozen review boundary", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
+    terminal.buffer.active.cursorY = 19;
+    const renderProjection = createHistoryProjectionRenderer();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => true,
+      setNewFramesWhileAway: vi.fn(),
+      onHistoryProjectionChange: renderProjection,
+    });
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    terminal.buffer.active.length += 30;
+    terminal.buffer.active.viewportY += 30;
+    defineScrollHeight(container, 2600);
+    emitScroll();
+    emitRender();
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1400);
+
+    container.dispatchEvent(touchEvent("touchstart", 320));
+    container.dispatchEvent(touchEvent("touchmove", 280));
+    container.scrollTop = 1440;
+    container.dispatchEvent(new Event("scroll"));
+    container.dispatchEvent(touchEvent("touchend", 280));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+    // Android keeps delivering compositor-owned scroll frames after touchend. The old path
+    // stopped at the frozen row, then classified the overshoot as a harmless same-row update,
+    // leaving the DOM viewport below the serialized review projection.
+    container.scrollTop = 1600;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    expect(container.scrollTop).toBe(2200);
+    expect(terminal.buffer.active.viewportY).toBe(110);
+    expect(host.style.top).toBe("2200px");
+    expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
+  });
+
+  it("keeps review ownership when a touch first locks toward history", () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
+    terminal.buffer.active.cursorY = 19;
+    const renderProjection = createHistoryProjectionRenderer();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => true,
+      setNewFramesWhileAway: vi.fn(),
+      onHistoryProjectionChange: renderProjection,
+    });
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    terminal.buffer.active.length += 30;
+    terminal.buffer.active.viewportY += 30;
+    defineScrollHeight(container, 2600);
+    emitScroll();
+    emitRender();
+    expect(container.scrollTop).toBe(1400);
+
+    // The first locked direction owns the gesture. A later Android geometry/clamp frame must not
+    // reinterpret a finger-down (toward-history) gesture as an instruction to reveal live output.
+    container.dispatchEvent(touchEvent("touchstart", 200));
+    container.dispatchEvent(touchEvent("touchmove", 240));
+    container.scrollTop = 1600;
+    container.dispatchEvent(new Event("scroll"));
+    container.scrollTop = 1700;
+    container.dispatchEvent(new Event("scroll"));
+
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    expect(container.scrollTop).toBe(1600);
+    expect(getHistoryProjectionClearCount(renderProjection)).toBe(0);
+
+    container.dispatchEvent(touchEvent("touchend", 240));
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+  });
+
   it("closes stale review state on a downward wheel already clamped at semantic bottom", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 99: "live prompt" });
