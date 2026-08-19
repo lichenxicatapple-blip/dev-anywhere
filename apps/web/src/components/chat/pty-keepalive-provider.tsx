@@ -42,7 +42,6 @@ interface PtyKeepAliveContextValue {
   updateFindRequest: (sessionId: string, request: number | undefined) => void;
 }
 
-const PTY_KEEP_ALIVE_CAPACITY = 3;
 const HIDDEN_WIDTH = 1024;
 const HIDDEN_HEIGHT = 720;
 const RECT_EPSILON_PX = 0.5;
@@ -73,11 +72,7 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
     activeSessionIdRef.current = view.sessionId;
     setActiveView(view);
     setEntries((current) => {
-      const touched = touchPtyKeepAliveEntry(current, view.sessionId, {
-        capacity: PTY_KEEP_ALIVE_CAPACITY,
-        now: Date.now(),
-        activeSessionId: view.sessionId,
-      });
+      const touched = touchPtyKeepAliveEntry(current, view.sessionId);
       return touched.map((entry) =>
         entry.sessionId === view.sessionId
           ? {

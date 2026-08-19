@@ -26,6 +26,10 @@ import {
 } from "../common/pty-semantic-machine.js";
 import { capturePtySnapshot } from "../common/pty-snapshot.js";
 import {
+  createCodexXtermHistoryCompat,
+  type CodexXtermHistoryCompat,
+} from "../common/codex-xterm-history-compat.js";
+import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
   type ProviderAdapter,
@@ -88,6 +92,8 @@ interface HostedPtySession {
   child: IPty;
   terminal: InstanceType<typeof HeadlessTerminal>;
   serializeAddon: SerializeAddon;
+  xtermHistoryCompat: CodexXtermHistoryCompat | null;
+  xtermHistoryCompatReported: boolean;
   idleTimer: NodeJS.Timeout;
   startedAt: number;
   lastOutputTime: number;
@@ -191,6 +197,12 @@ export class HostedPtyRegistry {
       child,
       terminal,
       serializeAddon,
+      xtermHistoryCompat: createCodexXtermHistoryCompat(
+        options.kind === "terminal" ? null : options.provider,
+        rows,
+        this.deps.getProviderEnv(),
+      ),
+      xtermHistoryCompatReported: false,
       idleTimer: setInterval(() => this.checkIdle(options.sessionId), IDLE_CHECK_INTERVAL_MS),
       startedAt: Date.now(),
       lastOutputTime: 0,
@@ -268,6 +280,8 @@ export class HostedPtyRegistry {
   resize(sessionId: string, cols: number, rows: number): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
+    this.flushPendingRenderData(sessionId, hosted);
+    hosted.xtermHistoryCompat?.setTerminalRows(rows);
     hosted.child.resize(cols, rows);
     hosted.terminal.resize(cols, rows);
     this.deps.relayConnection.sendRaw(
@@ -322,11 +336,12 @@ export class HostedPtyRegistry {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return;
     hosted.lastOutputTime = Date.now();
-    hosted.outputSeq += 1;
     hosted.startupOutput = appendStartupOutput(hosted.startupOutput, data);
-    hosted.terminal.write(data);
     this.deps.touchSessionActivity(sessionId);
-    this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
+    const previousRewriteCount = hosted.xtermHistoryCompat?.stats.rewrittenTransactions ?? 0;
+    const renderData = hosted.xtermHistoryCompat?.push(data) ?? data;
+    this.emitRenderData(sessionId, hosted, renderData);
+    this.reportXtermHistoryCompatRewrite(sessionId, hosted, previousRewriteCount);
 
     const oscSequences = extractOscSequences(data);
     const cwd = extractOscWorkingDirectory(data);
@@ -460,10 +475,42 @@ export class HostedPtyRegistry {
     this.deps.relayConnection.sendBinary(encodeBinaryFrame(sessionId, outputSeq, data));
   }
 
+  private emitRenderData(sessionId: string, hosted: HostedPtySession, data: string): void {
+    if (!data) return;
+    hosted.outputSeq += 1;
+    hosted.terminal.write(data);
+    this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
+  }
+
+  private flushPendingRenderData(sessionId: string, hosted: HostedPtySession): void {
+    this.emitRenderData(sessionId, hosted, hosted.xtermHistoryCompat?.flush() ?? "");
+  }
+
+  private reportXtermHistoryCompatRewrite(
+    sessionId: string,
+    hosted: HostedPtySession,
+    previousRewriteCount: number,
+  ): void {
+    const stats = hosted.xtermHistoryCompat?.stats;
+    if (!stats || stats.rewrittenTransactions === previousRewriteCount) return;
+    const payload = {
+      sessionId,
+      rewrittenTransactions: stats.rewrittenTransactions,
+      preservedRows: stats.preservedRows,
+    };
+    if (!hosted.xtermHistoryCompatReported) {
+      hosted.xtermHistoryCompatReported = true;
+      serviceLogger.info(payload, "Codex xterm history compatibility activated");
+    } else {
+      serviceLogger.debug(payload, "Codex xterm history transaction rewritten");
+    }
+  }
+
   private close(sessionId: string, options: { kill: boolean; notify: boolean }): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
     clearInterval(hosted.idleTimer);
+    this.flushPendingRenderData(sessionId, hosted);
     if (options.kill) {
       try {
         hosted.child.kill();

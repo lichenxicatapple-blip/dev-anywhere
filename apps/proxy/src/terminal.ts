@@ -23,6 +23,10 @@ import {
   shouldStartPtyTurnOnInput,
 } from "./common/pty-semantic-machine.js";
 import { capturePtySnapshot } from "./common/pty-snapshot.js";
+import {
+  createCodexXtermHistoryCompat,
+  type CodexXtermHistoryCompat,
+} from "./common/codex-xterm-history-compat.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";
 import { SOCK_PATH, STOPPED_PATH, tildify } from "./common/paths.js";
@@ -77,6 +81,8 @@ class TerminalSession {
   // headless terminal 在本进程维护，用于按需 serialize() 给远程 client
   private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
   private serializeAddon: SerializeAddon | null = null;
+  private xtermHistoryCompat: CodexXtermHistoryCompat | null = null;
+  private xtermHistoryCompatReported = false;
   private outputSeq = 0;
   private ptyStateSeq = 0;
   private remoteDetached = false;
@@ -104,9 +110,11 @@ class TerminalSession {
       getSessionId: () => this.sessionId,
       stopIdleChecker: () => this.idleChecker?.stop(),
       disposeRenderResources: () => {
+        this.flushPendingRenderData();
         this.headlessTerminal?.dispose();
         this.headlessTerminal = null;
         this.serializeAddon = null;
+        this.xtermHistoryCompat = null;
       },
     });
 
@@ -163,6 +171,7 @@ class TerminalSession {
     // UnicodeGraphemesAddon activate() 里会设置 activeVersion = '15-graphemes'
     this.headlessTerminal.loadAddon(this.serializeAddon);
     this.headlessTerminal.loadAddon(new UnicodeGraphemesAddon());
+    this.xtermHistoryCompat = createCodexXtermHistoryCompat(this.provider.id, rows, process.env);
   }
 
   private startPtyManager(): void {
@@ -176,6 +185,8 @@ class TerminalSession {
       stdin: process.stdin,
       stdout: process.stdout,
       onResize: (newCols, newRows) => {
+        this.flushPendingRenderData();
+        this.xtermHistoryCompat?.setTerminalRows(newRows);
         if (this.headlessTerminal) this.headlessTerminal.resize(newCols, newRows);
         if (this.socket.writable && this.sessionId) {
           this.socket.write(
@@ -200,15 +211,10 @@ class TerminalSession {
   // PTY 的每一帧输出都要：追到 headless terminal 状态、推 binary IPC、提取 provider 语义事件
   private handlePtyData(data: string): void {
     this.lastOutputTime = Date.now();
-    this.outputSeq += 1;
-
-    if (this.headlessTerminal) this.headlessTerminal.write(data);
-
-    if (!this.remoteDetached && this.socket.writable && this.sessionId) {
-      this.socket.write(
-        encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), this.outputSeq),
-      );
-    }
+    const previousRewriteCount = this.xtermHistoryCompat?.stats.rewrittenTransactions ?? 0;
+    const renderData = this.xtermHistoryCompat?.push(data) ?? data;
+    this.emitRenderData(renderData);
+    this.reportXtermHistoryCompatRewrite(previousRewriteCount);
 
     const oscSequences = extractOscSequences(data);
     const oscSignal = extractOscSignals(data, this.provider.id);
@@ -248,6 +254,43 @@ class TerminalSession {
     }
     if (decision.emit) {
       this.sendPtyState(decision.nextState, decision.meta);
+    }
+  }
+
+  /**
+   * Feed exactly the same canonical stream to the proxy-side xterm and the Web client. Keeping
+   * outputSeq on that stream means snapshots and replay frames cannot observe a sequence gap when
+   * the Codex compatibility layer temporarily buffers a synchronized-output transaction.
+   */
+  private emitRenderData(data: string): void {
+    if (!data) return;
+    this.outputSeq += 1;
+    this.headlessTerminal?.write(data);
+
+    if (!this.remoteDetached && this.socket.writable && this.sessionId) {
+      this.socket.write(
+        encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), this.outputSeq),
+      );
+    }
+  }
+
+  private flushPendingRenderData(): void {
+    this.emitRenderData(this.xtermHistoryCompat?.flush() ?? "");
+  }
+
+  private reportXtermHistoryCompatRewrite(previousRewriteCount: number): void {
+    const stats = this.xtermHistoryCompat?.stats;
+    if (!stats || stats.rewrittenTransactions === previousRewriteCount) return;
+    const payload = {
+      sessionId: this.sessionId,
+      rewrittenTransactions: stats.rewrittenTransactions,
+      preservedRows: stats.preservedRows,
+    };
+    if (!this.xtermHistoryCompatReported) {
+      this.xtermHistoryCompatReported = true;
+      log.info(payload, "Codex xterm history compatibility activated");
+    } else {
+      log.debug(payload, "Codex xterm history transaction rewritten");
     }
   }
 

@@ -116,6 +116,43 @@ describe("PtyKeepAliveProvider", () => {
     });
   });
 
+  it("keeps every visited live PTY mounted without a capacity limit", async () => {
+    useSessionStore.setState({
+      sessions: ["pty-1", "pty-2", "pty-3", "pty-4"].map((sessionId) => ({
+        sessionId,
+        name: `/tmp/${sessionId}`,
+        cwd: `/tmp/${sessionId}`,
+        state: "idle" as const,
+        mode: "pty" as const,
+        provider: "codex" as const,
+        ptyOwner: "proxy-hosted" as const,
+      })),
+      sessionListLoaded: true,
+    });
+
+    const renderView = (sessionId: string) => (
+      <PtyKeepAliveProvider>
+        <div style={{ height: 200, width: 300 }}>
+          <PtyKeepAliveViewport sessionId={sessionId} provider="codex" />
+        </div>
+      </PtyKeepAliveProvider>
+    );
+    const { container, rerender } = render(renderView("pty-1"));
+    rerender(renderView("pty-2"));
+    rerender(renderView("pty-3"));
+    rerender(renderView("pty-4"));
+
+    await waitFor(() => {
+      const entries = container.querySelectorAll('[data-slot="pty-keepalive-entry"]');
+      expect(Array.from(entries, (entry) => entry.getAttribute("data-session-id"))).toEqual([
+        "pty-1",
+        "pty-2",
+        "pty-3",
+        "pty-4",
+      ]);
+    });
+  });
+
   it("does not prune the route PTY entry before the session list has loaded", async () => {
     useSessionStore.setState({
       sessions: [],
