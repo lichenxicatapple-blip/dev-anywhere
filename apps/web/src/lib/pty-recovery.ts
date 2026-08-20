@@ -12,6 +12,12 @@ export interface PtyRenderTarget {
   reset: () => void;
   resize: (cols: number, rows: number) => void;
   write: (data: string | Uint8Array, callback?: WriteCallback) => void;
+  // Wait until writes already submitted to the terminal parser have settled. Recovery uses this
+  // before reset so an old queued write cannot land after the authoritative snapshot reset.
+  barrier?: (callback: WriteCallback) => void;
+  // Reconnect may skip an identical snapshot only when the preserved target still has the same
+  // geometry. A local fit/font resize while offline must force an authoritative re-apply.
+  getDimensions?: () => { cols: number; rows: number } | null;
 }
 
 interface PtySnapshotMessage {
@@ -26,12 +32,16 @@ interface PtyRecoveryOptions {
   requestIdFactory?: () => string;
 }
 
+interface StartSnapshotRequestOptions {
+  preserveTargetIfUnchanged?: boolean;
+}
+
 type SnapshotResult =
   | { applied: true; replayedFrames: number }
   | { applied: false; reason: "stale_snapshot" | "no_active_request" };
 
 interface PtyRecoveryController {
-  startSnapshotRequest: () => string;
+  startSnapshotRequest: (options?: StartSnapshotRequestOptions) => string;
   hasAppliedSnapshot: () => boolean;
   hasPendingGap: () => boolean;
   handleBinaryFrame: (
@@ -72,10 +82,26 @@ export function createPtyRecoveryController(
   let frameBuffer: Array<{ data: Uint8Array; outputSeq: number }> = [];
   const pendingFrames = new Map<number, Uint8Array>();
   let appliedOutputSeq = 0;
+  let appliedCols: number | null = null;
+  let appliedRows: number | null = null;
+  let preservedTarget: {
+    outputSeq: number;
+    cols: number;
+    rows: number;
+  } | null = null;
   // 每次 startSnapshotRequest / applySnapshot 都 ++; applySnapshot 把当前值塞进异步 write
   // callback 闭包, callback 触发时若 generation 已被新 startSnapshotRequest 推进, 说明
   // 期间发生了新一轮 recovery, 旧 replay frames 不能再写到 target——会污染新窗口。
   let snapshotGeneration = 0;
+  let targetMayHaveQueuedWrites = false;
+
+  const settleTarget = (target: PtyRenderTarget, callback: WriteCallback): void => {
+    if (target.barrier) {
+      target.barrier(callback);
+      return;
+    }
+    callback();
+  };
 
   const flushContiguousFrames = (target: PtyRenderTarget): number => {
     let written = 0;
@@ -92,7 +118,21 @@ export function createPtyRecoveryController(
   };
 
   return {
-    startSnapshotRequest() {
+    startSnapshotRequest(requestOptions = {}) {
+      if (
+        requestOptions.preserveTargetIfUnchanged &&
+        snapshotApplied &&
+        appliedCols !== null &&
+        appliedRows !== null
+      ) {
+        preservedTarget = {
+          outputSeq: appliedOutputSeq,
+          cols: appliedCols,
+          rows: appliedRows,
+        };
+      } else if (!requestOptions.preserveTargetIfUnchanged) {
+        preservedTarget = null;
+      }
       const requestId = requestIdFactory();
       activeRequestId = requestId;
       snapshotApplied = false;
@@ -141,32 +181,67 @@ export function createPtyRecoveryController(
         return { applied: false, reason: "stale_snapshot" };
       }
 
-      const frames = frameBuffer;
-      frameBuffer = [];
       pendingFrames.clear();
       activeRequestId = null;
-      snapshotApplied = true;
-      appliedOutputSeq = snapshot.outputSeq;
       snapshotGeneration += 1;
       const myGeneration = snapshotGeneration;
-      const replayFrames = frames
+      const replayFramesAtApply = frameBuffer
         .filter((frame) => frame.outputSeq > snapshot.outputSeq)
         .sort((a, b) => a.outputSeq - b.outputSeq);
+      const targetDimensions = target.getDimensions?.() ?? null;
 
-      target.reset();
-      target.resize(snapshot.cols, snapshot.rows);
-      target.write(snapshot.data, () => {
-        // callback 触发前若发生新 startSnapshotRequest / applySnapshot, generation 已推进,
-        // 旧 replay frames 属于上一窗口, 不能再写到 target。
+      const canReuseTarget =
+        preservedTarget !== null &&
+        preservedTarget.outputSeq === snapshot.outputSeq &&
+        preservedTarget.cols === snapshot.cols &&
+        preservedTarget.rows === snapshot.rows &&
+        targetDimensions?.cols === snapshot.cols &&
+        targetDimensions.rows === snapshot.rows &&
+        replayFramesAtApply.length === 0;
+      preservedTarget = null;
+      if (canReuseTarget) {
+        frameBuffer = [];
+        snapshotApplied = true;
+        appliedOutputSeq = snapshot.outputSeq;
+        appliedCols = snapshot.cols;
+        appliedRows = snapshot.rows;
+        onReplaySettled?.(false);
+        return { applied: true, replayedFrames: 0 };
+      }
+
+      // Keep snapshotApplied=false while the old parser queue drains and the snapshot is parsed.
+      // Binary frames arriving in either window stay in frameBuffer and are replayed afterwards.
+      const applyAuthoritativeSnapshot = (): void => {
         if (myGeneration !== snapshotGeneration) return;
-        for (const frame of replayFrames) {
-          pendingFrames.set(frame.outputSeq, frame.data);
-        }
-        flushContiguousFrames(target);
-        onReplaySettled?.(pendingFrames.size > 0);
-      });
+        targetMayHaveQueuedWrites = true;
+        target.reset();
+        target.resize(snapshot.cols, snapshot.rows);
+        target.write(snapshot.data, () => {
+          // callback 触发前若发生新 startSnapshotRequest / applySnapshot, generation 已推进,
+          // 旧 replay frames 属于上一窗口, 不能再写到 target。
+          if (myGeneration !== snapshotGeneration) return;
+          const replayFrames = frameBuffer
+            .filter((frame) => frame.outputSeq > snapshot.outputSeq)
+            .sort((a, b) => a.outputSeq - b.outputSeq);
+          frameBuffer = [];
+          snapshotApplied = true;
+          appliedOutputSeq = snapshot.outputSeq;
+          appliedCols = snapshot.cols;
+          appliedRows = snapshot.rows;
+          for (const frame of replayFrames) {
+            pendingFrames.set(frame.outputSeq, frame.data);
+          }
+          flushContiguousFrames(target);
+          onReplaySettled?.(pendingFrames.size > 0);
+        });
+      };
+      if (targetMayHaveQueuedWrites) {
+        settleTarget(target, applyAuthoritativeSnapshot);
+      } else {
+        applyAuthoritativeSnapshot();
+      }
 
-      return { applied: true, replayedFrames: replayFrames.length };
+      return { applied: true, replayedFrames: replayFramesAtApply.length };
     },
   };
 }

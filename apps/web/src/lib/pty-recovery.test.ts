@@ -3,14 +3,19 @@ import { createPtyRecoveryController, type PtyRenderTarget } from "./pty-recover
 
 function createTarget(): PtyRenderTarget & { calls: Array<[string, unknown]> } {
   const calls: Array<[string, unknown]> = [];
+  let dimensions = { cols: 0, rows: 0 };
   return {
     calls,
     reset: vi.fn(() => calls.push(["reset", null])),
-    resize: vi.fn((cols: number, rows: number) => calls.push(["resize", { cols, rows }])),
+    resize: vi.fn((cols: number, rows: number) => {
+      dimensions = { cols, rows };
+      calls.push(["resize", { cols, rows }]);
+    }),
     write: vi.fn((data: string | Uint8Array, callback?: () => void) => {
       calls.push(["write", data]);
       callback?.();
     }),
+    getDimensions: () => dimensions,
   };
 }
 
@@ -92,6 +97,177 @@ describe("PtyRecoveryController", () => {
       ["reset", null],
       ["resize", { cols: 80, rows: 24 }],
       ["write", "snapshot"],
+    ]);
+  });
+
+  it("reuses an already synchronized target when a reconnect snapshot is unchanged", () => {
+    let requestSequence = 0;
+    const recovery = createPtyRecoveryController({
+      requestIdFactory: () => `req-${++requestSequence}`,
+    });
+    const target = createTarget();
+
+    const initialRequest = recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      { requestId: initialRequest, cols: 80, rows: 24, data: "snapshot", outputSeq: 10 },
+      target,
+    );
+    target.calls.length = 0;
+    const onReplaySettled = vi.fn();
+
+    const reconnectRequest = recovery.startSnapshotRequest({
+      preserveTargetIfUnchanged: true,
+    });
+    const result = recovery.applySnapshot(
+      {
+        requestId: reconnectRequest,
+        cols: 80,
+        rows: 24,
+        data: "same authoritative snapshot",
+        outputSeq: 10,
+      },
+      target,
+      onReplaySettled,
+    );
+
+    expect(result).toEqual({ applied: true, replayedFrames: 0 });
+    expect(target.calls).toEqual([]);
+    expect(onReplaySettled).toHaveBeenCalledWith(false);
+  });
+
+  it("reapplies a reconnect snapshot when output or terminal dimensions changed", () => {
+    let requestSequence = 0;
+    const recovery = createPtyRecoveryController({
+      requestIdFactory: () => `req-${++requestSequence}`,
+    });
+    const target = createTarget();
+
+    const initialRequest = recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      { requestId: initialRequest, cols: 80, rows: 24, data: "initial", outputSeq: 10 },
+      target,
+    );
+    target.calls.length = 0;
+
+    const outputChangedRequest = recovery.startSnapshotRequest({
+      preserveTargetIfUnchanged: true,
+    });
+    recovery.applySnapshot(
+      {
+        requestId: outputChangedRequest,
+        cols: 80,
+        rows: 24,
+        data: "output changed",
+        outputSeq: 11,
+      },
+      target,
+    );
+    expect(target.calls).toEqual([
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "output changed"],
+    ]);
+
+    target.calls.length = 0;
+    const dimensionsChangedRequest = recovery.startSnapshotRequest({
+      preserveTargetIfUnchanged: true,
+    });
+    recovery.applySnapshot(
+      {
+        requestId: dimensionsChangedRequest,
+        cols: 100,
+        rows: 30,
+        data: "dimensions changed",
+        outputSeq: 11,
+      },
+      target,
+    );
+    expect(target.calls).toEqual([
+      ["reset", null],
+      ["resize", { cols: 100, rows: 30 }],
+      ["write", "dimensions changed"],
+    ]);
+  });
+
+  it("reapplies an otherwise unchanged snapshot when the local target geometry changed", () => {
+    let requestSequence = 0;
+    const recovery = createPtyRecoveryController({
+      requestIdFactory: () => `req-${++requestSequence}`,
+    });
+    const target = createTarget();
+
+    const initialRequest = recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      { requestId: initialRequest, cols: 80, rows: 24, data: "initial", outputSeq: 10 },
+      target,
+    );
+    target.resize(100, 30);
+    target.calls.length = 0;
+
+    const reconnectRequest = recovery.startSnapshotRequest({
+      preserveTargetIfUnchanged: true,
+    });
+    recovery.applySnapshot(
+      {
+        requestId: reconnectRequest,
+        cols: 80,
+        rows: 24,
+        data: "authoritative",
+        outputSeq: 10,
+      },
+      target,
+    );
+
+    expect(target.calls).toEqual([
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "authoritative"],
+    ]);
+  });
+
+  it("waits for old terminal writes and buffers new frames before resetting a reused target", () => {
+    const requestIds = ["req-initial", "req-reconnect"];
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
+    const target = createTarget();
+
+    recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      { requestId: "req-initial", cols: 80, rows: 24, data: "initial", outputSeq: 10 },
+      target,
+    );
+
+    const barrier = { release: null as (() => void) | null };
+    target.barrier = (callback) => {
+      target.calls.push(["barrier", null]);
+      barrier.release = callback;
+    };
+    target.calls.length = 0;
+    recovery.startSnapshotRequest();
+    const result = recovery.applySnapshot(
+      { requestId: "req-reconnect", cols: 80, rows: 24, data: "fresh", outputSeq: 11 },
+      target,
+    );
+
+    expect(result).toEqual({ applied: true, replayedFrames: 0 });
+    expect(recovery.hasAppliedSnapshot()).toBe(false);
+    expect(target.calls).toEqual([["barrier", null]]);
+
+    const laterFrame = { data: new Uint8Array([0x42]), outputSeq: 12 };
+    expect(recovery.handleBinaryFrame(laterFrame, target)).toEqual({
+      written: false,
+      hasGap: false,
+    });
+    const releaseBarrier = barrier.release;
+    if (!releaseBarrier) throw new Error("target barrier was not armed");
+    releaseBarrier();
+
+    expect(recovery.hasAppliedSnapshot()).toBe(true);
+    expect(target.calls).toEqual([
+      ["barrier", null],
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "fresh"],
+      ["write", laterFrame.data],
     ]);
   });
 

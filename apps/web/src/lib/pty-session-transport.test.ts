@@ -4,14 +4,19 @@ import type { PtyRenderTarget } from "./pty-recovery";
 
 function createTarget(): PtyRenderTarget & { calls: Array<[string, unknown]> } {
   const calls: Array<[string, unknown]> = [];
+  let dimensions = { cols: 0, rows: 0 };
   return {
     calls,
     reset: vi.fn(() => calls.push(["reset", null])),
-    resize: vi.fn((cols: number, rows: number) => calls.push(["resize", { cols, rows }])),
+    resize: vi.fn((cols: number, rows: number) => {
+      dimensions = { cols, rows };
+      calls.push(["resize", { cols, rows }]);
+    }),
     write: vi.fn((data: string | Uint8Array, callback?: () => void) => {
       calls.push(["write", data]);
       callback?.();
     }),
+    getDimensions: () => dimensions,
   };
 }
 
@@ -220,6 +225,136 @@ describe("attachPtySessionTransport", () => {
     vi.advanceTimersByTime(30_000);
     expect(harness.sent).toHaveLength(3);
     expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
+  });
+
+  it("pauses without disposing and reuses an unchanged synchronized terminal on resume", () => {
+    const harness = createHarness();
+    const target = createTarget();
+    const onReady = vi.fn();
+    const transport = attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleReady: (cb) => cb(),
+      onReady,
+    });
+
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "initial snapshot",
+      outputSeq: 10,
+    });
+    expect(onReady).toHaveBeenCalledTimes(1);
+    target.calls.length = 0;
+
+    transport.pause();
+    harness.emitBinary(new Uint8Array([0x41]), 11);
+    expect(target.calls).toEqual([]);
+
+    transport.resume();
+    expect(harness.sent).toHaveLength(2);
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "same state, serialization need not be parsed",
+      outputSeq: 10,
+    });
+
+    expect(target.calls).toEqual([]);
+    expect(onReady).toHaveBeenCalledTimes(2);
+    expect(harness.unsubBinary).not.toHaveBeenCalled();
+    expect(harness.unsubRelay).not.toHaveBeenCalled();
+  });
+
+  it("keeps a received pre-disconnect frame queued when an unchanged reconnect snapshot arrives", () => {
+    const harness = createHarness();
+    const target = createTarget();
+    const transport = attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleReady: (cb) => cb(),
+    });
+
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "initial",
+      outputSeq: 10,
+    });
+    target.calls.length = 0;
+
+    const receivedBeforeDisconnect = new Uint8Array([0x41]);
+    harness.emitBinary(receivedBeforeDisconnect, 11);
+    transport.pause();
+    transport.resume();
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "same state",
+      outputSeq: 11,
+    });
+
+    expect(target.calls).toEqual([]);
+    vi.advanceTimersByTime(16);
+    expect(target.calls).toEqual([["write", receivedBeforeDisconnect]]);
+  });
+
+  it("reapplies the authoritative snapshot after resume when output changed", () => {
+    const harness = createHarness();
+    const target = createTarget();
+    const transport = attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleReady: (cb) => cb(),
+    });
+
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "initial",
+      outputSeq: 10,
+    });
+    target.calls.length = 0;
+
+    transport.pause();
+    transport.resume();
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "changed",
+      outputSeq: 11,
+    });
+
+    expect(target.calls).toEqual([
+      ["write", ""],
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "changed"],
+    ]);
   });
 
   // proxy → relay 闪断时 sendBinary 直接丢帧，但 outputSeq 在 hosted-pty-registry

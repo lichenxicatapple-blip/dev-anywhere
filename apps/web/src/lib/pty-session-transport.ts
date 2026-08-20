@@ -39,6 +39,8 @@ interface PtySessionTransportOptions {
 
 interface PtySessionTransport {
   dispose: () => void;
+  pause: () => void;
+  resume: () => void;
 }
 
 export function attachPtySessionTransport(
@@ -75,6 +77,15 @@ export function attachPtySessionTransport(
         callback?.();
       });
     },
+    barrier: (callback) => target.write("", callback),
+    getDimensions: () => {
+      const reported = target.getDimensions?.();
+      if (reported) return reported;
+      const candidate = target as PtyRenderTarget & { cols?: unknown; rows?: unknown };
+      return typeof candidate.cols === "number" && typeof candidate.rows === "number"
+        ? { cols: candidate.cols, rows: candidate.rows }
+        : null;
+    },
   };
   const frameWriter = createPtyFrameWriteBuffer(tracedTarget, {
     onFramePending,
@@ -83,6 +94,8 @@ export function attachPtySessionTransport(
     cancel: cancelFrameFlush,
   });
   let disposed = false;
+  let paused = false;
+  let preserveTargetForCurrentSubscribe = false;
   let retryTimer: ReturnType<typeof setTimeout> | null = null;
   let slowNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   let gapRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -121,7 +134,9 @@ export function attachPtySessionTransport(
   };
 
   const requestSnapshot = (): void => {
-    const requestId = recovery.startSnapshotRequest();
+    const requestId = recovery.startSnapshotRequest({
+      preserveTargetIfUnchanged: preserveTargetForCurrentSubscribe,
+    });
     ws.send(JSON.stringify({ type: "session_subscribe", sessionId, requestId }));
   };
 
@@ -143,12 +158,13 @@ export function attachPtySessionTransport(
     }, slowNoticeDelayMs);
   };
 
-  const startSnapshotSubscribe = (): void => {
-    if (disposed) return;
+  const startSnapshotSubscribe = (preserveTargetIfUnchanged = false): void => {
+    if (disposed || paused) return;
     clearRetry();
     clearSlowNotice();
     clearGapRecovery();
-    frameWriter.clear();
+    if (!preserveTargetIfUnchanged) frameWriter.clear();
+    preserveTargetForCurrentSubscribe = preserveTargetIfUnchanged;
     subscribeDelayedReported = false;
     onSubscribeStarted?.();
     requestSnapshot();
@@ -157,7 +173,7 @@ export function attachPtySessionTransport(
   };
 
   const unsubBinary = ws.subscribeBinary(sessionId, (data, outputSeq) => {
-    if (disposed) return;
+    if (disposed || paused) return;
     markPtyOutputReceived(sessionId, data, outputSeq);
     const result = recovery.handleBinaryFrame({ data, outputSeq }, frameWriter.target);
     if (result.hasGap) {
@@ -168,7 +184,7 @@ export function attachPtySessionTransport(
   });
 
   const unsubRelay = relay.onMessage((msg) => {
-    if (disposed || msg.sessionId !== sessionId) return;
+    if (disposed || paused || msg.sessionId !== sessionId) return;
     if (msg.type === "terminal_resize") {
       frameWriter.target.resize(msg.cols as number, msg.rows as number);
       startSnapshotSubscribe();
@@ -186,27 +202,40 @@ export function attachPtySessionTransport(
       },
       frameWriter.target,
       (hasGap) => {
-        if (disposed) return;
+        if (disposed || paused) return;
         if (hasGap) {
           armGapRecoveryTimer();
         } else {
           clearGapRecovery();
         }
+        clearRetry();
+        clearSlowNotice();
+        scheduleReady(() => {
+          if (!disposed && !paused) onReady?.();
+        });
       },
     );
     if (!result.applied) return;
-    clearRetry();
-    clearSlowNotice();
-    scheduleReady(() => {
-      if (!disposed) onReady?.();
-    });
   });
 
   startSnapshotSubscribe();
 
   return {
+    pause: () => {
+      if (disposed || paused) return;
+      paused = true;
+      clearRetry();
+      clearSlowNotice();
+      clearGapRecovery();
+    },
+    resume: () => {
+      if (disposed || !paused) return;
+      paused = false;
+      startSnapshotSubscribe(true);
+    },
     dispose: () => {
       disposed = true;
+      paused = true;
       clearRetry();
       clearSlowNotice();
       clearGapRecovery();

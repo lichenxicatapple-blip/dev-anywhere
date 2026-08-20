@@ -16,6 +16,8 @@ function createHarness() {
   const disposeTerminal = vi.fn();
   const disposeRawInput = vi.fn();
   const disposeTransport = vi.fn();
+  const pauseTransport = vi.fn();
+  const resumeTransport = vi.fn();
   const host = document.createElement("div") as HTMLDivElement;
   return {
     host,
@@ -23,6 +25,8 @@ function createHarness() {
     disposeTerminal,
     disposeRawInput,
     disposeTransport,
+    pauseTransport,
+    resumeTransport,
     ws: {
       send: vi.fn(() => true),
       subscribeBinary: vi.fn(() => vi.fn()),
@@ -32,7 +36,11 @@ function createHarness() {
     },
     createTerminal: vi.fn(async () => ({ terminal, dispose: disposeTerminal })),
     attachRawInput: vi.fn(() => ({ dispose: disposeRawInput })),
-    attachTransport: vi.fn(() => ({ dispose: disposeTransport })),
+    attachTransport: vi.fn(() => ({
+      dispose: disposeTransport,
+      pause: pauseTransport,
+      resume: resumeTransport,
+    })),
   };
 }
 
@@ -209,6 +217,67 @@ describe("attachPtyTerminalController", () => {
     expect(h.disposeRawInput).toHaveBeenCalledTimes(1);
     expect(h.disposeTerminal).toHaveBeenCalledTimes(1);
     expect(h.terminal.focus).not.toHaveBeenCalled();
+  });
+
+  it("pauses and resumes the transport while preserving the terminal", async () => {
+    const h = createHarness();
+    const controller = attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal: h.createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+    });
+    await Promise.resolve();
+
+    controller.setTransportActive(false);
+    expect(h.pauseTransport).toHaveBeenCalledTimes(1);
+    expect(h.disposeTransport).not.toHaveBeenCalled();
+    expect(h.disposeTerminal).not.toHaveBeenCalled();
+    expect(h.disposeRawInput).not.toHaveBeenCalled();
+
+    controller.setTransportActive(true);
+    expect(h.attachTransport).toHaveBeenCalledTimes(1);
+    expect(h.resumeTransport).toHaveBeenCalledTimes(1);
+
+    controller.dispose();
+    expect(h.disposeTransport).toHaveBeenCalledTimes(1);
+    expect(h.disposeTerminal).toHaveBeenCalledTimes(1);
+  });
+
+  it("honors a transport state change made before async terminal creation settles", async () => {
+    const h = createHarness();
+    let resolveCreate: (value: {
+      terminal: typeof h.terminal;
+      dispose: () => void;
+    }) => void = () => {
+      throw new Error("createTerminal promise was not initialized");
+    };
+    const createTerminal = vi.fn(
+      () =>
+        new Promise<{ terminal: typeof h.terminal; dispose: () => void }>((resolve) => {
+          resolveCreate = resolve;
+        }),
+    );
+    const controller = attachPtyTerminalController({
+      host: h.host,
+      sessionId: "s1",
+      ws: h.ws,
+      relay: h.relay,
+      createTerminal,
+      attachRawInput: h.attachRawInput,
+      attachTransport: h.attachTransport,
+    });
+
+    controller.setTransportActive(false);
+    resolveCreate({ terminal: h.terminal, dispose: h.disposeTerminal });
+    await Promise.resolve();
+    expect(h.attachTransport).not.toHaveBeenCalled();
+
+    controller.setTransportActive(true);
+    expect(h.attachTransport).toHaveBeenCalledTimes(1);
   });
 
   it("calls onError and avoids partial wiring when createTerminal rejects", async () => {

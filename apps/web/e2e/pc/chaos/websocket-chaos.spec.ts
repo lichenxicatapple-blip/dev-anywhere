@@ -123,22 +123,42 @@ test.describe("WebSocket reconnect chaos", () => {
     ).toHaveCount(1);
   });
 
-  test("hides PTY input while disconnected and restores it after reconnect", async ({ page }) => {
+  test("disables PTY input while disconnected and restores it without rebuilding xterm", async ({
+    page,
+  }) => {
     await selectFakeProxy(page);
     await page.goto(`${BASE_URL}/#/chat/claude-pty?mode=pty`);
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
     await expect(
       page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
     ).toBeVisible();
+    await page.evaluate(() => {
+      (window as typeof window & { __ptyBeforeReconnect?: unknown }).__ptyBeforeReconnect =
+        window.__ccTestPtyTerminals?.get("claude-pty");
+    });
 
     await holdNextConnectionAndDropSocket(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
       "data-state",
       "disconnected",
     );
-    await expect(
-      page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
-    ).toHaveCount(0);
+    const terminalInput = page.locator(
+      '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
+    );
+    await expect(terminalInput).toHaveCount(1);
+    const inputCountBefore = (await sentFakeRelayMessages(page)).filter(
+      (message) => message.type === "remote_input_raw",
+    ).length;
+    await terminalInput.focus();
+    await page.keyboard.type("must-not-send");
+    await expect
+      .poll(
+        async () =>
+          (await sentFakeRelayMessages(page)).filter(
+            (message) => message.type === "remote_input_raw",
+          ).length,
+      )
+      .toBe(inputCountBefore);
 
     await releaseHeldConnections(page);
 
@@ -155,9 +175,24 @@ test.describe("WebSocket reconnect chaos", () => {
     );
     expect(lastRegisterIndex).toBeGreaterThanOrEqual(0);
     expect(subscribeIndex).toBeGreaterThan(lastRegisterIndex);
-    await expect(
-      page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
-    ).toBeVisible();
+    await expect(terminalInput).toBeVisible();
+    expect(
+      await page.evaluate(
+        () =>
+          (window as typeof window & { __ptyBeforeReconnect?: unknown }).__ptyBeforeReconnect ===
+          window.__ccTestPtyTerminals?.get("claude-pty"),
+      ),
+    ).toBe(true);
+    await terminalInput.focus();
+    await page.keyboard.type("restored-input");
+    await expect
+      .poll(async () =>
+        (await sentFakeRelayMessages(page))
+          .filter((message) => message.type === "remote_input_raw")
+          .map((message) => String(message.data ?? ""))
+          .join(""),
+      )
+      .toContain("restored-input");
   });
 
   test("reselects and resubscribes PTY after a graceful proxy restart", async ({ page }) => {

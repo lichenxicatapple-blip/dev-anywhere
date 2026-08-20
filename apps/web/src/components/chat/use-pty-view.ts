@@ -25,6 +25,7 @@ import { attachXtermRawInput } from "@/lib/pty-input";
 import { isOnlyPtyNonTypingInput } from "@/lib/pty-non-typing-input";
 import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
+import { schedulePtyTransportAttach } from "@/lib/pty-transport-attach-scheduler";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
 import { activateXtermLinkAtPoint, hasXtermLinkAtPoint } from "@/lib/xterm-touch-link-activation";
@@ -160,6 +161,7 @@ interface ScrollControllerHandle {
 
 interface TerminalControllerHandle {
   dispose: () => void;
+  setTransportActive: (active: boolean) => void;
 }
 
 interface MobilePtyControlsVisibilityInput {
@@ -320,6 +322,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   // === sub-hooks (各自管自己的 state，互不依赖) ===
   const connection = usePtyConnectionState();
+  const markDisconnected = connection.markDisconnected;
   const follow = usePtyFollowState();
   const traceEnabled = usePtyScrollTraceEnabled();
   const { openImagePreview } = useImagePreview();
@@ -333,6 +336,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const activeRef = useRef(active);
   const previousActiveRef = useRef(active);
   const readyRef = useRef(false);
+  const transportAvailableRef = useRef(false);
   const pendingNewFrameRef = useRef(false);
   const userHasVerticalScrollIntentRef = useRef(false);
   const lastFrameWriteAtRef = useRef<number | null>(null);
@@ -386,6 +390,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const keyboardOffset = physicalKeyboardMode ? 0 : detectedKeyboardOffset;
   const keyboardOpen = keyboardOffset > 0;
   const mobileControlsBottomInset = physicalKeyboardMode ? 0 : layoutBottomInset;
+  const [terminalRuntimeStarted, setTerminalRuntimeStarted] = useState(
+    () => connected && proxyOnline,
+  );
   physicalKeyboardModeRef.current = physicalKeyboardMode;
 
   // Event/RAF callbacks must observe the render that scheduled them. Effects
@@ -393,10 +400,18 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   // keepalive activation transition.
   activeRef.current = active;
   readyRef.current = connection.ready;
+  transportAvailableRef.current = connected && proxyOnline;
 
   const canAcceptInput = useCallback((): boolean => {
-    return activeRef.current && readyRef.current;
+    return activeRef.current && readyRef.current && transportAvailableRef.current;
   }, []);
+
+  // First connection boots the expensive xterm/view graph. Transient relay/proxy outages only
+  // detach its transport; keeping this latch true avoids destroying and rebuilding every cached
+  // terminal on each reconnect.
+  useEffect(() => {
+    if (connected && proxyOnline) setTerminalRuntimeStarted(true);
+  }, [connected, proxyOnline]);
 
   useEffect(() => {
     if (keyboardOffset > 0) setHasSeenSoftKeyboard(true);
@@ -739,16 +754,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [canAcceptInput],
   );
 
-  // === controller graph：单 effect 编排 terminal / scroll ===
+  // === persistent controller graph：单 effect 编排 terminal / scroll ===
   // attachPtyTerminalController 的 onTerminalReady 是 typed handshake：term 在 callback
   // 入参里直接给到，不再依赖 React 重渲染让下游 effect 通过 ref 读到。所有 terminal
   // 衍生 wiring（image link / debug 注册 / scroll-controller）
-  // 都在这个 callback 内一并挂载。reconnect 时 termCtrl/scrollCtrl 一起重建——靠
-  // userHasVerticalScrollIntentRef 跨周期保留用户回看意图，且 scroll-controller 内部
-  // 对 wasAtBottom 的判定已修正（updateSpacer 之后再读 scrollHeight），不会因 spacer
-  // 几何 stale 误判 atBottom 而清掉 intent。
+  // 都在这个 callback 内一并挂载。terminalRuntimeStarted 是单向 latch：首次连上后，
+  // reconnect 只替换 transport，不销毁 xterm/scroll/search/字体监听这棵昂贵视图图谱。
   useEffect(() => {
-    if (!connected || !proxyOnline) return;
+    if (!terminalRuntimeStarted) return;
     const host = xtermHostRef.current;
     const ws = wsManagerRef;
     const relay = relayClientRef;
@@ -973,6 +986,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         const message = err instanceof Error ? err.message : String(err);
         toast.error(`终端初始化失败：${message}`);
       },
+      connectTransportInitially: connected && proxyOnline,
       ...connection.transport,
     });
     terminalControllerRef.current = termCtrl;
@@ -1013,8 +1027,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [
     sessionId,
-    connected,
-    proxyOnline,
+    terminalRuntimeStarted,
     containerEl,
     spacerRef,
     xtermHostRef,
@@ -1032,6 +1045,23 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,
   ]);
+
+  // Network ownership is intentionally separate from the persistent terminal/view graph above.
+  // The visible PTY resumes immediately; hidden kept-alive PTYs are admitted one per animation
+  // frame so their snapshot parsing/layout cannot monopolize the connection UI's main thread.
+  useEffect(() => {
+    if (!terminalRuntimeStarted) return;
+    const controller = terminalControllerRef.current;
+    if (!controller) return;
+    if (!connected || !proxyOnline) {
+      markDisconnected();
+      controller.setTransportActive(false);
+      return;
+    }
+    return schedulePtyTransportAttach(sessionId, active ? "active" : "background", () => {
+      terminalControllerRef.current?.setTransportActive(true);
+    });
+  }, [active, connected, markDisconnected, proxyOnline, sessionId, terminalRuntimeStarted]);
 
   // === font-size effect：依赖 ptyFontSize 单独触发 ===
   useEffect(() => {

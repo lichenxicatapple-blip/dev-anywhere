@@ -32,6 +32,8 @@ type PtyTransportAttacher = (opts: {
   onSubscribeDelayed?: () => void;
 }) => {
   dispose: () => void;
+  pause?: () => void;
+  resume?: () => void;
 };
 
 interface PtyTerminalControllerOptions {
@@ -58,6 +60,7 @@ interface PtyTerminalControllerOptions {
   onReady?: () => void;
   onSubscribeStarted?: () => void;
   onSubscribeDelayed?: () => void;
+  connectTransportInitially?: boolean;
   // createTerminal 等异步初始化失败时的回调；调用方可借此弹 toast / 切错误态。
   // 不提供则错误仅记到 console.error，UI 静默无感知。
   onError?: (err: unknown) => void;
@@ -65,6 +68,7 @@ interface PtyTerminalControllerOptions {
 
 interface PtyTerminalController {
   dispose: () => void;
+  setTransportActive: (active: boolean) => void;
 }
 
 export function attachPtyTerminalController(
@@ -88,14 +92,46 @@ export function attachPtyTerminalController(
     onReady,
     onSubscribeStarted,
     onSubscribeDelayed,
+    connectTransportInitially = true,
     onError,
   } = options;
 
   let disposed = false;
   let disposeTerminal: (() => void) | null = null;
   let disposeRawInput: (() => void) | null = null;
-  let transport: ReturnType<typeof attachPtySessionTransport> | null = null;
+  let transport: ReturnType<PtyTransportAttacher> | null = null;
+  let terminal: PtyControlledTerminal | null = null;
+  let transportDesiredActive = connectTransportInitially;
   let removeFocusHandler: (() => void) | null = null;
+
+  const reconcileTransport = (): void => {
+    if (disposed || !terminal) return;
+    if (!transportDesiredActive) {
+      if (transport?.pause) {
+        transport.pause();
+      } else {
+        // Backward-compatible fallback for injected transports that only implement dispose.
+        transport?.dispose();
+        transport = null;
+      }
+      return;
+    }
+    if (transport) {
+      transport.resume?.();
+      return;
+    }
+    transport = attachTransport({
+      sessionId,
+      ws,
+      relay,
+      target: terminal,
+      onFramePending,
+      onFrameWritten,
+      onReady,
+      onSubscribeStarted,
+      onSubscribeDelayed,
+    });
+  };
 
   void (async () => {
     try {
@@ -106,6 +142,7 @@ export function attachPtyTerminalController(
       }
 
       disposeTerminal = result.dispose;
+      terminal = result.terminal;
       disposeRawInput = attachRawInput(result.terminal, sessionId, {
         onRawInput,
         ...(isInputEnabled ? { isInputEnabled } : {}),
@@ -124,17 +161,7 @@ export function attachPtyTerminalController(
         if (!disposed) focusTerminal();
       });
 
-      transport = attachTransport({
-        sessionId,
-        ws,
-        relay,
-        target: result.terminal,
-        onFramePending,
-        onFrameWritten,
-        onReady,
-        onSubscribeStarted,
-        onSubscribeDelayed,
-      });
+      reconcileTransport();
     } catch (err) {
       // createTerminal / attachTransport 抛出会让用户看到空白终端无任何提示。
       // 至少把错误抛给上层（toast / 错误态）+ 控制台，避免静默失败。
@@ -144,12 +171,19 @@ export function attachPtyTerminalController(
   })();
 
   return {
+    setTransportActive: (active) => {
+      transportDesiredActive = active;
+      reconcileTransport();
+    },
     dispose: () => {
       disposed = true;
+      transportDesiredActive = false;
       transport?.dispose();
+      transport = null;
       removeFocusHandler?.();
       disposeRawInput?.();
       disposeTerminal?.();
+      terminal = null;
     },
   };
 }

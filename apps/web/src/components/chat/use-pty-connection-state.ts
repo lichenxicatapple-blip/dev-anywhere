@@ -28,6 +28,11 @@ export function usePtyConnectionState() {
     setSubscribeDelayed(true);
   }, []);
 
+  const markDisconnected = useCallback(() => {
+    setReady(false);
+    setSubscribeDelayed(false);
+  }, []);
+
   const overlay = useMemo(
     () => ({
       connecting: connectingVisible,
@@ -49,5 +54,6 @@ export function usePtyConnectionState() {
     ready,
     overlay,
     transport,
+    markDisconnected,
   };
 }

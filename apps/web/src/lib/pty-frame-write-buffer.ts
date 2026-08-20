@@ -80,6 +80,8 @@ export function createPtyFrameWriteBuffer(
         if (wasEmpty) onFramePending?.();
         scheduleFlush();
       },
+      ...(target.barrier ? { barrier: target.barrier } : {}),
+      ...(target.getDimensions ? { getDimensions: target.getDimensions } : {}),
     },
     clear: clearPending,
     dispose: () => {

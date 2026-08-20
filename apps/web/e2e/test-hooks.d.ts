@@ -54,6 +54,9 @@ interface CCTestHooks {
 
 interface DevAnywherePtyScrollTraceEntry {
   event?: string;
+  viewportY?: number;
+  hostTopDrift?: number;
+  details?: string;
 }
 
 interface DevAnywherePtyDebugToolsApi {
