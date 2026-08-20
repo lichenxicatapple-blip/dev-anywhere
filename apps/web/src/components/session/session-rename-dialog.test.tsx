@@ -3,7 +3,12 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { SessionRenameDialog } from "./session-rename-dialog";
 
 describe("SessionRenameDialog", () => {
-  afterEach(() => cleanup());
+  afterEach(async () => {
+    cleanup();
+    // Radix FocusScope restores focus in a zero-delay unmount callback. Let it finish while this
+    // test file's jsdom realm is still active so its CustomEvent belongs to the target document.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  });
 
   it("does not submit an empty title", async () => {
     const onRename = vi.fn().mockResolvedValue(undefined);
