@@ -353,7 +353,20 @@ async function locateVisibleToken(
       const line = buffer.getLine(row)?.translateToString(true) ?? "";
       const match = /KEEP_SELECTION_TOKEN_\d{3}/u.exec(line);
       if (!match || match.index === undefined) continue;
-      const x = screenRect.left + (match.index + 5.5) * cellWidth;
+      // A preceding handle drag may have legitimately autoscrolled the wide terminal, leaving
+      // only the latter part of this token visible. Pick a real visible cell inside the token
+      // instead of assuming its fixed sixth cell is still inside the scrollport.
+      const firstVisibleColumn = Math.ceil(
+        (containerRect.left + 20 - screenRect.left) / cellWidth - 0.5,
+      );
+      const lastVisibleColumn = Math.floor(
+        (containerRect.right - 20 - screenRect.left) / cellWidth - 0.5,
+      );
+      const firstTargetColumn = Math.max(match.index, firstVisibleColumn);
+      const lastTargetColumn = Math.min(match.index + match[0].length - 1, lastVisibleColumn);
+      if (firstTargetColumn > lastTargetColumn) continue;
+      const targetColumn = Math.min(Math.max(match.index + 5, firstTargetColumn), lastTargetColumn);
+      const x = screenRect.left + (targetColumn + 0.5) * cellWidth;
       const y = screenRect.top + (row - buffer.viewportY + 0.5) * cellHeight;
       if (
         x < containerRect.left + 20 ||
