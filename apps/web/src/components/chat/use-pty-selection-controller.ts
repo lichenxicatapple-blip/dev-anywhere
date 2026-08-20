@@ -962,6 +962,7 @@ export function usePtySelectionController(
     let gesture: DesktopSelectionGesture | null = null;
     let nextGestureId = 1;
     let autoscrollFrame: number | null = null;
+    let managedCopyEventHandled = false;
     let gestureMarkerBinding: {
       terminal: Terminal;
       buffer: IBuffer;
@@ -1408,6 +1409,7 @@ export function usePtySelectionController(
     const onCopy = (event: ClipboardEvent): void => {
       const selected = refreshCurrentSelection()?.text ?? "";
       if (!selected || !event.clipboardData) return;
+      managedCopyEventHandled = true;
       event.clipboardData.setData("text/plain", selected);
       event.preventDefault();
       event.stopImmediatePropagation();
@@ -1424,7 +1426,24 @@ export function usePtySelectionController(
         // committed range after writing it to the clipboard.
         event.preventDefault();
         event.stopImmediatePropagation();
-        void copyText(selected, { allowLegacyFallback: true });
+        managedCopyEventHandled = false;
+        try {
+          document.execCommand("copy");
+        } catch {
+          // Fall through to the Clipboard API / hidden-textarea compatibility path below.
+        }
+        if (!managedCopyEventHandled) {
+          const activeElement =
+            document.activeElement instanceof HTMLElement ? document.activeElement : null;
+          void copyText(selected, { allowLegacyFallback: true }).finally(() => {
+            if (
+              activeElement?.isConnected &&
+              (document.activeElement === document.body || document.activeElement === null)
+            ) {
+              activeElement.focus({ preventScroll: true });
+            }
+          });
+        }
         return;
       }
       if (

@@ -187,6 +187,9 @@ async function copyManagedSelection(page: Page): Promise<string> {
   await page.keyboard.press(COPY_SHORTCUT);
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).not.toBe(sentinel);
   expect(await readRawPtyInput(page)).toBe(rawInputBeforeCopy);
+  expect(
+    await page.evaluate(() => document.activeElement?.classList.contains("xterm-helper-textarea")),
+  ).toBe(true);
   return page.evaluate(() => navigator.clipboard.readText());
 }
 
