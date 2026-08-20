@@ -2456,72 +2456,6 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(false);
   });
 
-  it("marks selection autoscroll as explicit review before its bare DOM scroll lands", () => {
-    const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 99: "prompt" });
-    const onUserVerticalScrollIntentChange = vi.fn();
-    const controller = attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term: terminal,
-      hasNewFrame: () => false,
-      consumeNewFrame: vi.fn(),
-      hasNewFramesWhileAway: () => false,
-      setNewFramesWhileAway: vi.fn(),
-      onUserVerticalScrollIntentChange,
-    });
-
-    controller.markSelectionAutoscrollIntent("selection edge autoscroll");
-    container.scrollTop = 800;
-    container.dispatchEvent(new Event("scroll"));
-
-    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
-    expect(controller.getDebugProbe().verticalIntentSource).toBe("selection-autoscroll");
-    expect(container.scrollTop).toBe(800);
-    expect(terminal.buffer.active.viewportY).toBe(40);
-    expect(host.style.top).toBe("800px");
-    expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
-  });
-
-  it("rejects xterm's private drag-selection scroll while the review container owns the row", async () => {
-    const { container, spacer, host } = createDom();
-    const { terminal, emitScroll } = createTerminal({ 99: "prompt" });
-    const renderProjection = createHistoryProjectionRenderer();
-    const controller = attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term: terminal,
-      hasNewFrame: () => false,
-      consumeNewFrame: vi.fn(),
-      hasNewFramesWhileAway: () => false,
-      setNewFramesWhileAway: vi.fn(),
-      onHistoryProjectionChange: renderProjection,
-    });
-
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
-    const ownedScrollTop = container.scrollTop;
-    const ownedViewportY = terminal.buffer.active.viewportY;
-    const ownedHostTop = host.style.top;
-
-    controller.setSelectionDragActive(true);
-    terminal.buffer.active.viewportY = ownedViewportY - 6;
-    emitScroll();
-    await Promise.resolve();
-
-    expect(container.scrollTop).toBe(ownedScrollTop);
-    expect(terminal.buffer.active.viewportY).toBe(ownedViewportY);
-    expect(host.style.top).toBe(ownedHostTop);
-
-    // The gate is scoped to the mouse drag lifetime. Normal live/output term scroll behavior is
-    // unchanged as soon as pointerup releases it.
-    controller.setSelectionDragActive(false);
-    terminal.buffer.active.viewportY = ownedViewportY - 3;
-    emitScroll();
-    expect(terminal.buffer.active.viewportY).toBe(ownedViewportY - 3);
-  });
-
   // Wheel integration around semantic live bottom. Pure "should clear intent?" semantics are
   // FSM coverage; these tests verify controller geometry produces the right bottom signal.
   // 镜像反向: 用户主动向下滚到底, intent 应该释放, output 才能恢复跟随。
@@ -3492,31 +3426,6 @@ describe("attachPtyScrollController", () => {
 
     // Keep the cursor near the center: 400 - 360 / 2 = 220.
     expect(container.scrollLeft).toBe(220);
-  });
-
-  it("preserves drag-select horizontal autoscroll before the browser scroll event arrives", () => {
-    const { container, spacer, host } = createDom();
-    defineScrollWidth(container, 1600);
-    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
-    const controller = attachPtyScrollController({
-      container,
-      spacer,
-      host,
-      term: terminal,
-      hasNewFrame: () => false,
-      consumeNewFrame: vi.fn(),
-      hasNewFramesWhileAway: () => false,
-      setNewFramesWhileAway: vi.fn(),
-    });
-
-    controller.markHorizontalScrollIntent("dragSelectAutoscroll dx=14");
-    container.scrollLeft = 14;
-
-    terminal.buffer.active.cursorX = 0; // cursorPxX = 0, viewport [14, 814] -> left of view
-    emitRender();
-
-    expect(container.scrollLeft).toBe(14);
-    expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
   });
 
   it("treats a large unmarked native horizontal scroll as user review intent", () => {

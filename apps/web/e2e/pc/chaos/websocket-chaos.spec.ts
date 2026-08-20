@@ -62,6 +62,133 @@ async function waitForAnimationFrames(
   );
 }
 
+test.describe("Mobile foreground WebSocket recovery", () => {
+  test.use({
+    hasTouch: true,
+    isMobile: true,
+    userAgent:
+      "Mozilla/5.0 (Linux; Android 15; Pixel 9) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/151.0.0.0 Mobile Safari/537.36",
+    viewport: { width: 390, height: 844 },
+  });
+
+  test.beforeEach(async ({ page }) => {
+    await installFakeRelay(page);
+  });
+
+  test("replaces a silent half-open socket and restores real PTY input without reloading", async ({
+    page,
+  }) => {
+    test.setTimeout(45_000);
+    await selectFakeProxy(page);
+    await page.goto(`${BASE_URL}/#/chat/claude-pty?mode=pty`);
+    const terminalInput = page.locator(
+      '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
+    );
+    await expect(terminalInput).toBeVisible();
+
+    await page.evaluate(() => {
+      const recoveryWindow = window as typeof window & { __socketBeforeSignalLoss?: unknown };
+      recoveryWindow.__socketBeforeSignalLoss = window.__devAnywhereE2E?.socket;
+      document.dispatchEvent(new Event("visibilitychange"));
+      window.dispatchEvent(new Event("focus"));
+    });
+    expect(
+      await page.evaluate(() => {
+        const recoveryWindow = window as typeof window & { __socketBeforeSignalLoss?: unknown };
+        return recoveryWindow.__socketBeforeSignalLoss === window.__devAnywhereE2E?.socket;
+      }),
+    ).toBe(true);
+
+    await page.evaluate(() => {
+      // Simulate the elevator failure mode: Chromium still says OPEN, but the route has
+      // become a black hole and no application-level pong comes back.
+      window.__devAnywhereE2E?.setRelayLivenessPongEnabled(false);
+    });
+
+    await expect
+      .poll(
+        () =>
+          page.evaluate(() => {
+            const recoveryWindow = window as typeof window & {
+              __socketBeforeSignalLoss?: unknown;
+            };
+            return recoveryWindow.__socketBeforeSignalLoss !== window.__devAnywhereE2E?.socket;
+          }),
+        { timeout: 22_000 },
+      )
+      .toBe(true);
+
+    await page.evaluate(() => window.__devAnywhereE2E?.setRelayLivenessPongEnabled(true));
+    await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute("data-state", "idle", {
+      timeout: 5_000,
+    });
+
+    await terminalInput.focus();
+    await page.keyboard.type("input-after-signal-recovery");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window.__devAnywhereE2E?.socket?.sent ?? [])
+            .flatMap((raw) => {
+              try {
+                return [JSON.parse(raw) as Record<string, unknown>];
+              } catch {
+                return [];
+              }
+            })
+            .filter((message) => message.type === "remote_input_raw")
+            .map((message) => String(message.data ?? ""))
+            .join(""),
+        ),
+      )
+      .toContain("input-after-signal-recovery");
+
+    await page.evaluate(() => {
+      const recoveryWindow = window as typeof window & { __socketBeforeOnline?: unknown };
+      recoveryWindow.__socketBeforeOnline = window.__devAnywhereE2E?.socket;
+      window.__devAnywhereE2E?.setRelayLivenessPongEnabled(false);
+    });
+    await page.context().setOffline(true);
+    expect(
+      await page.evaluate(() => {
+        const recoveryWindow = window as typeof window & { __socketBeforeOnline?: unknown };
+        return recoveryWindow.__socketBeforeOnline === window.__devAnywhereE2E?.socket;
+      }),
+    ).toBe(true);
+    await page.context().setOffline(false);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const recoveryWindow = window as typeof window & { __socketBeforeOnline?: unknown };
+          return recoveryWindow.__socketBeforeOnline !== window.__devAnywhereE2E?.socket;
+        }),
+      )
+      .toBe(true);
+
+    await page.evaluate(() => window.__devAnywhereE2E?.setRelayLivenessPongEnabled(true));
+    await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute("data-state", "idle");
+    await terminalInput.focus();
+    await page.keyboard.type("input-after-online-event");
+    await expect
+      .poll(() =>
+        page.evaluate(() =>
+          (window.__devAnywhereE2E?.socket?.sent ?? [])
+            .flatMap((raw) => {
+              try {
+                return [JSON.parse(raw) as Record<string, unknown>];
+              } catch {
+                return [];
+              }
+            })
+            .filter((message) => message.type === "remote_input_raw")
+            .map((message) => String(message.data ?? ""))
+            .join(""),
+        ),
+      )
+      .toContain("input-after-online-event");
+  });
+});
+
 test.describe("WebSocket reconnect chaos", () => {
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);

@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { attachPtyHistoryProjection } from "./pty-history-projection";
+import type { IBufferCell, IBufferLine } from "@xterm/xterm";
+import {
+  attachPtyHistoryProjection,
+  getRenderedPtyHistorySelectionLines,
+} from "./pty-history-projection";
 
 function createHost(): HTMLElement {
   const host = document.createElement("div");
@@ -21,6 +25,39 @@ afterEach(() => {
 });
 
 describe("attachPtyHistoryProjection", () => {
+  it("keeps frozen row identity when a full scrollback trim shifts xterm's viewport", () => {
+    const host = createHost();
+    let rowIdentityOffset = 0;
+    const line = {
+      length: 1,
+      isWrapped: false,
+      getCell: () => ({ getChars: () => "A", getWidth: () => 1 }) as unknown as IBufferCell,
+      translateToString: () => "A",
+    } as unknown as IBufferLine;
+    const controller = attachPtyHistoryProjection(host, {
+      serializeRangeAsHtml: () =>
+        "<html><body><pre><div><div><span>A</span></div><div><span>B</span></div></div></pre></body></html>",
+      getSelectionLine: () => line,
+      getBufferRowIdentityOffset: () => rowIdentityOffset,
+    });
+
+    controller.render({
+      kind: "review",
+      startLine: 40,
+      endLine: 41,
+      rowHeight: 20,
+      topOffset: 800,
+    });
+
+    const snapshot = host.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
+    expect(snapshot?.dataset.rowIdentityOffset).toBe("0");
+    expect(Array.from(getRenderedPtyHistorySelectionLines(host).keys())).toEqual([40, 41]);
+    rowIdentityOffset = -3;
+    expect(Array.from(getRenderedPtyHistorySelectionLines(host).keys())).toEqual([37, 38]);
+    expect(snapshot?.textContent).toContain("A");
+    expect(snapshot?.textContent).toContain("B");
+  });
+
   it("builds a styled preview directly from a serialized buffer range", () => {
     const host = createHost();
     const serializeRangeAsHtml = vi.fn(
@@ -105,6 +142,73 @@ describe("attachPtyHistoryProjection", () => {
     expect(foreground).toBeInstanceOf(HTMLSpanElement);
     expect((foreground as HTMLElement | null)?.style.opacity).toBe("0.5");
     expect(foreground?.textContent).toBe("Explain this codebase");
+  });
+
+  it("keeps dim truecolor glyphs identical to xterm's live DOM renderer", () => {
+    const host = createHost();
+    const sourceRows = [
+      [
+        { text: "你", isDim: false, isRenderedFgRGB: false },
+        { text: "", isDim: false, isRenderedFgRGB: false },
+        { text: "R", isDim: true, isRenderedFgRGB: true },
+        { text: "G", isDim: true, isRenderedFgRGB: true },
+        { text: "B", isDim: true, isRenderedFgRGB: true },
+        { text: "P", isDim: true, isRenderedFgRGB: false },
+      ],
+    ];
+    const controller = attachPtyHistoryProjection(host, {
+      serializeRangeAsHtml: () =>
+        "<html><body><pre><div><div><span>你</span><span style='color: #cdd6f4; opacity: 0.5'>RGB</span><span style='color: #e5e5e5; opacity: 0.5'>P</span></div></div></pre></body></html>",
+      getSerializedCell: (line, column) => sourceRows[line]?.[column] ?? null,
+    });
+
+    controller.render({
+      kind: "review",
+      startLine: 0,
+      endLine: 0,
+      rowHeight: 20,
+      topOffset: 0,
+    });
+
+    const spans = host.querySelectorAll<HTMLElement>(
+      '[data-slot="pty-review-snapshot"] .xterm-rows > div > span',
+    );
+    expect(spans[1]?.textContent).toBe("RGB");
+    expect(spans[1]?.style.color).toBe("rgb(205, 214, 244)");
+    expect(spans[1]?.style.opacity).toBe("");
+    expect(spans[1]?.children).toHaveLength(0);
+    expect(spans[2]?.style.opacity).toBe("");
+    expect(spans[2]?.firstElementChild).toHaveStyle({ opacity: "0.5" });
+    expect(spans[2]?.textContent).toBe("P");
+  });
+
+  it("removes carried dim opacity for a truecolor row without an explicit opening span", () => {
+    const host = createHost();
+    const sourceRows = [
+      [{ text: "A", isDim: true, isRenderedFgRGB: true }],
+      [{ text: "B", isDim: true, isRenderedFgRGB: true }],
+    ];
+    const controller = attachPtyHistoryProjection(host, {
+      serializeRangeAsHtml: () =>
+        "<html><body><pre><div><div><span></span><span style='color: #cdd6f4; opacity: 0.5'>A</span></div><div><span>B</span></div></div></pre></body></html>",
+      getSerializedCell: (line, column) => sourceRows[line]?.[column] ?? null,
+    });
+
+    controller.render({
+      kind: "review",
+      startLine: 0,
+      endLine: 1,
+      rowHeight: 20,
+      topOffset: 0,
+    });
+
+    const rows = host.querySelectorAll<HTMLElement>(
+      '[data-slot="pty-review-snapshot"] .xterm-rows > div',
+    );
+    expect(rows[0]?.lastElementChild).toHaveStyle({ color: "rgb(205, 214, 244)" });
+    expect((rows[0]?.lastElementChild as HTMLElement | null)?.style.opacity).toBe("");
+    expect(rows[1]?.firstElementChild).toHaveStyle({ color: "rgb(205, 214, 244)" });
+    expect((rows[1]?.firstElementChild as HTMLElement | null)?.style.opacity).toBe("");
   });
 
   it("preserves a background that carries onto a blank row", () => {

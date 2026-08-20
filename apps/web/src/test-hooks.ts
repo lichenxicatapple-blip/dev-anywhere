@@ -99,8 +99,8 @@ export function installTestHooks(): void {
           screenHeight: screen.clientHeight,
         };
       },
-      // drag-select autoscroll e2e 用: 取 xterm 当前选区文字, 验证选区是否真延伸
-      // 到屏外内容上(光 scrollLeft 动了不够, 那只能证明容器滚了)。
+      // SearchAddon still uses xterm's internal highlight/selection result. Managed pointer
+      // selection is intentionally not exposed through this hook.
       getSelection: (sid) => ptyTerminals.get(sid)?.getSelection() ?? "",
       activateLink: (sid, kind, needle, modifier) => {
         const provider = ptyLinkProviders.get(linkKey(sid, kind));

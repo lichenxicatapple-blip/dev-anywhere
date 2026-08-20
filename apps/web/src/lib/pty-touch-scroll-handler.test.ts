@@ -6,9 +6,13 @@ import {
   type PtyVerticalIntentEvent,
 } from "./pty-vertical-intent-fsm";
 
-function makeTouchEvent(touch: { clientX: number; clientY: number } | null): TouchEvent {
+function makeTouchEvent(
+  touch: { clientX: number; clientY: number } | null,
+  target?: EventTarget,
+): TouchEvent {
   return {
     touches: touch ? [touch] : [],
+    target,
   } as unknown as TouchEvent;
 }
 
@@ -103,5 +107,49 @@ describe("pty touch scroll handler", () => {
     expect(handler.getState().gestureMode).toBeNull();
     expect(handler.getState().lastClientY).toBeNull();
     expect(dispatched.map((event) => event.type)).toEqual(["touch-start", "touch-end"]);
+  });
+
+  it("leaves a selection-handle touch sequence exclusively to the handle driver", () => {
+    const container = document.createElement("div");
+    const handle = document.createElement("button");
+    handle.dataset.slot = "pty-selection-handle";
+    container.append(handle);
+    setReadonlyNumber(container, "scrollWidth", 800);
+    setReadonlyNumber(container, "clientWidth", 200);
+    setReadonlyNumber(container, "scrollHeight", 1200);
+    setReadonlyNumber(container, "clientHeight", 400);
+    let verticalIntent = createInitialPtyVerticalIntentState({ scrollTop: 0 });
+    const dispatched: PtyVerticalIntentEvent[] = [];
+    const traces: string[] = [];
+    const handler = createPtyTouchScrollHandler({
+      container,
+      atBottomThreshold: 8,
+      trace: (event) => traces.push(event),
+      getPageResumePending: () => false,
+      getVerticalIntent: () => verticalIntent,
+      dispatchVerticalIntent: (event) => {
+        dispatched.push(event);
+        const result = reducePtyVerticalIntent(verticalIntent, event, { atBottomThreshold: 8 });
+        verticalIntent = result.state;
+        return result;
+      },
+      getCurrentAnchor: () => ({ isAtBottom: false, bottomScrollTop: 800 }),
+      getLastSeenScrollTop: () => 0,
+      getFrozenReviewScrollEnd: () => null,
+      resumeLiveAtFrozenReviewEnd: () => {},
+      hasHorizontalOverflow: () => true,
+      clearHorizontalIntentIfUnscrollable: () => false,
+      markHorizontalUserInput: () => {},
+      notifyAtBottom: () => {},
+      flushPendingTouchScrollNotify: () => {},
+    });
+
+    handler.onTouchStart(makeTouchEvent({ clientX: 20, clientY: 100 }, handle));
+    handler.onTouchMove(makeTouchEvent({ clientX: 80, clientY: 102 }, handle));
+    handler.onTouchEnd(makeTouchEvent(null, handle));
+
+    expect(dispatched).toEqual([]);
+    expect(handler.getState().gestureMode).toBeNull();
+    expect(traces).toEqual(["touchstart:selection-handle", "touchend:selection-handle"]);
   });
 });

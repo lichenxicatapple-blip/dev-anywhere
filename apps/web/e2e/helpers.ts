@@ -43,6 +43,7 @@ declare global {
         emitJson(payload: FakeRelayMessage): void;
         emitPty(sessionId: string, data: string): void;
         close(): void;
+        readonly sent: string[];
       } | null;
       events: string[];
       holdConnections(): void;
@@ -386,6 +387,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
       readonly kind: "relay" | "voice-asr" | "voice-tts";
       binaryType: BinaryType = "arraybuffer";
       readyState = FakeRelayWebSocket.CONNECTING;
+      readonly sent: string[] = [];
 
       constructor(url: string) {
         super();
@@ -458,6 +460,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
           return;
         }
         if (typeof raw !== "string") return;
+        this.sent.push(raw);
         window.__devAnywhereE2E!.sent.push(raw);
         let msg: FakeRelayMessage;
         try {

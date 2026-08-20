@@ -54,8 +54,8 @@ interface PtyTouchScrollHandlerOptions {
 interface PtyTouchScrollHandler {
   onTouchStart: (event: TouchEvent) => void;
   onTouchMove: (event: TouchEvent) => void;
-  onTouchEnd: () => void;
-  onTouchCancel: () => void;
+  onTouchEnd: (event?: TouchEvent) => void;
+  onTouchCancel: (event?: TouchEvent) => void;
   isRecentNativeScroll: () => boolean;
   isRecentHorizontalGesture: () => boolean;
   tryResumeLiveAtFrozenReviewEnd: (
@@ -93,6 +93,11 @@ export function createPtyTouchScrollHandler({
   flushPendingTouchScrollNotify,
 }: PtyTouchScrollHandlerOptions): PtyTouchScrollHandler {
   let state = createInitialPtyTouchScrollState();
+  let selectionHandleTouchActive = false;
+
+  const isSelectionHandleTouch = (event?: TouchEvent): boolean =>
+    event?.target instanceof Element &&
+    event.target.closest('[data-slot="pty-selection-handle"]') !== null;
 
   const getScrollExpectation = (currentYOverride?: number | null) => {
     const currentY = currentYOverride ?? state.lastClientY;
@@ -189,6 +194,11 @@ export function createPtyTouchScrollHandler({
   };
 
   const onTouchStart = (event: TouchEvent): void => {
+    selectionHandleTouchActive = isSelectionHandleTouch(event);
+    if (selectionHandleTouchActive) {
+      trace("touchstart:selection-handle");
+      return;
+    }
     if (getPageResumePending()) {
       trace("touchstart:page-resume-pending");
       return;
@@ -225,6 +235,7 @@ export function createPtyTouchScrollHandler({
   };
 
   const onTouchMove = (event: TouchEvent): void => {
+    if (selectionHandleTouchActive || isSelectionHandleTouch(event)) return;
     if (getPageResumePending()) {
       trace("touchmove:page-resume-pending");
       return;
@@ -412,7 +423,12 @@ export function createPtyTouchScrollHandler({
     notifyAtBottom();
   };
 
-  const onTouchEnd = (): void => {
+  const onTouchEnd = (event?: TouchEvent): void => {
+    if (selectionHandleTouchActive || isSelectionHandleTouch(event)) {
+      selectionHandleTouchActive = false;
+      trace("touchend:selection-handle");
+      return;
+    }
     if (getPageResumePending()) {
       trace("touchend:page-resume-pending");
       return;
@@ -421,7 +437,12 @@ export function createPtyTouchScrollHandler({
     trace("touchend");
   };
 
-  const onTouchCancel = (): void => {
+  const onTouchCancel = (event?: TouchEvent): void => {
+    if (selectionHandleTouchActive || isSelectionHandleTouch(event)) {
+      selectionHandleTouchActive = false;
+      trace("touchcancel:selection-handle");
+      return;
+    }
     if (getPageResumePending()) {
       trace("touchcancel:page-resume-pending");
       return;

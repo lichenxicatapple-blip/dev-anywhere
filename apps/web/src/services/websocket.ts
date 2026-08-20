@@ -13,15 +13,19 @@ const MAX_PENDING_QUEUE_SIZE = 10000;
 // 手机锁屏/切后台后，浏览器可能保留一个 readyState=OPEN、实际已被系统回收的半开连接。
 // 短暂切应用不必额外验活；超过这个窗口则在恢复前台时验证现有连接。
 const BACKGROUND_RECONNECT_THRESHOLD_MS = 5_000;
+// 页面一直在前台时系统不会提供 visibility/focus 恢复信号；移动网络切换又可能让浏览器
+// 永久保留 readyState=OPEN 的半开 socket。仅在连续无入站数据时发一个应用层 ping，健康
+// 连接每 15 秒最多一次探测（请求/响应各一帧），活跃 PTY 则完全不增加流量。
+const FOREGROUND_CONNECTION_IDLE_MS = 15_000;
 // 浏览器 WebSocket API 不暴露协议层 ping。复用 Relay 的应用层 ping/pong，在这个窗口内
-// 能收到 pong 就保留原连接；只有超时才承担完整换链与状态重建的成本。
-const BACKGROUND_CONNECTION_PROBE_TIMEOUT_MS = 2_000;
+// 能收到任意入站帧就保留原连接；只有完全静默才承担完整换链与状态重建的成本。
+const CONNECTION_PROBE_TIMEOUT_MS = 2_000;
 
 interface WebSocketManagerOptions {
   probeConnectionAfterBackground?: boolean;
 }
 
-interface BackgroundConnectionProbe {
+interface ConnectionProbe {
   socket: WebSocket;
   requestId: string;
   timeout: ReturnType<typeof setTimeout>;
@@ -40,9 +44,11 @@ export class WebSocketManager {
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
   private backgroundedAt: number | null = null;
-  private backgroundProbe: BackgroundConnectionProbe | null = null;
-  private backgroundProbeSeq = 0;
-  private readonly probeConnectionAfterBackground: boolean;
+  private connectionProbe: ConnectionProbe | null = null;
+  private connectionProbeSeq = 0;
+  private foregroundWatchdogTimer: ReturnType<typeof setTimeout> | null = null;
+  private lastInboundAt = 0;
+  private readonly probeConnectionLiveness: boolean;
   // 命名引用让 close() 能 removeEventListener；匿名 lambda 注册到 document/window 上
   // 后无法摘除，instance 不会被 GC，长寿 tab 上 close → reconnect 反复后能堆积大量回调。
   private readonly visibilityListener = (): void => {
@@ -52,7 +58,9 @@ export class WebSocketManager {
     }
     if (document.visibilityState === "visible") this.resumeFromBackground();
   };
-  private readonly onlineListener = (): void => this.wakeReconnect();
+  // `online` means the browser observed a route transition. The old socket may still report
+  // OPEN or may be stuck CONNECTING forever, so this signal must replace rather than merely wake.
+  private readonly onlineListener = (): void => this.wakeReconnect(true);
   private readonly blurListener = (): void => this.markBackgrounded();
   private readonly focusListener = (): void => {
     // Some Android Chrome builds emit only blur/focus when the whole activity is
@@ -64,12 +72,13 @@ export class WebSocketManager {
 
   constructor(options: WebSocketManagerOptions = {}) {
     const deviceKind = describeCurrentClientDevice().deviceKind;
-    this.probeConnectionAfterBackground =
+    this.probeConnectionLiveness =
       options.probeConnectionAfterBackground ?? (deviceKind === "phone" || deviceKind === "tablet");
   }
 
   private markBackgrounded(): void {
-    this.cancelBackgroundProbe();
+    this.cancelConnectionProbe();
+    this.cancelForegroundWatchdog();
     this.backgroundedAt ??= Date.now();
   }
 
@@ -78,21 +87,71 @@ export class WebSocketManager {
     this.backgroundedAt = null;
     const wasBackgroundedLongEnough =
       backgroundedAt !== null && Date.now() - backgroundedAt >= BACKGROUND_RECONNECT_THRESHOLD_MS;
-    if (this.probeConnectionAfterBackground && wasBackgroundedLongEnough) {
-      this.probeBackgroundConnection();
+    if (this.probeConnectionLiveness && wasBackgroundedLongEnough) {
+      this.probeConnection();
       return;
     }
     this.wakeReconnect();
+    this.ensureForegroundWatchdog();
   }
 
-  private cancelBackgroundProbe(socket?: WebSocket): void {
-    const probe = this.backgroundProbe;
+  private cancelConnectionProbe(socket?: WebSocket): void {
+    const probe = this.connectionProbe;
     if (!probe || (socket && probe.socket !== socket)) return;
     clearTimeout(probe.timeout);
-    this.backgroundProbe = null;
+    this.connectionProbe = null;
   }
 
-  private probeBackgroundConnection(): void {
+  private cancelForegroundWatchdog(): void {
+    if (!this.foregroundWatchdogTimer) return;
+    clearTimeout(this.foregroundWatchdogTimer);
+    this.foregroundWatchdogTimer = null;
+  }
+
+  private canRunForegroundWatchdog(): boolean {
+    return (
+      this.probeConnectionLiveness &&
+      !this.closed &&
+      this.backgroundedAt === null &&
+      (typeof document === "undefined" || document.visibilityState !== "hidden")
+    );
+  }
+
+  private armForegroundWatchdog(delay = FOREGROUND_CONNECTION_IDLE_MS): void {
+    this.cancelForegroundWatchdog();
+    if (!this.canRunForegroundWatchdog() || this.connectionProbe) return;
+    this.foregroundWatchdogTimer = setTimeout(
+      () => {
+        this.foregroundWatchdogTimer = null;
+        this.runForegroundWatchdog();
+      },
+      Math.max(0, delay),
+    );
+  }
+
+  private ensureForegroundWatchdog(): void {
+    if (this.foregroundWatchdogTimer || this.connectionProbe) return;
+    this.armForegroundWatchdog();
+  }
+
+  private runForegroundWatchdog(): void {
+    if (!this.canRunForegroundWatchdog()) return;
+    const socket = this.ws;
+    if (!socket || !this.connected || socket.readyState !== WebSocket.OPEN) {
+      // Includes a CONNECTING attempt that never completes after a mobile route transition.
+      this.wakeReconnect(true);
+      return;
+    }
+
+    const idleFor = Date.now() - this.lastInboundAt;
+    if (idleFor < FOREGROUND_CONNECTION_IDLE_MS) {
+      this.armForegroundWatchdog(FOREGROUND_CONNECTION_IDLE_MS - idleFor);
+      return;
+    }
+    this.probeConnection();
+  }
+
+  private probeConnection(): void {
     if (this.closed) return;
     const socket = this.ws;
     if (!this.connected || !socket || socket.readyState !== WebSocket.OPEN) {
@@ -101,29 +160,30 @@ export class WebSocketManager {
       return;
     }
 
-    this.cancelBackgroundProbe();
-    this.backgroundProbeSeq += 1;
-    const requestId = `background-liveness-${Date.now().toString(36)}-${this.backgroundProbeSeq.toString(36)}`;
+    this.cancelConnectionProbe();
+    this.cancelForegroundWatchdog();
+    this.connectionProbeSeq += 1;
+    const requestId = `connection-liveness-${Date.now().toString(36)}-${this.connectionProbeSeq.toString(36)}`;
     const timeout = setTimeout(() => {
-      const active = this.backgroundProbe;
+      const active = this.connectionProbe;
       if (!active || active.socket !== socket || active.requestId !== requestId) return;
-      this.backgroundProbe = null;
+      this.connectionProbe = null;
       if (this.ws !== socket || this.closed) return;
       this.wakeReconnect(true);
-    }, BACKGROUND_CONNECTION_PROBE_TIMEOUT_MS);
-    this.backgroundProbe = { socket, requestId, timeout };
+    }, CONNECTION_PROBE_TIMEOUT_MS);
+    this.connectionProbe = { socket, requestId, timeout };
 
     try {
       // WebSocketManager 只消费自己 requestId 对应的 pong；其他 Relay 消息仍按原路径分发。
       socket.send(JSON.stringify({ type: "latency_web_relay_ping", requestId }));
     } catch {
-      this.cancelBackgroundProbe(socket);
+      this.cancelConnectionProbe(socket);
       if (this.ws === socket && !this.closed) this.wakeReconnect(true);
     }
   }
 
-  private consumeBackgroundProbePong(socket: WebSocket, data: string): boolean {
-    const probe = this.backgroundProbe;
+  private consumeConnectionProbePong(socket: WebSocket, data: string): boolean {
+    const probe = this.connectionProbe;
     if (!probe || probe.socket !== socket) return false;
 
     let message: { type?: unknown; requestId?: unknown };
@@ -136,8 +196,16 @@ export class WebSocketManager {
       return false;
     }
 
-    this.cancelBackgroundProbe(socket);
+    this.cancelConnectionProbe(socket);
     return true;
+  }
+
+  private noteInbound(socket: WebSocket): void {
+    if (this.ws !== socket) return;
+    this.lastInboundAt = Date.now();
+    // A normal relay/PTY frame proves the route is alive just as strongly as our own pong.
+    this.cancelConnectionProbe(socket);
+    this.ensureForegroundWatchdog();
   }
 
   private cancelReconnectTimer(): void {
@@ -148,7 +216,8 @@ export class WebSocketManager {
   }
 
   connect(url: string): void {
-    this.cancelBackgroundProbe();
+    this.cancelConnectionProbe();
+    this.cancelForegroundWatchdog();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
@@ -191,7 +260,8 @@ export class WebSocketManager {
     // the connection is established" 警告且新建一份会跟它 race, stale 事件互相
     // 覆盖 this.ws 直到出 InvalidStateError CONNECTING。等它自己 OPEN 或 close。
     if (!force && this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
-    this.cancelBackgroundProbe();
+    this.cancelConnectionProbe();
+    this.cancelForegroundWatchdog();
     // 锁屏期间的失败次数不应该惩罚恢复后的第一次重连
     this.reconnectAttempt = 0;
     this.cancelReconnectTimer();
@@ -236,7 +306,8 @@ export class WebSocketManager {
 
   close(): void {
     this.closed = true;
-    this.cancelBackgroundProbe();
+    this.cancelConnectionProbe();
+    this.cancelForegroundWatchdog();
     this.cancelReconnectTimer();
     this.ws?.close();
     this.ws = null;
@@ -281,6 +352,8 @@ export class WebSocketManager {
     const ws = new WebSocket(this.url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
+    // Also bounds a CONNECTING socket which never produces open/close after a route change.
+    this.armForegroundWatchdog();
 
     // wakeReconnect / connect() 重新建链时, 老 ws 的 close / open 事件可能在新 ws
     // 已替换 this.ws 之后才异步 fire (尤其老 ws 是 CONNECTING 被 close 时)。所有
@@ -291,6 +364,8 @@ export class WebSocketManager {
       if (this.ws !== ws) return;
       this.connected = true;
       this.reconnectAttempt = 0;
+      this.lastInboundAt = Date.now();
+      this.armForegroundWatchdog();
       this.statusHandlers.forEach((h) => h(true));
       this.flushPendingQueue();
     });
@@ -298,17 +373,21 @@ export class WebSocketManager {
     ws.addEventListener("message", (event) => {
       if (this.ws !== ws) return;
       if (event.data instanceof ArrayBuffer) {
+        this.noteInbound(ws);
         this.dispatchBinary(new Uint8Array(event.data));
       } else {
         const data = event.data as string;
-        if (this.consumeBackgroundProbePong(ws, data)) return;
+        const isProbePong = this.consumeConnectionProbePong(ws, data);
+        this.noteInbound(ws);
+        if (isProbePong) return;
         this.messageHandlers.forEach((h) => h(data));
       }
     });
 
     ws.addEventListener("close", (event) => {
       if (this.ws !== ws) return;
-      this.cancelBackgroundProbe(ws);
+      this.cancelConnectionProbe(ws);
+      this.cancelForegroundWatchdog();
       if (event.code === RelayCloseCode.CLIENT_KICKED) {
         this.closed = true;
         this.cancelReconnectTimer();

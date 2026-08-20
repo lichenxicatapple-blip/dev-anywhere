@@ -3,7 +3,12 @@ import { useEffect, useRef } from "react";
 import { useAppStore } from "@/stores/app-store";
 import { WebSocketManager } from "@/services/websocket";
 import { RelayClient } from "@/services/relay-client";
-import { handleWsStatusChange, handleRelayMessage } from "@/services/phase-machine";
+import {
+  createPhaseMachineTimers,
+  disposePhaseMachineTimers,
+  handleWsStatusChange,
+  handleRelayMessage,
+} from "@/services/phase-machine";
 import type { Timers } from "@/services/phase-machine";
 import { registerChatDispatcher } from "@/services/chat-dispatcher";
 import { registerSessionDispatcher } from "@/services/session-dispatcher";
@@ -112,7 +117,7 @@ export function useRelaySetup(): void {
     relayRef.current = relay;
     setRuntimeRefs({ wsManagerRef: ws, relayClientRef: relay });
 
-    const timers: Timers = { reconnect: null, coldStartDone: false };
+    const timers = createPhaseMachineTimers();
     timersRef.current = timers;
 
     const unsubStatus = ws.onStatusChange((connected) => {
@@ -147,6 +152,7 @@ export function useRelaySetup(): void {
       unregisterChat();
       unregisterSession();
       unregisterResource();
+      disposePhaseMachineTimers(timers);
       ws.close();
       setRuntimeRefs({ wsManagerRef: null, relayClientRef: null });
     };

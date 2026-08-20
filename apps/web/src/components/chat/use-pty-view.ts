@@ -19,8 +19,8 @@ import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { xtermFixedDarkSearchDecorations } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
+import { attachPtyBufferRowIdentityTracker } from "@/lib/pty-buffer-row-identity";
 import { attachPtyHistoryProjection } from "@/lib/pty-history-projection";
-import { attachPtyDragSelectAutoscroll } from "@/lib/pty-drag-select-autoscroll";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { isOnlyPtyNonTypingInput } from "@/lib/pty-non-typing-input";
 import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
@@ -28,7 +28,11 @@ import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { schedulePtyTransportAttach } from "@/lib/pty-transport-attach-scheduler";
 import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
-import { activateXtermLinkAtPoint, hasXtermLinkAtPoint } from "@/lib/xterm-touch-link-activation";
+import {
+  activateXtermLinkAtPoint,
+  hasXtermLinkAtPoint,
+  type XtermLinkActivationPoint,
+} from "@/lib/xterm-touch-link-activation";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { toast } from "@/components/toast";
@@ -70,6 +74,7 @@ interface UsePtyViewOptions {
   containerEl: HTMLDivElement | null;
   spacerRef: RefObject<HTMLDivElement | null>;
   xtermHostRef: RefObject<HTMLDivElement | null>;
+  selectionHandleLayerRef: RefObject<HTMLDivElement | null>;
   mobileControlsHeight: number;
 }
 
@@ -111,7 +116,6 @@ interface UsePtyViewResult {
   findNext: (query: string, incremental?: boolean) => boolean;
   findPrevious: (query: string) => boolean;
   clearFind: () => void;
-  refreshReviewSnapshot: () => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
@@ -150,7 +154,6 @@ interface ScrollControllerHandle {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
-  setSelectionDragActive: (active: boolean) => void;
   markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
@@ -317,6 +320,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     containerEl,
     spacerRef,
     xtermHostRef,
+    selectionHandleLayerRef,
     mobileControlsHeight,
   } = options;
 
@@ -659,7 +663,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [sessionId],
   );
 
-  const handlePtyTap = useCallback((point: { clientX: number; clientY: number }): boolean => {
+  const handlePtyTap = useCallback((point: XtermLinkActivationPoint): boolean => {
     const term = terminalRef.current;
     if (!term) return false;
     return activateXtermLinkAtPoint(term, ptyTouchLinkProvidersRef.current, point);
@@ -675,9 +679,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     sessionId,
     terminalRef,
     xtermHostRef,
+    selectionHandleLayerRef,
     scrollControllerRef,
     containerEl,
-    scrollState,
     keyboardOffset,
     ptyFontSize,
     suppressPtyFocus,
@@ -687,7 +691,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     onDownloadPath: downloadPtyPath,
     onPreviewPath: openImagePreview,
   });
-  ptySelectionActiveRef.current = selection.ptySelectionHandles !== null;
+  const clearManagedPtySelection = selection.clearPtySelection;
+  ptySelectionActiveRef.current = selection.hasPtySelection();
 
   const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
@@ -773,7 +778,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let fileDownloadLinkDispose: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
     let historyProjectionDispose: (() => void) | null = null;
-    let dragSelectDispose: (() => void) | null = null;
     let searchResultsRegistration: { dispose(): void } | null = null;
     let terminalSerializeAddon:
       | Awaited<ReturnType<typeof createXtermTerminal>>["serializeAddon"]
@@ -824,6 +828,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       isInputEnabled: canAcceptInput,
       canFocus: canAcceptInput,
       onTerminalReady: (term) => {
+        // A rebuilt Terminal is a new buffer identity. Managed ranges, frozen row snapshots,
+        // markers and overlay listeners from the previous instance must never cross that boundary.
+        clearManagedPtySelection();
         const xterm = term as Terminal;
         terminalRef.current = xterm;
         const searchAddon = new SearchAddon({ highlightLimit: 1000 });
@@ -849,6 +856,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
         registerPtyTerminal(sessionId, xterm);
         registerPtyTerminalWindowAccessor(() => terminalRef.current);
+        const bufferRowIdentity = attachPtyBufferRowIdentityTracker(xterm);
         const historyProjection = attachPtyHistoryProjection(host, {
           serializeRangeAsHtml: (startLine, endLine) =>
             terminalSerializeAddon?.serializeAsHTML({
@@ -861,8 +869,22 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
               onlySelection: false,
               scrollback: 0,
             }) ?? "",
+          getSerializedCell: (line, column) => {
+            const cell = xterm.buffer.active.getLine(line)?.getCell(column);
+            if (!cell) return null;
+            return {
+              text: cell.getWidth() === 0 ? "" : cell.getChars() || " ",
+              isDim: Boolean(cell.isDim()),
+              isRenderedFgRGB: cell.isInverse() ? cell.isBgRGB() : cell.isFgRGB(),
+            };
+          },
+          getSelectionLine: (line) => xterm.buffer.active.getLine(line) ?? null,
+          getBufferRowIdentityOffset: bufferRowIdentity.getOffset,
         });
-        historyProjectionDispose = historyProjection.dispose;
+        historyProjectionDispose = () => {
+          historyProjection.dispose();
+          bufferRowIdentity.dispose();
+        };
 
         const shouldRestorePageResumeOnAttach = pageResumePendingRef.current;
         if (shouldRestorePageResumeOnAttach) {
@@ -966,18 +988,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
             },
           };
         });
-
-        const dragSelect = attachPtyDragSelectAutoscroll({
-          container,
-          host,
-          onDragStateChange: (dragging) =>
-            scrollControllerRef.current?.setSelectionDragActive(dragging),
-          onVerticalScrollIntent: (reason) =>
-            scrollControllerRef.current?.markSelectionAutoscrollIntent(reason),
-          onHorizontalScrollIntent: (reason) =>
-            scrollControllerRef.current?.markHorizontalScrollIntent(reason),
-        });
-        dragSelectDispose = dragSelect.dispose;
       },
       onFramePending,
       onFrameWritten,
@@ -992,7 +1002,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     terminalControllerRef.current = termCtrl;
 
     return () => {
-      dragSelectDispose?.();
+      clearManagedPtySelection();
       scrollDispose?.();
       historyProjectionDispose?.();
       searchResultsRegistration?.dispose();
@@ -1044,6 +1054,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     suppressPtyFocus,
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,
+    clearManagedPtySelection,
   ]);
 
   // Network ownership is intentionally separate from the persistent terminal/view graph above.
@@ -1086,9 +1097,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     },
     [cancelPendingResumeForLiveFollow],
   );
-  const refreshReviewSnapshot = useCallback((): void => {
-    scrollControllerRef.current?.refreshReviewSnapshot();
-  }, []);
   const scrollToRatio = useCallback((ratio: number): void => {
     scrollControllerRef.current?.scrollToRatio(ratio);
   }, []);
@@ -1120,16 +1128,18 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         if (!query) {
           searchAddon?.clearDecorations();
           term?.clearSelection();
+          clearManagedPtySelection();
           setFindResult({ resultIndex: -1, resultCount: 0 });
         }
         return false;
       }
+      clearManagedPtySelection();
       const previousViewportY = term.buffer.active.viewportY;
       const found = searchAddon.findNext(query, { ...PTY_SEARCH_OPTIONS, incremental });
       if (found) revealFindSelection(previousViewportY);
       return found;
     },
-    [revealFindSelection],
+    [clearManagedPtySelection, revealFindSelection],
   );
 
   const findPrevious = useCallback(
@@ -1137,19 +1147,21 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const term = terminalRef.current;
       const searchAddon = searchAddonRef.current;
       if (!term || !searchAddon || !query) return false;
+      clearManagedPtySelection();
       const previousViewportY = term.buffer.active.viewportY;
       const found = searchAddon.findPrevious(query, PTY_SEARCH_OPTIONS);
       if (found) revealFindSelection(previousViewportY);
       return found;
     },
-    [revealFindSelection],
+    [clearManagedPtySelection, revealFindSelection],
   );
 
   const clearFind = useCallback((): void => {
     searchAddonRef.current?.clearDecorations();
     terminalRef.current?.clearSelection();
+    clearManagedPtySelection();
     setFindResult({ resultIndex: -1, resultCount: 0 });
-  }, []);
+  }, [clearManagedPtySelection]);
 
   const sendMobileInput = useCallback(
     (data: string): void => {
@@ -1260,7 +1272,6 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     findNext,
     findPrevious,
     clearFind,
-    refreshReviewSnapshot,
     scrollToBottom,
     scrollToRatio,
     scrollToXRatio,

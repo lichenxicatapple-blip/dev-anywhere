@@ -41,6 +41,10 @@ class FakeWebSocket extends EventTarget {
   receive(data: string): void {
     this.dispatchEvent(new MessageEvent("message", { data }));
   }
+
+  receiveBinary(data = new ArrayBuffer(0)): void {
+    this.dispatchEvent(new MessageEvent("message", { data }));
+  }
 }
 
 const sockets: FakeWebSocket[] = [];
@@ -130,6 +134,240 @@ describe("WebSocketManager", () => {
     expect(sockets.length).toBe(1);
     expect(ws1.readyState).toBe(FakeWebSocket.CONNECTING);
 
+    manager.close();
+  });
+
+  it("replaces a half-open OPEN socket immediately when the browser reports online", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    const statuses: boolean[] = [];
+    manager.onStatusChange((connected) => statuses.push(connected));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    // The browser may keep a dead TCP path as readyState=OPEN throughout a signal outage.
+    // `online` is the strongest available hint that the route changed, so keeping ws1 here
+    // strands input on the old path even though the phone has network again.
+    window.dispatchEvent(new Event("online"));
+
+    expect(sockets).toHaveLength(2);
+    expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(statuses).toEqual([true, false]);
+    sockets[1]!.open();
+    expect(statuses).toEqual([true, false, true]);
+
+    manager.close();
+  });
+
+  it("replaces a permanently CONNECTING socket when the browser reports online", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    expect(ws1.readyState).toBe(FakeWebSocket.CONNECTING);
+
+    window.dispatchEvent(new Event("online"));
+
+    expect(sockets).toHaveLength(2);
+    expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(sockets[1]!.readyState).toBe(FakeWebSocket.CONNECTING);
+
+    manager.close();
+  });
+
+  it("replaces a visible mobile OPEN socket when foreground ping receives no inbound data", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    const statuses: boolean[] = [];
+    manager.onStatusChange((connected) => statuses.push(connected));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(ws1.sent).toHaveLength(1);
+    expect(JSON.parse(ws1.sent[0]!)).toMatchObject({ type: "latency_web_relay_ping" });
+
+    await vi.advanceTimersByTimeAsync(2_001);
+    expect(sockets).toHaveLength(2);
+    expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(statuses).toEqual([true, false]);
+
+    manager.close();
+  });
+
+  it("bounds a visible mobile socket that remains CONNECTING without open or close", async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(sockets).toHaveLength(2);
+    expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(sockets[1]!.readyState).toBe(FakeWebSocket.CONNECTING);
+
+    manager.close();
+  });
+
+  it("keeps a visible healthy mobile socket across repeated foreground probes", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    const statuses: boolean[] = [];
+    manager.onStatusChange((connected) => statuses.push(connected));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    for (let probeIndex = 0; probeIndex < 2; probeIndex += 1) {
+      const ping = JSON.parse(ws1.sent[probeIndex]!) as { requestId: string; type: string };
+      expect(ping.type).toBe("latency_web_relay_ping");
+      ws1.receive(JSON.stringify({ type: "latency_web_relay_pong", requestId: ping.requestId }));
+      await vi.advanceTimersByTimeAsync(2_001);
+      expect(sockets).toHaveLength(1);
+      if (probeIndex === 0) await vi.advanceTimersByTimeAsync(12_999);
+    }
+
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+    expect(statuses).toEqual([true]);
+    manager.close();
+  });
+
+  it("uses ordinary inbound traffic as foreground liveness without sending an early ping", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    const messages: string[] = [];
+    manager.onMessage((message) => messages.push(message));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    await vi.advanceTimersByTimeAsync(14_000);
+    ws1.receive('{"type":"pty_state"}');
+    await vi.advanceTimersByTimeAsync(14_999);
+
+    expect(ws1.sent).toEqual([]);
+    expect(messages).toEqual(['{"type":"pty_state"}']);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(JSON.parse(ws1.sent[0]!)).toMatchObject({ type: "latency_web_relay_ping" });
+
+    manager.close();
+  });
+
+  it("accepts an ordinary inbound frame instead of requiring the exact foreground pong", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    await vi.advanceTimersByTimeAsync(15_000);
+    expect(ws1.sent).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1_000);
+    ws1.receive('{"type":"proxy_list_response"}');
+    await vi.advanceTimersByTimeAsync(2_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+    manager.close();
+  });
+
+  it("uses binary PTY output as foreground liveness", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-20T00:00:00Z"));
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    await vi.advanceTimersByTimeAsync(14_000);
+    ws1.receiveBinary();
+    await vi.advanceTimersByTimeAsync(14_999);
+    expect(ws1.sent).toEqual([]);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(JSON.parse(ws1.sent[0]!)).toMatchObject({ type: "latency_web_relay_ping" });
+
+    manager.close();
+  });
+
+  it("does not run the foreground watchdog for desktop sockets", async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: false });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.sent).toEqual([]);
+    manager.close();
+  });
+
+  it("does not replace a healthy OPEN socket for ordinary visible/focus notifications", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    Object.defineProperty(document, "visibilityState", {
+      configurable: true,
+      get: () => "visible",
+    });
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+
+    document.dispatchEvent(new Event("visibilitychange"));
+    window.dispatchEvent(new Event("focus"));
+
+    expect(sockets).toHaveLength(1);
+    expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
+    expect(ws1.sent).toEqual([]);
     manager.close();
   });
 

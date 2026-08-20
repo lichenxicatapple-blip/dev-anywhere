@@ -10,10 +10,29 @@ import { useSessionStore } from "@/stores/session-store";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
+const RECONNECT_BINDING_RETRY_INITIAL_MS = 500;
+const RECONNECT_BINDING_RETRY_MAX_MS = 2_000;
 
 export interface Timers {
   reconnect: ReturnType<typeof setTimeout> | null;
+  bindingRetry: ReturnType<typeof setTimeout> | null;
+  bindingRetryAttempt: number;
+  bindingAttemptGeneration: number | null;
+  recoveryGeneration: number;
   coldStartDone: boolean;
+  disposed: boolean;
+}
+
+export function createPhaseMachineTimers(): Timers {
+  return {
+    reconnect: null,
+    bindingRetry: null,
+    bindingRetryAttempt: 0,
+    bindingAttemptGeneration: null,
+    recoveryGeneration: 0,
+    coldStartDone: false,
+    disposed: false,
+  };
 }
 
 // 从 hash router URL 提取 /chat/:id 的 sessionId
@@ -73,9 +92,13 @@ function requestSessionHistory(relay: RelayClient): void {
     });
 }
 
-async function restoreSelectedProxyBinding(relay: RelayClient, proxy: ProxyInfo): Promise<boolean> {
+async function restoreSelectedProxyBinding(
+  relay: RelayClient,
+  proxy: ProxyInfo,
+  shouldCommit: () => boolean = () => true,
+): Promise<boolean> {
   const result = await ensureBinding(relay, { proxyId: proxy.proxyId });
-  if (isBindingError(result)) return false;
+  if (isBindingError(result) || !shouldCommit()) return false;
 
   writeStorageValue("local", STORAGE_KEYS.proxyId, proxy.proxyId);
   useAppStore.getState().setProxy(proxy.proxyId, proxy.name ?? null);
@@ -83,6 +106,127 @@ async function restoreSelectedProxyBinding(relay: RelayClient, proxy: ProxyInfo)
   requestProxyState(relay);
   requestSessionHistory(relay);
   return true;
+}
+
+function clearReconnectFallback(timers: Timers): void {
+  if (!timers.reconnect) return;
+  clearTimeout(timers.reconnect);
+  timers.reconnect = null;
+}
+
+function invalidateBindingRecovery(timers: Timers): void {
+  timers.recoveryGeneration += 1;
+  timers.bindingAttemptGeneration = null;
+  timers.bindingRetryAttempt = 0;
+  if (!timers.bindingRetry) return;
+  clearTimeout(timers.bindingRetry);
+  timers.bindingRetry = null;
+}
+
+function clearReconnectRecovery(timers: Timers): void {
+  clearReconnectFallback(timers);
+  invalidateBindingRecovery(timers);
+}
+
+function ensureReconnectFallback(timers: Timers): void {
+  if (timers.reconnect || timers.disposed) return;
+  timers.reconnect = setTimeout(() => {
+    timers.reconnect = null;
+    invalidateBindingRecovery(timers);
+    if (timers.disposed || useAppStore.getState().phase !== "reconnecting") return;
+
+    timers.coldStartDone = false;
+    useAppStore.getState().setProxyOnline(false);
+    useAppStore.getState().setProxies([]);
+    useAppStore.getState().resetProxyListLoaded();
+    useAppStore.getState().transitionToPhase("connecting");
+    router.navigate("/");
+  }, RECONNECT_GRACE_PERIOD_MS);
+}
+
+function reconnectBindingIsCurrent(timers: Timers, generation: number, proxyId: string): boolean {
+  const app = useAppStore.getState();
+  return (
+    !timers.disposed &&
+    timers.recoveryGeneration === generation &&
+    timers.bindingAttemptGeneration === generation &&
+    app.connected &&
+    app.phase === "reconnecting" &&
+    app.selectedProxyId === proxyId
+  );
+}
+
+function scheduleReconnectBindingRetry(
+  timers: Timers,
+  relay: RelayClient,
+  proxy: ProxyInfo,
+  generation: number,
+): void {
+  if (timers.bindingRetry || timers.disposed || timers.recoveryGeneration !== generation) return;
+
+  const backoffExponent = Math.min(timers.bindingRetryAttempt, 2);
+  const delay = Math.min(
+    RECONNECT_BINDING_RETRY_INITIAL_MS * 2 ** backoffExponent,
+    RECONNECT_BINDING_RETRY_MAX_MS,
+  );
+  timers.bindingRetryAttempt += 1;
+  timers.bindingRetry = setTimeout(() => {
+    timers.bindingRetry = null;
+    if (
+      timers.disposed ||
+      timers.recoveryGeneration !== generation ||
+      useAppStore.getState().phase !== "reconnecting"
+    ) {
+      return;
+    }
+    void attemptReconnectBinding(timers, relay, proxy, generation);
+  }, delay);
+}
+
+async function attemptReconnectBinding(
+  timers: Timers,
+  relay: RelayClient,
+  proxy: ProxyInfo,
+  generation = timers.recoveryGeneration,
+): Promise<void> {
+  const app = useAppStore.getState();
+  if (
+    timers.disposed ||
+    timers.recoveryGeneration !== generation ||
+    timers.bindingAttemptGeneration !== null ||
+    !app.connected ||
+    app.phase !== "reconnecting" ||
+    app.selectedProxyId !== proxy.proxyId
+  ) {
+    return;
+  }
+
+  if (timers.bindingRetry) {
+    clearTimeout(timers.bindingRetry);
+    timers.bindingRetry = null;
+  }
+  timers.bindingAttemptGeneration = generation;
+  const restored = await restoreSelectedProxyBinding(relay, proxy, () =>
+    reconnectBindingIsCurrent(timers, generation, proxy.proxyId),
+  );
+
+  if (!reconnectBindingIsCurrent(timers, generation, proxy.proxyId)) return;
+  timers.bindingAttemptGeneration = null;
+
+  if (restored) {
+    const phaseBeforeDisconnect = useAppStore.getState().phaseBeforeDisconnect;
+    clearReconnectRecovery(timers);
+    useAppStore.getState().transitionToPhase(phaseBeforeDisconnect ?? "session_browsing");
+    return;
+  }
+
+  useAppStore.getState().setProxyOnline(false);
+  scheduleReconnectBindingRetry(timers, relay, proxy, generation);
+}
+
+export function disposePhaseMachineTimers(timers: Timers): void {
+  timers.disposed = true;
+  clearReconnectRecovery(timers);
 }
 
 function bindingErrorMessage(code: string): string {
@@ -97,9 +241,13 @@ function bindingErrorMessage(code: string): string {
 }
 
 export function handleWsStatusChange(connected: boolean, timers: Timers, relay: RelayClient): void {
+  if (timers.disposed) return;
   useAppStore.getState().setConnected(connected);
   const s = useAppStore.getState();
   if (connected) {
+    // A new raw socket invalidates any proxy_select still pending on the previous transport.
+    // Input stays disabled until the selected proxy binding is acknowledged below.
+    invalidateBindingRecovery(timers);
     relay.register();
 
     if (s.phase === "connecting") {
@@ -107,14 +255,12 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
     }
 
     if (s.phase === "reconnecting") {
+      useAppStore.getState().setProxyOnline(false);
+      ensureReconnectFallback(timers);
       relay.listProxies();
     }
-
-    if (timers.reconnect) {
-      clearTimeout(timers.reconnect);
-      timers.reconnect = null;
-    }
   } else {
+    invalidateBindingRecovery(timers);
     useAppStore.getState().setProxyOnline(false);
     useAppStore.getState().setProxies([]);
     useAppStore.getState().resetProxyListLoaded();
@@ -122,16 +268,7 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
       if (s.phase !== "reconnecting") {
         useAppStore.getState().setPhase("reconnecting");
       }
-      if (!timers.reconnect) {
-        timers.reconnect = setTimeout(() => {
-          timers.reconnect = null;
-          timers.coldStartDone = false;
-          useAppStore.getState().setProxies([]);
-          useAppStore.getState().resetProxyListLoaded();
-          useAppStore.getState().transitionToPhase("connecting");
-          router.navigate("/");
-        }, RECONNECT_GRACE_PERIOD_MS);
-      }
+      ensureReconnectFallback(timers);
     }
   }
 }
@@ -141,6 +278,7 @@ export async function handleRelayMessage(
   timers: Timers,
   relay: RelayClient,
 ): Promise<void> {
+  if (timers.disposed) return;
   const s = useAppStore.getState();
 
   // client_register_response: 从 registering 转入 proxy_selecting
@@ -161,6 +299,7 @@ export async function handleRelayMessage(
   if (msg.type === "proxy_offline") {
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
+      invalidateBindingRecovery(timers);
       relay.clearBoundProxy(typeof msg.proxyId === "string" ? msg.proxyId : undefined);
       useAppStore.getState().setProxyOnline(false);
       toast.warning("当前开发机已离线");
@@ -172,13 +311,23 @@ export async function handleRelayMessage(
   if (msg.type === "proxy_online") {
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
+      const alreadyBound = relay.getBoundProxyId() === msg.proxyId;
+      if (alreadyBound && s.phase !== "reconnecting") {
+        useAppStore.getState().setProxyOnline(true);
+        toast.success("当前开发机已恢复连接");
+        return;
+      }
+
+      useAppStore.getState().setProxyOnline(false);
       const proxy = useAppStore.getState().proxies.find((p) => p.proxyId === msg.proxyId);
       if (proxy) {
-        void restoreSelectedProxyBinding(relay, { ...proxy, online: true });
-      } else {
-        useAppStore.getState().setProxyOnline(true);
+        const onlineProxy = { ...proxy, online: true };
+        if (s.phase === "reconnecting") {
+          await attemptReconnectBinding(timers, relay, onlineProxy);
+        } else if (await restoreSelectedProxyBinding(relay, onlineProxy)) {
+          toast.success("当前开发机已恢复连接");
+        }
       }
-      toast.success("当前开发机已恢复连接");
     }
     return;
   }
@@ -234,16 +383,14 @@ export async function handleRelayMessage(
     // 重连验证
     if (s.selectedProxyId) {
       const selected = proxies.find((p) => p.proxyId === s.selectedProxyId);
-      useAppStore.getState().setProxyOnline(selected?.online ?? false);
-      const needsBindingRestore =
-        selected?.online === true && relay.getBoundProxyId() !== selected.proxyId;
+      const hasConfirmedBinding =
+        selected?.online === true && relay.getBoundProxyId() === selected.proxyId;
+      useAppStore.getState().setProxyOnline(hasConfirmedBinding);
+      const needsBindingRestore = selected?.online === true && !hasConfirmedBinding;
 
       if (s.phase === "reconnecting") {
         if (selected?.online) {
-          const restored = await restoreSelectedProxyBinding(relay, selected);
-          if (restored) {
-            useAppStore.getState().transitionToPhase(s.phaseBeforeDisconnect ?? "session_browsing");
-          }
+          await attemptReconnectBinding(timers, relay, selected);
         }
         return;
       }

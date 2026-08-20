@@ -84,33 +84,6 @@ async function activate(
   );
 }
 
-async function selectTerminalText(page: Page, text: string): Promise<void> {
-  await expect
-    .poll(() =>
-      page.evaluate((target) => {
-        if (document.querySelector('[data-slot="pty-selection-toolbar"]')) return true;
-        const term = window.__ccTestPtyTerminals?.get("claude-pty");
-        const controller = window.__ccTestPtySelectionControllers?.get("claude-pty");
-        if (!term || !controller) return false;
-        const buffer = term.buffer.active;
-        for (let row = buffer.viewportY; row < buffer.viewportY + term.rows; row += 1) {
-          const line = buffer.getLine(row)?.translateToString(true) ?? "";
-          const column = line.indexOf(target);
-          if (column < 0) continue;
-          controller.selectRange({
-            anchorRow: row,
-            focusRow: row,
-            anchorColumn: column,
-            focusColumn: Math.min(column + target.length - 1, term.cols - 1),
-          });
-          return false;
-        }
-        return false;
-      }, text),
-    )
-    .toBe(true);
-}
-
 test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
@@ -443,64 +416,6 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     await expect
       .poll(() => terminalScroller.evaluate((element) => element.scrollTop))
       .toBeCloseTo(before!.scrollTop, 0);
-  });
-
-  test("selected image path opens preview from the terminal selection toolbar", async ({
-    page,
-  }) => {
-    await gotoPty(page);
-    await emitPtyLine(page, "artifact a=b.jpg ready\r\n");
-    await waitForBufferContains(page, "a=b.jpg");
-
-    await selectTerminalText(page, "b.jpg");
-
-    const previewButton = page.getByRole("button", { name: "预览终端选区图片" });
-    await expect(previewButton).toBeVisible();
-    await previewButton.click();
-
-    await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
-    await expect
-      .poll(async () => {
-        const sent = await sentFakeRelayMessages(page);
-        return sent.some(
-          (m: FakeRelayMessage) =>
-            m.type === "remote_file_url_request" &&
-            m.sessionId === "claude-pty" &&
-            m.path === "b.jpg" &&
-            m.disposition === "inline",
-        );
-      })
-      .toBe(true);
-  });
-
-  test("scrolling dismisses a file path selection toolbar anchored to old content", async ({
-    page,
-  }) => {
-    await gotoPty(page);
-    const path = "./build/archive.tar.gz";
-    const scrollback = Array.from(
-      { length: 120 },
-      (_, index) => `terminal history ${String(index).padStart(3, "0")}`,
-    );
-    await emitPtyLine(page, `${scrollback.join("\r\n")}\r\nartifact ${path} ready\r\n`);
-    await waitForBufferContains(page, path);
-
-    await selectTerminalText(page, path);
-
-    const toolbar = page.locator('[data-slot="pty-selection-toolbar"]');
-    await expect(toolbar).toBeVisible();
-    const terminalScroller = page.locator('[data-slot="pty-terminal"]');
-    const initialScrollTop = await terminalScroller.evaluate((element) => element.scrollTop);
-    expect(initialScrollTop).toBeGreaterThan(200);
-
-    await terminalScroller.hover();
-    await page.mouse.wheel(0, -200);
-
-    await expect(toolbar).toBeHidden();
-    await expect
-      .poll(() => page.evaluate(() => window.__ccTest?.pty.getSelection("claude-pty") ?? "missing"))
-      .toBe("");
-    await expectPtyRendered(page);
   });
 
   test("cmd+click on relative paths and top-level filenames triggers download", async ({

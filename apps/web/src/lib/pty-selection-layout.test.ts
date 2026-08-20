@@ -36,33 +36,44 @@ describe("pty selection layout", () => {
     expect(position).toEqual({ left: 120, top: 335.4 });
   });
 
-  it("keeps selection handles operable when one endpoint scrolls outside the viewport", () => {
-    const terminal = {
-      rows: 10,
-      cols: 20,
-      buffer: { active: { viewportY: 30 } },
-    } as unknown as Terminal;
+  it("keeps handle coordinates stable in the native scroll content plane", () => {
     const host = document.createElement("div");
     const screen = document.createElement("div");
+    const layer = document.createElement("div");
     screen.className = "xterm-screen";
     host.append(screen);
+    let scrollOffset = 0;
     screen.getBoundingClientRect = () =>
-      ({ left: 10, top: 20, width: 200, height: 200 }) as DOMRect;
+      ({ left: 10, top: 20 - scrollOffset, width: 200, height: 200 }) as DOMRect;
+    layer.getBoundingClientRect = () =>
+      ({ left: -50, top: -100 - scrollOffset, width: 0, height: 0 }) as DOMRect;
     Object.defineProperties(screen, {
       clientWidth: { value: 200 },
       clientHeight: { value: 200 },
     });
-
-    expect(
+    const line = { getCell: () => ({ getWidth: () => 1 }) };
+    const terminal = {
+      rows: 10,
+      cols: 20,
+      buffer: { active: { viewportY: 30, length: 80, getLine: () => line } },
+    } as unknown as Terminal;
+    const readHandles = () =>
       getPtySelectionHandles({
         terminal,
         host,
-        anchor: { row: 25, column: 2 },
-        focus: { row: 35, column: 8 },
-      }),
-    ).toEqual({
-      anchor: { left: 30, top: 40 },
-      focus: { left: 100, top: 140 },
+        coordinateSpace: layer,
+        anchor: { row: 32, column: 2 },
+        focus: { row: 32, column: 4 },
+      });
+
+    expect(readHandles()).toEqual({
+      anchor: { left: 80, top: 180 },
+      focus: { left: 110, top: 180 },
+    });
+    scrollOffset = 47.5;
+    expect(readHandles()).toEqual({
+      anchor: { left: 80, top: 180 },
+      focus: { left: 110, top: 180 },
     });
   });
 });

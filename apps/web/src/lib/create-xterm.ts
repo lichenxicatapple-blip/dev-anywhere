@@ -6,6 +6,7 @@ import { WebLinksAddon } from "@xterm/addon-web-links";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import "@xterm/xterm/css/xterm.css";
 import { DEFAULT_TERMINAL_FONT_SIZE, TERMINAL_FONT_FAMILY } from "@/lib/chat-font-size";
+import { loadFontCSS } from "@/lib/font-assets";
 import { xtermFixedDarkTheme } from "@/lib/xterm-theme";
 
 interface CreateXtermResult {
@@ -18,7 +19,21 @@ interface CreateXtermOptions {
   fontSize?: number;
 }
 
-const TERMINAL_FONT_METRIC_GLYPHS = "─│╭╮╰╯";
+// Codex renders `›` at the start of its input row and uses `·` / `•` in status text. Keep them in
+// the preflight set: if a unicode-range shard arrives only after the DOM renderer has measured a
+// fallback glyph, xterm keeps that fallback width and applies the wrong letter-spacing later.
+// For `›`, that made a full-width prompt background end ~1.6 CSS px before the fixed row edge.
+const TERMINAL_FONT_METRIC_GLYPHS = "─│╭╮╰╯›·•";
+
+function refreshXtermFontMetrics(terminal: Terminal): void {
+  // xterm 6's DOM WidthCache is not cleared by refresh(). A semantically identical font option
+  // round-trip goes through its public options API and synchronously invalidates both the glyph
+  // width cache and the base cell measurement after a lazy unicode-range shard finishes loading.
+  const fontFamily = terminal.options.fontFamily;
+  terminal.options.fontFamily = `${fontFamily} `;
+  terminal.options.fontFamily = fontFamily;
+  terminal.refresh(0, terminal.rows - 1);
+}
 
 // 提到独立纯函数让单测可以直接断言关键 option 不被无意改回——尤其是
 // cursorInactiveStyle: "none" (失焦时不画 ghost 光标)。
@@ -39,6 +54,12 @@ export function buildXtermTerminalOptions(options: CreateXtermOptions = {}): ITe
     // the semantic live viewport. A short server-owned host can legitimately follow at baseY - N,
     // so the two owners otherwise move host.top by whole rows on every character.
     scrollOnUserInput: false,
+    // Desktop selection is application-owned so it can use the same absolute buffer range as
+    // touch selection and the outer browser scroller. These xterm shortcuts would otherwise
+    // create a second, hidden selection owner (Alt-click cursor movement also conflicts with the
+    // conventional Alt rectangular-selection gesture).
+    altClickMovesCursor: false,
+    rightClickSelectsWord: false,
     theme: xtermFixedDarkTheme,
     allowProposedApi: true,
   };
@@ -49,6 +70,10 @@ export async function createXtermTerminal(
   container: HTMLDivElement,
   options: CreateXtermOptions = {},
 ): Promise<CreateXtermResult> {
+  // React passive effects run child-first, so the PTY can mount before useRelaySetup has appended
+  // result.css. Waiting here makes the subsequent FontFaceSet.load an actual font request instead
+  // of a successful no-op with zero matching @font-face rules.
+  await loadFontCSS(window.location.origin);
   await document.fonts.ready;
 
   // split font 的框线字形默认按需加载。必须在 xterm DOM renderer 首次测量前请求，
@@ -75,10 +100,10 @@ export async function createXtermTerminal(
 
   // Sarasa Fixed SC 是 cn-font-split 切片字体, 按 unicode-range 懒加载 — shard 直到首次出现
   // 对应字符才会被 fetch。await document.fonts.ready 在 xterm 创建时只能等"已声明的字体",
-  // 此时 shard 都还没被请求。监听 document.fonts.loadingdone, 每批字体落定后全量 refresh,
-  // 让下一帧用真字体重绘。
+  // 此时其他 shard 都还没被请求。每批字体落定后要同时清掉 DOM renderer 的字宽
+  // cache 并全量重绘；只调 refresh 会保留 fallback glyph 的旧 letter-spacing。
   const onFontsLoadingDone = (): void => {
-    terminal.refresh(0, terminal.rows - 1);
+    refreshXtermFontMetrics(terminal);
   };
   const onVisibilityChange = (): void => {
     if (document.visibilityState === "visible") terminal.refresh(0, terminal.rows - 1);

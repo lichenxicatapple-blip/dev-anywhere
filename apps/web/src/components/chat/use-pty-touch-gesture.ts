@@ -1,5 +1,5 @@
 import type { MouseEvent, PointerEvent, RefObject, TouchEvent } from "react";
-import { useCallback, useRef } from "react";
+import { useCallback, useEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
 
 // PTY 视图触屏手势：轻微手指漂移仍按 tap 处理，让 xterm / link 得到明确操作；
@@ -8,6 +8,7 @@ import type { Terminal } from "@xterm/xterm";
 
 interface TouchGestureState {
   pointerId: number;
+  touchIdentifier: number | null;
   startX: number;
   startY: number;
   lastX: number;
@@ -18,6 +19,7 @@ interface TouchGestureState {
   longPressDelivered: boolean;
   touchEventStream: boolean;
   longPressTimer: number | null;
+  scrollPositionAtStart: PtyTouchGestureScrollPosition | null;
 }
 
 const TAP_MOVE_THRESHOLD_PX = 16;
@@ -25,7 +27,12 @@ const LINK_TAP_MOVE_THRESHOLD_PX = 24;
 const LONG_PRESS_MOVE_CANCEL_PX = 6;
 const LONG_PRESS_DELAY_MS = 425;
 const TOUCH_EVENT_POINTER_ID = -1;
-type GestureFinishKind = "tap" | "link" | "scroll" | "longpress";
+export type PtyTouchGestureFinishKind = "tap" | "link" | "scroll" | "longpress";
+
+export interface PtyTouchGestureScrollPosition {
+  scrollLeft: number;
+  scrollTop: number;
+}
 
 interface PtyTouchGestureHandlers {
   onPointerDownCapture: (event: PointerEvent<HTMLDivElement>) => void;
@@ -40,7 +47,54 @@ interface PtyTouchGestureHandlers {
 }
 
 function matchesGesturePointer(gesture: TouchGestureState, pointerId: number): boolean {
-  return gesture.pointerId === pointerId || pointerId === TOUCH_EVENT_POINTER_ID;
+  return (
+    gesture.pointerId === pointerId ||
+    (pointerId === TOUCH_EVENT_POINTER_ID && gesture.touchIdentifier !== null)
+  );
+}
+
+interface TouchContactList {
+  readonly length: number;
+  readonly [index: number]: {
+    readonly identifier: number;
+    readonly clientX: number;
+    readonly clientY: number;
+  };
+}
+
+interface TouchContact {
+  readonly identifier: number;
+  readonly clientX: number;
+  readonly clientY: number;
+}
+
+function findTouchByIdentifier(
+  touches: TouchContactList,
+  identifier: number | null,
+): TouchContact | null {
+  if (identifier === null) return null;
+  for (let index = 0; index < touches.length; index += 1) {
+    const touch = touches[index];
+    if (touch?.identifier === identifier) return touch;
+  }
+  return null;
+}
+
+function findNearestTouch(
+  touches: TouchContactList,
+  point: { clientX: number; clientY: number },
+): TouchContact | null {
+  let nearest: TouchContact | null = null;
+  let nearestDistance = Number.POSITIVE_INFINITY;
+  for (let index = 0; index < touches.length; index += 1) {
+    const touch = touches[index];
+    if (!touch) continue;
+    const distance = Math.hypot(touch.clientX - point.clientX, touch.clientY - point.clientY);
+    if (distance >= nearestDistance) continue;
+    nearest = touch;
+    nearestDistance = distance;
+  }
+  return nearest;
 }
 
 function gestureDistance(gesture: TouchGestureState): number {
@@ -64,26 +118,68 @@ interface UsePtyTouchGestureOptions {
   terminalRef: RefObject<Terminal | null>;
   suppressPtyFocus: (options?: { blur?: boolean }) => void;
   focusTerminal?: () => void;
+  isGestureTarget?: (point: { clientX: number; clientY: number }) => boolean;
   onLongPressCandidateStart?: (point: { clientX: number; clientY: number }) => void;
   onTap?: (point: { clientX: number; clientY: number }) => boolean;
   isTapCandidate?: (point: { clientX: number; clientY: number }) => boolean;
   onLongPressStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressMove?: (point: { clientX: number; clientY: number }) => void;
   onLongPressEnd?: (point: { clientX: number; clientY: number }) => void;
+  onGestureFinish?: (kind: PtyTouchGestureFinishKind) => void;
+  getScrollPosition?: () => PtyTouchGestureScrollPosition | null;
 }
 
 export function usePtyTouchGesture({
   terminalRef,
   suppressPtyFocus,
   focusTerminal,
+  isGestureTarget,
   onLongPressCandidateStart,
   onTap,
   isTapCandidate,
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
+  onGestureFinish,
+  getScrollPosition,
 }: UsePtyTouchGestureOptions): PtyTouchGestureHandlers {
   const touchPointerRef = useRef<TouchGestureState | null>(null);
+  // Chrome normally finishes a dual pointer/touch stream with pointerup before touchend. Keep the
+  // first result long enough for touchend to suppress compatibility mouse/click events after a
+  // link activation or long press.
+  const pendingTouchFinishKindRef = useRef<{
+    kind: PtyTouchGestureFinishKind;
+    touchIdentifier: number | null;
+  } | null>(null);
+
+  useEffect(() => {
+    // A real Chromium touchend is not guaranteed to traverse the same React root that observed
+    // pointerup (the held target may have been replaced while selection UI mounted). Capture it
+    // at document scope so compatibility mouse synthesis is suppressed reliably.
+    const finishPendingTouch = (event: globalThis.TouchEvent): void => {
+      const result = pendingTouchFinishKindRef.current;
+      if (!result) return;
+      if (
+        result.touchIdentifier !== null &&
+        !findTouchByIdentifier(event.changedTouches, result.touchIdentifier)
+      ) {
+        return;
+      }
+      pendingTouchFinishKindRef.current = null;
+      if ((result.kind === "longpress" || result.kind === "link") && event.cancelable) {
+        event.preventDefault();
+      }
+    };
+    const cancelPendingTouch = (): void => {
+      pendingTouchFinishKindRef.current = null;
+    };
+    document.addEventListener("touchend", finishPendingTouch, { capture: true, passive: false });
+    document.addEventListener("touchcancel", cancelPendingTouch, { capture: true });
+    return () => {
+      document.removeEventListener("touchend", finishPendingTouch, { capture: true });
+      document.removeEventListener("touchcancel", cancelPendingTouch, { capture: true });
+    };
+  }, []);
 
   const clearLongPressTimer = useCallback((gesture: TouchGestureState): void => {
     if (gesture.longPressTimer === null) return;
@@ -129,19 +225,28 @@ export function usePtyTouchGesture({
   );
 
   const deliverLongPress = useCallback(
-    (gesture: TouchGestureState): void => {
+    (gesture: TouchGestureState, defer = true): void => {
       if (gesture.longPressDelivered || !gesture.longPressed || gesture.moved) return;
       gesture.longPressDelivered = true;
       const point = { clientX: gesture.lastX, clientY: gesture.lastY };
-      window.setTimeout(() => onLongPressEnd?.(point), 0);
+      if (defer) window.setTimeout(() => onLongPressEnd?.(point), 0);
+      else onLongPressEnd?.(point);
     },
     [onLongPressEnd],
   );
 
   const startGesture = useCallback(
-    (pointerId: number, clientX: number, clientY: number, touchEventStream = false): void => {
+    (
+      pointerId: number,
+      clientX: number,
+      clientY: number,
+      touchEventStream = false,
+      touchIdentifier: number | null = null,
+    ): void => {
+      pendingTouchFinishKindRef.current = null;
       const gesture: TouchGestureState = {
         pointerId,
+        touchIdentifier,
         startX: clientX,
         startY: clientY,
         lastX: clientX,
@@ -152,6 +257,7 @@ export function usePtyTouchGesture({
         longPressDelivered: false,
         touchEventStream,
         longPressTimer: null,
+        scrollPositionAtStart: getScrollPosition?.() ?? null,
       };
       gesture.longPressTimer = window.setTimeout(() => {
         if (touchPointerRef.current !== gesture) return;
@@ -161,7 +267,20 @@ export function usePtyTouchGesture({
       recordTouchGestureDebug("start", { pointerId, clientX, clientY, touchEventStream });
       onLongPressCandidateStart?.({ clientX, clientY });
     },
-    [markLongPress, onLongPressCandidateStart],
+    [getScrollPosition, markLongPress, onLongPressCandidateStart],
+  );
+
+  const didGestureScroll = useCallback(
+    (gesture: TouchGestureState): boolean => {
+      const start = gesture.scrollPositionAtStart;
+      const current = getScrollPosition?.() ?? null;
+      if (!start || !current) return false;
+      return (
+        Math.abs(current.scrollLeft - start.scrollLeft) > 0.5 ||
+        Math.abs(current.scrollTop - start.scrollTop) > 0.5
+      );
+    },
+    [getScrollPosition],
   );
 
   const updateGestureMove = useCallback(
@@ -215,7 +334,10 @@ export function usePtyTouchGesture({
   );
 
   const finishGesture = useCallback(
-    (pointerId: number, point?: { clientX: number; clientY: number }): GestureFinishKind | null => {
+    (
+      pointerId: number,
+      point?: { clientX: number; clientY: number },
+    ): PtyTouchGestureFinishKind | null => {
       const gesture = touchPointerRef.current;
       if (!gesture || !matchesGesturePointer(gesture, pointerId)) return null;
       if (point) {
@@ -225,7 +347,7 @@ export function usePtyTouchGesture({
       touchPointerRef.current = null;
       clearLongPressTimer(gesture);
       const distance = gestureDistance(gesture);
-      let result: GestureFinishKind;
+      let result: PtyTouchGestureFinishKind;
       if (gesture.longPressArmed) {
         if (distance <= LONG_PRESS_MOVE_CANCEL_PX) {
           startLongPress(gesture);
@@ -240,6 +362,7 @@ export function usePtyTouchGesture({
             longPressed: true,
             longPressArmed: true,
           });
+          onGestureFinish?.(result);
           return result;
         }
         gesture.longPressArmed = false;
@@ -256,6 +379,25 @@ export function usePtyTouchGesture({
           distance,
           longPressed: true,
         });
+        onGestureFinish?.(result);
+        return result;
+      }
+      // A committed container scroll is authoritative even when Chromium coalesces touchmove or
+      // the native pan starts below our 16 px tap-drift threshold. Long press remains higher
+      // priority because its selection autoscroll is controller-owned.
+      if (didGestureScroll(gesture)) {
+        suppressPtyFocus();
+        result = "scroll";
+        recordTouchGestureDebug("finish", {
+          pointerId,
+          result,
+          point,
+          moved: gesture.moved,
+          distance,
+          longPressed: false,
+          containerScrolled: true,
+        });
+        onGestureFinish?.(result);
         return result;
       }
       if (gesture.moved) {
@@ -270,6 +412,7 @@ export function usePtyTouchGesture({
             distance,
             longPressed: false,
           });
+          onGestureFinish?.(result);
           return result;
         }
         suppressPtyFocus();
@@ -282,6 +425,7 @@ export function usePtyTouchGesture({
           distance,
           longPressed: false,
         });
+        onGestureFinish?.(result);
         return result;
       }
       if (point && onTap?.(point)) {
@@ -295,6 +439,7 @@ export function usePtyTouchGesture({
           distance,
           longPressed: false,
         });
+        onGestureFinish?.(result);
         return result;
       }
       if (focusTerminal) focusTerminal();
@@ -308,12 +453,15 @@ export function usePtyTouchGesture({
         distance,
         longPressed: false,
       });
+      onGestureFinish?.(result);
       return result;
     },
     [
       clearLongPressTimer,
       deliverLongPress,
+      didGestureScroll,
       focusTerminal,
+      onGestureFinish,
       onTap,
       startLongPress,
       suppressPtyFocus,
@@ -322,14 +470,18 @@ export function usePtyTouchGesture({
   );
 
   const cancelGesture = useCallback(
-    (pointerId: number): GestureFinishKind | null => {
+    (
+      pointerId: number,
+      options: { immediateLongPressEnd?: boolean } = {},
+    ): PtyTouchGestureFinishKind | null => {
       const gesture = touchPointerRef.current;
       if (!gesture || !matchesGesturePointer(gesture, pointerId)) return null;
       clearLongPressTimer(gesture);
       touchPointerRef.current = null;
       if (gesture.longPressed) {
-        deliverLongPress(gesture);
+        deliverLongPress(gesture, options.immediateLongPressEnd !== true);
         recordTouchGestureDebug("cancel", { pointerId, result: "longpress" });
+        onGestureFinish?.("longpress");
         return "longpress";
       }
       if (gesture.longPressArmed) {
@@ -342,26 +494,83 @@ export function usePtyTouchGesture({
         moved: gesture.moved,
         distance: gestureDistance(gesture),
       });
+      onGestureFinish?.("scroll");
       return "scroll";
     },
-    [clearLongPressTimer, deliverLongPress, suppressPtyFocus],
+    [clearLongPressTimer, deliverLongPress, onGestureFinish, suppressPtyFocus],
   );
+  const cancelGestureRef = useRef(cancelGesture);
+  cancelGestureRef.current = cancelGesture;
+
+  useEffect(() => {
+    const interruptGesture = (): void => {
+      pendingTouchFinishKindRef.current = null;
+      const gesture = touchPointerRef.current;
+      if (!gesture) return;
+      cancelGestureRef.current(gesture.pointerId, { immediateLongPressEnd: true });
+    };
+    const handleVisibilityChange = (): void => {
+      if (document.visibilityState === "hidden") interruptGesture();
+    };
+
+    window.addEventListener("blur", interruptGesture);
+    window.addEventListener("pagehide", interruptGesture);
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+    return () => {
+      window.removeEventListener("blur", interruptGesture);
+      window.removeEventListener("pagehide", interruptGesture);
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+      const gesture = touchPointerRef.current;
+      if (gesture) clearLongPressTimer(gesture);
+      touchPointerRef.current = null;
+      pendingTouchFinishKindRef.current = null;
+    };
+  }, [clearLongPressTimer]);
 
   const onPointerDownCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>): void => {
       if (event.pointerType !== "touch") return;
       const target = event.target;
-      if (!(target instanceof Element) || !target.closest(".xterm")) return;
+      if (target instanceof Element && target.closest('[data-slot="pty-selection-handle"]')) {
+        return;
+      }
+      if (
+        !(target instanceof Element) ||
+        (!target.closest(".xterm") &&
+          !isGestureTarget?.({ clientX: event.clientX, clientY: event.clientY }))
+      ) {
+        return;
+      }
+
+      if (touchPointerRef.current) {
+        event.stopPropagation();
+        return;
+      }
 
       startGesture(event.pointerId, event.clientX, event.clientY);
       event.stopPropagation();
     },
-    [startGesture],
+    [isGestureTarget, startGesture],
   );
 
   const onPointerMoveCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>): void => {
       if (event.pointerType !== "touch") return;
+      const activeGesture = touchPointerRef.current;
+      if (activeGesture && !matchesGesturePointer(activeGesture, event.pointerId)) {
+        event.stopPropagation();
+        return;
+      }
+      if (
+        activeGesture?.touchEventStream &&
+        matchesGesturePointer(activeGesture, event.pointerId)
+      ) {
+        // Chromium emits pointermove and touchmove for the same physical finger. Once touchstart
+        // confirms the touch stream, touchmove is the sole movement authority; processing both
+        // would advance selection, repaint and rebind markers twice per hardware sample.
+        event.stopPropagation();
+        return;
+      }
       const moved = updateGestureMove(event.pointerId, event.clientX, event.clientY);
       const gesture = touchPointerRef.current;
       if (!gesture) return;
@@ -374,11 +583,21 @@ export function usePtyTouchGesture({
 
   const onPointerUpCapture = useCallback(
     (event: PointerEvent<HTMLDivElement>): void => {
+      const gesture = touchPointerRef.current;
       const result = finishGesture(event.pointerId, {
         clientX: event.clientX,
         clientY: event.clientY,
       });
       if (result) {
+        // Some Chromium configurations expose the pointer half through React without delivering
+        // touchstart to this root, even though a native touchend still follows. Cache every touch
+        // pointer result; a new gesture clears any pointer-only stale value.
+        if (event.pointerType === "touch") {
+          pendingTouchFinishKindRef.current = {
+            kind: result,
+            touchIdentifier: gesture?.touchIdentifier ?? null,
+          };
+        }
         event.stopPropagation();
         if (result === "link" && event.cancelable) event.preventDefault();
       }
@@ -399,7 +618,16 @@ export function usePtyTouchGesture({
         event.stopPropagation();
         return;
       }
-      if (cancelGesture(event.pointerId)) event.stopPropagation();
+      const result = cancelGesture(event.pointerId);
+      if (result) {
+        if (event.pointerType === "touch") {
+          pendingTouchFinishKindRef.current = {
+            kind: result,
+            touchIdentifier: gesture?.touchIdentifier ?? null,
+          };
+        }
+        event.stopPropagation();
+      }
     },
     [cancelGesture],
   );
@@ -407,27 +635,62 @@ export function usePtyTouchGesture({
   const onTouchStartCapture = useCallback(
     (event: TouchEvent<HTMLDivElement>): void => {
       const target = event.target;
-      if (!(target instanceof Element) || !target.closest(".xterm")) return;
-      if (touchPointerRef.current) {
-        touchPointerRef.current.touchEventStream = true;
+      if (!(target instanceof Element)) return;
+      if (target.closest('[data-slot="pty-selection-handle"]')) return;
+      const touch = event.changedTouches[0] ?? event.touches[0];
+      if (!touch) return;
+      if (
+        !target.closest(".xterm") &&
+        !isGestureTarget?.({ clientX: touch.clientX, clientY: touch.clientY })
+      ) {
         return;
       }
-      const touch = event.touches[0] ?? event.changedTouches[0];
-      if (!touch) return;
-      startGesture(TOUCH_EVENT_POINTER_ID, touch.clientX, touch.clientY, true);
+      if (touchPointerRef.current) {
+        if (touchPointerRef.current.touchIdentifier === null) {
+          const owner = findNearestTouch(event.changedTouches, {
+            clientX: touchPointerRef.current.lastX,
+            clientY: touchPointerRef.current.lastY,
+          });
+          if (!owner) return;
+          touchPointerRef.current.touchIdentifier = owner.identifier;
+          touchPointerRef.current.touchEventStream = true;
+        }
+        return;
+      }
+      startGesture(TOUCH_EVENT_POINTER_ID, touch.clientX, touch.clientY, true, touch.identifier);
     },
-    [startGesture],
+    [isGestureTarget, startGesture],
   );
 
   const onTouchMoveCapture = useCallback(
     (event: TouchEvent<HTMLDivElement>): void => {
-      const touch = event.touches[0] ?? event.changedTouches[0];
+      const activeGesture = touchPointerRef.current;
+      if (!activeGesture) return;
+      if (activeGesture.touchIdentifier === null) {
+        const owner = findNearestTouch(
+          event.changedTouches.length > 0 ? event.changedTouches : event.touches,
+          { clientX: activeGesture.lastX, clientY: activeGesture.lastY },
+        );
+        if (!owner) return;
+        activeGesture.touchIdentifier = owner.identifier;
+        activeGesture.touchEventStream = true;
+      }
+      const changedTouch = findTouchByIdentifier(
+        event.changedTouches,
+        activeGesture.touchIdentifier,
+      );
+      if (!changedTouch && event.changedTouches.length > 0) {
+        // Only another contact moved; never feed its coordinates into the initiating gesture.
+        return;
+      }
+      const touch =
+        changedTouch ?? findTouchByIdentifier(event.touches, activeGesture.touchIdentifier);
       if (!touch) return;
       const moved = updateGestureMove(TOUCH_EVENT_POINTER_ID, touch.clientX, touch.clientY);
-      const gesture = touchPointerRef.current;
-      if (!gesture) return;
+      const currentGesture = touchPointerRef.current;
+      if (!currentGesture) return;
       if (moved) {
-        if (gesture.longPressed) {
+        if (currentGesture.longPressed) {
           event.stopPropagation();
           event.preventDefault();
         }
@@ -438,14 +701,29 @@ export function usePtyTouchGesture({
 
   const onTouchEndCapture = useCallback(
     (event: TouchEvent<HTMLDivElement>): void => {
-      const touch = event.changedTouches[0];
       const gesture = touchPointerRef.current;
+      if (gesture?.touchIdentifier === null && event.changedTouches.length > 0) {
+        const owner = findNearestTouch(event.changedTouches, {
+          clientX: gesture.lastX,
+          clientY: gesture.lastY,
+        });
+        if (owner) gesture.touchIdentifier = owner.identifier;
+      }
+      const touch = gesture
+        ? findTouchByIdentifier(event.changedTouches, gesture.touchIdentifier)
+        : null;
+      if (gesture && !touch && findTouchByIdentifier(event.touches, gesture.touchIdentifier)) {
+        // A different finger ended; the initiating contact still owns the gesture.
+        return;
+      }
       const point = touch
         ? { clientX: touch.clientX, clientY: touch.clientY }
         : gesture
           ? { clientX: gesture.lastX, clientY: gesture.lastY }
           : undefined;
-      const result = finishGesture(TOUCH_EVENT_POINTER_ID, point);
+      const result =
+        finishGesture(TOUCH_EVENT_POINTER_ID, point) ?? pendingTouchFinishKindRef.current?.kind;
+      pendingTouchFinishKindRef.current = null;
       if (result === "longpress" || result === "link") {
         event.stopPropagation();
         if (event.cancelable) event.preventDefault();
@@ -456,7 +734,25 @@ export function usePtyTouchGesture({
 
   const onTouchCancelCapture = useCallback(
     (event: TouchEvent<HTMLDivElement>): void => {
-      if (cancelGesture(TOUCH_EVENT_POINTER_ID) === "longpress") event.stopPropagation();
+      const gesture = touchPointerRef.current;
+      if (gesture?.touchIdentifier === null && event.changedTouches.length > 0) {
+        const owner = findNearestTouch(event.changedTouches, {
+          clientX: gesture.lastX,
+          clientY: gesture.lastY,
+        });
+        if (owner) gesture.touchIdentifier = owner.identifier;
+      }
+      if (
+        gesture &&
+        !findTouchByIdentifier(event.changedTouches, gesture.touchIdentifier) &&
+        findTouchByIdentifier(event.touches, gesture.touchIdentifier)
+      ) {
+        return;
+      }
+      const result =
+        cancelGesture(TOUCH_EVENT_POINTER_ID) ?? pendingTouchFinishKindRef.current?.kind;
+      pendingTouchFinishKindRef.current = null;
+      if (result === "longpress") event.stopPropagation();
     },
     [cancelGesture],
   );

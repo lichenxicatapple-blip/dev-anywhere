@@ -1,4 +1,4 @@
-import type { Terminal } from "@xterm/xterm";
+import type { IBufferLine, Terminal } from "@xterm/xterm";
 import {
   getClientPositionForTerminalPoint,
   type TerminalSelectionPoint,
@@ -24,8 +24,11 @@ export interface PtySelectionHandleMetrics {
 interface GetPtySelectionHandlesOptions {
   terminal: Terminal;
   host: HTMLElement;
+  coordinateSpace?: HTMLElement | null;
   anchor: TerminalSelectionPoint;
   focus: TerminalSelectionPoint;
+  columnMode?: boolean;
+  getLine?: (row: number) => IBufferLine | null | undefined;
 }
 
 interface ComputePtySelectionToolbarPositionForHandlesOptions {
@@ -47,29 +50,41 @@ export function computePtySelectionHandleMetrics(ptyFontSize: number): PtySelect
 export function getPtySelectionHandles({
   terminal,
   host,
+  coordinateSpace,
   anchor,
   focus,
+  columnMode = false,
+  getLine,
 }: GetPtySelectionHandlesOptions): PtySelectionHandles | null {
-  const viewportStart = terminal.buffer.active.viewportY;
-  const viewportEnd = viewportStart + terminal.rows - 1;
-  const projectToViewport = (point: TerminalSelectionPoint): TerminalSelectionPoint => ({
-    ...point,
-    row: Math.min(viewportEnd, Math.max(viewportStart, point.row)),
-  });
+  const anchorComesFirst = columnMode
+    ? anchor.column <= focus.column
+    : anchor.row < focus.row || (anchor.row === focus.row && anchor.column <= focus.column);
   const anchorPosition = getClientPositionForTerminalPoint({
     terminal,
     host,
-    point: projectToViewport(anchor),
-    affinity: "before",
+    point: anchor,
+    affinity: anchorComesFirst ? "before" : "after",
+    getLine,
   });
   const focusPosition = getClientPositionForTerminalPoint({
     terminal,
     host,
-    point: projectToViewport(focus),
-    affinity: "after",
+    point: focus,
+    affinity: anchorComesFirst ? "after" : "before",
+    getLine,
   });
   if (!anchorPosition || !focusPosition) return null;
-  return { anchor: anchorPosition, focus: focusPosition };
+  if (!coordinateSpace) return { anchor: anchorPosition, focus: focusPosition };
+
+  const rect = coordinateSpace.getBoundingClientRect();
+  const toLocalPosition = (position: PtySelectionHandlePosition): PtySelectionHandlePosition => ({
+    left: position.left - rect.left,
+    top: position.top - rect.top,
+  });
+  return {
+    anchor: toLocalPosition(anchorPosition),
+    focus: toLocalPosition(focusPosition),
+  };
 }
 
 export function computePtySelectionToolbarPositionForHandles({

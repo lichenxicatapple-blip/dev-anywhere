@@ -6,6 +6,7 @@
 // 本组件仅负责 DOM 结构与 JSX 接线。
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from "react";
+import { createPortal } from "react-dom";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import type { SessionProvider } from "@/lib/session-provider";
 import { BackToBottom } from "./back-to-bottom";
@@ -39,6 +40,7 @@ export function ChatPtyView({
   const [findQuery, setFindQuery] = useState("");
   const spacerRef = useRef<HTMLDivElement>(null);
   const xtermHostRef = useRef<HTMLDivElement>(null);
+  const selectionHandleLayerRef = useRef<HTMLDivElement>(null);
 
   const view = usePtyView({
     sessionId,
@@ -46,6 +48,7 @@ export function ChatPtyView({
     containerEl,
     spacerRef,
     xtermHostRef,
+    selectionHandleLayerRef,
     mobileControlsHeight,
   });
   const handleMetrics = view.ptySelectionHandleMetrics;
@@ -100,7 +103,7 @@ export function ChatPtyView({
       ) : null}
       <div
         ref={setContainerEl}
-        className="flex-1 min-h-0 overflow-auto overscroll-contain bg-background px-3 pt-2"
+        className="relative flex-1 min-h-0 overflow-auto overscroll-contain bg-background px-3 pt-2"
         style={{
           paddingBottom: `calc(env(safe-area-inset-bottom) + ${view.containerPaddingBottom}px)`,
           touchAction: "pan-x pan-y",
@@ -108,7 +111,6 @@ export function ChatPtyView({
         }}
         onMouseDownCapture={view.handleTerminalContainerMouseDown}
         onPointerDownCapture={(event) => {
-          view.refreshReviewSnapshot();
           view.pointerHandlers.onPointerDownCapture(event);
         }}
         onPointerMoveCapture={view.pointerHandlers.onPointerMoveCapture}
@@ -146,6 +148,21 @@ export function ChatPtyView({
             data-slot="pty-host"
           />
         </div>
+        <div
+          ref={selectionHandleLayerRef}
+          data-slot="pty-selection-handle-layer"
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 0,
+            height: 0,
+            contain: "layout size",
+            overflow: "visible",
+            pointerEvents: "none",
+            zIndex: 4,
+          }}
+        />
       </div>
       <BackToBottom
         visible={!view.isAtBottom}
@@ -167,26 +184,27 @@ export function ChatPtyView({
           onHeightChange={setMobileControlsHeight}
         />
       ) : null}
-      {view.ptySelectionHandles ? (
-        <>
-          <PtySelectionHandle
-            kind="anchor"
-            position={view.ptySelectionHandles.anchor}
-            metrics={handleMetrics}
-            aria-label="调整选区起点"
-            onPointerDown={(event) => view.handlePtySelectionHandlePointerDown("anchor", event)}
-            onTouchStart={(event) => view.handlePtySelectionHandleTouchStart("anchor", event)}
-          />
-          <PtySelectionHandle
-            kind="focus"
-            position={view.ptySelectionHandles.focus}
-            metrics={handleMetrics}
-            aria-label="调整选区终点"
-            onPointerDown={(event) => view.handlePtySelectionHandlePointerDown("focus", event)}
-            onTouchStart={(event) => view.handlePtySelectionHandleTouchStart("focus", event)}
-          />
-        </>
-      ) : null}
+      {view.ptySelectionHandles && selectionHandleLayerRef.current
+        ? createPortal(
+            <>
+              <PtySelectionHandle
+                kind="anchor"
+                metrics={handleMetrics}
+                aria-label="调整选区起点"
+                onPointerDown={(event) => view.handlePtySelectionHandlePointerDown("anchor", event)}
+                onTouchStart={(event) => view.handlePtySelectionHandleTouchStart("anchor", event)}
+              />
+              <PtySelectionHandle
+                kind="focus"
+                metrics={handleMetrics}
+                aria-label="调整选区终点"
+                onPointerDown={(event) => view.handlePtySelectionHandlePointerDown("focus", event)}
+                onTouchStart={(event) => view.handlePtySelectionHandleTouchStart("focus", event)}
+              />
+            </>,
+            selectionHandleLayerRef.current,
+          )
+        : null}
       {view.ptySelectionToolbar ? (
         <div
           className="fixed z-50 flex -translate-x-1/2 gap-1 rounded-md border border-border bg-popover p-1 text-popover-foreground shadow-lg"
@@ -238,7 +256,6 @@ export function ChatPtyView({
 
 interface PtySelectionHandleProps {
   kind: "anchor" | "focus";
-  position: { left: number; top: number };
   metrics: { visualSize: number; stemSize: number; touchSize: number };
   "aria-label": string;
   onPointerDown: (event: ReactPointerEvent<HTMLButtonElement>) => void;
@@ -247,7 +264,6 @@ interface PtySelectionHandleProps {
 
 function PtySelectionHandle({
   kind,
-  position,
   metrics,
   "aria-label": ariaLabel,
   onPointerDown,
@@ -279,13 +295,15 @@ function PtySelectionHandle({
   return (
     <button
       type="button"
-      className="fixed z-50 touch-none rounded-full bg-transparent p-0 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
+      className="absolute z-50 touch-none rounded-full bg-transparent p-0 pointer-events-auto focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 focus-visible:outline-ring"
       style={{
-        left: position.left,
-        top: position.top,
+        left: 0,
+        top: 0,
         width: metrics.touchSize,
         height: metrics.touchSize,
-        transform: "translate(-50%, -50%)",
+        transform: "translate3d(0, 0, 0) translate(-50%, -50%)",
+        visibility: "hidden",
+        willChange: "transform",
       }}
       data-slot="pty-selection-handle"
       data-kind={kind}

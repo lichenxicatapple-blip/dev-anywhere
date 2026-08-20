@@ -138,6 +138,71 @@ test("keeps the reviewed frame frozen while live output appends new lines", asyn
   await expect(backToBottom(page)).toHaveAttribute("aria-label", "回到最新");
 });
 
+test("keeps dim truecolor foregrounds unchanged when review projection takes over", async ({
+  page,
+}) => {
+  await setupPtyChat(page, {
+    sessionId: SESSION_ID,
+    cols: 80,
+    rows: 24,
+    withVisualViewportMock: true,
+  });
+  await expectPtyTerminalMounted(page);
+
+  await page.evaluate(() => window.__ptySmoke.resize(80, 24));
+  await page.waitForTimeout(100);
+  await sendPtyOutput(
+    page,
+    [
+      Array.from({ length: 30 }, (_, index) => `COLOR HISTORY ${index + 1}\r\n`).join(""),
+      "\u001b[2;38;2;205;214;244;48;2;74;34;29mRGB DIM TARGET\u001b[0m\r\n",
+      Array.from({ length: 6 }, (_, index) => `COLOR LATER ${index + 1}\r\n`).join(""),
+    ].join(""),
+  );
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+    .toContain("RGB DIM TARGET");
+  await expectPtyRendered(page);
+
+  const liveAppearance = await page
+    .locator('[data-slot="pty-host"] .xterm-screen')
+    .evaluate((screen) => {
+      const renderedRows = Array.from(screen.children).find(
+        (child) => child instanceof HTMLElement && child.classList.contains("xterm-rows"),
+      );
+      const glyph = renderedRows
+        ? Array.from(renderedRows.querySelectorAll<HTMLElement>("span"))
+            .filter((span) => span.textContent?.includes("RGB DIM TARGET"))
+            .at(-1)
+        : null;
+      if (!glyph) return null;
+      return { color: getComputedStyle(glyph).color, opacity: getComputedStyle(glyph).opacity };
+    });
+  expect(liveAppearance).toEqual({ color: "rgb(205, 214, 244)", opacity: "1" });
+  if (!liveAppearance) throw new Error("live truecolor target glyph is unavailable");
+
+  const box = await ptyTerminal(page).boundingBox();
+  if (!box) throw new Error("PTY terminal is not visible");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -80);
+
+  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
+  await expect(snapshot).toContainText("RGB DIM TARGET");
+  const projectedAppearance = await snapshot.evaluate((element) => {
+    const glyph = Array.from(element.querySelectorAll<HTMLElement>("span"))
+      .filter((span) => span.textContent?.includes("RGB DIM TARGET"))
+      .at(-1);
+    if (!glyph) return null;
+    let effectiveOpacity = 1;
+    for (let current: HTMLElement | null = glyph; current && current !== element; ) {
+      effectiveOpacity *= Number.parseFloat(getComputedStyle(current).opacity);
+      current = current.parentElement;
+    }
+    return { color: getComputedStyle(glyph).color, opacity: effectiveOpacity };
+  });
+  expect(projectedAppearance).toEqual({ color: liveAppearance.color, opacity: 1 });
+});
+
 test("ignores passive container scroll events while the reviewed frame is frozen", async ({
   page,
 }) => {

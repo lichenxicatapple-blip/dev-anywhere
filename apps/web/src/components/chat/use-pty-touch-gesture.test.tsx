@@ -2,7 +2,7 @@ import { cleanup, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { usePtyTouchGesture } from "./use-pty-touch-gesture";
+import { usePtyTouchGesture, type PtyTouchGestureFinishKind } from "./use-pty-touch-gesture";
 
 afterEach(cleanup);
 
@@ -24,13 +24,28 @@ function dispatchPointer(
 function dispatchTouch(
   type: string,
   target: HTMLElement,
-  props: { clientX: number; clientY: number; omitChangedTouches?: boolean },
+  props: {
+    clientX: number;
+    clientY: number;
+    identifier?: number;
+    omitChangedTouches?: boolean;
+    touches?: Array<{ clientX: number; clientY: number; identifier: number }>;
+    changedTouches?: Array<{ clientX: number; clientY: number; identifier: number }>;
+  },
 ): Event {
   const event = new Event(type, { bubbles: true, cancelable: true });
-  const touch = { clientX: props.clientX, clientY: props.clientY };
+  const touch = {
+    clientX: props.clientX,
+    clientY: props.clientY,
+    identifier: props.identifier ?? 7,
+  };
   Object.defineProperties(event, {
-    touches: { value: type === "touchend" || type === "touchcancel" ? [] : [touch] },
-    changedTouches: { value: props.omitChangedTouches ? [] : [touch] },
+    touches: {
+      value: props.touches ?? (type === "touchend" || type === "touchcancel" ? [] : [touch]),
+    },
+    changedTouches: {
+      value: props.changedTouches ?? (props.omitChangedTouches ? [] : [touch]),
+    },
   });
   target.dispatchEvent(event);
   return event;
@@ -46,6 +61,7 @@ function Harness({
   onLongPressStart,
   onLongPressMove,
   onLongPressEnd,
+  onGestureFinish,
 }: {
   focus: () => void;
   focusTerminal?: () => void;
@@ -56,6 +72,7 @@ function Harness({
   onLongPressStart?: (point: { clientX: number; clientY: number }) => void;
   onLongPressMove?: (point: { clientX: number; clientY: number }) => void;
   onLongPressEnd?: (point: { clientX: number; clientY: number }) => void;
+  onGestureFinish?: (kind: PtyTouchGestureFinishKind) => void;
 }) {
   const terminalRef = useRef({ focus } as unknown as Terminal);
   const handlers = usePtyTouchGesture({
@@ -68,10 +85,12 @@ function Harness({
     onLongPressStart,
     onLongPressMove,
     onLongPressEnd,
+    onGestureFinish,
   });
   return (
     <div data-testid="root" {...handlers}>
       <div className="xterm" data-testid="xterm" />
+      <button type="button" data-slot="pty-selection-handle" data-testid="selection-handle" />
     </div>
   );
 }
@@ -81,7 +100,7 @@ describe("usePtyTouchGesture", () => {
     vi.useRealTimers();
   });
 
-  it("captures the long press candidate at touch start before delayed selection delivery", () => {
+  it("emits the long-press candidate before delayed long-press start", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -106,6 +125,47 @@ describe("usePtyTouchGesture", () => {
 
     expect(onLongPressCandidateStart).toHaveBeenCalledWith({ clientX: 100, clientY: 100 });
     expect(onLongPressStart).not.toHaveBeenCalled();
+  });
+
+  it("does not arm the terminal gesture router for a selection-handle contact", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onLongPressCandidateStart = vi.fn();
+    const onLongPressStart = vi.fn();
+    const onGestureFinish = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onLongPressCandidateStart={onLongPressCandidateStart}
+        onLongPressStart={onLongPressStart}
+        onGestureFinish={onGestureFinish}
+      />,
+    );
+    const handle = getByTestId("selection-handle");
+
+    dispatchPointer("pointerdown", handle, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+    dispatchTouch("touchstart", handle, { clientX: 100, clientY: 100 });
+    vi.advanceTimersByTime(650);
+    dispatchPointer("pointerup", handle, {
+      pointerId: 1,
+      pointerType: "touch",
+      clientX: 100,
+      clientY: 100,
+    });
+    dispatchTouch("touchend", handle, { clientX: 100, clientY: 100 });
+
+    expect(onLongPressCandidateStart).not.toHaveBeenCalled();
+    expect(onLongPressStart).not.toHaveBeenCalled();
+    expect(onGestureFinish).not.toHaveBeenCalled();
+    expect(suppress).not.toHaveBeenCalled();
+    expect(focus).not.toHaveBeenCalled();
   });
 
   it("lets callers guard touch-start focus and restore focus only for confirmed taps", () => {
@@ -141,39 +201,7 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("defers focus suppression until the touch scroll gesture ends", () => {
-    const focus = vi.fn();
-    const suppress = vi.fn();
-    const { getByTestId } = render(<Harness focus={focus} suppress={suppress} />);
-    const xterm = getByTestId("xterm");
-
-    dispatchPointer("pointerdown", xterm, {
-      pointerId: 1,
-      pointerType: "touch",
-      clientX: 100,
-      clientY: 100,
-    });
-    dispatchPointer("pointermove", xterm, {
-      pointerId: 1,
-      pointerType: "touch",
-      clientX: 100,
-      clientY: 120,
-    });
-
-    expect(suppress).not.toHaveBeenCalled();
-
-    dispatchPointer("pointerup", xterm, {
-      pointerId: 1,
-      pointerType: "touch",
-      clientX: 100,
-      clientY: 120,
-    });
-
-    expect(suppress).toHaveBeenCalledTimes(1);
-    expect(focus).not.toHaveBeenCalled();
-  });
-
-  it("selects on long press and does not focus the terminal on release", () => {
+  it("emits long-press start and end callbacks without requesting terminal focus", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -213,7 +241,7 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("updates selection while dragging after long press", () => {
+  it("forwards move and end points for an active long press", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -258,7 +286,7 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("selects when mobile Chrome emits contextmenu during long press", () => {
+  it("finishes an active long press once for a contextmenu and pointercancel sequence", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -294,7 +322,7 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("selects on long press when the browser only emits touch events", () => {
+  it("emits long-press end for a touch-only event sequence", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -461,7 +489,7 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("finishes a long press when Chrome starts with pointer events but ends with touch events", () => {
+  it("finishes a long press across a pointer-start and touch-end event sequence", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -494,7 +522,7 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("keeps the touch long press alive when Chrome emits pointercancel after touchstart", () => {
+  it("keeps a touch long press active across a pointercancel event sequence", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -534,7 +562,82 @@ describe("usePtyTouchGesture", () => {
     expect(focus).not.toHaveBeenCalled();
   });
 
-  it("cancels long press selection when the touch becomes a scroll gesture", () => {
+  it("keeps the initiating touch in control when a second contact starts, moves, and ends", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onLongPressMove = vi.fn();
+    const onLongPressEnd = vi.fn();
+    const { getByTestId } = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onLongPressMove={onLongPressMove}
+        onLongPressEnd={onLongPressEnd}
+      />,
+    );
+    const xterm = getByTestId("xterm");
+    const first = { clientX: 100, clientY: 100, identifier: 7 };
+    const second = { clientX: 220, clientY: 220, identifier: 8 };
+
+    dispatchTouch("touchstart", xterm, first);
+    dispatchTouch("touchstart", xterm, {
+      ...second,
+      touches: [first, second],
+      changedTouches: [second],
+    });
+    vi.advanceTimersByTime(650);
+    dispatchTouch("touchmove", xterm, {
+      ...second,
+      clientX: 260,
+      clientY: 260,
+      touches: [first, { ...second, clientX: 260, clientY: 260 }],
+      changedTouches: [{ ...second, clientX: 260, clientY: 260 }],
+    });
+    dispatchTouch("touchend", xterm, {
+      ...second,
+      touches: [first],
+      changedTouches: [second],
+    });
+
+    expect(onLongPressMove).not.toHaveBeenCalled();
+    expect(onLongPressEnd).not.toHaveBeenCalled();
+
+    dispatchTouch("touchmove", xterm, {
+      clientX: 130,
+      clientY: 160,
+      identifier: 7,
+    });
+    dispatchTouch("touchend", xterm, {
+      clientX: 130,
+      clientY: 160,
+      identifier: 7,
+    });
+    vi.runOnlyPendingTimers();
+
+    expect(onLongPressMove).toHaveBeenCalledWith({ clientX: 130, clientY: 160 });
+    expect(onLongPressEnd).toHaveBeenCalledWith({ clientX: 130, clientY: 160 });
+    expect(onLongPressEnd).toHaveBeenCalledTimes(1);
+  });
+
+  it("cancels an armed long-press timer when the page is hidden", () => {
+    vi.useFakeTimers();
+    const focus = vi.fn();
+    const suppress = vi.fn();
+    const onLongPressStart = vi.fn();
+    const { getByTestId } = render(
+      <Harness focus={focus} suppress={suppress} onLongPressStart={onLongPressStart} />,
+    );
+    const xterm = getByTestId("xterm");
+
+    dispatchTouch("touchstart", xterm, { clientX: 100, clientY: 100 });
+    window.dispatchEvent(new Event("pagehide"));
+    vi.advanceTimersByTime(650);
+
+    expect(onLongPressStart).not.toHaveBeenCalled();
+  });
+
+  it("finishes an active long press synchronously when the page is hidden", () => {
     vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
@@ -544,45 +647,52 @@ describe("usePtyTouchGesture", () => {
     );
     const xterm = getByTestId("xterm");
 
-    dispatchPointer("pointerdown", xterm, {
-      pointerId: 1,
-      pointerType: "touch",
-      clientX: 100,
-      clientY: 100,
-    });
-    dispatchPointer("pointermove", xterm, {
-      pointerId: 1,
-      pointerType: "touch",
-      clientX: 100,
-      clientY: 120,
-    });
+    dispatchTouch("touchstart", xterm, { clientX: 100, clientY: 100 });
     vi.advanceTimersByTime(650);
+    window.dispatchEvent(new Event("pagehide"));
 
-    expect(onLongPressEnd).not.toHaveBeenCalled();
+    expect(onLongPressEnd).toHaveBeenCalledWith({ clientX: 100, clientY: 100 });
+    expect(onLongPressEnd).toHaveBeenCalledTimes(1);
+
+    dispatchTouch("touchend", xterm, { clientX: 100, clientY: 100 });
+    vi.runOnlyPendingTimers();
+    expect(onLongPressEnd).toHaveBeenCalledTimes(1);
   });
 
-  it("lets non-selection touch scroll events reach the terminal scroll controller", () => {
+  it("keeps an active gesture across callback-only rerenders", () => {
+    vi.useFakeTimers();
     const focus = vi.fn();
     const suppress = vi.fn();
-    const { getByTestId } = render(<Harness focus={focus} suppress={suppress} />);
-    const root = getByTestId("root");
-    const xterm = getByTestId("xterm");
-    const touchstart = vi.fn();
-    const touchmove = vi.fn();
-    const touchend = vi.fn();
-    root.addEventListener("touchstart", touchstart);
-    root.addEventListener("touchmove", touchmove);
-    root.addEventListener("touchend", touchend);
+    const onLongPressStart = vi.fn();
+    const onLongPressEnd = vi.fn();
+    const firstFinish = vi.fn();
+    const secondFinish = vi.fn();
+    const rendered = render(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onLongPressStart={onLongPressStart}
+        onLongPressEnd={onLongPressEnd}
+        onGestureFinish={firstFinish}
+      />,
+    );
+    const xterm = rendered.getByTestId("xterm");
 
     dispatchTouch("touchstart", xterm, { clientX: 100, clientY: 100 });
-    dispatchTouch("touchmove", xterm, { clientX: 100, clientY: 112 });
-    dispatchTouch("touchmove", xterm, { clientX: 100, clientY: 120 });
-    dispatchTouch("touchend", xterm, { clientX: 100, clientY: 120 });
+    vi.advanceTimersByTime(650);
+    rendered.rerender(
+      <Harness
+        focus={focus}
+        suppress={suppress}
+        onLongPressStart={onLongPressStart}
+        onLongPressEnd={onLongPressEnd}
+        onGestureFinish={secondFinish}
+      />,
+    );
+    dispatchTouch("touchend", xterm, { clientX: 100, clientY: 100 });
+    vi.runOnlyPendingTimers();
 
-    expect(touchstart).toHaveBeenCalledTimes(1);
-    expect(touchmove).toHaveBeenCalledTimes(2);
-    expect(touchend).toHaveBeenCalledTimes(1);
-    expect(suppress).toHaveBeenCalledTimes(1);
-    expect(focus).not.toHaveBeenCalled();
+    expect(onLongPressEnd).toHaveBeenCalledTimes(1);
+    expect(secondFinish).toHaveBeenCalledWith("longpress");
   });
 });

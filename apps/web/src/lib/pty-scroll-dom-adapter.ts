@@ -6,8 +6,8 @@ interface PtyScrollDomAdapterOptions {
   onWheel: (event: WheelEvent) => void;
   onTouchStart: (event: TouchEvent) => void;
   onTouchMove: (event: TouchEvent) => void;
-  onTouchEnd: () => void;
-  onTouchCancel: () => void;
+  onTouchEnd: (event: TouchEvent) => void;
+  onTouchCancel: (event: TouchEvent) => void;
   onContainerScroll: () => void;
   onTermScroll: () => void;
   onRender: () => void;

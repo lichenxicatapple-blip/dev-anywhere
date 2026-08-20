@@ -1,4 +1,8 @@
-import type { Terminal } from "@xterm/xterm";
+import type { IBufferLine, Terminal } from "@xterm/xterm";
+import {
+  getRenderedPtyHistoryProjectionRange,
+  getRenderedPtyHistorySelectionLine,
+} from "./pty-history-projection";
 import { measureXtermCellSize } from "./pty-xterm-metrics";
 import type { PtySelectionPathAction } from "./pty-selection-path-action";
 import { findFileDownloadPathMatchesInWrappedBuffer } from "./xterm-file-download-links";
@@ -9,13 +13,14 @@ export interface TerminalSelectionPoint {
   column: number;
 }
 
-interface TerminalSelectionResult {
+export interface TerminalSelectionResult {
   anchor: TerminalSelectionPoint;
   focus: TerminalSelectionPoint;
   text: string;
+  columnMode?: boolean;
 }
 
-interface TerminalPathSelectionResult extends TerminalSelectionResult {
+export interface TerminalPathSelectionResult extends TerminalSelectionResult {
   pathAction: PtySelectionPathAction;
 }
 
@@ -26,13 +31,13 @@ interface TerminalPointAtClientOptions {
   clientY: number;
   cellWidth?: number;
   cellHeight?: number;
+  /**
+   * Active drags may leave the painted terminal bounds while the outer viewport autoscrolls.
+   * Clamp those coordinates to the nearest real buffer cell. Press/click hit testing deliberately
+   * leaves this off so terminal padding can never manufacture a selection anchor.
+   */
+  clampToBuffer?: boolean;
 }
-
-type SelectTerminalLineAtPointOptions = TerminalPointAtClientOptions;
-
-type SelectTerminalTokenAtPointOptions = TerminalPointAtClientOptions;
-
-type SelectTerminalInitialRangeAtPointOptions = TerminalPointAtClientOptions;
 
 interface SelectTerminalInitialRangeAtBufferPointOptions {
   terminal: Terminal;
@@ -45,6 +50,7 @@ interface SelectTerminalRangeOptions {
   terminal: Terminal;
   anchor: TerminalSelectionPoint;
   focus: TerminalSelectionPoint;
+  columnMode?: boolean;
 }
 
 interface TerminalPointClientPositionOptions {
@@ -54,6 +60,7 @@ interface TerminalPointClientPositionOptions {
   affinity?: "before" | "after";
   cellWidth?: number;
   cellHeight?: number;
+  getLine?: (row: number) => IBufferLine | null | undefined;
 }
 
 interface TerminalLineTextCellSpan {
@@ -82,51 +89,39 @@ function getCellSize({
   cellH: number;
 } | null {
   if (cellWidth && cellHeight) return { cellW: cellWidth, cellH: cellHeight };
+  const screen = host.querySelector<HTMLElement>(".xterm-screen");
+  const rect = screen?.getBoundingClientRect();
+  if (rect && rect.width > 0 && rect.height > 0 && terminal.cols > 0 && terminal.rows > 0) {
+    return { cellW: rect.width / terminal.cols, cellH: rect.height / terminal.rows };
+  }
   return measureXtermCellSize(host, terminal);
 }
 
-function findNonBlankCellRange(
-  line: NonNullable<ReturnType<Terminal["buffer"]["active"]["getLine"]>>,
-  maxCols: number,
-): { start: number; end: number } | null {
-  const endLimit = Math.min(line.length, maxCols);
-  const hasVisibleChars = (index: number): boolean =>
-    (line.getCell(index)?.getChars() ?? "").trim().length > 0;
-  let start = 0;
-  while (start < endLimit && !hasVisibleChars(start)) start += 1;
-  if (start >= endLimit) return null;
-
-  let end = endLimit - 1;
-  while (end >= start && !hasVisibleChars(end)) end -= 1;
-  if (end < start) return null;
-
-  return { start, end };
-}
-
-function findTokenCellRange(
-  line: NonNullable<ReturnType<Terminal["buffer"]["active"]["getLine"]>>,
-  column: number,
-  maxCols: number,
-): { start: number; end: number } | null {
-  const endLimit = Math.min(line.length, maxCols);
-  if (column < 0 || column >= endLimit) return null;
-
-  if (!hasVisibleChars(line, column)) return null;
-
+function getGlyphStartColumn(line: IBufferLine | null | undefined, column: number): number {
   let start = column;
-  while (start > 0 && hasVisibleChars(line, start - 1)) start -= 1;
-
-  let end = column;
-  while (end + 1 < endLimit && hasVisibleChars(line, end + 1)) end += 1;
-
-  return { start, end };
+  while (start > 0 && line?.getCell(start)?.getWidth() === 0) start -= 1;
+  return start;
 }
 
-function hasVisibleChars(
-  line: NonNullable<ReturnType<Terminal["buffer"]["active"]["getLine"]>>,
-  index: number,
-): boolean {
-  return (line.getCell(index)?.getChars() ?? "").trim().length > 0;
+function getGlyphEndColumnExclusive(
+  line: IBufferLine | null | undefined,
+  column: number,
+  cols: number,
+): number {
+  const start = getGlyphStartColumn(line, column);
+  const width = Math.max(1, line?.getCell(start)?.getWidth() ?? 1);
+  return Math.min(cols, start + width);
+}
+
+function normalizePointToGlyphStart(
+  terminal: Terminal,
+  host: HTMLElement,
+  point: TerminalSelectionPoint,
+): TerminalSelectionPoint {
+  const line =
+    getRenderedPtyHistorySelectionLine(host, point.row) ??
+    terminal.buffer.active.getLine(point.row);
+  return { ...point, column: getGlyphStartColumn(line, point.column) };
 }
 
 function getTerminalLineTextAndCellSpans(
@@ -153,7 +148,13 @@ function getTerminalLineTextAndCellSpans(
     });
   }
 
-  return { text: text.trimEnd(), spans };
+  // `trimEnd()` would incorrectly discard explicitly printed spaces. xterm's trimRight only
+  // removes cells without content, so use its own translated prefix as the authoritative length.
+  const trimmedText = line.translateToString(true, 0, endLimit);
+  return {
+    text: text.slice(0, trimmedText.length),
+    spans: spans.filter((span) => span.textStart < trimmedText.length),
+  };
 }
 
 function isTechnicalConnector(segment: Intl.SegmentData): boolean {
@@ -239,42 +240,7 @@ function findSemanticTextRanges(text: string): TerminalLineTextRange[] {
   return ranges.sort((left, right) => left.start - right.start || left.end - right.end);
 }
 
-function findSemanticTokenCellRanges(
-  line: NonNullable<ReturnType<Terminal["buffer"]["active"]["getLine"]>>,
-  maxCols: number,
-): Array<{ start: number; end: number }> {
-  const { text, spans } = getTerminalLineTextAndCellSpans(line, maxCols);
-  return findSemanticTextRanges(text).flatMap((range) => {
-    const covered = spans.filter(
-      (span) => span.textStart < range.end && span.textEnd > range.start,
-    );
-    const first = covered[0];
-    const last = covered.at(-1);
-    return first && last ? [{ start: first.cellStart, end: last.cellEnd }] : [];
-  });
-}
-
-function findNearestTokenIndex(
-  ranges: Array<{ start: number; end: number }>,
-  column: number,
-): number | null {
-  if (ranges.length === 0) return null;
-
-  let nearestIndex = 0;
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (let index = 0; index < ranges.length; index += 1) {
-    const range = ranges[index];
-    const distance =
-      column < range.start ? range.start - column : column > range.end ? column - range.end : 0;
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-      nearestIndex = index;
-    }
-  }
-  return nearestIndex;
-}
-
-function normalizeSelectionPoints(
+export function normalizeTerminalSelectionPoints(
   anchor: TerminalSelectionPoint,
   focus: TerminalSelectionPoint,
 ): { start: TerminalSelectionPoint; end: TerminalSelectionPoint } {
@@ -284,23 +250,79 @@ function normalizeSelectionPoints(
   return { start: focus, end: anchor };
 }
 
-function extractText(
+export function extractTerminalRangeText(
   terminal: Terminal,
   start: TerminalSelectionPoint,
   end: TerminalSelectionPoint,
+  columnMode = false,
 ): string {
+  if (columnMode) {
+    const firstRow = Math.min(start.row, end.row);
+    const lastRow = Math.max(start.row, end.row);
+    const firstColumn = Math.min(start.column, end.column);
+    const lastColumn = Math.max(start.column, end.column);
+    const lines: string[] = [];
+    for (let row = firstRow; row <= lastRow; row += 1) {
+      const line = terminal.buffer.active.getLine(row);
+      if (!line) continue;
+      const from = getGlyphStartColumn(line, firstColumn);
+      const to = getGlyphEndColumnExclusive(line, lastColumn, terminal.cols);
+      lines.push(line.translateToString(true, from, to).replace(/\u00a0/g, " "));
+    }
+    return lines.join("\n");
+  }
+
   const lines: string[] = [];
   for (let row = start.row; row <= end.row; row += 1) {
     const line = terminal.buffer.active.getLine(row);
-    if (!line) {
-      lines.push("");
-      continue;
+    if (!line) continue;
+    const from = row === start.row ? getGlyphStartColumn(line, start.column) : 0;
+    const to =
+      row === end.row ? getGlyphEndColumnExclusive(line, end.column, terminal.cols) : terminal.cols;
+    const text = line.translateToString(true, from, to).replace(/\u00a0/g, " ");
+    if (row > start.row && line.isWrapped && lines.length > 0) {
+      lines[lines.length - 1] += text;
+    } else {
+      lines.push(text);
     }
-    const from = row === start.row ? start.column : 0;
-    const to = row === end.row ? end.column + 1 : terminal.cols;
-    lines.push(line.translateToString(true, from, to));
   }
-  return lines.join("\n").replace(/\s+$/, "");
+  return lines.join("\n");
+}
+
+export function resolveTerminalRange({
+  terminal,
+  anchor,
+  focus,
+  columnMode = false,
+}: SelectTerminalRangeOptions): TerminalSelectionResult | null {
+  if (
+    anchor.row < 0 ||
+    focus.row < 0 ||
+    anchor.row >= terminal.buffer.active.length ||
+    focus.row >= terminal.buffer.active.length ||
+    anchor.column < 0 ||
+    focus.column < 0 ||
+    anchor.column >= terminal.cols ||
+    focus.column >= terminal.cols
+  ) {
+    return null;
+  }
+  const normalizedAnchor = {
+    ...anchor,
+    column: getGlyphStartColumn(terminal.buffer.active.getLine(anchor.row), anchor.column),
+  };
+  const normalizedFocus = {
+    ...focus,
+    column: getGlyphStartColumn(terminal.buffer.active.getLine(focus.row), focus.column),
+  };
+  const { start, end } = normalizeTerminalSelectionPoints(normalizedAnchor, normalizedFocus);
+  const text = extractTerminalRangeText(
+    terminal,
+    columnMode ? normalizedAnchor : start,
+    columnMode ? normalizedFocus : end,
+    columnMode,
+  );
+  return { anchor: normalizedAnchor, focus: normalizedFocus, text, columnMode };
 }
 
 export function getTerminalPointAtClient({
@@ -310,6 +332,7 @@ export function getTerminalPointAtClient({
   clientY,
   cellWidth,
   cellHeight,
+  clampToBuffer = false,
 }: TerminalPointAtClientOptions): TerminalSelectionPoint | null {
   const screen = host.querySelector<HTMLElement>(".xterm-screen");
   if (!screen) return null;
@@ -318,15 +341,46 @@ export function getTerminalPointAtClient({
   if (!measured?.cellW || !measured.cellH) return null;
 
   const rect = screen.getBoundingClientRect();
-  const rowInViewport = Math.floor((clientY - rect.top) / measured.cellH);
-  const column = Math.floor((clientX - rect.left) / measured.cellW);
-  if (rowInViewport < 0 || rowInViewport >= terminal.rows) return null;
-  if (column < 0 || column >= terminal.cols) return null;
+  const rawRow =
+    terminal.buffer.active.viewportY + Math.floor((clientY - rect.top) / measured.cellH);
+  const rawColumn = Math.floor((clientX - rect.left) / measured.cellW);
+  if (clampToBuffer) {
+    if (terminal.buffer.active.length <= 0 || terminal.cols <= 0) return null;
+    return normalizePointToGlyphStart(terminal, host, {
+      row: Math.max(0, Math.min(terminal.buffer.active.length - 1, rawRow)),
+      column: Math.max(0, Math.min(terminal.cols - 1, rawColumn)),
+    });
+  }
+  if (rawColumn < 0 || rawColumn >= terminal.cols) return null;
 
-  return {
-    row: terminal.buffer.active.viewportY + rowInViewport,
-    column,
-  };
+  // The frozen review and live-backfill rows are real painted buffer rows, but they can sit above
+  // xterm's own viewport. Their shell carries the authoritative buffer interval; hit-test it
+  // before the native screen so blank padding can never be mistaken for selectable content.
+  const projection = getRenderedPtyHistoryProjectionRange(host);
+  if (projection) {
+    const { startLine, endLine } = projection;
+    const projectionRect = projection.element.getBoundingClientRect();
+    const row = startLine + Math.floor((clientY - projectionRect.top) / measured.cellH);
+    if (
+      Number.isInteger(startLine) &&
+      Number.isInteger(endLine) &&
+      row >= startLine &&
+      row <= endLine &&
+      row >= 0 &&
+      row < terminal.buffer.active.length
+    ) {
+      return normalizePointToGlyphStart(terminal, host, { row, column: rawColumn });
+    }
+  }
+
+  const rowInNativeViewport = Math.floor((clientY - rect.top) / measured.cellH);
+  if (rowInNativeViewport < 0 || rowInNativeViewport >= terminal.rows) return null;
+  if (rawRow < 0 || rawRow >= terminal.buffer.active.length) return null;
+
+  return normalizePointToGlyphStart(terminal, host, {
+    row: rawRow,
+    column: rawColumn,
+  });
 }
 
 export function getClientPositionForTerminalPoint({
@@ -336,6 +390,7 @@ export function getClientPositionForTerminalPoint({
   affinity = "before",
   cellWidth,
   cellHeight,
+  getLine,
 }: TerminalPointClientPositionOptions): { left: number; top: number } | null {
   const screen = host.querySelector<HTMLElement>(".xterm-screen");
   if (!screen) return null;
@@ -344,137 +399,131 @@ export function getClientPositionForTerminalPoint({
   if (!measured?.cellW || !measured.cellH) return null;
 
   const rowInViewport = point.row - terminal.buffer.active.viewportY;
-  if (rowInViewport < 0 || rowInViewport >= terminal.rows) return null;
+  if (point.row < 0 || point.row >= terminal.buffer.active.length) return null;
   if (point.column < 0 || point.column >= terminal.cols) return null;
 
   const rect = screen.getBoundingClientRect();
-  const columnOffset = affinity === "after" ? point.column + 1 : point.column;
+  const line = getLine?.(point.row) ?? terminal.buffer.active.getLine(point.row);
+  const glyphStart = getGlyphStartColumn(line, point.column);
+  const width = Math.max(1, line?.getCell(glyphStart)?.getWidth() ?? 1);
+  const columnOffset = affinity === "after" ? glyphStart + width : glyphStart;
+
+  // Review/live-backfill rows are painted by a frozen projection shell. Its row identity can
+  // rebase while scrollback trims even though the shell itself deliberately stays in place. Use
+  // the same shell + rebased interval as the forward hit-test above so point -> client and client
+  // -> point remain exact inverses for the frame the user can actually see.
+  const projection = getRenderedPtyHistoryProjectionRange(host);
+  if (projection && point.row >= projection.startLine && point.row <= projection.endLine) {
+    const projectionRect = projection.element.getBoundingClientRect();
+    return {
+      left: rect.left + columnOffset * measured.cellW,
+      top: projectionRect.top + (point.row - projection.startLine + 1) * measured.cellH,
+    };
+  }
+
   return {
     left: rect.left + columnOffset * measured.cellW,
     top: rect.top + (rowInViewport + 1) * measured.cellH,
   };
 }
 
-export function selectTerminalRange({
-  terminal,
-  anchor,
-  focus,
-}: SelectTerminalRangeOptions): TerminalSelectionResult | null {
-  const { start, end } = normalizeSelectionPoints(anchor, focus);
-  const rowSpan = Math.max(0, end.row - start.row);
-  const length = rowSpan * terminal.cols + (end.column - start.column) + 1;
-  if (length <= 0) return null;
-
-  terminal.select(start.column, start.row, length);
-  const text = terminal.getSelection?.() || extractText(terminal, start, end);
-  if (!text.trim()) return null;
-  return { anchor, focus, text };
-}
-
-export function selectTerminalLineAtPoint({
-  terminal,
-  host,
-  clientX,
-  clientY,
-  cellWidth,
-  cellHeight,
-}: SelectTerminalLineAtPointOptions): TerminalSelectionResult | null {
-  const point = getTerminalPointAtClient({
-    terminal,
-    host,
-    clientX,
-    clientY,
-    cellWidth,
-    cellHeight,
-  });
-  if (!point) return null;
-
-  const line = terminal.buffer.active.getLine(point.row);
-  if (!line) return null;
-
-  const range = findNonBlankCellRange(line, terminal.cols);
-  if (!range) return null;
-
-  return selectTerminalRange({
-    terminal,
-    anchor: { row: point.row, column: range.start },
-    focus: { row: point.row, column: range.end },
-  });
-}
-
-export function selectTerminalTokenAtPoint({
-  terminal,
-  host,
-  clientX,
-  clientY,
-  cellWidth,
-  cellHeight,
-}: SelectTerminalTokenAtPointOptions): TerminalSelectionResult | null {
-  const point = getTerminalPointAtClient({
-    terminal,
-    host,
-    clientX,
-    clientY,
-    cellWidth,
-    cellHeight,
-  });
-  if (!point) return null;
-
-  const line = terminal.buffer.active.getLine(point.row);
-  if (!line) return null;
-
-  const range = findTokenCellRange(line, point.column, terminal.cols);
-  if (!range) return null;
-
-  return selectTerminalRange({
-    terminal,
-    anchor: { row: point.row, column: range.start },
-    focus: { row: point.row, column: range.end },
-  });
-}
-
-export function selectTerminalInitialRangeAtPoint({
-  terminal,
-  host,
-  clientX,
-  clientY,
-  cellWidth,
-  cellHeight,
-}: SelectTerminalInitialRangeAtPointOptions): TerminalSelectionResult | null {
-  const point = getTerminalPointAtClient({
-    terminal,
-    host,
-    clientX,
-    clientY,
-    cellWidth,
-    cellHeight,
-  });
-  if (!point) return null;
-
-  return selectTerminalInitialRangeAtBufferPoint({ terminal, point });
-}
-
-export function selectTerminalInitialRangeAtBufferPoint({
+export function resolveTerminalInitialRangeAtBufferPoint({
   terminal,
   point,
 }: SelectTerminalInitialRangeAtBufferPointOptions): TerminalSelectionResult | null {
-  const line = terminal.buffer.active.getLine(point.row);
-  if (!line) return null;
+  const buffer = terminal.buffer.active;
+  if (!buffer.getLine(point.row)) return null;
 
-  const ranges = findSemanticTokenCellRanges(line, terminal.cols);
-  const tokenIndex = findNearestTokenIndex(ranges, point.column);
-  if (tokenIndex === null) return null;
+  let firstRow = point.row;
+  let lastRow = point.row;
+  while (firstRow > 0 && buffer.getLine(firstRow)?.isWrapped) firstRow -= 1;
+  while (lastRow + 1 < buffer.length && buffer.getLine(lastRow + 1)?.isWrapped) lastRow += 1;
 
-  const range = ranges[tokenIndex];
-  if (!range) return null;
-  return selectTerminalRange({
+  const mappedSpans: Array<TerminalLineTextCellSpan & { row: number }> = [];
+  let logicalText = "";
+  for (let row = firstRow; row <= lastRow; row += 1) {
+    const line = buffer.getLine(row);
+    if (!line) continue;
+    const { text, spans } = getTerminalLineTextAndCellSpans(line, terminal.cols);
+    const textOffset = logicalText.length;
+    logicalText += text;
+    mappedSpans.push(
+      ...spans.map((span) => ({
+        ...span,
+        row,
+        textStart: span.textStart + textOffset,
+        textEnd: span.textEnd + textOffset,
+      })),
+    );
+  }
+
+  const targetSpan = mappedSpans.find(
+    (span) =>
+      span.row === point.row && point.column >= span.cellStart && point.column <= span.cellEnd,
+  );
+  if (!targetSpan) return null;
+  let semanticRange = findSemanticTextRanges(logicalText).find(
+    (range) => range.start < targetSpan.textEnd && range.end > targetSpan.textStart,
+  );
+  if (!semanticRange) {
+    const targetIndex = mappedSpans.indexOf(targetSpan);
+    const targetText = logicalText.slice(targetSpan.textStart, targetSpan.textEnd);
+    if (targetIndex < 0 || targetText.trim().length > 0) return null;
+    let firstWhitespace = targetIndex;
+    let lastWhitespace = targetIndex;
+    while (
+      firstWhitespace > 0 &&
+      logicalText
+        .slice(mappedSpans[firstWhitespace - 1].textStart, mappedSpans[firstWhitespace - 1].textEnd)
+        .trim().length === 0
+    ) {
+      firstWhitespace -= 1;
+    }
+    while (
+      lastWhitespace + 1 < mappedSpans.length &&
+      logicalText
+        .slice(mappedSpans[lastWhitespace + 1].textStart, mappedSpans[lastWhitespace + 1].textEnd)
+        .trim().length === 0
+    ) {
+      lastWhitespace += 1;
+    }
+    semanticRange = {
+      start: mappedSpans[firstWhitespace].textStart,
+      end: mappedSpans[lastWhitespace].textEnd,
+    };
+  }
+  const covered = mappedSpans.filter(
+    (span) => span.textStart < semanticRange.end && span.textEnd > semanticRange.start,
+  );
+  const first = covered[0];
+  const last = covered.at(-1);
+  if (!first || !last) return null;
+  return resolveTerminalRange({
     terminal,
-    anchor: { row: point.row, column: range.start },
-    focus: { row: point.row, column: range.end },
+    anchor: { row: first.row, column: first.cellStart },
+    focus: { row: last.row, column: last.cellEnd },
   });
 }
 
-export function selectTerminalPathLinkAtBufferPoint({
+export function resolveTerminalLineAtBufferPoint({
+  terminal,
+  point,
+}: SelectTerminalInitialRangeAtBufferPointOptions): TerminalSelectionResult | null {
+  const buffer = terminal.buffer.active;
+  if (!buffer.getLine(point.row)) return null;
+  let firstRow = point.row;
+  let lastRow = point.row;
+  while (firstRow > 0 && buffer.getLine(firstRow)?.isWrapped) firstRow -= 1;
+  while (lastRow + 1 < buffer.length && buffer.getLine(lastRow + 1)?.isWrapped) lastRow += 1;
+
+  return resolveTerminalRange({
+    terminal,
+    anchor: { row: firstRow, column: 0 },
+    focus: { row: lastRow, column: Math.max(0, terminal.cols - 1) },
+  });
+}
+
+export function resolveTerminalPathLinkAtBufferPoint({
   terminal,
   point,
 }: SelectTerminalPathLinkAtBufferPointOptions): TerminalPathSelectionResult | null {
@@ -490,20 +539,14 @@ export function selectTerminalPathLinkAtBufferPoint({
       pathAction: { kind: "file-download", path: match.path } as const,
     })),
   ].find(({ match }) => {
-    if (lineNumber < match.startLineNumber || lineNumber > match.endLineNumber) {
-      return false;
-    }
-    if (lineNumber === match.startLineNumber && column < match.startColumn) {
-      return false;
-    }
-    if (lineNumber === match.endLineNumber && column > match.endColumn) {
-      return false;
-    }
+    if (lineNumber < match.startLineNumber || lineNumber > match.endLineNumber) return false;
+    if (lineNumber === match.startLineNumber && column < match.startColumn) return false;
+    if (lineNumber === match.endLineNumber && column > match.endColumn) return false;
     return true;
   });
   if (!candidate) return null;
 
-  const selected = selectTerminalRange({
+  const selected = resolveTerminalRange({
     terminal,
     anchor: {
       row: candidate.match.startLineNumber - 1,

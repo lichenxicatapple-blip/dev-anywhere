@@ -119,7 +119,6 @@ interface PtyScrollController {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
-  setSelectionDragActive: (active: boolean) => void;
   markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
@@ -217,12 +216,6 @@ export function attachPtyScrollController(
   let pendingTouchScrollNotifyFrame: number | null = null;
   let pendingTouchScrollNotifyCancel: ((handle: number) => void) | null = null;
   let reviewProjectionRefreshPending = initialUserHasVerticalScrollIntent;
-  // xterm owns a private 50ms drag-selection scroll timer. While a mouse selection is active our
-  // outer container must remain the sole vertical owner, otherwise xterm can change viewportY
-  // behind a frozen review host and make only the selection layer appear to scroll.
-  let selectionDragActive = false;
-  let selectionDragRepairQueued = false;
-  let disposed = false;
   let activeHistoryProjection: {
     kind: PtyHistoryProjection["kind"];
     key: string;
@@ -1053,32 +1046,6 @@ export function attachPtyScrollController(
     });
   };
 
-  const setSelectionDragActive = (active: boolean): void => {
-    if (selectionDragActive === active) return;
-    selectionDragActive = active;
-    trace(`selection-drag:${active ? "start" : "end"}`);
-  };
-
-  const scheduleSelectionDragRepair = (): void => {
-    if (selectionDragRepairQueued) return;
-    selectionDragRepairQueued = true;
-    queueMicrotask(() => {
-      selectionDragRepairQueued = false;
-      if (disposed || !userHasVerticalScrollIntent() || !reviewScrollAnchor) return;
-      const { cellH } = getDims();
-      const plan = cellH > 0 ? computeReviewLayoutPlan(cellH) : null;
-      if (!plan || plan.ydisp === term.buffer.active.viewportY) return;
-      trace("selection-drag:repair-term-scroll", {
-        ydisp: plan.ydisp,
-        details: `viewportY=${term.buffer.active.viewportY}->${plan.ydisp}`,
-      });
-      // A real xterm ignores scrollToLine while it is synchronously notifying onScroll listeners.
-      // Leave that callback stack first, then restore the outer-owned row in the same task before
-      // the browser can paint the transient split frame.
-      commitReviewLayout("selection-drag-repair", { capture: false });
-    });
-  };
-
   // liveLastY 扫描会跑到 term.rows 行，每帧 onRender 都跑一次浪费。
   // 用 buffer revision 当 cache key：xterm.onWriteParsed 写完就 ++，加上 baseY/rows。
   // semantic bottom 会把 viewportY 移入历史，viewportY 不能参与 live screen 缓存语义。
@@ -1576,21 +1543,6 @@ export function attachPtyScrollController(
         scrollToBottom("termScroll");
         return;
       }
-      if (selectionDragActive && userHasVerticalScrollIntent() && reviewScrollAnchor) {
-        const { cellH } = getDims();
-        const plan = cellH > 0 ? computeReviewLayoutPlan(cellH) : null;
-        if (plan && plan.ydisp !== term.buffer.active.viewportY) {
-          trace("selection-drag:reject-term-scroll", {
-            ydisp: plan.ydisp,
-            details: `viewportY=${term.buffer.active.viewportY}->${plan.ydisp}`,
-          });
-          // SelectionService updates its endpoint after the synchronous scroll request returns.
-          // Queue restoration outside this re-entrant callback but still before paint; the RAF
-          // drag driver will move the outer container and extend the selection normally.
-          scheduleSelectionDragRepair();
-          return;
-        }
-      }
       if (userHasVerticalScrollIntent() && reviewScrollAnchor) {
         const { cellH } = getDims();
         if (pendingFrame === "marked" && getCurrentAnchor().cursorInViewport) {
@@ -1886,12 +1838,12 @@ export function attachPtyScrollController(
     onWheel,
     onTouchStart: touchHandler.onTouchStart,
     onTouchMove: touchHandler.onTouchMove,
-    onTouchEnd: () => {
-      touchHandler.onTouchEnd();
+    onTouchEnd: (event) => {
+      touchHandler.onTouchEnd(event);
       relayout();
     },
-    onTouchCancel: () => {
-      touchHandler.onTouchCancel();
+    onTouchCancel: (event) => {
+      touchHandler.onTouchCancel(event);
       relayout();
     },
     onContainerScroll,
@@ -1935,7 +1887,6 @@ export function attachPtyScrollController(
 
   return {
     dispose: () => {
-      disposed = true;
       domAdapter.dispose();
       traceAdapter.dispose();
       cancelPendingTouchScrollNotify();
@@ -1948,7 +1899,6 @@ export function attachPtyScrollController(
     scrollToRatio,
     scrollToXRatio,
     resetHorizontalScroll,
-    setSelectionDragActive,
     markSelectionAutoscrollIntent,
     markHorizontalScrollIntent,
     traceRawInputFollowScheduled,

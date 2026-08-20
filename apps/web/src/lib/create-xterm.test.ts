@@ -67,14 +67,27 @@ describe("createXtermTerminal font invalidation", () => {
     const windowRemove = vi.spyOn(window, "removeEventListener");
 
     try {
-      const result = await createXtermTerminal(container);
+      const creating = createXtermTerminal(container);
+      const stylesheet = document.head.querySelector<HTMLLinkElement>(
+        'link[href$="/fonts/sarasa-fixed-sc/result.css"]',
+      );
+      expect(stylesheet).not.toBeNull();
+      stylesheet?.dispatchEvent(new Event("load"));
+      const result = await creating;
 
-      expect(load).toHaveBeenCalledWith('16px "Sarasa Fixed SC"', "─│╭╮╰╯");
+      // `›` is Codex's prompt marker. It must be loaded before Terminal construction so the DOM
+      // renderer cannot cache its wider fallback-font advance and shorten the row background.
+      expect(load).toHaveBeenCalledWith('16px "Sarasa Fixed SC"', "─│╭╮╰╯›·•");
 
       const addedListeners = addEventListener.mock.calls.filter(
         (args) => args[0] === "loadingdone",
       );
       expect(addedListeners.length).toBe(1);
+      const fontFamily = result.terminal.options.fontFamily;
+      const refresh = vi.spyOn(result.terminal, "refresh");
+      (addedListeners[0][1] as EventListener)(new Event("loadingdone"));
+      expect(result.terminal.options.fontFamily).toBe(fontFamily);
+      expect(refresh).toHaveBeenCalledWith(0, result.terminal.rows - 1);
       const visibilityListeners = documentAdd.mock.calls.filter(
         (args) => args[0] === "visibilitychange",
       );
@@ -114,6 +127,9 @@ describe("createXtermTerminal font invalidation", () => {
       Object.defineProperty(document, "fonts", { value: originalFonts, configurable: true });
       window.matchMedia = originalMatchMedia;
       document.body.removeChild(container);
+      document.head
+        .querySelectorAll<HTMLLinkElement>('link[href*="/fonts/sarasa-fixed-sc/"]')
+        .forEach((link) => link.remove());
     }
   });
 });

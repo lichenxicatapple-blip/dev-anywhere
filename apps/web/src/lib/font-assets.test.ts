@@ -31,4 +31,18 @@ describe("loadFontCSS", () => {
 
     expect(document.head.querySelectorAll("link")).toHaveLength(5);
   });
+
+  it("settles only after the split-font stylesheet has registered its faces", async () => {
+    let settled = false;
+    const loading = loadFontCSS("http://localhost:3100").then(() => {
+      settled = true;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+
+    const stylesheet = document.head.querySelector<HTMLLinkElement>('link[rel="stylesheet"]');
+    stylesheet?.dispatchEvent(new Event("load"));
+    await loading;
+    expect(settled).toBe(true);
+  });
 });

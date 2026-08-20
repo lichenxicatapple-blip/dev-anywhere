@@ -7,12 +7,11 @@ interface PtySelectionToolbarPositionInput {
   viewportOffsetTop?: number;
 }
 
-interface PtySelectionScrollDismissInput {
-  now: number;
-  viewportTransitionUntil: number;
-  scrollLeft: number;
-  scrollTop: number;
-  selectionAutoscrollPosition: { scrollLeft: number; scrollTop: number } | null;
+interface PtySelectionInteractionStartInput {
+  hasManagedSelection: boolean;
+  eventType: string;
+  pointerType?: string | null;
+  targetIsScrollSurface: boolean;
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -40,17 +39,21 @@ export function computePtySelectionToolbarPosition({
   };
 }
 
-export function shouldDismissPtySelectionOnContainerScroll({
-  now,
-  viewportTransitionUntil,
-  scrollLeft,
-  scrollTop,
-  selectionAutoscrollPosition,
-}: PtySelectionScrollDismissInput): boolean {
-  if (now <= viewportTransitionUntil) return false;
-  return !(
-    selectionAutoscrollPosition &&
-    scrollLeft === selectionAutoscrollPosition.scrollLeft &&
-    scrollTop === selectionAutoscrollPosition.scrollTop
-  );
+export function shouldDeferPtySelectionDismissOnInteractionStart({
+  hasManagedSelection,
+  eventType,
+  pointerType,
+  targetIsScrollSurface,
+}: PtySelectionInteractionStartInput): boolean {
+  if (!hasManagedSelection || !targetIsScrollSurface) return false;
+  if (eventType === "touchstart") return true;
+  if (eventType !== "pointerdown") return false;
+  // The custom scrollbars are explicit scroll controls for mouse, pen, and touch alike.
+  return pointerType === "touch" || pointerType === "pen" || pointerType === "mouse";
+}
+
+export function shouldDismissManagedPtySelectionAfterGesture(
+  kind: "tap" | "link" | "scroll" | "longpress",
+): boolean {
+  return kind === "tap" || kind === "link";
 }

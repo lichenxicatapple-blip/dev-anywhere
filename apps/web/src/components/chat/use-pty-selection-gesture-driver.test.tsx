@@ -9,19 +9,38 @@ import {
 
 afterEach(() => {
   cleanup();
-  vi.unstubAllGlobals();
 });
 
 function dispatchTouch(
   type: string,
   target: EventTarget,
-  props: { clientX: number; clientY: number },
+  props: { clientX: number; clientY: number; identifier?: number },
 ): Event {
   const event = new Event(type, { bubbles: true, cancelable: true });
-  const touch = { clientX: props.clientX, clientY: props.clientY };
+  const touch = {
+    clientX: props.clientX,
+    clientY: props.clientY,
+    identifier: props.identifier ?? 7,
+  };
   Object.defineProperties(event, {
     touches: { value: type === "touchend" || type === "touchcancel" ? [] : [touch] },
     changedTouches: { value: [touch] },
+  });
+  target.dispatchEvent(event);
+  return event;
+}
+
+function dispatchPointer(
+  type: string,
+  target: EventTarget,
+  props: { clientX: number; clientY: number; pointerId: number },
+): Event {
+  const event = new Event(type, { bubbles: true, cancelable: true });
+  Object.defineProperties(event, {
+    clientX: { value: props.clientX },
+    clientY: { value: props.clientY },
+    pointerId: { value: props.pointerId },
+    pointerType: { value: "touch" },
   });
   target.dispatchEvent(event);
   return event;
@@ -31,8 +50,7 @@ function Harness({
   onHandleDragStart,
   onHandleDragMove,
   onHandleDragEnd,
-  onVerticalScrollIntent,
-  onHorizontalScrollIntent,
+  onHandleDragCancel = vi.fn(),
 }: {
   onHandleDragStart: (kind: PtySelectionHandleKind) => void;
   onHandleDragMove: (
@@ -43,8 +61,7 @@ function Harness({
     kind: PtySelectionHandleKind,
     point: { clientX: number; clientY: number } | null,
   ) => void;
-  onVerticalScrollIntent?: (reason: string) => void;
-  onHorizontalScrollIntent?: (reason: string) => void;
+  onHandleDragCancel?: (kind: PtySelectionHandleKind) => void;
 }) {
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const terminalRef = useRef({ focus: vi.fn() } as unknown as Terminal);
@@ -57,12 +74,10 @@ function Harness({
     onLongPressStart: vi.fn(),
     onLongPressMove: vi.fn(),
     onLongPressEnd: vi.fn(),
-    onVerticalScrollIntent,
-    onHorizontalScrollIntent,
     onHandleDragStart,
     onHandleDragMove,
     onHandleDragEnd,
-    onHandleDragCancel: vi.fn(),
+    onHandleDragCancel,
   });
 
   return (
@@ -70,33 +85,15 @@ function Harness({
       <button
         data-testid="handle"
         type="button"
+        onPointerDown={(event) => driver.handlePtySelectionHandlePointerDown("focus", event)}
         onTouchStart={(event) => driver.handlePtySelectionHandleTouchStart("focus", event)}
       />
     </div>
   );
 }
 
-function defineScrollableBox(element: HTMLElement): void {
-  Object.defineProperty(element, "scrollWidth", { configurable: true, value: 1600 });
-  Object.defineProperty(element, "scrollHeight", { configurable: true, value: 600 });
-  Object.defineProperty(element, "clientWidth", { configurable: true, value: 800 });
-  Object.defineProperty(element, "clientHeight", { configurable: true, value: 400 });
-  element.getBoundingClientRect = () =>
-    ({
-      left: 0,
-      top: 0,
-      right: 800,
-      bottom: 400,
-      width: 800,
-      height: 400,
-      x: 0,
-      y: 0,
-      toJSON: () => null,
-    }) as DOMRect;
-}
-
 describe("usePtySelectionGestureDriver", () => {
-  it("owns handle drag touch events and releases native scroll suppression after drag end", () => {
+  it("prevents touchmove only while a handle drag is active", () => {
     const onHandleDragStart = vi.fn<(kind: PtySelectionHandleKind) => void>();
     const onHandleDragMove =
       vi.fn<(kind: PtySelectionHandleKind, point: { clientX: number; clientY: number }) => void>();
@@ -114,6 +111,17 @@ describe("usePtySelectionGestureDriver", () => {
 
     const root = getByTestId("root");
     const handle = getByTestId("handle");
+    vi.spyOn(handle, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      right: 144,
+      bottom: 244,
+      width: 44,
+      height: 44,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    });
     dispatchTouch("touchstart", handle, { clientX: 120, clientY: 220 });
 
     const suppressed = dispatchTouch("touchmove", root, { clientX: 121, clientY: 221 });
@@ -123,21 +131,14 @@ describe("usePtySelectionGestureDriver", () => {
     dispatchTouch("touchend", window, { clientX: 188, clientY: 288 });
 
     expect(onHandleDragStart).toHaveBeenCalledWith("focus");
-    expect(onHandleDragMove).toHaveBeenCalledWith("focus", { clientX: 144, clientY: 244 });
-    expect(onHandleDragEnd).toHaveBeenCalledWith("focus", { clientX: 188, clientY: 288 });
+    expect(onHandleDragMove).toHaveBeenCalledWith("focus", { clientX: 146, clientY: 246 });
+    expect(onHandleDragEnd).toHaveBeenCalledWith("focus", { clientX: 190, clientY: 290 });
 
     const released = dispatchTouch("touchmove", root, { clientX: 122, clientY: 222 });
     expect(released.defaultPrevented).toBe(false);
   });
 
-  it("marks horizontal intent before handle autoscroll changes scrollLeft", () => {
-    const rafState: { pendingFrame?: FrameRequestCallback } = {};
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
-      rafState.pendingFrame = cb;
-      return 1;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
-
+  it("cancels an active handle drag and releases touchmove suppression on pagehide", () => {
     const onHandleDragStart = vi.fn<(kind: PtySelectionHandleKind) => void>();
     const onHandleDragMove =
       vi.fn<(kind: PtySelectionHandleKind, point: { clientX: number; clientY: number }) => void>();
@@ -145,38 +146,43 @@ describe("usePtySelectionGestureDriver", () => {
       vi.fn<
         (kind: PtySelectionHandleKind, point: { clientX: number; clientY: number } | null) => void
       >();
-    const onHorizontalScrollIntent = vi.fn<(reason: string) => void>();
+    const onHandleDragCancel = vi.fn<(kind: PtySelectionHandleKind) => void>();
     const { getByTestId } = render(
       <Harness
         onHandleDragStart={onHandleDragStart}
         onHandleDragMove={onHandleDragMove}
         onHandleDragEnd={onHandleDragEnd}
-        onHorizontalScrollIntent={onHorizontalScrollIntent}
+        onHandleDragCancel={onHandleDragCancel}
       />,
     );
-
     const root = getByTestId("root");
     const handle = getByTestId("handle");
-    defineScrollableBox(root);
+    vi.spyOn(handle, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      right: 144,
+      bottom: 244,
+      width: 44,
+      height: 44,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    });
 
     dispatchTouch("touchstart", handle, { clientX: 120, clientY: 220 });
-    dispatchTouch("touchmove", window, { clientX: 795, clientY: 220 });
-    rafState.pendingFrame?.(0);
+    window.dispatchEvent(new Event("pagehide"));
+    const moveAfterPagehide = dispatchTouch("touchmove", root, {
+      clientX: 121,
+      clientY: 221,
+    });
 
-    expect(root.scrollLeft).toBeGreaterThan(0);
-    expect(onHorizontalScrollIntent).toHaveBeenCalledWith(
-      expect.stringContaining("selectionGestureAutoscroll"),
-    );
+    expect(onHandleDragCancel).toHaveBeenCalledWith("focus");
+    expect(onHandleDragCancel).toHaveBeenCalledTimes(1);
+    expect(onHandleDragEnd).not.toHaveBeenCalled();
+    expect(moveAfterPagehide.defaultPrevented).toBe(false);
   });
 
-  it("marks vertical review once before the first effective handle autoscroll write", () => {
-    const rafState: { pendingFrame?: FrameRequestCallback } = {};
-    vi.stubGlobal("requestAnimationFrame", (cb: FrameRequestCallback): number => {
-      rafState.pendingFrame = cb;
-      return 1;
-    });
-    vi.stubGlobal("cancelAnimationFrame", vi.fn());
-
+  it("keeps the initiating pointer in control when another pointer presses the handle", () => {
     const onHandleDragStart = vi.fn<(kind: PtySelectionHandleKind) => void>();
     const onHandleDragMove =
       vi.fn<(kind: PtySelectionHandleKind, point: { clientX: number; clientY: number }) => void>();
@@ -184,39 +190,33 @@ describe("usePtySelectionGestureDriver", () => {
       vi.fn<
         (kind: PtySelectionHandleKind, point: { clientX: number; clientY: number } | null) => void
       >();
-    const rootRef: { current: HTMLElement | null } = { current: null };
-    const scrollTopsAtIntent: number[] = [];
-    const onVerticalScrollIntent = vi.fn<(reason: string) => void>(() => {
-      if (rootRef.current) scrollTopsAtIntent.push(rootRef.current.scrollTop);
-    });
-    const rendered = render(
+    const { getByTestId } = render(
       <Harness
         onHandleDragStart={onHandleDragStart}
         onHandleDragMove={onHandleDragMove}
         onHandleDragEnd={onHandleDragEnd}
-        onVerticalScrollIntent={onVerticalScrollIntent}
       />,
     );
+    const handle = getByTestId("handle");
+    vi.spyOn(handle, "getBoundingClientRect").mockReturnValue({
+      left: 100,
+      top: 200,
+      right: 144,
+      bottom: 244,
+      width: 44,
+      height: 44,
+      x: 100,
+      y: 200,
+      toJSON: () => ({}),
+    });
 
-    const root = rendered.getByTestId("root");
-    rootRef.current = root;
-    const handle = rendered.getByTestId("handle");
-    defineScrollableBox(root);
-    root.scrollTop = 200;
+    dispatchPointer("pointerdown", handle, { pointerId: 7, clientX: 122, clientY: 222 });
+    dispatchPointer("pointerdown", handle, { pointerId: 8, clientX: 130, clientY: 230 });
+    dispatchPointer("pointermove", window, { pointerId: 7, clientX: 142, clientY: 242 });
+    dispatchPointer("pointerup", window, { pointerId: 7, clientX: 142, clientY: 242 });
 
-    dispatchTouch("touchstart", handle, { clientX: 120, clientY: 220 });
-    dispatchTouch("touchmove", window, { clientX: 400, clientY: 5 });
-    rafState.pendingFrame?.(0);
-
-    expect(root.scrollTop).toBeLessThan(200);
-    expect(scrollTopsAtIntent).toEqual([200]);
-    expect(onVerticalScrollIntent).toHaveBeenCalledWith(
-      expect.stringContaining("selectionGestureAutoscroll"),
-    );
-
-    const afterFirstFrame = root.scrollTop;
-    rafState.pendingFrame?.(16);
-    expect(root.scrollTop).toBeLessThan(afterFirstFrame);
-    expect(onVerticalScrollIntent).toHaveBeenCalledTimes(1);
+    expect(onHandleDragStart).toHaveBeenCalledTimes(1);
+    expect(onHandleDragMove).toHaveBeenCalledWith("focus", { clientX: 142, clientY: 242 });
+    expect(onHandleDragEnd).toHaveBeenCalledWith("focus", { clientX: 142, clientY: 242 });
   });
 });

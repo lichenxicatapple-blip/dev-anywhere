@@ -1,3 +1,6 @@
+import type { IBufferLine } from "@xterm/xterm";
+import { snapshotPtySelectionBufferLine } from "./pty-selection-buffer-snapshot";
+
 export type PtyHistoryProjectionKind = "review" | "live-backfill";
 
 export interface PtyHistoryProjection {
@@ -15,10 +18,85 @@ interface PtyHistoryProjectionController {
 
 interface PtyHistoryProjectionOptions {
   serializeRangeAsHtml?: (startLine: number, endLine: number) => string;
+  getSerializedCell?: (line: number, column: number) => PtyHistorySerializedCell | null;
+  getSelectionLine?: (line: number) => IBufferLine | null;
+  getBufferRowIdentityOffset?: () => number;
+}
+
+interface PtyHistorySerializedCell {
+  text: string;
+  isDim: boolean;
+  isRenderedFgRGB: boolean;
 }
 
 const REVIEW_SLOT = "pty-review-snapshot";
 const LIVE_BACKFILL_SLOT = "pty-live-backfill";
+interface PtyHistoryProjectionSelectionSource {
+  readonly capturedRowIdentityOffset: number;
+  readonly getCurrentRowIdentityOffset?: () => number;
+  readonly lines: ReadonlyMap<number, IBufferLine>;
+  rebasedDelta?: number;
+  rebasedLines?: ReadonlyMap<number, IBufferLine>;
+}
+
+const projectionSelectionLines = new WeakMap<HTMLElement, PtyHistoryProjectionSelectionSource>();
+const EMPTY_PROJECTION_SELECTION_LINES: ReadonlyMap<number, IBufferLine> = new Map();
+
+function getRenderedProjection(host: HTMLElement): HTMLElement | null {
+  return host.querySelector<HTMLElement>(
+    '.xterm-screen [data-slot="pty-review-snapshot"], .xterm-screen [data-slot="pty-live-backfill"]',
+  );
+}
+
+function getProjectionRowDelta(source: PtyHistoryProjectionSelectionSource): number {
+  const current = source.getCurrentRowIdentityOffset?.() ?? source.capturedRowIdentityOffset;
+  const delta = current - source.capturedRowIdentityOffset;
+  return Number.isInteger(delta) ? delta : 0;
+}
+
+export function getRenderedPtyHistoryProjectionRange(
+  host: HTMLElement,
+): { element: HTMLElement; startLine: number; endLine: number } | null {
+  const projection = getRenderedProjection(host);
+  const source = projection ? projectionSelectionLines.get(projection) : undefined;
+  if (!projection || !source) return null;
+  const delta = getProjectionRowDelta(source);
+  const startLine = Number(projection.dataset.startLine) + delta;
+  const endLine = Number(projection.dataset.endLine) + delta;
+  if (!Number.isInteger(startLine) || !Number.isInteger(endLine)) return null;
+  return { element: projection, startLine, endLine };
+}
+
+/** Returns the immutable lines painted by the current review/backfill shell. */
+export function getRenderedPtyHistorySelectionLines(
+  host: HTMLElement,
+): ReadonlyMap<number, IBufferLine> {
+  const projection = getRenderedProjection(host);
+  const source = projection ? projectionSelectionLines.get(projection) : undefined;
+  if (!source) return EMPTY_PROJECTION_SELECTION_LINES;
+
+  // A public xterm marker supplies the row-identity delta even when viewportY is clamped at the
+  // absolute top of scrollback. Rebase immutable rows instead of replacing the frozen frame.
+  const delta = getProjectionRowDelta(source);
+  if (delta === 0) return source.lines;
+  if (source.rebasedDelta === delta && source.rebasedLines) return source.rebasedLines;
+  const rebased = new Map<number, IBufferLine>();
+  for (const [row, line] of source.lines) {
+    const nextRow = row + delta;
+    if (nextRow >= 0) rebased.set(nextRow, line);
+  }
+  source.rebasedDelta = delta;
+  source.rebasedLines = rebased;
+  return rebased;
+}
+
+/** Returns the immutable line painted by the current review/backfill shell, if that row is one. */
+export function getRenderedPtyHistorySelectionLine(
+  host: HTMLElement,
+  row: number,
+): IBufferLine | null {
+  return getRenderedPtyHistorySelectionLines(host).get(row) ?? null;
+}
 
 function findRenderedRows(screen: HTMLElement): HTMLElement | null {
   return (
@@ -36,9 +114,15 @@ function createSnapshotShell(
   rows: HTMLElement,
   topOffset: number,
   slot: typeof REVIEW_SLOT | typeof LIVE_BACKFILL_SLOT,
+  startLine: number,
+  endLine: number,
+  capturedRowIdentityOffset: number,
 ): HTMLElement {
   const next = document.createElement("div");
   next.dataset.slot = slot;
+  next.dataset.startLine = String(startLine);
+  next.dataset.endLine = String(endLine);
+  next.dataset.rowIdentityOffset = String(capturedRowIdentityOffset);
   next.setAttribute("aria-hidden", "true");
   Object.assign(next.style, {
     position: "absolute",
@@ -54,19 +138,52 @@ function createSnapshotShell(
   return next;
 }
 
-function isolateSerializedForegroundOpacity(rows: HTMLElement): void {
-  for (const cell of rows.querySelectorAll<HTMLElement>("span[style]")) {
-    const opacity = cell.style.opacity;
-    if (!opacity || opacity === "1") continue;
+function isolateSerializedForegroundOpacity(
+  rows: HTMLElement,
+  startLine: number,
+  getSerializedCell?: PtyHistoryProjectionOptions["getSerializedCell"],
+): void {
+  for (const [rowOffset, row] of Array.from(rows.children).entries()) {
+    if (!(row instanceof HTMLElement)) continue;
+    let column = 0;
 
-    // SerializeAddon represents xterm's dim attribute by fading the whole cell.
-    // The live renderer fades only glyphs, so isolate that opacity from the
-    // cell background to keep review snapshots visually identical.
-    cell.style.removeProperty("opacity");
-    const foreground = document.createElement("span");
-    foreground.style.opacity = opacity;
-    foreground.append(...Array.from(cell.childNodes));
-    cell.append(foreground);
+    for (const span of Array.from(row.children)) {
+      if (!(span instanceof HTMLElement)) continue;
+      const textLength = span.textContent?.length ?? 0;
+      let sourceCell = getSerializedCell?.(startLine + rowOffset, column) ?? null;
+      while (sourceCell?.text.length === 0) {
+        column += 1;
+        sourceCell = getSerializedCell?.(startLine + rowOffset, column) ?? null;
+      }
+
+      const opacity = span.style.opacity;
+      if (opacity && opacity !== "1") {
+        // xterm's DOM renderer emits an inline color for a truecolor foreground. CSS cascade makes
+        // that declaration win over its `.xterm-dim` class, so SGR dim does not affect the live
+        // glyph. SerializeAddon instead emits `color` plus `opacity: 0.5`, which makes the
+        // same glyph suddenly fade when history projection takes over. Remove opacity only for
+        // that exact cell mode; default and palette foregrounds still use xterm's real dim effect.
+        if (sourceCell?.isDim && sourceCell.isRenderedFgRGB) {
+          span.style.removeProperty("opacity");
+        } else {
+          // SerializeAddon applies dim opacity to the whole cell. The live renderer fades only the
+          // glyph, so keep the cell background opaque for modes where dim is actually visible.
+          span.style.removeProperty("opacity");
+          const foreground = document.createElement("span");
+          foreground.style.opacity = opacity;
+          foreground.append(...Array.from(span.childNodes));
+          span.append(foreground);
+        }
+      }
+
+      let consumedTextLength = 0;
+      while (consumedTextLength < textLength) {
+        const serializedCell = getSerializedCell?.(startLine + rowOffset, column) ?? null;
+        if (!serializedCell) break;
+        consumedTextLength += serializedCell.text.length;
+        column += 1;
+      }
+    }
   }
 }
 
@@ -101,6 +218,8 @@ function createSerializedRows(
   html: string,
   renderedRows: HTMLElement,
   rowHeight: number,
+  startLine: number,
+  getSerializedCell?: PtyHistoryProjectionOptions["getSerializedCell"],
 ): HTMLElement | null {
   const parsed = new DOMParser().parseFromString(html, "text/html");
   const serializedRows = parsed.querySelector<HTMLElement>("pre > div");
@@ -110,7 +229,7 @@ function createSerializedRows(
   rows.className = renderedRows.className;
   rows.removeAttribute("id");
   restoreSerializedRowStyleCarry(rows);
-  isolateSerializedForegroundOpacity(rows);
+  isolateSerializedForegroundOpacity(rows, startLine, getSerializedCell);
   const renderedStyle = getComputedStyle(renderedRows);
   const serializedRowCount = rows.childElementCount;
   Object.assign(rows.style, {
@@ -190,10 +309,39 @@ export function attachPtyHistoryProjection(
     }
 
     const html = options.serializeRangeAsHtml(projection.startLine, projection.endLine);
-    const rows = createSerializedRows(html, renderedRows, projection.rowHeight);
+    const rows = createSerializedRows(
+      html,
+      renderedRows,
+      projection.rowHeight,
+      projection.startLine,
+      options.getSerializedCell,
+    );
     if (!rows) return false;
     const slot = projection.kind === "review" ? REVIEW_SLOT : LIVE_BACKFILL_SLOT;
-    const next = createSnapshotShell(screen, rows, projection.topOffset, slot);
+    const capturedRowIdentityOffset = options.getBufferRowIdentityOffset?.() ?? 0;
+    const next = createSnapshotShell(
+      screen,
+      rows,
+      projection.topOffset,
+      slot,
+      projection.startLine,
+      projection.endLine,
+      capturedRowIdentityOffset,
+    );
+    const frozenLines = new Map<number, IBufferLine>();
+    if (options.getSelectionLine) {
+      for (let line = projection.startLine; line <= projection.endLine; line += 1) {
+        const sourceLine = options.getSelectionLine(line);
+        if (sourceLine) {
+          frozenLines.set(line, snapshotPtySelectionBufferLine(sourceLine, sourceLine.length));
+        }
+      }
+    }
+    projectionSelectionLines.set(next, {
+      capturedRowIdentityOffset,
+      getCurrentRowIdentityOffset: options.getBufferRowIdentityOffset,
+      lines: frozenLines,
+    });
     replaceProjection(next);
     return true;
   };
