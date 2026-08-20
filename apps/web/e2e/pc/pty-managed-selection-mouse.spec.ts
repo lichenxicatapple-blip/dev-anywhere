@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
+import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "../pty-fixture";
 import { sendPtyOutput } from "../pty-scroll-helpers";
 
 test.use({ viewport: { width: 900, height: 640 } });
@@ -183,8 +183,10 @@ async function copyManagedSelection(page: Page): Promise<string> {
   });
   const sentinel = `__selection_clipboard_sentinel_${Date.now()}__`;
   await page.evaluate((value) => navigator.clipboard.writeText(value), sentinel);
+  const rawInputBeforeCopy = await readRawPtyInput(page);
   await page.keyboard.press(COPY_SHORTCUT);
   await expect.poll(() => page.evaluate(() => navigator.clipboard.readText())).not.toBe(sentinel);
+  expect(await readRawPtyInput(page)).toBe(rawInputBeforeCopy);
   return page.evaluate(() => navigator.clipboard.readText());
 }
 

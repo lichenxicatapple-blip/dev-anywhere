@@ -224,7 +224,7 @@ function managedRangeContainsPoint(
 }
 
 function isCopyShortcut(event: KeyboardEvent): boolean {
-  return event.key.toLowerCase() === "c" && (event.metaKey || event.ctrlKey);
+  return event.key.toLowerCase() === "c" && (isMacPlatform() ? event.metaKey : event.ctrlKey);
 }
 
 function toTerminalPoint(point: Readonly<{ row: number; column: number }>): TerminalSelectionPoint {
@@ -1415,7 +1415,18 @@ export function usePtySelectionController(
 
     const onKeyDown = (event: KeyboardEvent): void => {
       if (!getPtyManagedSelectionRange(managedStateRef.current)) return;
-      if (isCopyShortcut(event)) return;
+      if (isCopyShortcut(event)) {
+        const selected = refreshCurrentSelection()?.text ?? "";
+        if (!selected) return;
+        // Managed ranges deliberately do not populate xterm's private SelectionService. On
+        // Ctrl+C, xterm would therefore treat the key as raw SIGINT input and prevent the
+        // browser's copy event. Own the shortcut on every desktop platform and preserve the
+        // committed range after writing it to the clipboard.
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        void copyText(selected, { allowLegacyFallback: true });
+        return;
+      }
       if (
         event.key === "Shift" ||
         event.key === "Control" ||
