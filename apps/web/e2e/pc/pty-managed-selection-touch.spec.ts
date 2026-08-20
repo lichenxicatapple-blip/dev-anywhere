@@ -365,7 +365,7 @@ async function locateVisibleToken(
       const firstTargetColumn = Math.max(match.index, firstVisibleColumn);
       const lastTargetColumn = Math.min(match.index + match[0].length - 1, lastVisibleColumn);
       if (firstTargetColumn > lastTargetColumn) continue;
-      const targetColumn = Math.min(Math.max(match.index + 5, firstTargetColumn), lastTargetColumn);
+      const targetColumn = Math.floor((firstTargetColumn + lastTargetColumn) / 2);
       const x = screenRect.left + (targetColumn + 0.5) * cellWidth;
       const y = screenRect.top + (row - buffer.viewportY + 0.5) * cellHeight;
       if (
