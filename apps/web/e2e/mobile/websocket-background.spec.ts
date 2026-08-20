@@ -76,7 +76,9 @@ test.describe("L4 mobile / background WebSocket liveness", () => {
     const recovered = await runPhase("inspect-dead");
     expect(recovered.documentId).toBe(setup.documentId);
     expect(recovered.route).toBe(setup.route);
-    expect(recovered.backgroundEmissions).toBeGreaterThan(0);
+    // The first background phase proves healthy streaming continues. The dead phase must be fully
+    // silent; otherwise an ordinary inbound frame legitimately proves the socket is still alive.
+    expect(recovered.backgroundEmissions).toBe(0);
     expect(recovered.pingDelta).toBe(1);
     expect(recovered.openDelta).toBe(1);
     expect(recovered.closeDelta).toBe(1);

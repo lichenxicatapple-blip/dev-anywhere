@@ -231,34 +231,63 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
     };
   });
   await page.getByText(String(state.postResumeText)).waitFor({ state: "visible", timeout: 10_000 });
-  await page.evaluate(() => {
-    const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
-    if (!audit) throw new Error("the original page document was replaced");
-    audit.intervalId = window.setInterval(() => audit.emitNext(), 1_000);
-  });
+  // Keep the old socket completely silent for the dead-connection phase. A normal relay frame is
+  // valid liveness evidence, so restarting the stream here would race (and correctly cancel) the
+  // two-second probe that is supposed to replace a genuinely half-open connection.
   return { ...state, postResumeVisible: true };
 }
 
 async function inspectDead(): Promise<Record<string, unknown>> {
   const page = await connectToMobilePage();
-  await page.waitForFunction(
-    () => {
+  try {
+    await page.waitForFunction(
+      () => {
+        const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
+        const baseline = audit?.deadBaseline;
+        if (!audit || !baseline) return false;
+        const events = window.__devAnywhereE2E?.events ?? [];
+        const counts = {
+          close: events.filter((event) => event === "relay:close").length,
+          open: events.filter((event) => event === "relay:open").length,
+          ping: events.filter((event) => event === "relay:send:latency_web_relay_ping").length,
+        };
+        return (
+          counts.ping > baseline.ping &&
+          counts.close > baseline.close &&
+          counts.open > baseline.open
+        );
+      },
+      undefined,
+      { timeout: 12_000 },
+    );
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => {
       const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
-      const baseline = audit?.deadBaseline;
-      if (!audit || !baseline) return false;
       const events = window.__devAnywhereE2E?.events ?? [];
-      const counts = {
-        close: events.filter((event) => event === "relay:close").length,
-        open: events.filter((event) => event === "relay:open").length,
-        ping: events.filter((event) => event === "relay:send:latency_web_relay_ping").length,
+      return {
+        auditPresent: Boolean(audit),
+        baseline: audit?.deadBaseline ?? null,
+        counts: {
+          close: events.filter((event) => event === "relay:close").length,
+          open: events.filter((event) => event === "relay:open").length,
+          ping: events.filter((event) => event === "relay:send:latency_web_relay_ping").length,
+        },
+        documentId: audit?.documentId ?? null,
+        route: location.href,
       };
-      return (
-        counts.ping > baseline.ping && counts.close > baseline.close && counts.open > baseline.open
-      );
-    },
-    undefined,
-    { timeout: 12_000 },
-  );
+    });
+    throw new Error(`Dead-socket recovery timed out: ${JSON.stringify(diagnostics)}`, {
+      cause: error,
+    });
+  }
+
+  // A new WebSocket `open` precedes proxy rebind, history replay, and the React commit that restores
+  // the composer. Assert the user-visible recovery point instead of snapshotting that async phase
+  // in the same task as the raw socket counters.
+  await page.locator('[data-slot="input-bar"][data-mode="json"]').waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
 
   const state = await page.evaluate(() => {
     const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
