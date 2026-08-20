@@ -691,7 +691,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     onDownloadPath: downloadPtyPath,
     onPreviewPath: openImagePreview,
   });
-  const clearManagedPtySelection = selection.clearPtySelection;
+  const clearManagedPtySelection = selection.clearManagedPtySelection;
+  const clearPtySelection = selection.clearPtySelection;
   ptySelectionActiveRef.current = selection.hasPtySelection();
 
   const handleTerminalPasteCapture = useTerminalPaste({
@@ -830,7 +831,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       onTerminalReady: (term) => {
         // A rebuilt Terminal is a new buffer identity. Managed ranges, frozen row snapshots,
         // markers and overlay listeners from the previous instance must never cross that boundary.
-        clearManagedPtySelection();
+        clearPtySelection();
         const xterm = term as Terminal;
         terminalRef.current = xterm;
         const searchAddon = new SearchAddon({ highlightLimit: 1000 });
@@ -1002,7 +1003,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     terminalControllerRef.current = termCtrl;
 
     return () => {
-      clearManagedPtySelection();
+      clearPtySelection();
       scrollDispose?.();
       historyProjectionDispose?.();
       searchResultsRegistration?.dispose();
@@ -1054,7 +1055,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     suppressPtyFocus,
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,
-    clearManagedPtySelection,
+    clearPtySelection,
   ]);
 
   // Network ownership is intentionally separate from the persistent terminal/view graph above.
@@ -1133,6 +1134,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         }
         return false;
       }
+      // SearchAddon uses xterm's native selection as the cursor for the next match. Clear only
+      // the app-owned pointer/touch range here or every Enter would restart at the first result.
       clearManagedPtySelection();
       const previousViewportY = term.buffer.active.viewportY;
       const found = searchAddon.findNext(query, { ...PTY_SEARCH_OPTIONS, incremental });

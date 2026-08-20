@@ -115,6 +115,7 @@ interface UsePtySelectionControllerResult {
   ptySelectionPathAction: PtySelectionPathAction | null;
   ptySelectionHandleMetrics: PtySelectionHandleMetrics;
   hasPtySelection: () => boolean;
+  clearManagedPtySelection: () => void;
   clearPtySelection: () => void;
   copyPtySelection: () => void;
   openPtySelectionPathAction: () => void;
@@ -645,7 +646,7 @@ export function usePtySelectionController(
     setPtySelectionPathAction(null);
   }, [setToolbarPresentation]);
 
-  const clearPtySelection = useCallback((): void => {
+  const clearManagedPtySelection = useCallback((): void => {
     stopDesktopSelectionRef.current?.();
     stopPtySelectionGestureRef.current?.();
     managedStateRef.current = reducePtyManagedSelection(managedStateRef.current, {
@@ -657,12 +658,16 @@ export function usePtySelectionController(
     longPressFixedEndpointRef.current = null;
     handleDragRestoreRef.current = null;
     activeHandleDragKindRef.current = null;
-    terminalRef.current?.clearSelection();
     overlayRef.current?.dispose();
     overlayRef.current = null;
     overlayTerminalRef.current = null;
     clearSelectionVisuals();
-  }, [clearSelectionVisuals, releaseCommittedSelectionMarkers, terminalRef]);
+  }, [clearSelectionVisuals, releaseCommittedSelectionMarkers]);
+
+  const clearPtySelection = useCallback((): void => {
+    clearManagedPtySelection();
+    terminalRef.current?.clearSelection();
+  }, [clearManagedPtySelection, terminalRef]);
 
   const getPointAtClient = useCallback(
     (clientX: number, clientY: number, clampToBuffer = false): TerminalSelectionPoint | null => {
@@ -2020,6 +2025,7 @@ export function usePtySelectionController(
     ptySelectionPathAction,
     ptySelectionHandleMetrics,
     hasPtySelection: isSelectionActive,
+    clearManagedPtySelection,
     clearPtySelection,
     copyPtySelection,
     openPtySelectionPathAction,
