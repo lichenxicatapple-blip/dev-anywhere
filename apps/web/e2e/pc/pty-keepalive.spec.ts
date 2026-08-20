@@ -34,6 +34,7 @@ test.describe("PTY keep-alive", () => {
     await page.locator('[data-slot="session-row"][data-session-id="codex-pty"]:visible').click();
     await expect(page).toHaveURL(/\/chat\/codex-pty\?mode=pty/);
     await expect(activePty(page).locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+    await expect(activePty(page).locator(".xterm-helper-textarea")).toBeFocused();
 
     await page.evaluate(() => {
       window.__devAnywhereE2E?.socket?.emitPty("claude-pty", "BACKGROUND-LIVE-FRAME\r\n");
@@ -41,6 +42,7 @@ test.describe("PTY keep-alive", () => {
 
     await page.locator('[data-slot="session-row"][data-session-id="claude-pty"]:visible').click();
     await expect(page).toHaveURL(/\/chat\/claude-pty\?mode=pty/);
+    await expect(activePty(page).locator(".xterm-helper-textarea")).toBeFocused();
     await expect
       .poll(() =>
         page.evaluate((sessionId) => window.__ccTest?.pty.serialize(sessionId) ?? "", "claude-pty"),

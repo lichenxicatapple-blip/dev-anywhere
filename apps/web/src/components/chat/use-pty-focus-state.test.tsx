@@ -11,12 +11,20 @@ describe("usePtyFocusState", () => {
   it("does not auto-focus the PTY over an interactive control the user already focused", () => {
     const host = document.createElement("div");
     const terminalInput = document.createElement("textarea");
+    const previousHost = document.createElement("div");
+    const previousTerminalInput = document.createElement("textarea");
+    const sessionSelect = document.createElement("button");
     const menuItem = document.createElement("button");
     host.append(terminalInput);
-    document.body.append(host, menuItem);
+    previousHost.dataset.slot = "pty-host";
+    previousHost.append(previousTerminalInput);
+    sessionSelect.dataset.slot = "session-row-select";
+    document.body.append(host, previousHost, sessionSelect, menuItem);
 
     expect(shouldAutoFocusPtyInput(host, document.body)).toBe(true);
     expect(shouldAutoFocusPtyInput(host, terminalInput)).toBe(true);
+    expect(shouldAutoFocusPtyInput(host, previousTerminalInput)).toBe(true);
+    expect(shouldAutoFocusPtyInput(host, sessionSelect)).toBe(true);
     expect(shouldAutoFocusPtyInput(host, menuItem)).toBe(false);
   });
 

@@ -16,7 +16,8 @@ export function shouldAutoFocusPtyInput(
     activeElement === null ||
     activeElement === document.body ||
     activeElement === document.documentElement ||
-    host.contains(activeElement)
+    host.contains(activeElement) ||
+    activeElement.closest('[data-slot="pty-host"], [data-slot="session-row-select"]') !== null
   );
 }
 

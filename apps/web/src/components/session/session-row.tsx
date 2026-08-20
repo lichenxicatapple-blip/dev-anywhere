@@ -152,6 +152,7 @@ export function SessionRow({
       )}
       <button
         type="button"
+        data-slot="session-row-select"
         onClick={onClick}
         className="flex min-h-11 flex-col justify-center gap-1 flex-1 min-w-0 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring rounded-sm md:min-h-0"
         aria-pressed={selected}
