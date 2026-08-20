@@ -337,7 +337,7 @@ async function readScrollPosition(page: Page): Promise<{
 async function locateVisibleToken(
   page: Page,
   sessionId: string,
-): Promise<{ point: Point; text: string }> {
+): Promise<{ point: Point; text: string; range: ManagedRange }> {
   const target = await page.evaluate((sid) => {
     const terminal = window.__ccTestPtyTerminals?.get(sid);
     const screen = terminal?.element?.querySelector<HTMLElement>(".xterm-screen");
@@ -376,7 +376,14 @@ async function locateVisibleToken(
       ) {
         continue;
       }
-      return { point: { x, y }, text: match[0] };
+      return {
+        point: { x, y },
+        text: match[0],
+        range: {
+          anchor: { row, column: match.index },
+          focus: { row, column: match.index + match[0].length - 1 },
+        },
+      };
     }
     return null;
   }, sessionId);
@@ -453,7 +460,12 @@ async function establishSelection(
   await longPress(client, target.point);
   await expect
     .poll(() => readSelectionSnapshot(page), { timeout: 5_000 })
-    .toMatchObject({ handles: 2, toolbarVisible: true });
+    .toMatchObject({
+      anchor: target.range.anchor,
+      focus: target.range.focus,
+      handles: 2,
+      toolbarVisible: true,
+    });
   await expect(page.locator('[data-slot="pty-managed-selection-overlay"]')).toBeVisible();
   const snapshot = await readSelectionSnapshot(page);
   if (!snapshot) throw new Error("managed selection overlay did not mount after real long press");
