@@ -2484,6 +2484,44 @@ describe("attachPtyScrollController", () => {
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(true);
   });
 
+  it("rejects xterm's private drag-selection scroll while the review container owns the row", async () => {
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll } = createTerminal({ 99: "prompt" });
+    const renderProjection = createHistoryProjectionRenderer();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onHistoryProjectionChange: renderProjection,
+    });
+
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
+    const ownedScrollTop = container.scrollTop;
+    const ownedViewportY = terminal.buffer.active.viewportY;
+    const ownedHostTop = host.style.top;
+
+    controller.setSelectionDragActive(true);
+    terminal.buffer.active.viewportY = ownedViewportY - 6;
+    emitScroll();
+    await Promise.resolve();
+
+    expect(container.scrollTop).toBe(ownedScrollTop);
+    expect(terminal.buffer.active.viewportY).toBe(ownedViewportY);
+    expect(host.style.top).toBe(ownedHostTop);
+
+    // The gate is scoped to the mouse drag lifetime. Normal live/output term scroll behavior is
+    // unchanged as soon as pointerup releases it.
+    controller.setSelectionDragActive(false);
+    terminal.buffer.active.viewportY = ownedViewportY - 3;
+    emitScroll();
+    expect(terminal.buffer.active.viewportY).toBe(ownedViewportY - 3);
+  });
+
   // Wheel integration around semantic live bottom. Pure "should clear intent?" semantics are
   // FSM coverage; these tests verify controller geometry produces the right bottom signal.
   // 镜像反向: 用户主动向下滚到底, intent 应该释放, output 才能恢复跟随。

@@ -17,6 +17,7 @@ interface Harness {
   getSnapshot: () => DragSelectDebugSnapshot;
   onVerticalScrollIntent: ReturnType<typeof vi.fn<(reason: string) => void>>;
   onHorizontalScrollIntent: ReturnType<typeof vi.fn<(reason: string) => void>>;
+  onDragStateChange: ReturnType<typeof vi.fn<(dragging: boolean) => void>>;
   dispose: () => void;
 }
 
@@ -61,10 +62,12 @@ function createHarness(opts: {
   };
   const onVerticalScrollIntent = vi.fn<(reason: string) => void>();
   const onHorizontalScrollIntent = vi.fn<(reason: string) => void>();
+  const onDragStateChange = vi.fn<(dragging: boolean) => void>();
 
   const handle = attachPtyDragSelectAutoscroll({
     container,
     host,
+    onDragStateChange,
     onVerticalScrollIntent,
     onHorizontalScrollIntent,
     requestFrame,
@@ -90,6 +93,7 @@ function createHarness(opts: {
     getSnapshot: handle.getDebugSnapshot,
     onVerticalScrollIntent,
     onHorizontalScrollIntent,
+    onDragStateChange,
     dispose() {
       handle.dispose();
       container.remove();
@@ -310,5 +314,42 @@ describe("pty drag-select autoscroll", () => {
     h.flushFrame();
     expect(h.container.scrollTop).toBeLessThan(afterFirstFrame);
     expect(h.onVerticalScrollIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses the visible xterm screen edge when a review projection extends above the host", () => {
+    h = createHarness({ scrollHeight: 1200, clientHeight: 400 });
+    h.container.scrollTop = 600;
+    const screen = document.createElement("div");
+    screen.className = "xterm-screen";
+    screen.getBoundingClientRect = () =>
+      ({
+        left: 0,
+        top: 120,
+        right: 800,
+        bottom: 400,
+        width: 800,
+        height: 280,
+        x: 0,
+        y: 120,
+        toJSON: () => null,
+      }) as DOMRect;
+    h.host.appendChild(screen);
+
+    pointerDown(h.container, { x: 400, y: 200 });
+    // Above xterm's screen but nowhere near the outer container's top edge. This was the dead
+    // zone where xterm viewportY moved on its own while container.scrollTop stayed frozen.
+    pointerMove({ x: 400, y: 110 });
+    h.flushFrame();
+
+    expect(h.container.scrollTop).toBeLessThan(600);
+    expect(h.onVerticalScrollIntent).toHaveBeenCalledTimes(1);
+  });
+
+  it("reports the mouse drag lifetime exactly once", () => {
+    h = createHarness({});
+    pointerDown(h.container, { x: 100, y: 200 });
+    pointerUp();
+
+    expect(h.onDragStateChange.mock.calls).toEqual([[true], [false]]);
   });
 });

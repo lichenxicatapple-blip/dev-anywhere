@@ -149,6 +149,7 @@ interface ScrollControllerHandle {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
+  setSelectionDragActive: (active: boolean) => void;
   markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
@@ -956,6 +957,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         const dragSelect = attachPtyDragSelectAutoscroll({
           container,
           host,
+          onDragStateChange: (dragging) =>
+            scrollControllerRef.current?.setSelectionDragActive(dragging),
           onVerticalScrollIntent: (reason) =>
             scrollControllerRef.current?.markSelectionAutoscrollIntent(reason),
           onHorizontalScrollIntent: (reason) =>

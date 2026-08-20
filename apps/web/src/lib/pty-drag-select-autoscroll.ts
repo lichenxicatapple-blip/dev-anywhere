@@ -21,6 +21,7 @@ interface DragSelectOptions {
   host: HTMLElement;
   edgePx?: number;
   maxSpeedPx?: number;
+  onDragStateChange?: (dragging: boolean) => void;
   onVerticalScrollIntent?: (reason: string) => void;
   onHorizontalScrollIntent?: (reason: string) => void;
   // 测试注入: 默认 requestAnimationFrame / cancelAnimationFrame。jsdom 下走 setTimeout 桩。
@@ -55,6 +56,7 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
     host,
     edgePx = DEFAULT_EDGE_PX,
     maxSpeedPx = DEFAULT_MAX_SPEED_PX,
+    onDragStateChange,
     onVerticalScrollIntent,
     onHorizontalScrollIntent,
     requestFrame = (cb) => requestAnimationFrame(cb),
@@ -79,21 +81,41 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
   // 永远到不了 .xterm-screen, 选区不会扩。必须在 .xterm-screen 上派发。lazy 解析
   // 一次, attach 时 xterm 可能还没把 screen 渲出来。
   let cachedDispatchTarget: HTMLElement | null = null;
-  const getDispatchTarget = (): HTMLElement => {
+  const resolveDispatchTarget = (): HTMLElement => {
     if (cachedDispatchTarget && cachedDispatchTarget.isConnected) return cachedDispatchTarget;
     const screen = host.querySelector<HTMLElement>(".xterm-screen");
     cachedDispatchTarget = screen ?? host;
-    dispatchTargetTag = screen ? "xterm-screen" : "host";
     return cachedDispatchTarget;
+  };
+  const getDispatchTarget = (): HTMLElement => {
+    const target = resolveDispatchTarget();
+    dispatchTargetTag = target === host ? "host" : "xterm-screen";
+    return target;
   };
 
   const stop = (): void => {
+    const wasDragging = dragging;
     dragging = false;
     verticalScrollIntentMarked = false;
     if (frame !== null) {
       cancelFrame(frame);
       frame = null;
     }
+    if (wasDragging) onDragStateChange?.(false);
+  };
+
+  const getVerticalAutoscrollRect = (
+    containerRect: DOMRect,
+  ): Pick<DOMRect, "left" | "top" | "right" | "bottom"> => {
+    const target = resolveDispatchTarget();
+    if (target === host) return containerRect;
+    const screenRect = target.getBoundingClientRect();
+    const top = Math.max(containerRect.top, screenRect.top);
+    const bottom = Math.min(containerRect.bottom, screenRect.bottom);
+    // A not-yet-laid-out xterm screen reports a zero/empty rect. Keep the old container edge
+    // behavior until real screen geometry is available.
+    if (screenRect.height <= 0 || bottom <= top) return containerRect;
+    return { left: containerRect.left, top, right: containerRect.right, bottom };
   };
 
   const tick = (): void => {
@@ -101,10 +123,27 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
     if (!dragging) return;
     const rect = container.getBoundingClientRect();
 
-    const { dx, dy } = getEdgeAutoscrollDelta({
+    const { dx } = getEdgeAutoscrollDelta({
       pointerX,
       pointerY,
       rect,
+      scrollLeft: container.scrollLeft,
+      scrollTop: container.scrollTop,
+      scrollWidth: container.scrollWidth,
+      scrollHeight: container.scrollHeight,
+      clientWidth: container.clientWidth,
+      clientHeight: container.clientHeight,
+      edgePx,
+      maxSpeedPx,
+    });
+    // The review projection can extend above/below the actual xterm screen. xterm starts its own
+    // selection autoscroll at the screen edge, so using the outer container edge here leaves a
+    // dead zone where only xterm's private viewport moves. Use the visible screen intersection for
+    // vertical ownership while retaining container bounds for horizontal scrolling.
+    const { dy } = getEdgeAutoscrollDelta({
+      pointerX,
+      pointerY,
+      rect: getVerticalAutoscrollRect(rect),
       scrollLeft: container.scrollLeft,
       scrollTop: container.scrollTop,
       scrollWidth: container.scrollWidth,
@@ -152,6 +191,7 @@ export function attachPtyDragSelectAutoscroll(opts: DragSelectOptions): DragSele
     // 避免和移动端 usePtyTouchGesture 的滚动手势打架。
     if (event.pointerType !== "mouse") return;
     if (event.button !== 0) return;
+    if (!dragging) onDragStateChange?.(true);
     dragging = true;
     verticalScrollIntentMarked = false;
     pointerX = event.clientX;
