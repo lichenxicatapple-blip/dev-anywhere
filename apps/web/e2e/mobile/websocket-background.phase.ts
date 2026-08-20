@@ -207,6 +207,10 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
     const latestText = `后台持续更新 ${audit.revision}`;
     const sameSocket = audit.originalSocket === window.__devAnywhereE2E?.socket;
 
+    // Keep the explicit post-resume revision stable until the assertion observes it. Otherwise
+    // the one-second stream interval can replace revision N with N+1 before the CDP client starts
+    // polling, turning a healthy updating page into a permanent wait for stale text.
+    window.clearInterval(audit.intervalId);
     audit.emitNext();
     window.__devAnywhereE2E?.setRelayLivenessPongEnabled(false);
     audit.preDeadSocket = window.__devAnywhereE2E?.socket ?? null;
@@ -227,6 +231,11 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
     };
   });
   await page.getByText(String(state.postResumeText)).waitFor({ state: "visible", timeout: 10_000 });
+  await page.evaluate(() => {
+    const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
+    if (!audit) throw new Error("the original page document was replaced");
+    audit.intervalId = window.setInterval(() => audit.emitNext(), 1_000);
+  });
   return { ...state, postResumeVisible: true };
 }
 
