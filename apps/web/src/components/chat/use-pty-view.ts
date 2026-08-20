@@ -56,7 +56,7 @@ import { serializeTerminalBuffer } from "@/lib/pty-serialize-buffer";
 import { registerPtyLinkProvider, registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
 import { useImagePreview } from "./image-preview";
 import { usePtyConnectionState } from "./use-pty-connection-state";
-import { usePtyFocusState } from "./use-pty-focus-state";
+import { shouldAutoFocusPtyInput, usePtyFocusState } from "./use-pty-focus-state";
 import { usePtyFollowState } from "./use-pty-follow-state";
 import {
   usePtySelectionController,
@@ -811,7 +811,13 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       // IME 把视口压成一半, 用户还没看清当前 PTY 内容键盘已遮；强制实体键盘时保留 RAF auto-focus。
       // 用户想敲字仍可点 PTY 区域 (handleTerminalContainerMouseDown / pointerdown 都挂了
       // terminal.focus)。
-      scheduleAutoFocus: softKeyboardEditingSurface ? () => {} : undefined,
+      scheduleAutoFocus: softKeyboardEditingSurface
+        ? () => {}
+        : (callback) => {
+            requestAnimationFrame(() => {
+              if (shouldAutoFocusPtyInput(xtermHostRef.current)) callback();
+            });
+          },
       createTerminal: async (terminalHost) => {
         const result = await createXtermTerminal(terminalHost, {
           fontSize: useAppStore.getState().ptyFontSize,
@@ -1085,9 +1091,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   useEffect(() => {
     if (!active || !connection.ready || softKeyboardEditingSurface) return;
-    const id = requestAnimationFrame(() => terminalRef.current?.focus());
+    const id = requestAnimationFrame(() => {
+      if (shouldAutoFocusPtyInput(xtermHostRef.current)) terminalRef.current?.focus();
+    });
     return () => cancelAnimationFrame(id);
-  }, [active, connection.ready, softKeyboardEditingSurface]);
+  }, [active, connection.ready, softKeyboardEditingSurface, xtermHostRef]);
 
   // === 暴露给 JSX 的命令式句柄（稳定 useCallback，内部读 ref 拿当前 controller）===
   // reason 默认 "viewExternal" — 当 BackToBottom 按钮等明确入口外调时, caller 可传具体 label。

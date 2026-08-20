@@ -1,13 +1,25 @@
 import { renderHook } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { Terminal } from "@xterm/xterm";
-import { usePtyFocusState } from "./use-pty-focus-state";
+import { shouldAutoFocusPtyInput, usePtyFocusState } from "./use-pty-focus-state";
 
 afterEach(() => {
   document.body.replaceChildren();
 });
 
 describe("usePtyFocusState", () => {
+  it("does not auto-focus the PTY over an interactive control the user already focused", () => {
+    const host = document.createElement("div");
+    const terminalInput = document.createElement("textarea");
+    const menuItem = document.createElement("button");
+    host.append(terminalInput);
+    document.body.append(host, menuItem);
+
+    expect(shouldAutoFocusPtyInput(host, document.body)).toBe(true);
+    expect(shouldAutoFocusPtyInput(host, terminalInput)).toBe(true);
+    expect(shouldAutoFocusPtyInput(host, menuItem)).toBe(false);
+  });
+
   it("can suppress focus re-entry without blurring the active PTY input", () => {
     const container = document.createElement("div");
     const host = document.createElement("div");

@@ -7,6 +7,19 @@ import type { Terminal } from "@xterm/xterm";
 
 const FOCUS_SUPPRESSION_WINDOW_MS = 900;
 
+export function shouldAutoFocusPtyInput(
+  host: HTMLElement | null,
+  activeElement: Element | null = document.activeElement,
+): boolean {
+  if (!host) return false;
+  return (
+    activeElement === null ||
+    activeElement === document.body ||
+    activeElement === document.documentElement ||
+    host.contains(activeElement)
+  );
+}
+
 interface UsePtyFocusStateOptions {
   containerEl: HTMLElement | null;
   xtermHostRef: RefObject<HTMLDivElement | null>;

@@ -149,6 +149,7 @@ test.describe("ChatHeader screen wake lock", () => {
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
     const menu = page.locator('[data-slot="chat-overflow-menu"]');
     const item = page.locator('[data-slot="chat-menu-screen-wake-lock-item"]');
+    await expect(menu).toHaveAttribute("data-state", "open");
     await expect(item).toBeVisible();
     await expect(item).toHaveAttribute("data-state", "unchecked");
 
