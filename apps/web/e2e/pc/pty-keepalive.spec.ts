@@ -105,8 +105,9 @@ test.describe("PTY keep-alive", () => {
     });
     await expectPtyCursorAwareBottom(page);
 
-    const terminal = activePty(page).locator('[data-slot="pty-terminal"]');
-    const terminalScreen = activePty(page).locator('[data-slot="pty-host"] .xterm-screen');
+    const claudePty = ptyEntry(page, "claude-pty");
+    const terminal = claudePty.locator('[data-slot="pty-terminal"]');
+    const terminalScreen = claudePty.locator('[data-slot="pty-host"] .xterm-screen');
     await terminalScreen.hover();
     await page.mouse.wheel(0, -600);
     await expect(activePty(page).locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
@@ -117,7 +118,7 @@ test.describe("PTY keep-alive", () => {
 
     await page.locator('[data-slot="session-row"][data-session-id="codex-pty"]:visible').click();
     await expect(page).toHaveURL(/\/chat\/codex-pty\?mode=pty/);
-    await expect(ptyEntry(page, "claude-pty")).toHaveAttribute("data-active", "false");
+    await expect(claudePty).toHaveAttribute("data-active", "false");
 
     // 模拟隐藏标签页期间 Chrome 回放错误 DOM 位置，同时终端继续产生输出。
     await ptyEntry(page, "claude-pty")
@@ -133,14 +134,13 @@ test.describe("PTY keep-alive", () => {
 
     await page.locator('[data-slot="session-row"][data-session-id="claude-pty"]:visible').click();
     await expect(page).toHaveURL(/\/chat\/claude-pty\?mode=pty/);
+    // The route commits before the keep-alive provider finishes swapping the active portal entry.
+    // Bind every post-activation assertion to this session and wait for that second transition so
+    // a retiring session can never supply the scroll baseline for the resumed one.
+    await expect(claudePty).toHaveAttribute("data-active", "true");
     await expectPtyCursorAwareBottom(page);
-    await expect(activePty(page).locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
-      "inert",
-      true,
-    );
-    await expect(
-      activePty(page).locator('[data-slot="back-to-bottom-new-indicator"]'),
-    ).toBeHidden();
+    await expect(claudePty.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty("inert", true);
+    await expect(claudePty.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeHidden();
     await expectPtyRendered(page);
 
     // The lifecycle transaction is finished. A later user wheel must own the viewport instead of
@@ -151,7 +151,7 @@ test.describe("PTY keep-alive", () => {
     await expect
       .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
       .toBeLessThan(liveScrollTop);
-    await expect(activePty(page).locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
+    await expect(claudePty.locator('[data-slot="back-to-bottom"]')).toHaveJSProperty(
       "inert",
       false,
     );
