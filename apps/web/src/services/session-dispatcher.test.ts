@@ -101,6 +101,7 @@ describe("session-dispatcher lifecycle reconciliation", () => {
     createSessionMessageHandler()({
       type: "session_history_response",
       requestId: "history-old-proxy",
+      success: true,
       sessions: [
         {
           id: "stale",
@@ -113,5 +114,29 @@ describe("session-dispatcher lifecycle reconciliation", () => {
     });
 
     expect(useSessionStore.getState().historySessions.map((item) => item.id)).toEqual(["current"]);
+  });
+
+  it("does not turn an unsolicited history scan failure into an empty snapshot", () => {
+    const current = {
+      id: "current",
+      title: "Current history",
+      projectDir: "/current",
+      updatedAt: 1,
+      provider: "claude" as const,
+    };
+    useSessionStore.setState({ historySessions: [current], historyLoadStatus: "loaded" });
+
+    createSessionMessageHandler()({
+      type: "session_history_response",
+      success: false,
+      sessions: [],
+      errorCode: "UNKNOWN",
+      error: "历史会话扫描失败",
+    });
+
+    expect(useSessionStore.getState()).toMatchObject({
+      historySessions: [current],
+      historyLoadStatus: "loaded",
+    });
   });
 });

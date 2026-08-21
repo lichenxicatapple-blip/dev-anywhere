@@ -160,7 +160,10 @@ export function ChatPtyView({
             contain: "layout size",
             overflow: "visible",
             pointerEvents: "none",
-            zIndex: 4,
+            // Keep the 44px touch targets above the transient overlay scrollbars (z-10). A handle
+            // can legitimately sit in the rightmost 32px; letting the scrollbar win that overlap
+            // turns a handle drag into a large track jump and silently drops the selection.
+            zIndex: 11,
           }}
         />
       </div>

@@ -54,6 +54,7 @@ declare global {
       setImagePreviewDataBase64(value: string): void;
       setProxySelectDelay(ms: number): void;
       setSessionListDelay(ms: number): void;
+      setSessionHistoryDelay(ms: number): void;
       setRelayLivenessPongEnabled(enabled: boolean): void;
       setProxyOnline(online: boolean): void;
       voice: {
@@ -233,6 +234,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     let proxyOnlineState = true;
     let proxySelectDelayMs = 0;
     let sessionListDelayMs = 0;
+    let sessionHistoryDelayMs = 0;
     let imagePreviewDelayMs = 0;
     let holdImagePreviews = false;
     let relayLivenessPongEnabled = true;
@@ -533,11 +535,18 @@ export async function installFakeRelay(page: Page): Promise<void> {
             }, sessionListDelayMs);
             break;
           case "session_history_request":
-            this.emitJson({
-              type: "session_history_response",
-              requestId: msg.requestId,
-              sessions: history,
-            });
+            {
+              const emitHistory = () => {
+                this.emitJson({
+                  type: "session_history_response",
+                  requestId: msg.requestId,
+                  success: true,
+                  sessions: history,
+                });
+              };
+              if (sessionHistoryDelayMs > 0) setTimeout(emitHistory, sessionHistoryDelayMs);
+              else emitHistory();
+            }
             break;
           case "proxy_info_request":
             this.emitJson({
@@ -1022,6 +1031,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
       setSessionListDelay(ms: number) {
         sessionListDelayMs = Math.max(0, ms);
+      },
+      setSessionHistoryDelay(ms: number) {
+        sessionHistoryDelayMs = Math.max(0, ms);
       },
       setRelayLivenessPongEnabled(enabled: boolean) {
         relayLivenessPongEnabled = enabled;

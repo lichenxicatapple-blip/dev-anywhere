@@ -685,17 +685,36 @@ describe("RelayClient request handling", () => {
     ws.emit({
       type: "session_history_response",
       requestId: "other-request",
+      success: true,
       sessions: [{ id: "old", title: "old", projectDir: "/old", updatedAt: 1 }],
     });
     ws.emit({
       type: "session_history_response",
       requestId,
+      success: true,
       sessions: [{ id: "new", title: "new", projectDir: "/new", updatedAt: 2 }],
     });
 
     await expect(promise).resolves.toEqual([
       { id: "new", title: "new", projectDir: "/new", updatedAt: 2 },
     ]);
+  });
+
+  it("rejects an explicit session history scan failure instead of treating it as empty", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestSessionHistory();
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "session_history_response",
+      requestId,
+      success: false,
+      sessions: [],
+      errorCode: "UNKNOWN",
+      error: "历史会话扫描失败",
+    });
+
+    await expect(promise).rejects.toThrow("历史会话扫描失败");
   });
 
   it("waits for matching session message responses", async () => {

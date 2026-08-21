@@ -15,6 +15,8 @@ import {
   writeStorageValue,
 } from "@/lib/storage-keys";
 
+export type HistoryLoadStatus = "idle" | "loading" | "loaded" | "error";
+
 export function ptyAutoYesSessionKey(
   proxyId: string | null | undefined,
   sessionId: string,
@@ -57,6 +59,10 @@ interface SessionStoreState {
   // 已绑定新开发机但 session_list 尚未返回时保留目标名称，避免退化成无上下文的加载态。
   loadingProxyName: string | null;
   historySessions: HistorySession[];
+  // 历史扫描独立于活跃 session_list 异步进行。不要把“请求尚未返回”渲染成“确实为空”。
+  historyLoadStatus: HistoryLoadStatus;
+  // 后发请求/切换开发机使旧请求失效，防止慢响应覆盖新开发机的数据或加载状态。
+  historyLoadGeneration: number;
   // PTY 终端标题: Claude CLI 运行时会通过 OSC 0 改终端标题, proxy 抽取后转发 terminal_title
   // chat-header 为 PTY 模式优先展示这个字段, 空则回退到 cwd / sessionId
   ptyTitles: Record<string, string>;
@@ -78,16 +84,22 @@ interface SessionStoreState {
   setPtyTitle: (sessionId: string, title: string) => void;
   setPtyAutoYes: (sessionKey: string, enabled: boolean) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
+  beginHistoryLoad: () => number;
+  resolveHistoryLoad: (generation: number, sessions: HistorySession[]) => boolean;
+  rejectHistoryLoad: (generation: number) => boolean;
+  cancelHistoryLoad: (generation: number) => boolean;
   prepareForProxySwitch: (proxyName: string) => void;
 }
 
 export const useSessionStore = create<SessionStoreState>()(
   devtools(
-    (set) => ({
+    (set, get) => ({
       sessions: [],
       sessionListLoaded: false,
       loadingProxyName: null,
       historySessions: [],
+      historyLoadStatus: "idle",
+      historyLoadGeneration: 0,
       ptyTitles: {},
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
@@ -196,17 +208,44 @@ export const useSessionStore = create<SessionStoreState>()(
           writePtyAutoYesBySessionKey(ptyAutoYesBySessionKey);
           return { ptyAutoYesBySessionKey };
         }),
-      setHistorySessions: (sessions) => set({ historySessions: sessions }),
+      setHistorySessions: (sessions) =>
+        set((state) => ({
+          historySessions: sessions,
+          historyLoadStatus: "loaded",
+          historyLoadGeneration: state.historyLoadGeneration + 1,
+        })),
+      beginHistoryLoad: () => {
+        const generation = get().historyLoadGeneration + 1;
+        set({ historyLoadStatus: "loading", historyLoadGeneration: generation });
+        return generation;
+      },
+      resolveHistoryLoad: (generation, sessions) => {
+        if (get().historyLoadGeneration !== generation) return false;
+        set({ historySessions: sessions, historyLoadStatus: "loaded" });
+        return true;
+      },
+      rejectHistoryLoad: (generation) => {
+        if (get().historyLoadGeneration !== generation) return false;
+        set({ historyLoadStatus: "error" });
+        return true;
+      },
+      cancelHistoryLoad: (generation) => {
+        if (get().historyLoadGeneration !== generation) return false;
+        set({ historyLoadStatus: "idle" });
+        return true;
+      },
       prepareForProxySwitch: (loadingProxyName) =>
-        set({
+        set((state) => ({
           sessions: [],
           sessionListLoaded: false,
           loadingProxyName,
           historySessions: [],
+          historyLoadStatus: "idle",
+          historyLoadGeneration: state.historyLoadGeneration + 1,
           ptyTitles: {},
           ptyStateBySessionId: {},
           agentStatusBySessionId: {},
-        }),
+        })),
     }),
     { name: "session-store" },
   ),

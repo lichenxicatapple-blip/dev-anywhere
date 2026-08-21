@@ -38,6 +38,11 @@ function resetAppStore(): void {
     relayClientAuthIssue: null,
     pendingToast: null,
   });
+  useSessionStore.setState({
+    historySessions: [],
+    historyLoadStatus: "idle",
+    historyLoadGeneration: 0,
+  });
 }
 
 function reconnectTimers(): Timers {
@@ -467,10 +472,11 @@ describe("phase-machine request failure handling", () => {
     );
 
     await vi.waitFor(() => {
-      expect(toastWarning).toHaveBeenCalledWith("历史会话加载可能遇到问题，仍在等待开发机返回");
+      expect(toastWarning).toHaveBeenCalledWith("历史会话加载失败，可点击刷新重试");
     });
     expect(toastError).not.toHaveBeenCalled();
-    expect(relay.requestSessionHistory).toHaveBeenCalledWith(30_000);
+    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000);
+    expect(useSessionStore.getState().historyLoadStatus).toBe("error");
     expect(useAppStore.getState().phase).toBe("chatting");
     errSpy.mockRestore();
   });
@@ -519,6 +525,70 @@ describe("phase-machine request failure handling", () => {
     expect(toastError).not.toHaveBeenCalled();
     expect(toastWarning).not.toHaveBeenCalled();
     errSpy.mockRestore();
+  });
+});
+
+describe("phase-machine cold-start history", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetAppStore();
+    useAppStore.setState({
+      phase: "proxy_selecting",
+      selectedProxyId: null,
+      selectedProxyName: null,
+      proxyOnline: false,
+    });
+    window.location.hash = "#/chat/deep-session?mode=json";
+  });
+
+  afterEach(() => {
+    window.location.hash = "#/";
+    localStorage.clear();
+  });
+
+  it("loads history after binding a pasted deep link without a saved proxy", async () => {
+    const history = [
+      {
+        id: "history-deep-link",
+        title: "Deep link history",
+        projectDir: "/workspace",
+        updatedAt: 1,
+        provider: "claude" as const,
+      },
+    ];
+    const proxies = [
+      {
+        proxyId: "proxy-1",
+        name: "DEV Mac",
+        online: true,
+        sessions: ["deep-session"],
+      },
+    ];
+    const relay = {
+      requestProxyList: vi.fn().mockResolvedValue(proxies),
+      selectProxy: vi.fn().mockResolvedValue({ success: true, proxyId: "proxy-1" }),
+      sendControl: vi.fn(),
+      requestProxyInfo: vi.fn().mockResolvedValue({ homePath: "/h", agentCli: {} }),
+      requestAgentStatuses: vi.fn().mockResolvedValue([]),
+      requestSessionHistory: vi.fn().mockResolvedValue(history),
+    } as unknown as RelayClient;
+    const timers = createPhaseMachineTimers();
+
+    await handleRelayMessage({ type: "proxy_list_response", proxies }, timers, relay);
+
+    await vi.waitFor(() => {
+      expect(useSessionStore.getState()).toMatchObject({
+        historyLoadStatus: "loaded",
+        historySessions: history,
+      });
+    });
+    expect(relay.requestSessionHistory).toHaveBeenCalledTimes(1);
+    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000);
+    expect(useAppStore.getState()).toMatchObject({
+      selectedProxyId: "proxy-1",
+      proxyOnline: true,
+      phase: "chatting",
+    });
   });
 });
 

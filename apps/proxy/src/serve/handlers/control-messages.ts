@@ -224,6 +224,7 @@ export function createControlMessageHandlers(
           serializeControl({
             type: "session_history_response",
             requestId: msg.requestId,
+            success: true,
             sessions,
           }),
         );
@@ -233,7 +234,10 @@ export function createControlMessageHandlers(
           serializeControl({
             type: "session_history_response",
             requestId: msg.requestId,
+            success: false,
             sessions: [],
+            errorCode: ControlErrorCode.UNKNOWN,
+            error: "历史会话扫描失败",
           }),
         );
         serviceLogger.warn({ error: String(err) }, "Session history scan failed");

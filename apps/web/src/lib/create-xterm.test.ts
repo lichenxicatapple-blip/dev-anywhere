@@ -72,12 +72,17 @@ describe("createXtermTerminal font invalidation", () => {
         'link[href$="/fonts/sarasa-fixed-sc/result.css"]',
       );
       expect(stylesheet).not.toBeNull();
+      expect(
+        document.head.querySelector(
+          'link[href$="/fonts/sarasa-fixed-sc/090128a865f81baab82dfa2776ef9d39.woff2"]',
+        ),
+      ).not.toBeNull();
       stylesheet?.dispatchEvent(new Event("load"));
       const result = await creating;
 
-      // `›` is Codex's prompt marker. It must be loaded before Terminal construction so the DOM
-      // renderer cannot cache its wider fallback-font advance and shorten the row background.
-      expect(load).toHaveBeenCalledWith('16px "Sarasa Fixed SC"', "─│╭╮╰╯›·•");
+      // Codex prompt markers and common Powerline separators must be loaded before Terminal
+      // construction so the DOM renderer cannot cache fallback-font advances.
+      expect(load).toHaveBeenCalledWith('16px "Sarasa Fixed SC"', "─│╭╮╰╯›·•");
 
       const addedListeners = addEventListener.mock.calls.filter(
         (args) => args[0] === "loadingdone",

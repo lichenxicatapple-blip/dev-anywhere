@@ -664,7 +664,10 @@ export class RelayClient {
       "读取历史会话超时",
       timeoutMs,
       requestId,
-    ).then((resp) => resp.sessions);
+    ).then((resp) => {
+      if (!resp.success) throw new Error(resp.error ?? "读取历史会话失败");
+      return resp.sessions;
+    });
   }
 
   requestSessionMessages(

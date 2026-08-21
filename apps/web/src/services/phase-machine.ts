@@ -8,8 +8,11 @@ import type { RelayClient } from "@/services/relay-client";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
+import { loadSessionHistory } from "@/services/session-history-loader";
 
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
+// 本机 650+ 个历史文件约 2.2s 扫完；给移动弱网留充足余量，但不要让失败请求锁住刷新整整 30s。
+const SESSION_HISTORY_LOAD_TIMEOUT_MS = 15_000;
 const RECONNECT_BINDING_RETRY_INITIAL_MS = 500;
 const RECONNECT_BINDING_RETRY_MAX_MS = 2_000;
 
@@ -74,22 +77,16 @@ function requestProxyState(relay: RelayClient): void {
 }
 
 function requestSessionHistory(relay: RelayClient): void {
-  const requestedProxyId = useAppStore.getState().selectedProxyId;
-  if (!requestedProxyId) return;
-  void relay
-    .requestSessionHistory(RECONNECT_GRACE_PERIOD_MS)
-    .then((sessions) => {
-      if (useAppStore.getState().selectedProxyId !== requestedProxyId) return;
-      useSessionStore.getState().setHistorySessions(sessions);
-    })
-    .catch((err: unknown) => {
-      console.error("[phase-machine] requestSessionHistory failed", err);
+  void loadSessionHistory(relay, SESSION_HISTORY_LOAD_TIMEOUT_MS).then((result) => {
+    if (result.status === "failed") {
+      console.error("[phase-machine] requestSessionHistory failed", result.error);
       const app = useAppStore.getState();
       // 手机唤醒时，旧连接上的请求会随 socket 断开而失败；新连接随后会重新同步。
       // 只有连接已经稳定后仍然失败，才向用户报告真正需要关注的问题。
       if (!app.connected || !app.proxyOnline || app.phase === "reconnecting") return;
-      toast.warning("历史会话加载可能遇到问题，仍在等待开发机返回");
-    });
+      toast.warning("历史会话加载失败，可点击刷新重试");
+    }
+  });
 }
 
 async function restoreSelectedProxyBinding(
@@ -358,6 +355,7 @@ export async function handleRelayMessage(
         writeStorageValue("local", STORAGE_KEYS.proxyId, result.proxyId);
         useAppStore.getState().setPhase("chatting");
         requestProxyState(relay);
+        requestSessionHistory(relay);
         return;
       }
 

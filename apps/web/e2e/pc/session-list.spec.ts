@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import {
+  BASE_URL,
   installFakeRelay,
   openCreateAgentSessionDialog,
   selectFakeProxy,
@@ -8,6 +9,34 @@ import {
 import webPackage from "../../package.json" with { type: "json" };
 
 const WEB_VERSION = webPackage.version;
+
+test.describe("Session history initial loading", () => {
+  test.use({ viewport: { width: 1280, height: 800 } });
+
+  test("keeps active sessions usable while delayed history loads", async ({ page }) => {
+    await installFakeRelay(page);
+    await page.goto(`${BASE_URL}/#/`);
+    await page.locator('[data-slot="proxy-switcher-trigger"]').click();
+    await page.evaluate(() => window.__devAnywhereE2E?.setSessionHistoryDelay(1_200));
+    await page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible').last().click();
+
+    await expect(page.locator('[data-slot="session-row"]:visible').first()).toBeVisible();
+    await expect(page.locator('[data-slot="history-loading"]:visible')).toContainText(
+      "正在加载会话记录",
+    );
+    await expect(page.locator('[data-slot="history-empty"]:visible')).toHaveCount(0);
+    const refresh = page.locator('[data-slot="history-refresh"]:visible');
+    await expect(refresh).toBeDisabled();
+    await expect(refresh).toHaveAttribute("aria-busy", "true");
+
+    await expect(page.locator('[data-slot="history-loading"]:visible')).toHaveCount(0, {
+      timeout: 5_000,
+    });
+    await expect(refresh).toBeEnabled();
+    await expect(refresh).toHaveAttribute("aria-busy", "false");
+    await expect(page.locator('[data-slot="history-section-header"]:visible')).toContainText("· 2");
+  });
+});
 
 test.describe("CreateSessionDialog — 字段校验", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
@@ -154,6 +183,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await page.evaluate(() => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "session_history_response",
+        success: true,
         sessions: [
           {
             id: "hist-claude-same-dir",
@@ -197,6 +227,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await page.evaluate((title) => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "session_history_response",
+        success: true,
         sessions: [
           {
             id: "hist-long-title",
@@ -229,6 +260,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await page.evaluate((title) => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "session_history_response",
+        success: true,
         sessions: [
           {
             id: "hist-restore-dialog-overflow",

@@ -617,6 +617,7 @@ describe("Message routing integration", () => {
     proxy.send(
       JSON.stringify({
         type: "session_history_response",
+        success: true,
         sessions: [{ id: "s1", title: "test", projectDir: "/proj", updatedAt: 123 }],
       }),
     );
