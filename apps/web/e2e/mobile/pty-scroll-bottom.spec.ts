@@ -44,6 +44,7 @@ async function touchDrag(
   page: Page,
   start: { x: number; y: number },
   end: { x: number; y: number },
+  options: { primeMovePx?: number } = {},
 ): Promise<void> {
   const client = await page.context().newCDPSession(page);
   try {
@@ -51,8 +52,27 @@ async function touchDrag(
       type: "touchStart",
       touchPoints: [{ x: start.x, y: start.y, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
     });
+    let primedProgress = 0;
+    if (options.primeMovePx) {
+      const distance = Math.hypot(end.x - start.x, end.y - start.y);
+      primedProgress = distance > 0 ? Math.min(1, options.primeMovePx / distance) : 0;
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchMove",
+        touchPoints: [
+          {
+            x: start.x + (end.x - start.x) * primedProgress,
+            y: start.y + (end.y - start.y) * primedProgress,
+            id: 1,
+            radiusX: 2,
+            radiusY: 2,
+            force: 1,
+          },
+        ],
+      });
+    }
     for (let step = 1; step <= 4; step += 1) {
       const progress = step / 4;
+      if (progress <= primedProgress) continue;
       await page.waitForTimeout(40);
       await client.send("Input.dispatchTouchEvent", {
         type: "touchMove",
@@ -446,16 +466,25 @@ function expectReviewScrollSamplesStable(
 }
 
 function expectViewportNeverPulledTowardBottom(samples: ReviewScrollSample[]): void {
-  const viewportMoves = samples
-    .slice(1)
-    .map((sample, index) => sample.viewportY - samples[index].viewportY);
   expect(samples.length).toBeGreaterThan(10);
   expect(Math.min(...samples.map((sample) => sample.viewportY))).toBeLessThan(samples[0].viewportY);
-  const upwardMoves = samples
+
+  // A one-paint viewport bridge deliberately advances xterm's logical viewport before moving its
+  // old DOM rows. During that frame the native scroll position is the visual authority; only
+  // settled reviewing samples may be compared as xterm viewport positions.
+  const domMoves = samples
     .slice(1)
-    .map((sample, index) => ({ previous: samples[index], sample }))
-    .filter(({ previous, sample }) => sample.viewportY > previous.viewportY);
-  expect(Math.max(...viewportMoves), JSON.stringify(upwardMoves, null, 2)).toBeLessThanOrEqual(0);
+    .map((sample, index) => sample.scrollTop - samples[index].scrollTop);
+  expect(Math.max(...domMoves)).toBeLessThanOrEqual(0);
+
+  const settledReviewSamples = samples.filter(
+    (sample) => sample.intentMode === "reviewing" && !sample.viewportBridgeActive,
+  );
+  expect(settledReviewSamples.length).toBeGreaterThan(1);
+  const settledViewportMoves = settledReviewSamples
+    .slice(1)
+    .map((sample, index) => sample.viewportY - settledReviewSamples[index].viewportY);
+  expect(Math.max(...settledViewportMoves)).toBeLessThanOrEqual(0);
 }
 
 async function readPtyScreenBottomGap(page: Page): Promise<number> {
@@ -637,6 +666,9 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 120, rows: 54 });
     await sendPtyLines(emuPage, { count: 260, prefix: "bottom-drift" });
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("bottom-drift 259");
     await expectPtyCursorAwareBottom(emuPage);
     const beforeSnapshot = await readPtyDebugSnapshot(emuPage);
     if (!beforeSnapshot) throw new Error("PTY debug snapshot is not available");
@@ -693,7 +725,13 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     const x = box.x + box.width / 2;
     const startY = box.y + box.height * 0.42;
     const shallowDistance = Math.max(20, Math.min(rowHeight * 1.25, 30));
-    await touchDrag(emuPage, { x, y: startY }, { x, y: startY + shallowDistance });
+    // Prime the pan before CDP round-trip latency can turn this shallow scroll into a long press.
+    await touchDrag(
+      emuPage,
+      { x, y: startY },
+      { x, y: startY + shallowDistance },
+      { primeMovePx: 10 },
+    );
     await waitForAnimationFrames(emuPage);
 
     await expect
