@@ -8,6 +8,73 @@ import {
   sendPtyOutput,
 } from "../pty-scroll-helpers";
 
+async function readActivePtyFindPaint(page: import("@playwright/test").Page, sessionId: string) {
+  return page.evaluate((sid) => {
+    const term = window.__ccTestPtyTerminals?.get(sid);
+    const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
+    const selection = term?.getSelectionPosition();
+    if (!term || !container || !selection) return null;
+
+    const containerRect = container.getBoundingClientRect();
+    const style = getComputedStyle(container);
+    const contentRect = {
+      top: containerRect.top + (Number.parseFloat(style.paddingTop) || 0),
+      right: containerRect.right - (Number.parseFloat(style.paddingRight) || 0),
+      bottom: containerRect.bottom - (Number.parseFloat(style.paddingBottom) || 0),
+      left: containerRect.left + (Number.parseFloat(style.paddingLeft) || 0),
+    };
+    const intersectsContent = (element: Element): boolean => {
+      const rect = element.getBoundingClientRect();
+      return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.right > contentRect.left &&
+        rect.left < contentRect.right &&
+        rect.bottom > contentRect.top &&
+        rect.top < contentRect.bottom
+      );
+    };
+
+    const projected = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-slot="pty-search-selection-segment"]'),
+    ).find((segment) => {
+      const firstRow = Number(segment.dataset.firstRow);
+      const lastRow = Number(segment.dataset.lastRow);
+      const firstColumn = Number(segment.dataset.firstColumn);
+      const columnCount = Number(segment.dataset.columnCount);
+      return (
+        firstRow <= selection.start.y &&
+        lastRow >= selection.start.y &&
+        firstColumn <= selection.start.x &&
+        firstColumn + columnCount > selection.start.x &&
+        intersectsContent(segment)
+      );
+    });
+    const nativeDecoration = Array.from(
+      container.querySelectorAll<HTMLElement>(".xterm-find-result-decoration"),
+    ).find(intersectsContent);
+    const nativeSelection = Array.from(
+      container.querySelectorAll<HTMLElement>(".xterm-selection > div"),
+    ).find(intersectsContent);
+    const selectionStartsInNativeViewport =
+      selection.start.y >= term.buffer.active.viewportY &&
+      selection.start.y < term.buffer.active.viewportY + term.rows;
+
+    return {
+      selectedText: term.getSelection(),
+      source: projected
+        ? "projection"
+        : selectionStartsInNativeViewport && (nativeDecoration || nativeSelection)
+          ? "native"
+          : null,
+      startRow: selection.start.y,
+      startColumn: selection.start.x,
+      endRow: selection.end.y,
+      endColumn: selection.end.x,
+    };
+  }, sessionId);
+}
+
 test.describe("会话内查找", () => {
   test("气泡模式会拉取完整历史并定位虚拟列表中的消息", async ({ page }) => {
     await installFakeRelay(page);
@@ -87,27 +154,22 @@ test.describe("会话内查找", () => {
     await expect
       .poll(() => readPtyScrollMetrics(page).then((metrics) => metrics.bottomGap))
       .toBeGreaterThan(100);
-    await expect
-      .poll(() =>
-        page.evaluate((sid) => {
-          const term = window.__ccTestPtyTerminals?.get(sid);
-          if (!term) return false;
-          const { viewportY } = term.buffer.active;
-          return Array.from({ length: term.rows }, (_, row) =>
-            term.buffer.active.getLine(viewportY + row)?.translateToString(true),
-          ).some((line) => line?.includes("SEARCH NEEDLE OLD"));
-        }, sessionId),
-      )
-      .toBe(true);
     await expectPtyRendered(page);
+    await expect
+      .poll(() => readActivePtyFindPaint(page, sessionId))
+      .toMatchObject({ selectedText: "SEARCH NEEDLE", source: "projection" });
     expect(await readRawPtyInput(page)).toBe(rawInputBeforeFind);
 
     await findInput.press("Enter");
     await expect(resultLabel).toHaveText("2 / 2");
+    await expect
+      .poll(() => readActivePtyFindPaint(page, sessionId))
+      .toMatchObject({ selectedText: "SEARCH NEEDLE", source: "native" });
     expect(await readRawPtyInput(page)).toBe(rawInputBeforeFind);
 
     await page.keyboard.press("Escape");
     await expect(page.locator('[data-slot="chat-find-bar"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="pty-search-selection-overlay"]')).toHaveCount(0);
     await expect(terminalInput).toBeFocused();
     await expect
       .poll(() => page.evaluate((sid) => window.__ccTest?.pty.getSelection(sid) ?? "", sessionId))

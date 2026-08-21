@@ -1,4 +1,4 @@
-import type { IBufferLine, Terminal } from "@xterm/xterm";
+import type { IBufferLine, IBufferRange, Terminal } from "@xterm/xterm";
 import { getRenderedPtyHistoryProjectionRange } from "./pty-history-projection";
 import type { PtySelectionBufferPoint, PtySelectionRange } from "./pty-managed-selection-state";
 
@@ -7,6 +7,14 @@ export interface PtyManagedSelectionOverlayOptions {
   container: HTMLElement;
   selectionBackground?: string;
   getLine?: (row: number) => IBufferLine | null | undefined;
+  /** Resolve a moving xterm-owned range whenever the overlay repaints. */
+  resolveRange?: () => PtySelectionRange | null;
+  /** Paint only the rows serialized into the current live-backfill shell. */
+  projectionOnly?: boolean;
+  overlaySlot?: string;
+  segmentSlot?: string;
+  opacity?: string;
+  borderColor?: string;
 }
 
 export interface PtyManagedSelectionOverlayController {
@@ -25,6 +33,29 @@ const OVERLAY_SLOT = "pty-managed-selection-overlay";
 const SEGMENT_SLOT = "pty-managed-selection-segment";
 const DEFAULT_SELECTION_BACKGROUND = "#264f78";
 const SELECTION_OPACITY = "0.62";
+
+/** Converts xterm's end-exclusive selection range into our inclusive endpoint model. */
+export function xtermSelectionToPtySelectionRange(
+  selection: IBufferRange | undefined,
+  cols: number,
+): PtySelectionRange | null {
+  if (!selection || cols <= 0) return null;
+  const coordinates = [selection.start.x, selection.start.y, selection.end.x, selection.end.y];
+  if (
+    coordinates.some((value) => !Number.isInteger(value) || value < 0) ||
+    selection.start.x > cols ||
+    selection.end.x > cols
+  ) {
+    return null;
+  }
+  const startOffset = selection.start.y * cols + selection.start.x;
+  const endOffset = selection.end.y * cols + selection.end.x;
+  if (endOffset <= startOffset) return null;
+  const lastOffset = endOffset - 1;
+  const start = { row: Math.floor(startOffset / cols), column: startOffset % cols };
+  const focus = { row: Math.floor(lastOffset / cols), column: lastOffset % cols };
+  return { anchor: start, focus, columnMode: false };
+}
 
 function isValidPoint(point: PtySelectionBufferPoint): boolean {
   return (
@@ -163,9 +194,9 @@ function clipSegmentsToRows(
   return clipped;
 }
 
-function createOverlay(screen: HTMLElement): HTMLElement {
+function createOverlay(screen: HTMLElement, slot: string): HTMLElement {
   const overlay = screen.ownerDocument.createElement("div");
-  overlay.dataset.slot = OVERLAY_SLOT;
+  overlay.dataset.slot = slot;
   overlay.setAttribute("aria-hidden", "true");
   Object.assign(overlay.style, {
     position: "absolute",
@@ -191,6 +222,12 @@ export function attachPtyManagedSelectionOverlay({
   container,
   selectionBackground,
   getLine,
+  resolveRange,
+  projectionOnly = false,
+  overlaySlot = OVERLAY_SLOT,
+  segmentSlot = SEGMENT_SLOT,
+  opacity = SELECTION_OPACITY,
+  borderColor,
 }: PtyManagedSelectionOverlayOptions): PtyManagedSelectionOverlayController {
   let currentRange: PtySelectionRange | null = null;
   let screen: HTMLElement | null = null;
@@ -219,7 +256,7 @@ export function attachPtyManagedSelectionOverlay({
   };
 
   function paint(): void {
-    const range = currentRange;
+    const range = currentRange && resolveRange ? resolveRange() : currentRange;
     if (disposed || !range) {
       clearOverlay();
       return;
@@ -253,6 +290,10 @@ export function attachPtyManagedSelectionOverlay({
     const projection = terminal.element
       ? getRenderedPtyHistoryProjectionRange(terminal.element)
       : null;
+    if (projectionOnly && !projection) {
+      clearOverlay();
+      return;
+    }
     const rowOrigin = projection?.startLine ?? terminal.buffer.active.viewportY;
     const topOrigin = projection
       ? projection.element.getBoundingClientRect().top - screenRect.top
@@ -265,6 +306,10 @@ export function attachPtyManagedSelectionOverlay({
       first: rowOrigin + Math.floor((visibleTop - topOrigin) / metrics.cellH),
       last: rowOrigin + Math.ceil((visibleBottom - topOrigin) / metrics.cellH) - 1,
     };
+    if (projectionOnly && projection) {
+      visibleRows.first = Math.max(visibleRows.first, projection.startLine);
+      visibleRows.last = Math.min(visibleRows.last, projection.endLine);
+    }
     const getSegmentsForRows = (first: number, last: number): SelectionSegment[] =>
       clipSegmentsToRows(
         getSelectionSegments(range, terminal.cols, getLine, { first, last }),
@@ -282,7 +327,7 @@ export function attachPtyManagedSelectionOverlay({
 
     if (!overlay || overlay.ownerDocument !== resolvedScreen.ownerDocument) {
       clearOverlay();
-      overlay = createOverlay(resolvedScreen);
+      overlay = createOverlay(resolvedScreen, overlaySlot);
     } else if (overlay.parentElement !== resolvedScreen) {
       resolvedScreen.append(overlay);
     }
@@ -305,7 +350,7 @@ export function attachPtyManagedSelectionOverlay({
       if (clippedBottom <= clippedTop || segment.columnCount <= 0) continue;
 
       const rectangle = resolvedScreen.ownerDocument.createElement("div");
-      rectangle.dataset.slot = SEGMENT_SLOT;
+      rectangle.dataset.slot = segmentSlot;
       rectangle.dataset.firstRow = String(segment.firstRow);
       rectangle.dataset.lastRow = String(segment.lastRow);
       rectangle.dataset.firstColumn = String(segment.firstColumn);
@@ -317,7 +362,8 @@ export function attachPtyManagedSelectionOverlay({
         width: `${segment.columnCount * metrics.cellW}px`,
         height: `${clippedBottom - clippedTop}px`,
         backgroundColor: background,
-        opacity: SELECTION_OPACITY,
+        opacity,
+        boxShadow: borderColor ? `inset 0 0 0 1px ${borderColor}` : "",
         pointerEvents: "none",
       });
       overlay.append(rectangle);

@@ -20,7 +20,15 @@ import { createXtermTerminal } from "@/lib/create-xterm";
 import { xtermFixedDarkSearchDecorations } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
 import { attachPtyBufferRowIdentityTracker } from "@/lib/pty-buffer-row-identity";
-import { attachPtyHistoryProjection } from "@/lib/pty-history-projection";
+import {
+  attachPtyHistoryProjection,
+  getRenderedPtyHistorySelectionLine,
+} from "@/lib/pty-history-projection";
+import {
+  attachPtyManagedSelectionOverlay,
+  type PtyManagedSelectionOverlayController,
+  xtermSelectionToPtySelectionRange,
+} from "@/lib/pty-managed-selection-overlay";
 import { attachXtermRawInput } from "@/lib/pty-input";
 import { isOnlyPtyNonTypingInput } from "@/lib/pty-non-typing-input";
 import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
@@ -333,6 +341,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   // === 私有 ref（仅供 hook 内部使用，不暴露给 JSX）===
   const terminalRef = useRef<Terminal | null>(null);
   const searchAddonRef = useRef<SearchAddon | null>(null);
+  const projectedSearchOverlayRef = useRef<PtyManagedSelectionOverlayController | null>(null);
+  const projectedSearchActiveRef = useRef(false);
   const ptyTouchLinkProvidersRef = useRef<ILinkProvider[]>([]);
   const terminalControllerRef = useRef<TerminalControllerHandle | null>(null);
   const scrollControllerRef = useRef<ScrollControllerHandle | null>(null);
@@ -694,6 +704,16 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const clearPtySelection = selection.clearPtySelection;
   ptySelectionActiveRef.current = selection.hasPtySelection();
 
+  const refreshProjectedSearchSelection = useCallback((): void => {
+    const term = terminalRef.current;
+    const overlay = projectedSearchOverlayRef.current;
+    const range =
+      projectedSearchActiveRef.current && term
+        ? xtermSelectionToPtySelectionRange(term.getSelectionPosition(), term.cols)
+        : null;
+    overlay?.render(range);
+  }, []);
+
   const handleTerminalPasteCapture = useTerminalPaste({
     sessionId,
     terminalRef,
@@ -779,6 +799,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let scrollDispose: (() => void) | null = null;
     let historyProjectionDispose: (() => void) | null = null;
     let searchResultsRegistration: { dispose(): void } | null = null;
+    let searchSelectionRegistration: { dispose(): void } | null = null;
+    let projectedSearchOverlay: PtyManagedSelectionOverlayController | null = null;
     let terminalSerializeAddon:
       | Awaited<ReturnType<typeof createXtermTerminal>>["serializeAddon"]
       | null = null;
@@ -844,6 +866,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         searchAddonRef.current = searchAddon;
         searchResultsRegistration = searchAddon.onDidChangeResults((result) => {
           setFindResult(result);
+          refreshProjectedSearchSelection();
         });
         setFindReady(true);
         const imageLinkRegistration = registerImagePreviewLinkProvider(xterm, openImagePreview);
@@ -917,11 +940,36 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
             userHasVerticalScrollIntentRef.current = value;
           },
           onTouchReviewStart: suppressPtyFocus,
-          onHistoryProjectionChange: historyProjection.render,
+          onHistoryProjectionChange: (projection) => {
+            const rendered = historyProjection.render(projection);
+            if (rendered) refreshProjectedSearchSelection();
+            return rendered;
+          },
           getBufferRowIdentityOffset: bufferRowIdentity.getOffset,
         });
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;
+        projectedSearchOverlay = attachPtyManagedSelectionOverlay({
+          terminal: xterm,
+          container,
+          getLine: (row) =>
+            getRenderedPtyHistorySelectionLine(host, row) ??
+            xterm.buffer.active.getLine(row) ??
+            null,
+          resolveRange: () =>
+            projectedSearchActiveRef.current
+              ? xtermSelectionToPtySelectionRange(xterm.getSelectionPosition(), xterm.cols)
+              : null,
+          projectionOnly: true,
+          overlaySlot: "pty-search-selection-overlay",
+          segmentSlot: "pty-search-selection-segment",
+          selectionBackground: xtermFixedDarkSearchDecorations.activeMatchBackground,
+          borderColor: xtermFixedDarkSearchDecorations.activeMatchBorder,
+          opacity: "0.62",
+        });
+        projectedSearchOverlayRef.current = projectedSearchOverlay;
+        searchSelectionRegistration = xterm.onSelectionChange(refreshProjectedSearchSelection);
+        refreshProjectedSearchSelection();
         if (shouldRestorePageResumeOnAttach) {
           scrollCtrl.restorePageResume();
           clearNewFramesWhileAway();
@@ -1009,6 +1057,12 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     terminalControllerRef.current = termCtrl;
 
     return () => {
+      projectedSearchActiveRef.current = false;
+      searchSelectionRegistration?.dispose();
+      projectedSearchOverlay?.dispose();
+      if (projectedSearchOverlayRef.current === projectedSearchOverlay) {
+        projectedSearchOverlayRef.current = null;
+      }
       clearPtySelection();
       scrollDispose?.();
       historyProjectionDispose?.();
@@ -1062,6 +1116,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     scheduleRawInputFollow,
     resetHorizontalScrollAfterLineSubmit,
     clearPtySelection,
+    refreshProjectedSearchSelection,
   ]);
 
   // Network ownership is intentionally separate from the persistent terminal/view graph above.
@@ -1135,9 +1190,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const searchAddon = searchAddonRef.current;
       if (!term || !searchAddon || !query) {
         if (!query) {
+          projectedSearchActiveRef.current = false;
           searchAddon?.clearDecorations();
           term?.clearSelection();
           clearManagedPtySelection();
+          refreshProjectedSearchSelection();
           setFindResult({ resultIndex: -1, resultCount: 0 });
         }
         return false;
@@ -1145,12 +1202,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       // SearchAddon uses xterm's native selection as the cursor for the next match. Clear only
       // the app-owned pointer/touch range here or every Enter would restart at the first result.
       clearManagedPtySelection();
+      projectedSearchActiveRef.current = true;
       const previousViewportY = term.buffer.active.viewportY;
       const found = searchAddon.findNext(query, { ...PTY_SEARCH_OPTIONS, incremental });
       if (found) revealFindSelection(previousViewportY);
+      refreshProjectedSearchSelection();
       return found;
     },
-    [clearManagedPtySelection, revealFindSelection],
+    [clearManagedPtySelection, refreshProjectedSearchSelection, revealFindSelection],
   );
 
   const findPrevious = useCallback(
@@ -1159,20 +1218,24 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const searchAddon = searchAddonRef.current;
       if (!term || !searchAddon || !query) return false;
       clearManagedPtySelection();
+      projectedSearchActiveRef.current = true;
       const previousViewportY = term.buffer.active.viewportY;
       const found = searchAddon.findPrevious(query, PTY_SEARCH_OPTIONS);
       if (found) revealFindSelection(previousViewportY);
+      refreshProjectedSearchSelection();
       return found;
     },
-    [clearManagedPtySelection, revealFindSelection],
+    [clearManagedPtySelection, refreshProjectedSearchSelection, revealFindSelection],
   );
 
   const clearFind = useCallback((): void => {
+    projectedSearchActiveRef.current = false;
     searchAddonRef.current?.clearDecorations();
     terminalRef.current?.clearSelection();
     clearManagedPtySelection();
+    refreshProjectedSearchSelection();
     setFindResult({ resultIndex: -1, resultCount: 0 });
-  }, [clearManagedPtySelection]);
+  }, [clearManagedPtySelection, refreshProjectedSearchSelection]);
 
   const sendMobileInput = useCallback(
     (data: string): void => {
