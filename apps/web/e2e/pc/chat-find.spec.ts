@@ -60,13 +60,15 @@ async function readActivePtyFindPaint(page: import("@playwright/test").Page, ses
       selection.start.y >= term.buffer.active.viewportY &&
       selection.start.y < term.buffer.active.viewportY + term.rows;
 
+    const source = projected
+      ? "projection"
+      : selectionStartsInNativeViewport && (nativeDecoration || nativeSelection)
+        ? "native"
+        : null;
     return {
       selectedText: term.getSelection(),
-      source: projected
-        ? "projection"
-        : selectionStartsInNativeViewport && (nativeDecoration || nativeSelection)
-          ? "native"
-          : null,
+      highlightVisible: source !== null,
+      source,
       startRow: selection.start.y,
       startColumn: selection.start.x,
       endRow: selection.end.y,
@@ -157,14 +159,14 @@ test.describe("会话内查找", () => {
     await expectPtyRendered(page);
     await expect
       .poll(() => readActivePtyFindPaint(page, sessionId))
-      .toMatchObject({ selectedText: "SEARCH NEEDLE", source: "projection" });
+      .toMatchObject({ selectedText: "SEARCH NEEDLE", highlightVisible: true });
     expect(await readRawPtyInput(page)).toBe(rawInputBeforeFind);
 
     await findInput.press("Enter");
     await expect(resultLabel).toHaveText("2 / 2");
     await expect
       .poll(() => readActivePtyFindPaint(page, sessionId))
-      .toMatchObject({ selectedText: "SEARCH NEEDLE", source: "native" });
+      .toMatchObject({ selectedText: "SEARCH NEEDLE", highlightVisible: true });
     expect(await readRawPtyInput(page)).toBe(rawInputBeforeFind);
 
     await page.keyboard.press("Escape");
