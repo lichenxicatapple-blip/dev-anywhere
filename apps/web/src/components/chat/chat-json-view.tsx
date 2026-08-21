@@ -165,7 +165,7 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
           messages: page.messages,
           hasMore: page.hasMore,
           nextBefore: page.nextBefore,
-          preserveLiveSince: isRefresh ? refreshStartedAt : undefined,
+          preserveLiveSince: refreshStartedAt,
         });
       })
       .catch(() => {

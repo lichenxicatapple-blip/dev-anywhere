@@ -305,6 +305,100 @@ describe("chat-store per-session", () => {
     ]);
   });
 
+  it("keeps completed live messages that race the initial history response", () => {
+    const historyRequestedAt = 2_000;
+    useChatStore.setState({
+      bySessionId: {
+        s1: {
+          ...EMPTY_SLICE,
+          messages: [
+            {
+              id: "live-user",
+              role: "user",
+              text: "刚发送的问题",
+              isPartial: false,
+              timestamp: historyRequestedAt + 10,
+              toolCalls: [],
+            },
+            {
+              id: "live-assistant",
+              role: "assistant",
+              text: "已经完成的实时回复",
+              isPartial: false,
+              timestamp: historyRequestedAt + 20,
+              toolCalls: [],
+              revision: 2,
+            },
+          ],
+        },
+      },
+    });
+
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      preserveLiveSince: historyRequestedAt,
+      messages: [],
+    });
+
+    expect(useChatStore.getState().bySessionId.s1.messages.map((message) => message.text)).toEqual([
+      "刚发送的问题",
+      "已经完成的实时回复",
+    ]);
+  });
+
+  it("does not duplicate live messages already captured by initial history", () => {
+    const historyRequestedAt = 2_000;
+    useChatStore.setState({
+      bySessionId: {
+        s1: {
+          ...EMPTY_SLICE,
+          messages: [
+            {
+              id: "live-user",
+              role: "user",
+              text: "已被历史捕获的问题",
+              isPartial: false,
+              timestamp: historyRequestedAt + 10,
+              toolCalls: [],
+            },
+            {
+              id: "live-assistant",
+              role: "assistant",
+              text: "已被历史捕获的回复",
+              isPartial: false,
+              timestamp: historyRequestedAt + 20,
+              toolCalls: [],
+            },
+          ],
+        },
+      },
+    });
+
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      preserveLiveSince: historyRequestedAt,
+      messages: [
+        {
+          role: "user",
+          text: "已被历史捕获的问题",
+          timestamp: historyRequestedAt + 10,
+          cursor: "history-user",
+        },
+        {
+          role: "assistant",
+          text: "已被历史捕获的回复",
+          timestamp: historyRequestedAt + 20,
+          cursor: "history-assistant",
+        },
+      ],
+    });
+
+    expect(useChatStore.getState().bySessionId.s1.messages.map((message) => message.text)).toEqual([
+      "已被历史捕获的问题",
+      "已被历史捕获的回复",
+    ]);
+  });
+
   it("restores historical tool calls as durable activity messages", () => {
     useChatStore.getState().loadHistoryPage("s1", {
       mode: "replace",

@@ -594,12 +594,16 @@ export const useChatStore = create<ChatStoreState>()(
               );
               nextMessages = [...refreshedHistory, ...liveMessages];
             } else {
+              const preserveLiveSince = page.preserveLiveSince ?? Number.POSITIVE_INFINITY;
               nextMessages = [
                 ...historyMessages,
                 ...slice.messages.filter(
                   (m) =>
                     !m.id.startsWith(historyPrefix) &&
-                    (m.deliveryStatus === "queued" || (m.role === "assistant" && m.isPartial)),
+                    (m.deliveryStatus === "queued" ||
+                      (m.role === "assistant" && m.isPartial) ||
+                      (m.timestamp >= preserveLiveSince &&
+                        !isExactHistoryDuplicate(m, historyMessages))),
                 ),
               ];
             }
