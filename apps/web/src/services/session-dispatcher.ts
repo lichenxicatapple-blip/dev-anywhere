@@ -1,7 +1,8 @@
 // Session 生命周期消息 dispatcher (与 chat-dispatcher 分工: 本 dispatcher 只负责会话元数据, 不碰消息/审批).
 // 订阅以下消息类型, 写入 session-store:
 //   Envelope: session_list / session_status
-//   Control:  agent_status / pty_state / session_history_response
+//   Control:  agent_status / pty_state
+// request-scoped session_history_response 由发起请求的 loader 独占处理，dispatcher 只显式忽略。
 // 未选 proxy 时短路, 避免跨 proxy 残留. 去重: chat-dispatcher 不消费这些类型, 无 race.
 import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
 import { useSessionStore } from "@/stores/session-store";
@@ -61,13 +62,6 @@ function handlePtyState(msg: Extract<RelayControlMessage, { type: "pty_state" }>
   useSessionStore.getState().setPtyState(msg.sessionId, msg.payload);
 }
 
-function handleSessionHistoryResponse(
-  msg: Extract<RelayControlMessage, { type: "session_history_response" }>,
-): void {
-  if (!msg.success) return;
-  useSessionStore.getState().setHistorySessions(msg.sessions);
-}
-
 export function registerSessionDispatcher(): () => void {
   return registerDispatcher("registerSessionDispatcher", () => createSessionMessageHandler());
 }
@@ -95,9 +89,7 @@ export function createSessionMessageHandler(): (
         handlePtyState(msg);
         break;
       case "session_history_response":
-        // 带 requestId 的响应由发起请求的调用点在校验目标开发机后写入，避免慢响应跨开发机污染。
-        if (msg.requestId) break;
-        handleSessionHistoryResponse(msg);
+        // 历史响应必须带 requestId，只能由发起请求的 loader 在校验目标开发机后写入。
         break;
       default:
         break;

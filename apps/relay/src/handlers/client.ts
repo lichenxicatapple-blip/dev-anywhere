@@ -18,6 +18,7 @@ import type { VoiceProviderRegistry } from "../voice/provider.js";
 import { startRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
 import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js";
+import type { SessionHistoryRouteRegistry } from "../session-history-route-registry.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -297,6 +298,7 @@ export function handleClientConnection(
   registry: RelayRegistry,
   logger: Logger,
   ptySnapshotRoutes: PtySnapshotRouteRegistry,
+  sessionHistoryRoutes: SessionHistoryRouteRegistry,
   chaos?: RelayChaos,
   voiceConfigStore?: VoiceConfigStore,
   voiceProviders?: VoiceProviderRegistry,
@@ -567,6 +569,63 @@ export function handleClientConnection(
         }
         const proxyWs = registry.getProxy(targetProxyId);
         if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
+          if (msg.type === "session_history_request") {
+            const registration = sessionHistoryRoutes.register(
+              targetProxyId,
+              msg.requestId,
+              clientWs,
+              proxyWs,
+            );
+            if (registration.kind === "duplicate") {
+              logger.debug(
+                { proxyId: targetProxyId, requestId: msg.requestId },
+                "Duplicate session history request suppressed",
+              );
+              return;
+            }
+            if (registration.kind === "joined") {
+              logger.debug(
+                {
+                  proxyId: targetProxyId,
+                  requestId: msg.requestId,
+                  upstreamRequestId: registration.upstreamRequestId,
+                },
+                "Session history request joined active upstream flight",
+              );
+              return;
+            }
+            if (registration.kind !== "leader") {
+              logger.warn(
+                { proxyId: targetProxyId, requestId: msg.requestId, registration },
+                "Session history response route rejected",
+              );
+              clientWs.send(
+                JSON.stringify({
+                  type: "relay_error",
+                  requestId: msg.requestId,
+                  code: RelayErrorCode.INVALID_MESSAGE,
+                  message:
+                    registration.kind === "collision"
+                      ? "Session history requestId is already in use"
+                      : "Too many pending session history requests",
+                }),
+              );
+              return;
+            }
+            const upstreamRequest = serializeControl({
+              type: "session_history_request",
+              requestId: registration.upstreamRequestId,
+            });
+            if (chaos) {
+              chaos.send(proxyWs, upstreamRequest, {
+                direction: "client_to_proxy",
+                type: msg.type,
+              });
+            } else {
+              proxyWs.send(upstreamRequest);
+            }
+            return;
+          }
           if (msg.type === "session_subscribe") {
             const registration = ptySnapshotRoutes.register(
               targetProxyId,
@@ -694,6 +753,7 @@ export function handleClientConnection(
 
   clientWs.on("close", (code: number, reason: Buffer) => {
     ptySnapshotRoutes.abandonSocket(clientWs);
+    sessionHistoryRoutes.abandonSocket(clientWs);
     registry.removeClientWs(clientWs);
     // 清掉 binding.ws 引用：保留绑定关系（重连时还能恢复 proxyId 关联），但释放对已关闭 ws 对象的强引用，
     // 避免高频重连下 clientBindings Map 长期持有死 ws 对象阻止 GC，同时让 countClients 数字不再虚高。

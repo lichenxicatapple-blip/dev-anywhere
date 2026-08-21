@@ -11,7 +11,7 @@ import { HISTORY_METADATA_PATH } from "../../common/paths.js";
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void>;
   handleDirCreateRequest(msg: { path: string; requestId?: string }): Promise<void>;
-  handleSessionHistoryRequest(msg: { requestId?: string }): Promise<void>;
+  handleSessionHistoryRequest(msg: { requestId: string }): Promise<void>;
   handleSessionResourcesRequest(msg: {
     sessionId: string;
     requestId?: string;
@@ -101,6 +101,20 @@ export function createControlMessageHandlers(
   sessionManager: SessionManager,
 ): ControlMessageHandlers {
   const sessionResources = new Map<string, SessionResources>();
+  let sessionHistoryScanInFlight: ReturnType<typeof scanSessionHistory> | undefined;
+
+  function getSessionHistory(): ReturnType<typeof scanSessionHistory> {
+    if (sessionHistoryScanInFlight) return sessionHistoryScanInFlight;
+
+    const scan = scanSessionHistory({ metadataPath: HISTORY_METADATA_PATH });
+    const sharedScan = scan.finally(() => {
+      if (sessionHistoryScanInFlight === sharedScan) {
+        sessionHistoryScanInFlight = undefined;
+      }
+    });
+    sessionHistoryScanInFlight = sharedScan;
+    return sharedScan;
+  }
 
   function getResources(sessionId: string): SessionResources {
     let res = sessionResources.get(sessionId);
@@ -217,9 +231,9 @@ export function createControlMessageHandlers(
       }
     },
 
-    async handleSessionHistoryRequest(msg: { requestId?: string }): Promise<void> {
+    async handleSessionHistoryRequest(msg: { requestId: string }): Promise<void> {
       try {
-        const sessions = await scanSessionHistory({ metadataPath: HISTORY_METADATA_PATH });
+        const sessions = await getSessionHistory();
         send(
           serializeControl({
             type: "session_history_response",

@@ -606,17 +606,21 @@ describe("Message routing integration", () => {
 
   it("routes session_history_request/response full round trip", async () => {
     const { proxy, client } = await setupBoundPair();
+    const requestId = "history-round-trip";
 
     const proxyMsgPromise = waitForMessage(proxy);
-    client.send(JSON.stringify({ type: "session_history_request" }));
+    client.send(JSON.stringify({ type: "session_history_request", requestId }));
 
     const proxyReceived = JSON.parse(await proxyMsgPromise);
     expect(proxyReceived.type).toBe("session_history_request");
+    expect(proxyReceived.requestId).not.toBe(requestId);
+    expect(proxyReceived.requestId).toMatch(/^relay-history-/);
 
     const clientMsgPromise = waitForMessage(client);
     proxy.send(
       JSON.stringify({
         type: "session_history_response",
+        requestId: proxyReceived.requestId,
         success: true,
         sessions: [{ id: "s1", title: "test", projectDir: "/proj", updatedAt: 123 }],
       }),
@@ -624,7 +628,189 @@ describe("Message routing integration", () => {
 
     const clientReceived = JSON.parse(await clientMsgPromise);
     expect(clientReceived.type).toBe("session_history_response");
+    expect(clientReceived.requestId).toBe(requestId);
     expect(clientReceived.sessions[0].id).toBe("s1");
+  });
+
+  it("fans concurrent session history requests into one upstream response and preserves client IDs", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const receivedByA: Array<{ type?: string; requestId?: string; sessions?: unknown[] }> = [];
+    const receivedByB: Array<{ type?: string; requestId?: string; sessions?: unknown[] }> = [];
+    const proxyRequests: Array<{ type?: string; requestId?: string }> = [];
+    clientA.on("message", (data) => receivedByA.push(JSON.parse(data.toString())));
+    clientB.on("message", (data) => receivedByB.push(JSON.parse(data.toString())));
+    proxy.on("message", (data) => proxyRequests.push(JSON.parse(data.toString())));
+
+    clientA.send(
+      JSON.stringify({ type: "session_history_request", requestId: "history-client-a" }),
+    );
+    clientB.send(
+      JSON.stringify({ type: "session_history_request", requestId: "history-client-b" }),
+    );
+
+    await settle(100);
+    expect(proxyRequests).toHaveLength(1);
+    const upstreamRequestId = proxyRequests[0]?.requestId;
+    expect(proxyRequests[0]?.type).toBe("session_history_request");
+    expect(upstreamRequestId).toMatch(/^relay-history-/);
+
+    proxy.send(
+      JSON.stringify({
+        type: "session_history_response",
+        requestId: upstreamRequestId,
+        success: true,
+        sessions: [{ id: "shared", title: "Shared", projectDir: "/shared", updatedAt: 2 }],
+      }),
+    );
+    await settle(100);
+
+    expect(receivedByA).toEqual([
+      expect.objectContaining({
+        type: "session_history_response",
+        requestId: "history-client-a",
+        sessions: [expect.objectContaining({ id: "shared" })],
+      }),
+    ]);
+    expect(receivedByB).toEqual([
+      expect.objectContaining({
+        type: "session_history_response",
+        requestId: "history-client-b",
+        sessions: [expect.objectContaining({ id: "shared" })],
+      }),
+    ]);
+  });
+
+  it("fans an upstream history failure out with each requesting client ID", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const proxyRequest = waitForMessage(proxy);
+    const responseA = waitForMessage(clientA);
+    const responseB = waitForMessage(clientB);
+
+    clientA.send(JSON.stringify({ type: "session_history_request", requestId: "failure-a" }));
+    clientB.send(JSON.stringify({ type: "session_history_request", requestId: "failure-b" }));
+    const upstream = JSON.parse(await proxyRequest);
+    await settle(100);
+
+    proxy.send(
+      JSON.stringify({
+        type: "session_history_response",
+        requestId: upstream.requestId,
+        success: false,
+        sessions: [],
+        errorCode: "UNKNOWN",
+        error: "synthetic scan failure",
+      }),
+    );
+
+    expect(JSON.parse(await responseA)).toMatchObject({
+      type: "session_history_response",
+      requestId: "failure-a",
+      success: false,
+      sessions: [],
+      error: "synthetic scan failure",
+    });
+    expect(JSON.parse(await responseB)).toMatchObject({
+      type: "session_history_response",
+      requestId: "failure-b",
+      success: false,
+      sessions: [],
+      error: "synthetic scan failure",
+    });
+  });
+
+  it("drops an unmatched request-scoped history response instead of broadcasting it", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const receivedByA: unknown[] = [];
+    const receivedByB: unknown[] = [];
+    clientA.on("message", (data) => receivedByA.push(JSON.parse(data.toString())));
+    clientB.on("message", (data) => receivedByB.push(JSON.parse(data.toString())));
+
+    proxy.send(
+      JSON.stringify({
+        type: "session_history_response",
+        requestId: "history-unmatched",
+        success: true,
+        sessions: [],
+      }),
+    );
+    await settle(100);
+
+    expect(receivedByA).toEqual([]);
+    expect(receivedByB).toEqual([]);
+  });
+
+  it("keeps a joined history waiter alive after the upstream leader client disconnects", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const proxyRequest = waitForMessage(proxy);
+    clientA.send(
+      JSON.stringify({ type: "session_history_request", requestId: "history-abandoned" }),
+    );
+    clientB.send(JSON.stringify({ type: "session_history_request", requestId: "history-live" }));
+    const upstream = JSON.parse(await proxyRequest);
+    expect(upstream.type).toBe("session_history_request");
+    expect(upstream.requestId).toMatch(/^relay-history-/);
+    await settle(100);
+
+    const responseB = waitForMessage(clientB);
+    await new Promise<void>((resolve) => {
+      clientA.once("close", () => resolve());
+      clientA.close();
+    });
+    proxy.send(
+      JSON.stringify({
+        type: "session_history_response",
+        requestId: upstream.requestId,
+        success: true,
+        sessions: [{ id: "survived", title: "Survived", projectDir: "/ok", updatedAt: 1 }],
+      }),
+    );
+
+    expect(JSON.parse(await responseB)).toMatchObject({
+      type: "session_history_response",
+      requestId: "history-live",
+      sessions: [{ id: "survived" }],
+    });
+  });
+
+  it("rejects a session history request without requestId before it reaches the proxy", async () => {
+    const { proxy, client } = await setupBoundPair();
+    const receivedByProxy: unknown[] = [];
+    proxy.on("message", (data) => receivedByProxy.push(JSON.parse(data.toString())));
+    const relayError = waitForMessage(client);
+
+    client.send(JSON.stringify({ type: "session_history_request" }));
+
+    expect(JSON.parse(await relayError)).toMatchObject({
+      type: "relay_error",
+      code: "INVALID_MESSAGE",
+    });
+    await settle(100);
+    expect(receivedByProxy).toEqual([]);
+  });
+
+  it("rejects a session history response without requestId instead of broadcasting it", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const receivedByA: unknown[] = [];
+    const receivedByB: unknown[] = [];
+    clientA.on("message", (data) => receivedByA.push(JSON.parse(data.toString())));
+    clientB.on("message", (data) => receivedByB.push(JSON.parse(data.toString())));
+    const relayError = waitForMessage(proxy);
+
+    proxy.send(
+      JSON.stringify({
+        type: "session_history_response",
+        success: true,
+        sessions: [],
+      }),
+    );
+
+    expect(JSON.parse(await relayError)).toMatchObject({
+      type: "relay_error",
+      code: "INVALID_MESSAGE",
+    });
+    await settle(100);
+    expect(receivedByA).toEqual([]);
+    expect(receivedByB).toEqual([]);
   });
 
   // ==========================================================

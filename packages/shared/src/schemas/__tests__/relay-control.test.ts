@@ -755,6 +755,7 @@ describe("RelayControlSchema", () => {
   it("parses session_history_response with sessions array", () => {
     const result = RelayControlSchema.parse({
       type: "session_history_response",
+      requestId: "history-1",
       success: true,
       sessions: [
         {
@@ -773,6 +774,21 @@ describe("RelayControlSchema", () => {
       expect(result.sessions[0].title).toBe("Fix bug");
       expect(result.sessions[0].preferredMode).toBe("json");
     }
+  });
+
+  it("rejects session history messages without a requestId", () => {
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_history_request",
+      }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_history_response",
+        success: true,
+        sessions: [],
+      }).success,
+    ).toBe(false);
   });
 
   it("parses an explicit session_history_response failure", () => {

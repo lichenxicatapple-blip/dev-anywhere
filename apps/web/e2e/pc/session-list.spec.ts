@@ -181,26 +181,22 @@ test.describe("CreateSessionDialog — 字段校验", () => {
 
   test("同路径的 Claude/Codex 历史目录折叠状态互不影响", async ({ page }) => {
     await page.evaluate(() => {
-      window.__devAnywhereE2E?.socket?.emitJson({
-        type: "session_history_response",
-        success: true,
-        sessions: [
-          {
-            id: "hist-claude-same-dir",
-            title: "Claude same dir",
-            projectDir: "/home/dev/projects/dev-anywhere",
-            updatedAt: Date.now() - 1_000,
-            provider: "claude",
-          },
-          {
-            id: "hist-codex-same-dir",
-            title: "Codex same dir",
-            projectDir: "/home/dev/projects/dev-anywhere",
-            updatedAt: Date.now() - 2_000,
-            provider: "codex",
-          },
-        ],
-      });
+      window.__ccTest?.session.setHistorySessions([
+        {
+          id: "hist-claude-same-dir",
+          title: "Claude same dir",
+          projectDir: "/home/dev/projects/dev-anywhere",
+          updatedAt: Date.now() - 1_000,
+          provider: "claude",
+        },
+        {
+          id: "hist-codex-same-dir",
+          title: "Codex same dir",
+          projectDir: "/home/dev/projects/dev-anywhere",
+          updatedAt: Date.now() - 2_000,
+          provider: "codex",
+        },
+      ]);
     });
 
     await page.locator('[data-slot="history-section-header"]:visible').click();
@@ -225,19 +221,15 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     const longTitle =
       "A very long restored session title for checking the complete hover label in the history list";
     await page.evaluate((title) => {
-      window.__devAnywhereE2E?.socket?.emitJson({
-        type: "session_history_response",
-        success: true,
-        sessions: [
-          {
-            id: "hist-long-title",
-            title,
-            projectDir: "/home/dev/projects/sample-app",
-            updatedAt: Date.now() - 1_000,
-            provider: "claude",
-          },
-        ],
-      });
+      window.__ccTest?.session.setHistorySessions([
+        {
+          id: "hist-long-title",
+          title,
+          projectDir: "/home/dev/projects/sample-app",
+          updatedAt: Date.now() - 1_000,
+          provider: "claude",
+        },
+      ]);
     }, longTitle);
 
     await page.locator('[data-slot="history-section-header"]:visible').click();
@@ -258,20 +250,16 @@ test.describe("CreateSessionDialog — 字段校验", () => {
       "这是一个足够长的历史会话标题，用来确认恢复弹窗内部选项不会越过右边界";
 
     await page.evaluate((title) => {
-      window.__devAnywhereE2E?.socket?.emitJson({
-        type: "session_history_response",
-        success: true,
-        sessions: [
-          {
-            id: "hist-restore-dialog-overflow",
-            title,
-            projectDir: "/home/dev/projects/sample-app",
-            updatedAt: Date.now() - 1_000,
-            provider: "claude",
-            preferredMode: "pty",
-          },
-        ],
-      });
+      window.__ccTest?.session.setHistorySessions([
+        {
+          id: "hist-restore-dialog-overflow",
+          title,
+          projectDir: "/home/dev/projects/sample-app",
+          updatedAt: Date.now() - 1_000,
+          provider: "claude",
+          preferredMode: "pty",
+        },
+      ]);
     }, longTitle);
 
     await page.locator('[data-slot="history-section-header"]:visible').click();
