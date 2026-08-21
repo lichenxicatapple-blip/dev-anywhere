@@ -75,11 +75,12 @@ export function PtyTest() {
       }
     });
     unsubBinaryRef.current = unsub;
+    const requestId = crypto.randomUUID();
 
     // 监听 session_snapshot JSON 响应
     const unsubSnapshot = relayClientRef.onMessage((msg) => {
       const m = msg as Record<string, unknown>;
-      if (m.type === "session_snapshot" && m.sessionId === sessionId) {
+      if (m.type === "session_snapshot" && m.sessionId === sessionId && m.requestId === requestId) {
         unsubSnapshot();
         if (terminalRef.current && typeof m.data === "string") {
           terminalRef.current.reset();
@@ -101,6 +102,7 @@ export function PtyTest() {
       JSON.stringify({
         type: "session_subscribe",
         sessionId,
+        requestId,
       }),
     );
 

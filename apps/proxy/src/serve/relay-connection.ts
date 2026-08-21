@@ -26,6 +26,19 @@ const MAX_QUEUE_SIZE = 10000;
 // proxy 侧主动心跳：网络切换时本机 TCP/WebSocket 可能保持半开，不能只等 close 事件。
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10000;
+export const RELAY_CONNECTION_WEBSOCKET_OPTIONS = {
+  maxPayload: 10 * 1024 * 1024,
+  perMessageDeflate: {
+    clientNoContextTakeover: true,
+    serverNoContextTakeover: true,
+    threshold: 32 * 1024,
+    concurrencyLimit: 4,
+    zlibDeflateOptions: {
+      level: 3,
+      memLevel: 7,
+    },
+  },
+} as const;
 export const RelayConnectionState = {
   DISCONNECTED: "disconnected",
   CONNECTING: "connecting",
@@ -141,7 +154,7 @@ export class RelayConnection extends EventEmitter {
     try {
       const base = this.relayUrl.replace(/\/$/, "") + "/proxy";
       const url = this.token ? `${base}?token=${encodeURIComponent(this.token)}` : base;
-      this.ws = new WebSocket(url);
+      this.ws = new WebSocket(url, RELAY_CONNECTION_WEBSOCKET_OPTIONS);
 
       this.ws.on("open", () => {
         // open 属异步回调，若同步 close() 已先切 CLOSED，REGISTERING 会被拒，需跳过后续 register
@@ -326,7 +339,7 @@ export class RelayConnection extends EventEmitter {
       this.fsm.current() === RelayConnectionState.SYNCED &&
       this.ws?.readyState === WebSocket.OPEN
     ) {
-      this.ws.send(data);
+      this.ws.send(data, { binary: true, compress: false });
     }
     // binary 帧无队列，断线丢弃
   }

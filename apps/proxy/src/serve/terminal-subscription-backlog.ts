@@ -1,5 +1,5 @@
 interface PendingTerminalSubscribe {
-  requestId?: string;
+  requestId: string;
 }
 
 const MAX_PENDING_SUBSCRIBES_PER_SESSION = 8;
@@ -7,9 +7,9 @@ const MAX_PENDING_SUBSCRIBES_PER_SESSION = 8;
 export class TerminalSubscriptionBacklog {
   private readonly pending = new Map<string, PendingTerminalSubscribe[]>();
 
-  add(sessionId: string, requestId?: string): void {
+  add(sessionId: string, requestId: string): void {
     const entries = this.pending.get(sessionId) ?? [];
-    if (requestId && entries.some((entry) => entry.requestId === requestId)) return;
+    if (entries.some((entry) => entry.requestId === requestId)) return;
     entries.push({ requestId });
     if (entries.length > MAX_PENDING_SUBSCRIBES_PER_SESSION) {
       entries.splice(0, entries.length - MAX_PENDING_SUBSCRIBES_PER_SESSION);

@@ -20,6 +20,29 @@ function createTarget(): PtyRenderTarget & { calls: Array<[string, unknown]> } {
   };
 }
 
+function createControlledTarget(): PtyRenderTarget & {
+  calls: Array<[string, unknown]>;
+  pendingWriteCallbacks: Array<() => void>;
+} {
+  const calls: Array<[string, unknown]> = [];
+  const pendingWriteCallbacks: Array<() => void> = [];
+  let dimensions = { cols: 0, rows: 0 };
+  return {
+    calls,
+    pendingWriteCallbacks,
+    reset: vi.fn(() => calls.push(["reset", null])),
+    resize: vi.fn((cols: number, rows: number) => {
+      dimensions = { cols, rows };
+      calls.push(["resize", { cols, rows }]);
+    }),
+    write: vi.fn((data: string | Uint8Array, callback?: () => void) => {
+      calls.push(["write", data]);
+      if (callback) pendingWriteCallbacks.push(callback);
+    }),
+    getDimensions: () => dimensions,
+  };
+}
+
 function createHarness() {
   let binaryHandler: ((data: Uint8Array, outputSeq: number) => void) | null = null;
   let relayHandler: ((msg: Record<string, unknown>) => void) | null = null;
@@ -207,6 +230,7 @@ describe("attachPtySessionTransport", () => {
     });
 
     expect(harness.sent).toHaveLength(1);
+    const logicalRequestId = lastRequestId(harness.sent);
     vi.advanceTimersByTime(9999);
     expect(harness.sent).toHaveLength(1);
     expect(onSubscribeDelayed).not.toHaveBeenCalled();
@@ -220,11 +244,110 @@ describe("attachPtySessionTransport", () => {
 
     vi.advanceTimersByTime(1);
     expect(harness.sent).toHaveLength(2);
+    expect(lastRequestId(harness.sent)).toBe(logicalRequestId);
     expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
 
     vi.advanceTimersByTime(30_000);
     expect(harness.sent).toHaveLength(3);
+    expect(lastRequestId(harness.sent)).toBe(logicalRequestId);
     expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
+  });
+
+  it("invalidates an already scheduled ready boundary on a new subscribe, pause, and dispose", () => {
+    const createPendingReadyTransport = () => {
+      const harness = createHarness();
+      const target = createTarget();
+      const paintBoundaries: Array<() => void> = [];
+      const onReady = vi.fn();
+      const transport = attachPtySessionTransport({
+        sessionId: "s1",
+        ws: harness.ws,
+        relay: harness.relay,
+        target,
+        scheduleReady: (callback) => paintBoundaries.push(callback),
+        onReady,
+      });
+      harness.emitRelay({
+        type: "session_snapshot",
+        sessionId: "s1",
+        requestId: lastRequestId(harness.sent),
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        outputSeq: 10,
+      });
+      expect(paintBoundaries).toHaveLength(1);
+      return { harness, transport, paintBoundaries, onReady };
+    };
+
+    const resubscribed = createPendingReadyTransport();
+    resubscribed.harness.emitRelay({
+      type: "terminal_resize",
+      sessionId: "s1",
+      cols: 100,
+      rows: 30,
+    });
+    resubscribed.paintBoundaries.shift()?.();
+    expect(resubscribed.onReady).not.toHaveBeenCalled();
+    resubscribed.transport.dispose();
+
+    const paused = createPendingReadyTransport();
+    paused.transport.pause();
+    paused.paintBoundaries.shift()?.();
+    expect(paused.onReady).not.toHaveBeenCalled();
+    paused.transport.dispose();
+
+    const disposed = createPendingReadyTransport();
+    disposed.transport.dispose();
+    disposed.paintBoundaries.shift()?.();
+    expect(disposed.onReady).not.toHaveBeenCalled();
+  });
+
+  it("does not let future live frames extend the replay readiness fence", () => {
+    const harness = createHarness();
+    const target = createControlledTarget();
+    const frameFlushes: FrameRequestCallback[] = [];
+    const paintBoundaries: Array<() => void> = [];
+    const onReady = vi.fn();
+    const transport = attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleFrameFlush: (callback) => {
+        frameFlushes.push(callback);
+        return frameFlushes.length;
+      },
+      cancelFrameFlush: vi.fn(),
+      scheduleReady: (callback) => paintBoundaries.push(callback),
+      onReady,
+    });
+
+    harness.emitBinary(new Uint8Array([11]), 11);
+    harness.emitRelay({
+      type: "session_snapshot",
+      sessionId: "s1",
+      requestId: lastRequestId(harness.sent),
+      cols: 80,
+      rows: 24,
+      data: "snapshot",
+      outputSeq: 10,
+    });
+    target.pendingWriteCallbacks.shift()?.();
+    frameFlushes.shift()?.(16);
+
+    // The replay batch is now in xterm. Frames from the still-running PTY arrive afterwards.
+    harness.emitBinary(new Uint8Array([12]), 12);
+    harness.emitBinary(new Uint8Array([13]), 13);
+    expect(frameFlushes).toHaveLength(1);
+    target.pendingWriteCallbacks.shift()?.();
+
+    expect(paintBoundaries).toHaveLength(1);
+    paintBoundaries.shift()?.();
+    expect(onReady).toHaveBeenCalledTimes(1);
+    // seq 12/13 still form a later pending batch, proving they did not starve the replay fence.
+    expect(frameFlushes).toHaveLength(1);
+    transport.dispose();
   });
 
   it("pauses without disposing and reuses an unchanged synchronized terminal on resume", () => {
@@ -239,11 +362,12 @@ describe("attachPtySessionTransport", () => {
       scheduleReady: (cb) => cb(),
       onReady,
     });
+    const initialRequestId = lastRequestId(harness.sent);
 
     harness.emitRelay({
       type: "session_snapshot",
       sessionId: "s1",
-      requestId: lastRequestId(harness.sent),
+      requestId: initialRequestId,
       cols: 80,
       rows: 24,
       data: "initial snapshot",
@@ -258,6 +382,7 @@ describe("attachPtySessionTransport", () => {
 
     transport.resume();
     expect(harness.sent).toHaveLength(2);
+    expect(lastRequestId(harness.sent)).not.toBe(initialRequestId);
     harness.emitRelay({
       type: "session_snapshot",
       sessionId: "s1",

@@ -291,7 +291,7 @@ export class HostedPtyRegistry {
     return true;
   }
 
-  snapshot(sessionId: string, requestId?: string): boolean {
+  snapshot(sessionId: string, requestId: string): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
     capturePtySnapshot(hosted.terminal, hosted.serializeAddon, hosted.outputSeq, (snapshot) => {
@@ -301,7 +301,7 @@ export class HostedPtyRegistry {
           type: "session_snapshot",
           sessionId,
           ...snapshot,
-          ...(requestId !== undefined ? { requestId } : {}),
+          requestId,
         }),
       );
       serviceLogger.info(

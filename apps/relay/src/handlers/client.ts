@@ -17,6 +17,7 @@ import type { VoiceConfigStore } from "../voice/config-store.js";
 import type { VoiceProviderRegistry } from "../voice/provider.js";
 import { startRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
+import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -295,6 +296,7 @@ export function handleClientConnection(
   ws: WebSocket,
   registry: RelayRegistry,
   logger: Logger,
+  ptySnapshotRoutes: PtySnapshotRouteRegistry,
   chaos?: RelayChaos,
   voiceConfigStore?: VoiceConfigStore,
   voiceProviders?: VoiceProviderRegistry,
@@ -565,6 +567,51 @@ export function handleClientConnection(
         }
         const proxyWs = registry.getProxy(targetProxyId);
         if (proxyWs && proxyWs.readyState === WebSocket.OPEN) {
+          if (msg.type === "session_subscribe") {
+            const registration = ptySnapshotRoutes.register(
+              targetProxyId,
+              msg.sessionId,
+              msg.requestId,
+              clientWs,
+              proxyWs,
+            );
+            if (registration === "duplicate") {
+              logger.debug(
+                { proxyId: targetProxyId, sessionId: msg.sessionId, requestId: msg.requestId },
+                "Duplicate PTY snapshot subscribe suppressed",
+              );
+              return;
+            }
+            if (registration !== "registered" && registration !== "retry_due") {
+              logger.warn(
+                {
+                  proxyId: targetProxyId,
+                  sessionId: msg.sessionId,
+                  requestId: msg.requestId,
+                  registration,
+                },
+                "PTY snapshot subscribe route rejected",
+              );
+              clientWs.send(
+                JSON.stringify({
+                  type: "relay_error",
+                  requestId: msg.requestId,
+                  code: RelayErrorCode.INVALID_MESSAGE,
+                  message:
+                    registration === "collision"
+                      ? "PTY snapshot requestId is already in use"
+                      : "Too many pending PTY snapshot requests",
+                }),
+              );
+              return;
+            }
+            if (registration === "retry_due") {
+              logger.debug(
+                { proxyId: targetProxyId, sessionId: msg.sessionId, requestId: msg.requestId },
+                "Retrying unanswered PTY snapshot subscribe",
+              );
+            }
+          }
           if (chaos) chaos.send(proxyWs, raw, { direction: "client_to_proxy", type: msg.type });
           else proxyWs.send(raw);
         } else {
@@ -646,6 +693,7 @@ export function handleClientConnection(
   });
 
   clientWs.on("close", (code: number, reason: Buffer) => {
+    ptySnapshotRoutes.abandonSocket(clientWs);
     registry.removeClientWs(clientWs);
     // 清掉 binding.ws 引用：保留绑定关系（重连时还能恢复 proxyId 关联），但释放对已关闭 ws 对象的强引用，
     // 避免高频重连下 clientBindings Map 长期持有死 ws 对象阻止 GC，同时让 countClients 数字不再虚高。

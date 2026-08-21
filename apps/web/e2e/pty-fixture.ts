@@ -237,7 +237,8 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
           }
 
           if (msg.type === "session_subscribe") {
-            this.emitSnapshot(String(msg.requestId ?? ""), snapshotData);
+            if (typeof msg.requestId !== "string") return;
+            this.emitSnapshot(msg.requestId, snapshotData);
           }
         }
 

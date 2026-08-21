@@ -175,7 +175,7 @@ sequenceDiagram
   Note over Producer,Xterm: 此时 PTY 仍可能继续输出
   Xterm-->>Producer: barrier callback
   Producer->>Relay: session_snapshot(requestId, data, outputSeq=S)
-  Relay->>Web: 广播 session_snapshot
+  Relay->>Web: 按 (proxyId, sessionId, requestId) 精确返回
 
   Producer->>Relay: binary frame seq=S+1
   Relay->>Web: binary frame seq=S+1
@@ -191,7 +191,7 @@ sequenceDiagram
 
 ### 多客户端与 requestId
 
-Relay 会把 Proxy 发来的 `session_snapshot` 广播给绑定到同一开发机的所有客户端。两个客户端也可能同时查看同一个会话。
+Relay 在转发 `session_subscribe` 前记录 `(proxyId, sessionId, requestId)` 与请求浏览器 socket 的精确映射。Proxy 返回 `session_snapshot` 时，Relay 只把大快照发给该 socket；缺失 `requestId` 的消息会被协议 schema 拒绝，找不到匹配 pending route 的迟到或伪造快照会直接丢弃。因此，同时查看同一会话的其他客户端不会再支付这份快照的网络和解压成本。
 
 浏览器生成的快照请求 ID 由三部分组成：
 
@@ -202,6 +202,12 @@ Relay 会把 Proxy 发来的 `session_snapshot` 广播给绑定到同一开发�
 因此不同设备、标签页、会话控制器和重试请求不会从相同的 `pty-snapshot-1` 开始。接收端先按 `sessionId` 筛选，再只接受与当前活动请求 ID 完全一致的快照。其他客户端的快照和当前控制器已经淘汰的旧快照都会被忽略。
 
 实现位于 [`apps/web/src/lib/pty-recovery.ts`](../apps/web/src/lib/pty-recovery.ts)。
+
+### 传输压缩与资源边界
+
+`/proxy` 与 `/client` 数据通道统一启用 `permessage-deflate`，不维护协议版本或兼容分支。超过 `32 KiB` 的 JSON 控制消息（尤其全量快照）使用 level 3、memLevel 7 压缩；两端都禁用 context takeover，并把 zlib 并发限制为 4，避免长连接字典和无界压缩任务占用 Relay 内存。PTY 实时帧与远程文件二进制帧在 Node 发送端明确设置 `compress: false`，避免给高频、小块或已经压缩的数据增加 CPU 与延迟。语音使用独立 WebSocket，完全不协商此扩展。
+
+这是一次硬切换：Web、Relay 与 Proxy 都要求快照请求携带 `requestId`，部署时必须同步更新并刷新旧页面，不提供无 ID 广播回退。
 
 ## 浏览器恢复算法
 
@@ -235,7 +241,7 @@ stateDiagram-v2
 5. 发送 `session_subscribe`；
 6. 安排慢响应提示和重试。
 
-快照 `10` 秒未应用时，UI 会进入“同步时间较长”的状态。快照仍未到达时，每隔 `30` 秒发起一个带新 `requestId` 的请求，直到成功或 transport 被销毁。
+快照 `10` 秒未应用时，UI 会进入“同步时间较长”的状态。快照仍未到达时，每隔 `30` 秒重发同一逻辑请求的 `requestId`，使已经在途的慢响应仍然有效，直到成功或 transport 被销毁。Relay 的未应答重发门槛为 `25` 秒，给浏览器的 `30` 秒定时器留出调度和网络抖动余量。
 
 ### 2. 快照前帧缓冲
 

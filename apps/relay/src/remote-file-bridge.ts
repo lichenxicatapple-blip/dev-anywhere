@@ -298,7 +298,7 @@ export class RemoteFileBridge {
       req.pause();
       const frame = encodeFileStreamFrame(uploadId, pending.chunkSeq, Buffer.from(chunk));
       pending.chunkSeq += 1;
-      proxyWs.send(frame, { binary: true }, (err) => {
+      proxyWs.send(frame, { binary: true, compress: false }, (err) => {
         if (err) {
           this.failUpload(uploadId, 502, err.message);
           return;

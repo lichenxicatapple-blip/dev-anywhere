@@ -315,7 +315,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
               rows: msg.rows,
               data: msg.data,
               outputSeq: msg.outputSeq,
-              ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
+              requestId: msg.requestId,
             }),
           );
           serviceLogger.info(

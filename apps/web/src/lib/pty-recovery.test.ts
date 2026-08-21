@@ -371,6 +371,30 @@ describe("PtyRecoveryController", () => {
     ]);
   });
 
+  it("keeps reporting a pending gap when a stale or duplicate frame arrives", () => {
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+
+    recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      {
+        requestId: "req-1",
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        outputSeq: 10,
+      },
+      target,
+    );
+
+    expect(
+      recovery.handleBinaryFrame({ data: new Uint8Array([12]), outputSeq: 12 }, target),
+    ).toEqual({ written: false, hasGap: true });
+    expect(
+      recovery.handleBinaryFrame({ data: new Uint8Array([10]), outputSeq: 10 }, target),
+    ).toEqual({ written: false, hasGap: true });
+  });
+
   it("ignores stale snapshots from older resize or reconnect requests", () => {
     const requestIds = ["req-old", "req-new"];
     const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });

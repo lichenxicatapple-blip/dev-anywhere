@@ -132,7 +132,7 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
     return () => cancelAnimationFrame(raf);
   }, [kbOffset, scrollEl]);
 
-  // 订阅 session + 拉取历史消息: 必须等 WS 连接 + proxy 已绑定 (relay NOT_BOUND 会丢请求)
+  // 拉取历史消息: 必须等 WS 连接 + proxy 已绑定 (relay NOT_BOUND 会丢请求)
   // 直接 URL 进入 /chat/:id 时, 本 effect 会在 connected/proxyOnline 变 true 后重放
   useEffect(() => {
     const relay = relayClientRef;
@@ -141,7 +141,6 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
       historyRefreshGenerationRef.current += 1;
       return;
     }
-    relay.sendControl({ type: "session_subscribe", sessionId });
     // React StrictMode 会重复执行 effect。每个连接周期只同步一次，连接中断后再开放重试。
     if (historyRefreshKeyRef.current === sessionId) return;
     historyRefreshKeyRef.current = sessionId;

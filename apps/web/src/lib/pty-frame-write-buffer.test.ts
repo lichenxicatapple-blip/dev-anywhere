@@ -55,6 +55,70 @@ describe("createPtyFrameWriteBuffer", () => {
     expect(onFrameWritten).toHaveBeenCalledTimes(1);
   });
 
+  it("fences the currently enqueued writes without waiting for future live frames", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const target = createTarget();
+    const writeCallbacks: Array<() => void> = [];
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      if (callback) writeCallbacks.push(callback);
+    });
+    const writer = createPtyFrameWriteBuffer(target, {});
+    const onFence = vi.fn();
+
+    writer.target.write(new Uint8Array([1]));
+    writer.fence(onFence);
+    queued.shift()?.(16);
+    // A new live frame arrives after the fenced batch was submitted but before xterm settles it.
+    writer.target.write(new Uint8Array([2]));
+    expect(onFence).not.toHaveBeenCalled();
+
+    writeCallbacks.shift()?.();
+    expect(onFence).toHaveBeenCalledTimes(1);
+    // The later frame is still waiting for its own RAF and did not extend the earlier fence.
+    expect(target.calls).toEqual([["write", new Uint8Array([1])]]);
+  });
+
+  it("does not pass a recovery barrier through until buffered writes settle", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const target = createTarget();
+    const writeCallbacks: Array<() => void> = [];
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      if (callback) writeCallbacks.push(callback);
+    });
+    target.barrier = vi.fn((callback) => callback());
+    const writer = createPtyFrameWriteBuffer(target, {});
+    const onBarrier = vi.fn();
+
+    writer.target.write(new Uint8Array([1]));
+    writer.target.barrier?.(onBarrier);
+    expect(target.barrier).not.toHaveBeenCalled();
+
+    queued.shift()?.(16);
+    expect(target.barrier).not.toHaveBeenCalled();
+    writeCallbacks.shift()?.();
+
+    expect(target.barrier).toHaveBeenCalledTimes(1);
+    expect(onBarrier).toHaveBeenCalledTimes(1);
+  });
+
   it("drops pending binary frames on dispose", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(

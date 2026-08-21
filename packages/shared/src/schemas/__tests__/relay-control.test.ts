@@ -550,7 +550,7 @@ describe("RelayControlSchema", () => {
     expect(() => RelayControlSchema.parse({ type: "proxy_offline" })).toThrow();
   });
 
-  it("accepts PTY snapshot requestId for stale snapshot rejection", () => {
+  it("requires PTY snapshot requestId for exact request routing", () => {
     expect(
       RelayControlSchema.parse({
         type: "session_subscribe",
@@ -575,6 +575,19 @@ describe("RelayControlSchema", () => {
       type: "session_snapshot",
       requestId: "pty-snapshot-1",
     });
+    expect(
+      RelayControlSchema.safeParse({ type: "session_subscribe", sessionId: "sess-1" }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_snapshot",
+        sessionId: "sess-1",
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        outputSeq: 1,
+      }).success,
+    ).toBe(false);
   });
 
   it("parses turn_result with optional result fallback text", () => {

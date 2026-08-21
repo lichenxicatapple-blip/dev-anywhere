@@ -12,6 +12,7 @@ import { parseMessage, routeProxyMessage } from "../router.js";
 import type { RelayChaos } from "../chaos.js";
 import { completeRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
+import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js";
 
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
@@ -81,6 +82,7 @@ export function handleProxyConnection(
   ws: WebSocket,
   registry: RelayRegistry,
   logger: Logger,
+  ptySnapshotRoutes: PtySnapshotRouteRegistry,
   chaos?: RelayChaos,
   remoteFileBridge?: RemoteFileBridge,
 ): void {
@@ -118,7 +120,7 @@ export function handleProxyConnection(
       const clients = registry.getClientsForProxy(proxyWs.proxyId);
       for (const clientWs of clients) {
         if (clientWs.readyState === WebSocket.OPEN) {
-          clientWs.send(data);
+          clientWs.send(data, { binary: true, compress: false });
         }
       }
       return;
@@ -139,6 +141,7 @@ export function handleProxyConnection(
       const { proxyId, name } = result.message;
       const status = registry.registerProxy(proxyId, proxyWs, name);
       proxyWs.proxyId = proxyId;
+      if (status === "reconnected") ptySnapshotRoutes.clearProxy(proxyId);
       logger.info({ proxyId, status }, "Proxy registered");
 
       proxyWs.send(
@@ -158,6 +161,7 @@ export function handleProxyConnection(
 
     if (result.kind === "control" && result.message.type === "proxy_disconnect") {
       if (proxyWs.proxyId) {
+        ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info(
@@ -217,6 +221,36 @@ export function handleProxyConnection(
       }
       if (proxyWs.proxyId && result.message.type === "remote_file_upload_stream_response") {
         remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
+        return;
+      }
+      if (proxyWs.proxyId && result.message.type === "session_snapshot") {
+        const route = ptySnapshotRoutes.resolve(
+          proxyWs.proxyId,
+          result.message.sessionId,
+          result.message.requestId,
+          proxyWs,
+        );
+        if (route.kind === "matched" && route.clientWs.readyState === WebSocket.OPEN) {
+          if (chaos) {
+            chaos.send(route.clientWs, raw, {
+              direction: "proxy_to_client",
+              type: result.message.type,
+            });
+          } else {
+            route.clientWs.send(raw);
+          }
+          return;
+        }
+
+        logger.debug(
+          {
+            proxyId: proxyWs.proxyId,
+            sessionId: result.message.sessionId,
+            requestId: result.message.requestId,
+            route: route.kind,
+          },
+          "Unmatched PTY snapshot dropped",
+        );
         return;
       }
       if (isProxyToClientRelayControlType(result.message.type)) {
@@ -285,6 +319,7 @@ export function handleProxyConnection(
       );
       return;
     }
+    ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
     notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
     try {
       registry.transitionProxy(proxyWs.proxyId, "online", "offline");

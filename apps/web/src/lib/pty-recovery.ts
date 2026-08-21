@@ -21,7 +21,7 @@ export interface PtyRenderTarget {
 }
 
 interface PtySnapshotMessage {
-  requestId?: string;
+  requestId: string;
   cols: number;
   rows: number;
   data: string;
@@ -72,8 +72,8 @@ export function createPtyRecoveryController(
 ): PtyRecoveryController {
   let seq = 0;
   const controllerScope = `${SNAPSHOT_REQUEST_PAGE_SCOPE}-${++snapshotControllerSeq}`;
-  // Relay 会把 proxy 的快照广播给绑定到同一开发机的所有客户端。requestId 必须跨
-  // 页面和 controller 唯一，接收方才能拒绝其他客户端请求产生的同 session 快照。
+  // Relay 用 requestId 将快照精确路由回发起订阅的浏览器。它必须跨页面和 controller
+  // 唯一，既避免请求碰撞，也让接收方拒绝迟到的旧恢复响应。
   const requestIdFactory =
     options.requestIdFactory ?? (() => `pty-snapshot-${controllerScope}-${++seq}`);
 
@@ -158,7 +158,12 @@ export function createPtyRecoveryController(
         }
         return { written: false, hasGap: false };
       }
-      if (frame.outputSeq <= appliedOutputSeq) return { written: false, hasGap: false };
+      if (frame.outputSeq <= appliedOutputSeq) {
+        // A stale/duplicate frame does not change an already pending gap. Returning the real state
+        // prevents transport from cancelling the recovery timer while appliedOutputSeq+1 is still
+        // missing.
+        return { written: false, hasGap: pendingFrames.size > 0 };
+      }
       pendingFrames.set(frame.outputSeq, frame.data);
       if (pendingFrames.size > MAX_PENDING_FRAMES) {
         // Map.keys() 按插入顺序, 删最早进的那条

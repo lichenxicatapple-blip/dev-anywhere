@@ -3,7 +3,7 @@ import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import { RELAY_JSON_MESSAGE_MAX_BYTES, serializeControl } from "@dev-anywhere/shared";
-import { waitForOpen, waitForMessage, getPort, settle } from "../helpers.js";
+import { collectMessages, waitForOpen, waitForMessage, getPort, settle } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
 
@@ -76,9 +76,68 @@ describe("Message routing integration", () => {
     return { proxy, client };
   }
 
+  async function setupTwoClientsBoundToOneProxy(): Promise<{
+    proxy: WebSocket;
+    clientA: WebSocket;
+    clientB: WebSocket;
+  }> {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1", name: "test-machine" }));
+    await settle();
+
+    const clientA = connectClient();
+    await waitForOpen(clientA);
+    await registerClient(clientA, "client-snapshot-a");
+    clientA.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessage(clientA);
+
+    const clientB = connectClient();
+    await waitForOpen(clientB);
+    await registerClient(clientB, "client-snapshot-b");
+    clientB.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    await waitForMessage(clientB);
+
+    return { proxy, clientA, clientB };
+  }
+
+  function recordSnapshotRequestIds(client: WebSocket): string[] {
+    const requestIds: string[] = [];
+    client.on("message", (data) => {
+      try {
+        const message = JSON.parse(data.toString()) as { type?: string; requestId?: string };
+        if (message.type === "session_snapshot" && typeof message.requestId === "string") {
+          requestIds.push(message.requestId);
+        }
+      } catch {
+        // PTY binary frames and unrelated messages are outside this control-routing contract.
+      }
+    });
+    return requestIds;
+  }
+
+  function transportBytes(ws: WebSocket, field: "bytesRead" | "bytesWritten"): number {
+    return (ws as unknown as { _socket: { bytesRead: number; bytesWritten: number } })._socket[
+      field
+    ];
+  }
+
   // ==========================================================
   // 1. Envelope 端到端（proxy -> relay -> client）
   // ==========================================================
+
+  it("negotiates deflate for proxy and data-client sockets but not voice", async () => {
+    const proxy = connectProxy();
+    const client = connectClient();
+    const voice = new WebSocket(`ws://127.0.0.1:${port}/voice/asr`);
+    connections.push(voice);
+
+    await Promise.all([waitForOpen(proxy), waitForOpen(client), waitForOpen(voice)]);
+
+    expect(proxy.extensions).toContain("permessage-deflate");
+    expect(client.extensions).toContain("permessage-deflate");
+    expect(voice.extensions).toBe("");
+  });
 
   it("routes assistant_message envelope from proxy to client", async () => {
     const { proxy, client } = await setupBoundPair();
@@ -246,7 +305,19 @@ describe("Message routing integration", () => {
     expect(Buffer.byteLength(raw)).toBeGreaterThan(oneMiB);
     expect(Buffer.byteLength(raw)).toBeLessThan(RELAY_JSON_MESSAGE_MAX_BYTES);
 
+    const subscribePromise = waitForMessage(proxy);
+    client.send(
+      JSON.stringify({
+        type: "session_subscribe",
+        sessionId: "s1",
+        requestId: "snapshot-large",
+      }),
+    );
+    await subscribePromise;
+
     const msgPromise = waitForMessage(client);
+    const proxyBytesBefore = transportBytes(proxy, "bytesWritten");
+    const clientBytesBefore = transportBytes(client, "bytesRead");
     proxy.send(raw);
 
     const received = JSON.parse(await msgPromise);
@@ -259,6 +330,219 @@ describe("Message routing integration", () => {
       outputSeq: 1,
     });
     expect(received.data).toHaveLength(snapshotData.length);
+    const proxyWireBytes = transportBytes(proxy, "bytesWritten") - proxyBytesBefore;
+    const clientWireBytes = transportBytes(client, "bytesRead") - clientBytesBefore;
+    expect(proxyWireBytes).toBeLessThan(Buffer.byteLength(raw) / 4);
+    expect(clientWireBytes).toBeLessThan(Buffer.byteLength(raw) / 4);
+  });
+
+  it("routes concurrent PTY snapshots only to their requesting clients even in reverse order", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const proxyRequestsPromise = collectMessages(proxy, 2, 1_000);
+
+    clientA.send(
+      JSON.stringify({ type: "session_subscribe", sessionId: "s1", requestId: "snapshot-a" }),
+    );
+    clientB.send(
+      JSON.stringify({ type: "session_subscribe", sessionId: "s1", requestId: "snapshot-b" }),
+    );
+
+    const proxyRequests = (await proxyRequestsPromise).map((raw) => JSON.parse(raw));
+    expect(proxyRequests).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "session_subscribe",
+          sessionId: "s1",
+          requestId: "snapshot-a",
+        }),
+        expect.objectContaining({
+          type: "session_subscribe",
+          sessionId: "s1",
+          requestId: "snapshot-b",
+        }),
+      ]),
+    );
+
+    const snapshotsAtA = recordSnapshotRequestIds(clientA);
+    const snapshotsAtB = recordSnapshotRequestIds(clientB);
+    const largeSnapshot = "x".repeat(1024 * 1024 + 128);
+
+    // The proxy is allowed to finish requests out of order. requestId, not response order or the
+    // shared proxy binding, identifies the exact browser socket that paid for this large payload.
+    proxy.send(
+      serializeControl({
+        type: "session_snapshot",
+        sessionId: "s1",
+        requestId: "snapshot-b",
+        cols: 270,
+        rows: 57,
+        data: "snapshot-for-b",
+        outputSeq: 20,
+      }),
+    );
+    proxy.send(
+      serializeControl({
+        type: "session_snapshot",
+        sessionId: "s1",
+        requestId: "snapshot-a",
+        cols: 270,
+        rows: 57,
+        data: largeSnapshot,
+        outputSeq: 21,
+      }),
+    );
+    await settle(150);
+
+    expect(snapshotsAtA).toEqual(["snapshot-a"]);
+    expect(snapshotsAtB).toEqual(["snapshot-b"]);
+  });
+
+  it("deduplicates a same-socket retry with the same PTY snapshot requestId", async () => {
+    const { proxy, client } = await setupBoundPair();
+    const proxySubscribes: Array<{ type?: string; requestId?: string }> = [];
+    proxy.on("message", (data) => {
+      try {
+        const message = JSON.parse(data.toString()) as { type?: string; requestId?: string };
+        if (message.type === "session_subscribe") proxySubscribes.push(message);
+      } catch {
+        // Ignore unrelated binary data.
+      }
+    });
+    const subscribe = JSON.stringify({
+      type: "session_subscribe",
+      sessionId: "s1",
+      requestId: "snapshot-retry",
+    });
+
+    client.send(subscribe);
+    client.send(subscribe);
+    await settle(150);
+
+    expect(proxySubscribes).toEqual([
+      expect.objectContaining({ requestId: "snapshot-retry", type: "session_subscribe" }),
+    ]);
+  });
+
+  it("forwards the same snapshot requestId again after its proxy reconnects", async () => {
+    const { proxy: oldProxy, client } = await setupBoundPair();
+    const subscribe = JSON.stringify({
+      type: "session_subscribe",
+      sessionId: "s1",
+      requestId: "snapshot-across-reconnect",
+    });
+
+    const oldProxyRequest = waitForMessage(oldProxy);
+    client.send(subscribe);
+    expect(JSON.parse(await oldProxyRequest)).toMatchObject({
+      type: "session_subscribe",
+      requestId: "snapshot-across-reconnect",
+    });
+
+    const newProxy = connectProxy();
+    await waitForOpen(newProxy);
+    const registerResponse = waitForMessage(newProxy);
+    newProxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    await registerResponse;
+
+    const newProxyRequest = waitForMessage(newProxy);
+    client.send(subscribe);
+    expect(JSON.parse(await newProxyRequest)).toMatchObject({
+      type: "session_subscribe",
+      requestId: "snapshot-across-reconnect",
+    });
+
+    const received = recordSnapshotRequestIds(client);
+    newProxy.send(
+      serializeControl({
+        type: "session_snapshot",
+        sessionId: "s1",
+        requestId: "snapshot-across-reconnect",
+        cols: 80,
+        rows: 24,
+        data: "new-proxy-snapshot",
+        outputSeq: 1,
+      }),
+    );
+    await settle(150);
+    expect(received).toEqual(["snapshot-across-reconnect"]);
+  });
+
+  it("drops a matched PTY snapshot after its requesting client disconnects", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const proxyRequestPromise = waitForMessage(proxy);
+    clientA.send(
+      JSON.stringify({
+        type: "session_subscribe",
+        sessionId: "s1",
+        requestId: "snapshot-abandoned",
+      }),
+    );
+    expect(JSON.parse(await proxyRequestPromise)).toMatchObject({
+      type: "session_subscribe",
+      requestId: "snapshot-abandoned",
+    });
+
+    const snapshotsAtB = recordSnapshotRequestIds(clientB);
+    await new Promise<void>((resolve) => {
+      clientA.once("close", () => resolve());
+      clientA.close();
+    });
+
+    proxy.send(
+      serializeControl({
+        type: "session_snapshot",
+        sessionId: "s1",
+        requestId: "snapshot-abandoned",
+        cols: 80,
+        rows: 24,
+        data: "must-not-fall-back-to-broadcast",
+        outputSeq: 1,
+      }),
+    );
+    await settle(150);
+
+    expect(snapshotsAtB).toEqual([]);
+  });
+
+  it("rejects PTY subscribe and snapshot messages without requestId", async () => {
+    const { proxy, clientA, clientB } = await setupTwoClientsBoundToOneProxy();
+    const proxySubscribes: string[] = [];
+    proxy.on("message", (data) => {
+      try {
+        const message = JSON.parse(data.toString()) as { type?: string };
+        if (message.type === "session_subscribe") proxySubscribes.push(data.toString());
+      } catch {
+        // Ignore unrelated binary frames.
+      }
+    });
+    const snapshotsAtB = recordSnapshotRequestIds(clientB);
+
+    const clientError = waitForMessage(clientA);
+    clientA.send(JSON.stringify({ type: "session_subscribe", sessionId: "s1" }));
+    expect(JSON.parse(await clientError)).toMatchObject({
+      type: "relay_error",
+      code: "INVALID_MESSAGE",
+    });
+
+    const proxyError = waitForMessage(proxy);
+    proxy.send(
+      JSON.stringify({
+        type: "session_snapshot",
+        sessionId: "s1",
+        cols: 80,
+        rows: 24,
+        data: "must-be-rejected",
+        outputSeq: 1,
+      }),
+    );
+    expect(JSON.parse(await proxyError)).toMatchObject({
+      type: "relay_error",
+      code: "INVALID_MESSAGE",
+    });
+    await settle(150);
+
+    expect(proxySubscribes).toEqual([]);
+    expect(snapshotsAtB).toEqual([]);
   });
 
   it("routes command_list_push from proxy to client", async () => {
@@ -368,6 +652,34 @@ describe("Message routing integration", () => {
   // ==========================================================
   // 5. Binary frame passthrough
   // ==========================================================
+
+  it("keeps binary PTY frames uncompressed on the negotiated data channel", async () => {
+    const { proxy, client } = await setupBoundPair();
+    const sessionId = "s1";
+    const body = Buffer.alloc(64 * 1024, 0x78);
+    const frame = Buffer.concat([Buffer.from([sessionId.length]), Buffer.from(sessionId), body]);
+    const proxyBytesBefore = transportBytes(proxy, "bytesWritten");
+    const clientBytesBefore = transportBytes(client, "bytesRead");
+    const received = new Promise<Buffer>((resolve) => {
+      client.once("message", (data: Buffer, isBinary: boolean) => {
+        expect(isBinary).toBe(true);
+        resolve(data);
+      });
+    });
+
+    proxy.send(frame, { binary: true, compress: false });
+    expect(await received).toEqual(frame);
+
+    const proxyToRelay = transportBytes(proxy, "bytesWritten") - proxyBytesBefore;
+    const relayToClient = transportBytes(client, "bytesRead") - clientBytesBefore;
+    // A compressed 64 KiB run of repeated bytes would be only a few hundred bytes. Both legs
+    // staying near the application size proves the explicitly-uncompressed Proxy ingress and
+    // Relay egress remain raw despite permessage-deflate being negotiated for large JSON.
+    expect(proxyToRelay).toBeGreaterThanOrEqual(frame.length);
+    expect(proxyToRelay).toBeLessThan(frame.length + 256);
+    expect(relayToClient).toBeGreaterThanOrEqual(frame.length);
+    expect(relayToClient).toBeLessThan(frame.length + 256);
+  });
 
   it("routes binary frame from proxy to client", async () => {
     const { proxy, client } = await setupBoundPair();

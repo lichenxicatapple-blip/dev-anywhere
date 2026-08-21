@@ -100,6 +100,11 @@ export function attachPtySessionTransport(
   let slowNoticeTimer: ReturnType<typeof setTimeout> | null = null;
   let gapRecoveryTimer: ReturnType<typeof setTimeout> | null = null;
   let subscribeDelayedReported = false;
+  let currentRequestId: string | null = null;
+  let readyCycle = 0;
+  let readyAttempt = 0;
+  let readyAwaiting = false;
+  let readyGateInFlight = false;
 
   const clearRetry = (): void => {
     if (!retryTimer) return;
@@ -119,6 +124,70 @@ export function attachPtySessionTransport(
     gapRecoveryTimer = null;
   };
 
+  const invalidateReadyGate = (): void => {
+    readyCycle += 1;
+    readyAttempt += 1;
+    readyAwaiting = false;
+    readyGateInFlight = false;
+  };
+
+  const cancelReadyAttemptForGap = (): void => {
+    readyAttempt += 1;
+    readyGateInFlight = false;
+  };
+
+  const tryAdvanceReady = (): void => {
+    if (
+      disposed ||
+      paused ||
+      !readyAwaiting ||
+      readyGateInFlight ||
+      !recovery.hasAppliedSnapshot() ||
+      recovery.hasPendingGap()
+    ) {
+      return;
+    }
+
+    readyGateInFlight = true;
+    const cycle = readyCycle;
+    const attempt = ++readyAttempt;
+    // Capture only replay writes already enqueued now. Live frames arriving afterwards must not
+    // keep a busy terminal in the syncing state forever.
+    frameWriter.fence(() => {
+      if (
+        disposed ||
+        paused ||
+        cycle !== readyCycle ||
+        attempt !== readyAttempt ||
+        !readyAwaiting
+      ) {
+        return;
+      }
+      if (recovery.hasPendingGap()) {
+        readyGateInFlight = false;
+        return;
+      }
+      scheduleReady(() => {
+        if (
+          disposed ||
+          paused ||
+          cycle !== readyCycle ||
+          attempt !== readyAttempt ||
+          !readyAwaiting
+        ) {
+          return;
+        }
+        if (recovery.hasPendingGap()) {
+          readyGateInFlight = false;
+          return;
+        }
+        readyGateInFlight = false;
+        readyAwaiting = false;
+        onReady?.();
+      });
+    });
+  };
+
   // outputSeq gap 持续超过阈值即认为服务端确实丢帧（不是乱序），主动重订 snapshot。
   // 不直接复用 startSnapshotSubscribe 调用方注释：这里要求保留 frameWriter 当前缓冲，
   // startSnapshotSubscribe 会 frameWriter.clear()，相当于在等 snapshot 期间画面再清一次。
@@ -133,19 +202,25 @@ export function attachPtySessionTransport(
     }, gapRecoveryDelayMs);
   };
 
-  const requestSnapshot = (): void => {
+  const beginSnapshotRequest = (): string => {
     const requestId = recovery.startSnapshotRequest({
       preserveTargetIfUnchanged: preserveTargetForCurrentSubscribe,
     });
+    currentRequestId = requestId;
     ws.send(JSON.stringify({ type: "session_subscribe", sessionId, requestId }));
+    return requestId;
   };
 
-  const scheduleSnapshotRetry = (): void => {
+  const scheduleSnapshotRetry = (requestId: string): void => {
     retryTimer = setTimeout(() => {
       retryTimer = null;
-      if (disposed || recovery.hasAppliedSnapshot()) return;
-      requestSnapshot();
-      scheduleSnapshotRetry();
+      if (disposed || paused || recovery.hasAppliedSnapshot() || currentRequestId !== requestId) {
+        return;
+      }
+      // This is another delivery attempt for the same logical request. A slow first response must
+      // remain valid, and frames accumulated while it is in flight must stay in the same window.
+      ws.send(JSON.stringify({ type: "session_subscribe", sessionId, requestId }));
+      scheduleSnapshotRetry(requestId);
     }, retryDelayMs);
   };
 
@@ -160,6 +235,7 @@ export function attachPtySessionTransport(
 
   const startSnapshotSubscribe = (preserveTargetIfUnchanged = false): void => {
     if (disposed || paused) return;
+    invalidateReadyGate();
     clearRetry();
     clearSlowNotice();
     clearGapRecovery();
@@ -167,8 +243,8 @@ export function attachPtySessionTransport(
     preserveTargetForCurrentSubscribe = preserveTargetIfUnchanged;
     subscribeDelayedReported = false;
     onSubscribeStarted?.();
-    requestSnapshot();
-    scheduleSnapshotRetry();
+    const requestId = beginSnapshotRequest();
+    scheduleSnapshotRetry(requestId);
     scheduleSlowNotice();
   };
 
@@ -177,9 +253,11 @@ export function attachPtySessionTransport(
     markPtyOutputReceived(sessionId, data, outputSeq);
     const result = recovery.handleBinaryFrame({ data, outputSeq }, frameWriter.target);
     if (result.hasGap) {
+      if (readyAwaiting && readyGateInFlight) cancelReadyAttemptForGap();
       armGapRecoveryTimer();
     } else {
       clearGapRecovery();
+      tryAdvanceReady();
     }
   });
 
@@ -191,10 +269,11 @@ export function attachPtySessionTransport(
       return;
     }
     if (msg.type !== "session_snapshot") return;
+    if (typeof msg.requestId !== "string") return;
 
     const result = recovery.applySnapshot(
       {
-        requestId: msg.requestId as string | undefined,
+        requestId: msg.requestId as string,
         cols: msg.cols as number,
         rows: msg.rows as number,
         data: msg.data as string,
@@ -203,19 +282,22 @@ export function attachPtySessionTransport(
       frameWriter.target,
       (hasGap) => {
         if (disposed || paused) return;
+        readyAwaiting = true;
         if (hasGap) {
+          cancelReadyAttemptForGap();
           armGapRecoveryTimer();
         } else {
           clearGapRecovery();
+          tryAdvanceReady();
         }
-        clearRetry();
         clearSlowNotice();
-        scheduleReady(() => {
-          if (!disposed && !paused) onReady?.();
-        });
       },
     );
     if (!result.applied) return;
+    // A valid response is now being parsed. Stop delivery retries immediately rather than sending
+    // redundant large snapshots while the terminal parser drains.
+    currentRequestId = null;
+    clearRetry();
   });
 
   startSnapshotSubscribe();
@@ -224,6 +306,8 @@ export function attachPtySessionTransport(
     pause: () => {
       if (disposed || paused) return;
       paused = true;
+      currentRequestId = null;
+      invalidateReadyGate();
       clearRetry();
       clearSlowNotice();
       clearGapRecovery();
@@ -236,6 +320,8 @@ export function attachPtySessionTransport(
     dispose: () => {
       disposed = true;
       paused = true;
+      currentRequestId = null;
+      invalidateReadyGate();
       clearRetry();
       clearSlowNotice();
       clearGapRecovery();

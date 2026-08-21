@@ -196,7 +196,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pty_subscribe"),
     sessionId: z.string(),
-    requestId: z.string().optional(),
+    requestId: z.string(),
   }),
 
   // terminal → serve：serialize() 结果
@@ -207,7 +207,7 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     rows: z.number(),
     data: z.string(),
     outputSeq: z.number().int().nonnegative(),
-    requestId: z.string().optional(),
+    requestId: z.string(),
   }),
 
   // serve → terminal：relay 连接状态变更，供终端给用户显示 remote viewing 是否通畅

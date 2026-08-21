@@ -21,6 +21,7 @@ import type { VoiceConfigTester } from "./voice/config-test.js";
 import { createVoiceProviderRegistry, type VoiceProviderRegistry } from "./voice/provider.js";
 import { RemoteFileBridge } from "./remote-file-bridge.js";
 import { mountWebApp } from "./web-app.js";
+import { PtySnapshotRouteRegistry } from "./pty-snapshot-route-registry.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -60,6 +61,17 @@ export interface RelayServer {
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
 const PACKAGED_FONTS_DIR = resolve(MODULE_DIR, "../assets/fonts");
 const PACKAGED_WEB_DIR = resolve(MODULE_DIR, "../assets/web");
+const DATA_CHANNEL_MAX_PAYLOAD_BYTES = 10 * 1024 * 1024;
+const DATA_CHANNEL_COMPRESSION = {
+  clientNoContextTakeover: true,
+  serverNoContextTakeover: true,
+  threshold: 32 * 1024,
+  concurrencyLimit: 4,
+  zlibDeflateOptions: {
+    level: 3,
+    memLevel: 7,
+  },
+} as const;
 
 function firstHeaderValue(value: string | string[] | undefined): string | undefined {
   if (Array.isArray(value)) return value[0];
@@ -97,6 +109,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   }
 
   const registry = new RelayRegistry();
+  const ptySnapshotRoutes = new PtySnapshotRouteRegistry();
   const remoteFileBridge = new RemoteFileBridge({ registry, logger });
   const voiceConfigStore = createVoiceConfigStore({
     dataDir,
@@ -175,8 +188,18 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   // 使用 createServer 而非 app.listen，确保 WebSocket upgrade 可在同一端口上处理
   const httpServer = createServer(app);
 
-  const proxyWss = new WebSocketServer({ noServer: true });
-  const clientWss = new WebSocketServer({ noServer: true });
+  const proxyWss = new WebSocketServer({
+    noServer: true,
+    maxPayload: DATA_CHANNEL_MAX_PAYLOAD_BYTES,
+    perMessageDeflate: DATA_CHANNEL_COMPRESSION,
+  });
+  const clientWss = new WebSocketServer({
+    noServer: true,
+    maxPayload: DATA_CHANNEL_MAX_PAYLOAD_BYTES,
+    perMessageDeflate: DATA_CHANNEL_COMPRESSION,
+  });
+  // Voice sockets intentionally do not negotiate permessage-deflate: audio is already compressed
+  // or latency-sensitive, so deflating it only adds CPU and head-of-line delay.
   const voiceAsrWss = new WebSocketServer({ noServer: true });
   const voiceTtsWss = new WebSocketServer({ noServer: true });
 
@@ -247,7 +270,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   });
 
   proxyWss.on("connection", (ws) => {
-    handleProxyConnection(ws, registry, logger, relayChaos, remoteFileBridge);
+    handleProxyConnection(ws, registry, logger, ptySnapshotRoutes, relayChaos, remoteFileBridge);
   });
 
   clientWss.on("connection", (ws, request) => {
@@ -255,6 +278,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       ws,
       registry,
       logger,
+      ptySnapshotRoutes,
       relayChaos,
       voiceConfigStore,
       voiceProviders,

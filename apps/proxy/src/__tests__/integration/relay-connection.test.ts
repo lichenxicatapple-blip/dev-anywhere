@@ -1,11 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
+import type WebSocket from "ws";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "@dev-anywhere/relay/server";
 import { buildMessage } from "@dev-anywhere/shared";
-import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";
+import {
+  RELAY_CONNECTION_WEBSOCKET_OPTIONS,
+  RelayConnection,
+  RelayConnectionState,
+} from "#src/serve/relay-connection.js";
 
 const relayLogger = createLogger({ name: "test", silent: true });
 
@@ -39,6 +44,19 @@ describe("RelayConnection", () => {
     conn = null;
   });
 
+  it("uses bounded, context-free compression for large relay JSON messages", () => {
+    expect(RELAY_CONNECTION_WEBSOCKET_OPTIONS).toEqual({
+      maxPayload: 10 * 1024 * 1024,
+      perMessageDeflate: {
+        clientNoContextTakeover: true,
+        serverNoContextTakeover: true,
+        threshold: 32 * 1024,
+        concurrencyLimit: 4,
+        zlibDeflateOptions: { level: 3, memLevel: 7 },
+      },
+    });
+  });
+
   it("connects to relay and sends proxy_register with proxyId", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");
@@ -53,6 +71,7 @@ describe("RelayConnection", () => {
 
     // 验证 proxy 已注册到 relay
     expect(relay.registry.getProxy(proxyId)).toBeDefined();
+    expect(relay.registry.getProxy(proxyId)?.extensions).toContain("permessage-deflate");
   });
 
   it("sends MessageEnvelope to relay via sendEnvelope()", async () => {
@@ -74,6 +93,23 @@ describe("RelayConnection", () => {
 
     // send 不应抛异常
     expect(() => conn!.sendEnvelope(envelope)).not.toThrow();
+  });
+
+  it("never compresses binary PTY frames", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
+    const idPath = join(tmpDir, "proxy-id");
+
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, { proxyIdPath: idPath });
+    conn.connect();
+    await waitForProxyRegistration(conn);
+    await vi.waitFor(() => expect(conn!.getStatus().connected).toBe(true));
+
+    const relaySocket = (conn as unknown as { ws: WebSocket }).ws;
+    const sendSpy = vi.spyOn(relaySocket, "send");
+    const frame = new Uint8Array([2, 0x73, 0x31, 0x41]);
+    conn.sendBinary(frame);
+
+    expect(sendSpy).toHaveBeenCalledWith(frame, { binary: true, compress: false });
   });
 
   it("emits 'message' event when relay forwards a message", async () => {

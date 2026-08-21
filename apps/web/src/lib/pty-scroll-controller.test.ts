@@ -31,6 +31,10 @@ function getHistoryProjectionClearCount(
   return renderer.mock.calls.filter(([projection]) => projection === null).length;
 }
 
+async function flushNextAnimationFrame(): Promise<void> {
+  await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+}
+
 describe("attachPtyScrollController", () => {
   let resizeDisconnect: ReturnType<typeof vi.fn>;
   let resizeObserveCalls: Element[];
@@ -560,7 +564,7 @@ describe("attachPtyScrollController", () => {
     );
   });
 
-  it("keeps the review host and row anchor stable while the live buffer grows", () => {
+  it("keeps the review host and row anchor stable while the live buffer grows", async () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitRender, emitScroll } = createTerminal({ 99: "prompt" });
     const renderProjection = createHistoryProjectionRenderer();
@@ -587,6 +591,7 @@ describe("attachPtyScrollController", () => {
     terminal.buffer.active.viewportY += 12;
     emitScroll();
     emitRender();
+    await flushNextAnimationFrame();
 
     expect(host.style.top).toBe(frozenHostTop);
     expect(getHistoryProjections(renderProjection, "review")).toHaveLength(capturesAtReviewEntry);
@@ -711,7 +716,7 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("2618px");
   });
 
-  it("keeps short-host positioning stable when term scroll follows to bottom", () => {
+  it("keeps short-host positioning stable when term scroll follows to bottom", async () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "8px";
@@ -748,6 +753,7 @@ describe("attachPtyScrollController", () => {
     terminal.buffer.active.length = 144;
     terminal.buffer.active.viewportY = 114;
     emitScroll();
+    await flushNextAnimationFrame();
 
     expect(container.scrollTop).toBe(2280);
     expect(host.style.top).toBe("2298px");
@@ -756,7 +762,7 @@ describe("attachPtyScrollController", () => {
   // Vertical intent integration. The set/clear state table lives in
   // pty-vertical-intent-fsm.test.ts; this block only proves controller events and xterm/DOM
   // side effects are wired to that FSM correctly.
-  it("preserves browser scroll when xterm scrolls while user is away from bottom", () => {
+  it("preserves browser scroll when xterm scrolls while user is away from bottom", async () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitScroll } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
@@ -775,13 +781,14 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 100;
     terminal.buffer.active.viewportY = 7;
     emitScroll();
+    await flushNextAnimationFrame();
 
     expect(container.scrollTop).toBe(100);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
     expect(host.style.top).toBe("100px");
   });
 
-  it("keeps the xterm viewport on the reviewed history when new output scrolls the terminal", () => {
+  it("keeps the xterm viewport on the reviewed history when new output scrolls the terminal", async () => {
     const { container, spacer, host } = createDom();
     const setNewFramesWhileAway = vi.fn();
     const { terminal, emitScroll } = createTerminal({ 99: "prompt" });
@@ -805,13 +812,14 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 100;
     terminal.buffer.active.viewportY = 80;
     emitScroll();
+    await flushNextAnimationFrame();
 
     expect(setNewFramesWhileAway).toHaveBeenCalledWith(true);
     expect(terminal.scrollToLine).toHaveBeenLastCalledWith(5);
     expect(host.style.top).toBe("100px");
   });
 
-  it("keeps the browser scroll pinned when xterm scrolls after content growth at bottom", () => {
+  it("keeps the browser scroll pinned when xterm scrolls after content growth at bottom", async () => {
     const { container, spacer, host } = createDom();
     let scrollHeight = 2000;
     Object.defineProperty(container, "scrollHeight", {
@@ -836,6 +844,7 @@ describe("attachPtyScrollController", () => {
     terminal.buffer.active.viewportY = 90;
     scrollHeight = 2200;
     emitScroll();
+    await flushNextAnimationFrame();
 
     expect(container.scrollTop).toBe(1800);
   });
@@ -2524,7 +2533,7 @@ describe("attachPtyScrollController", () => {
     expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
   });
 
-  it("resumes live output when wheel-down reaches the frozen review boundary", () => {
+  it("resumes live output when wheel-down reaches the frozen review boundary", async () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
     terminal.buffer.active.cursorY = 19;
@@ -2554,6 +2563,7 @@ describe("attachPtyScrollController", () => {
     defineScrollHeight(container, 2600);
     emitScroll();
     emitRender();
+    await flushNextAnimationFrame();
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     expect(container.scrollTop).toBe(1400);
 
@@ -2570,7 +2580,7 @@ describe("attachPtyScrollController", () => {
     expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
   });
 
-  it("resumes live output when a review touch reaches the frozen review boundary", () => {
+  it("resumes live output when a review touch reaches the frozen review boundary", async () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
     terminal.buffer.active.cursorY = 19;
@@ -2597,6 +2607,7 @@ describe("attachPtyScrollController", () => {
     defineScrollHeight(container, 2600);
     emitScroll();
     emitRender();
+    await flushNextAnimationFrame();
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     expect(container.scrollTop).toBe(1400);
 
@@ -2615,7 +2626,7 @@ describe("attachPtyScrollController", () => {
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
   });
 
-  it("resumes live output when post-touch inertia reaches the frozen review boundary", () => {
+  it("resumes live output when post-touch inertia reaches the frozen review boundary", async () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
     terminal.buffer.active.cursorY = 19;
@@ -2638,6 +2649,7 @@ describe("attachPtyScrollController", () => {
     defineScrollHeight(container, 2600);
     emitScroll();
     emitRender();
+    await flushNextAnimationFrame();
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     expect(container.scrollTop).toBe(1400);
 
@@ -2661,7 +2673,7 @@ describe("attachPtyScrollController", () => {
     expect(getHistoryProjectionClearCount(renderProjection)).toBe(1);
   });
 
-  it("keeps review ownership when a touch first locks toward history", () => {
+  it("keeps review ownership when a touch first locks toward history", async () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitScroll, emitRender } = createTerminal({ 99: "initial live tail" });
     terminal.buffer.active.cursorY = 19;
@@ -2684,6 +2696,7 @@ describe("attachPtyScrollController", () => {
     defineScrollHeight(container, 2600);
     emitScroll();
     emitRender();
+    await flushNextAnimationFrame();
     expect(container.scrollTop).toBe(1400);
 
     // The first locked direction owns the gesture. A later Android geometry/clamp frame must not
@@ -3149,7 +3162,7 @@ describe("attachPtyScrollController", () => {
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
   });
 
-  it("reflows a touch review across keyboard close without exposing the short-host gap", () => {
+  it("reflows a touch review across keyboard close without exposing the short-host gap", async () => {
     const { container, spacer, host } = createDom();
     container.style.paddingTop = "8px";
     container.style.paddingBottom = "32px";
@@ -3233,6 +3246,7 @@ describe("attachPtyScrollController", () => {
     terminal.buffer.active.length += 1;
     emitScroll();
     emitRender();
+    await flushNextAnimationFrame();
     expect(getHistoryProjections(renderProjection, "review")).toHaveLength(capturesAfterInertia);
   });
 
@@ -3729,7 +3743,7 @@ describe("attachPtyScrollController", () => {
     expect(onIntentChange).not.toHaveBeenCalledWith(false);
   });
 
-  it("does not pin to bottom when buffer growth races onTermScroll before updateSpacer", () => {
+  it("does not pin to bottom when buffer growth races onTermScroll before updateSpacer", async () => {
     const { container, spacer, host } = createDom();
     // scrollHeight 跟 spacer.style.height 走，模拟真实 DOM
     Object.defineProperty(container, "scrollHeight", {
@@ -3760,8 +3774,173 @@ describe("attachPtyScrollController", () => {
     container.scrollTop = 0;
     const scrollTopBefore = container.scrollTop;
     emitScroll();
+    await flushNextAnimationFrame();
 
     expect(container.scrollTop).toBe(scrollTopBefore);
+  });
+
+  it("coalesces a large burst of external xterm scrolls into one reconciliation frame", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll } = createTerminal({ 5_019: "latest prompt" });
+    const onScrollStateChange = vi.fn<(state: PtyScrollState) => void>();
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onScrollStateChange,
+    });
+    onScrollStateChange.mockClear();
+
+    for (let index = 0; index < 5_000; index += 1) {
+      terminal.buffer.active.length = 21 + index;
+      terminal.buffer.active.viewportY = 1 + index;
+      emitScroll();
+    }
+
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(queued).toHaveLength(1);
+    expect(onScrollStateChange).not.toHaveBeenCalled();
+
+    queued[0]?.(performance.now());
+
+    expect(onScrollStateChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not queue reconciliation for controller-owned xterm scrolls", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll } = createTerminal({ 99: "prompt" });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+    vi.mocked(requestAnimationFrame).mockClear();
+    terminal.scrollToLine.mockImplementation((ydisp: number) => {
+      terminal.buffer.active.viewportY = ydisp;
+      emitScroll();
+    });
+
+    controller.scrollToRatio(200 / 1600);
+
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(10);
+    expect(requestAnimationFrame).not.toHaveBeenCalled();
+    expect(queued).toHaveLength(0);
+  });
+
+  it("cancels a queued xterm scroll reconciliation on dispose", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return 73;
+      }),
+    );
+    const cancelAnimationFrame = vi.fn();
+    vi.stubGlobal("cancelAnimationFrame", cancelAnimationFrame);
+    const { container, spacer, host } = createDom();
+    const { terminal, emitScroll } = createTerminal({ 119: "latest prompt" });
+    const onScrollStateChange = vi.fn<(state: PtyScrollState) => void>();
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      onScrollStateChange,
+    });
+    onScrollStateChange.mockClear();
+
+    terminal.buffer.active.length = 120;
+    terminal.buffer.active.viewportY = 100;
+    emitScroll();
+    controller.dispose();
+
+    expect(cancelAnimationFrame).toHaveBeenCalledWith(73);
+    queued[0]?.(performance.now());
+    expect(onScrollStateChange).not.toHaveBeenCalled();
+  });
+
+  it("reconciles the latest xterm viewport state before the queued paint", () => {
+    const queued: FrameRequestCallback[] = [];
+    vi.stubGlobal(
+      "requestAnimationFrame",
+      vi.fn((callback: FrameRequestCallback) => {
+        queued.push(callback);
+        return queued.length;
+      }),
+    );
+    vi.stubGlobal("cancelAnimationFrame", vi.fn());
+    const { container, spacer, host } = createDom();
+    Object.defineProperty(container, "scrollHeight", {
+      configurable: true,
+      get: () => parseFloat(spacer.style.height || "0") || 0,
+    });
+    const { terminal, emitScroll } = createTerminal({
+      99: "initial prompt",
+      119: "final prompt",
+    });
+    attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
+    terminal.buffer.active.length = 110;
+    terminal.buffer.active.viewportY = 90;
+    emitScroll();
+    terminal.buffer.active.length = 120;
+    terminal.buffer.active.viewportY = 100;
+    emitScroll();
+
+    // This is the state a snapshot write callback observes: the final reconciliation has already
+    // been reserved, while derived layout still waits for the browser's ready-to-paint phase.
+    expect(requestAnimationFrame).toHaveBeenCalledTimes(1);
+    expect(queued).toHaveLength(1);
+    expect(spacer.style.height).toBe("2000px");
+
+    queued[0]?.(performance.now());
+
+    expect(spacer.style.height).toBe("2400px");
+    expect(container.scrollTop).toBe(2000);
+    expect(terminal.buffer.active.viewportY).toBe(100);
+    expect(host.style.top).toBe("2000px");
   });
 
   it("preserves intent across reconnect when an empty terminal triggers relayout", () => {
@@ -3942,7 +4121,8 @@ describe("attachPtyScrollController", () => {
   // syncing.{internal,external} 泄漏审查记录:
   //   - syncing.internal: 所有 frame commit 都只围住 term.scrollToLine 的同步回调；host 先写、
   //     container 后写，但 native container scroll 仍保留自己的事件归属。try/finally 保证复位。
-  //   - syncing.external: 仅在 onTermScroll 整段 try/finally 围住, finally 里 restore。
+  //   - syncing.external: 仅在合并后的 term-scroll reconcile 整段 try/finally 围住,
+  //     finally 里 restore。
   // 模拟 scrollToLine throw 的回归测试在 jsdom 下被作为 unhandled error 上报,污染下一个 test。
   // 这条 invariant 改由静态审查 + cellH 恢复测试一起兜——前者保证 syncing 不卡, 后者保证 host 不卡。
 

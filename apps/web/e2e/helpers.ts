@@ -673,10 +673,11 @@ export async function installFakeRelay(page: Page): Promise<void> {
             emitHistoryPage(this, msg);
             break;
           case "session_subscribe":
+            if (typeof msg.requestId !== "string") break;
             this.emitJson({
               type: "session_snapshot",
               sessionId: String(msg.sessionId),
-              requestId: String(msg.requestId ?? ""),
+              requestId: msg.requestId,
               cols: 80,
               rows: 24,
               data: ptyBuffers.get(String(msg.sessionId)) ?? "Dev Anywhere PTY ready\r\n$ ",

@@ -97,6 +97,10 @@ export interface SessionViaRelay {
   onBinary: (handler: (buf: ArrayBuffer) => void) => () => void;
   // proxy graceful restart 后，Web 会重新 select 当前 proxy；协议级测试也需要显式模拟。
   selectProxy: () => Promise<void>;
+  // Close the fixture's controller connection without terminating the session. Long-running
+  // browser benchmarks use this after seeding a terminal so the controller does not become an
+  // extra snapshot broadcast recipient.
+  disconnect: () => void;
   // teardown: 发 session_terminate 并关 ws.
   terminate: () => Promise<void>;
 }
@@ -113,6 +117,8 @@ export type SpawnSessionOptions =
       mode: "pty";
       cwd?: string;
       provider?: "claude" | "codex";
+      cols?: number;
+      rows?: number;
     };
 
 export async function spawnSessionViaRelay(
@@ -154,6 +160,8 @@ export async function spawnSessionViaRelay(
     ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
     ...(options.provider !== undefined ? { provider: options.provider } : {}),
     ...(options.kind !== undefined ? { kind: options.kind } : {}),
+    ...(options.kind === "terminal" && options.cols !== undefined ? { cols: options.cols } : {}),
+    ...(options.kind === "terminal" && options.rows !== undefined ? { rows: options.rows } : {}),
   });
   if (!createResp.sessionId) {
     throw new Error(
@@ -181,6 +189,7 @@ export async function spawnSessionViaRelay(
     onJson: (handler) => ws.onJson(handler),
     onBinary: (handler) => ws.onBinary(handler),
     selectProxy,
+    disconnect: () => ws.close(),
     terminate: async () => {
       try {
         await ws.request("session_terminate", { sessionId }).catch(() => {});

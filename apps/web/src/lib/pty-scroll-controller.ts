@@ -215,6 +215,14 @@ export function attachPtyScrollController(
   let prevCursorBufferRow: number | null = null;
   let pendingTouchScrollNotifyFrame: number | null = null;
   let pendingTouchScrollNotifyCancel: ((handle: number) => void) | null = null;
+  // xterm can synchronously emit thousands of onScroll events while parsing an authoritative
+  // snapshot. The terminal buffer remains xterm-owned; only the derived DOM/review/follow
+  // reconciliation is coalesced. Reading terminal state when this frame fires makes the last
+  // event in the parser burst authoritative and leaves the final repair queued before the next
+  // browser paint (the RAF is requested from inside the first synchronous onScroll callback).
+  let pendingTermScrollReconcileFrame: number | null = null;
+  let pendingTermScrollReconcileCancel: ((handle: number) => void) | null = null;
+  let disposed = false;
   let reviewProjectionRefreshPending = initialUserHasVerticalScrollIntent;
   let activeHistoryProjection: {
     kind: PtyHistoryProjection["kind"];
@@ -1526,9 +1534,8 @@ export function attachPtyScrollController(
     syncContainerScroll();
   };
 
-  const onTermScroll = (): void => {
+  const reconcileTermScroll = (): void => {
     trace("term-scroll");
-    if (syncing.internal) return;
     syncing.external = true;
     try {
       updateSpacer();
@@ -1575,6 +1582,33 @@ export function attachPtyScrollController(
     } finally {
       syncing.external = false;
     }
+  };
+
+  const cancelPendingTermScrollReconcile = (): void => {
+    if (pendingTermScrollReconcileFrame === null) return;
+    pendingTermScrollReconcileCancel?.(pendingTermScrollReconcileFrame);
+    pendingTermScrollReconcileFrame = null;
+    pendingTermScrollReconcileCancel = null;
+  };
+
+  const onTermScroll = (): void => {
+    // Controller-owned viewport commits already position host/xterm/DOM atomically. Their
+    // synchronous xterm callback must neither reconcile nor reserve an otherwise empty RAF.
+    if (syncing.internal || disposed || pendingTermScrollReconcileFrame !== null) return;
+    if (typeof window.requestAnimationFrame !== "function") {
+      reconcileTermScroll();
+      return;
+    }
+    pendingTermScrollReconcileFrame = window.requestAnimationFrame(() => {
+      pendingTermScrollReconcileFrame = null;
+      pendingTermScrollReconcileCancel = null;
+      if (disposed) return;
+      reconcileTermScroll();
+    });
+    pendingTermScrollReconcileCancel =
+      typeof window.cancelAnimationFrame === "function"
+        ? (handle) => window.cancelAnimationFrame(handle)
+        : null;
   };
 
   const relayout = (): void => {
@@ -1887,6 +1921,8 @@ export function attachPtyScrollController(
 
   return {
     dispose: () => {
+      disposed = true;
+      cancelPendingTermScrollReconcile();
       domAdapter.dispose();
       traceAdapter.dispose();
       cancelPendingTouchScrollNotify();
