@@ -25,7 +25,7 @@ afterEach(() => {
 });
 
 describe("attachPtyHistoryProjection", () => {
-  it("keeps frozen row identity when a full scrollback trim shifts xterm's viewport", () => {
+  it("keeps live-backfill row identity when a full scrollback trim shifts xterm's buffer", () => {
     const host = createHost();
     let rowIdentityOffset = 0;
     const line = {
@@ -42,23 +42,23 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 40,
       endLine: 41,
       rowHeight: 20,
       topOffset: 800,
     });
 
-    const snapshot = host.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
-    expect(snapshot?.dataset.rowIdentityOffset).toBe("0");
+    const backfill = host.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+    expect(backfill?.dataset.rowIdentityOffset).toBe("0");
     expect(Array.from(getRenderedPtyHistorySelectionLines(host).keys())).toEqual([40, 41]);
     rowIdentityOffset = -3;
     expect(Array.from(getRenderedPtyHistorySelectionLines(host).keys())).toEqual([37, 38]);
-    expect(snapshot?.textContent).toContain("A");
-    expect(snapshot?.textContent).toContain("B");
+    expect(backfill?.textContent).toContain("A");
+    expect(backfill?.textContent).toContain("B");
   });
 
-  it("builds a styled preview directly from a serialized buffer range", () => {
+  it("builds styled live backfill directly from a serialized buffer range", () => {
     const host = createHost();
     const serializeRangeAsHtml = vi.fn(
       () =>
@@ -68,7 +68,7 @@ describe("attachPtyHistoryProjection", () => {
 
     expect(
       controller.render({
-        kind: "review",
+        kind: "live-backfill",
         startLine: 17,
         endLine: 19,
         rowHeight: 20,
@@ -76,19 +76,19 @@ describe("attachPtyHistoryProjection", () => {
       }),
     ).toBe(true);
 
-    const snapshot = host.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
+    const backfill = host.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
     expect(serializeRangeAsHtml).toHaveBeenCalledWith(17, 19);
-    expect(snapshot?.textContent).toContain("older row");
-    expect(snapshot?.textContent).toContain("target row");
-    expect(snapshot?.textContent).toContain("overscan row");
-    expect(snapshot?.querySelector(".xterm-rows")?.children).toHaveLength(3);
-    expect(snapshot?.querySelector('[style*="0, 255, 0"]')).not.toBeNull();
-    expect(host.querySelectorAll('[data-slot="pty-review-snapshot"]')).toHaveLength(1);
-    expect(snapshot?.nextElementSibling).toHaveClass("xterm-selection");
+    expect(backfill?.textContent).toContain("older row");
+    expect(backfill?.textContent).toContain("target row");
+    expect(backfill?.textContent).toContain("overscan row");
+    expect(backfill?.querySelector(".xterm-rows")?.children).toHaveLength(3);
+    expect(backfill?.querySelector('[style*="0, 255, 0"]')).not.toBeNull();
+    expect(host.querySelectorAll('[data-slot="pty-live-backfill"]')).toHaveLength(1);
+    expect(backfill?.nextElementSibling).toHaveClass("xterm-selection");
     expect(host.style.overflow).toBe("visible");
   });
 
-  it("keeps the terminal row height when an expanded review viewport captures more rows", () => {
+  it("keeps the terminal row height when live backfill contains more rows", () => {
     const host = createHost();
     const renderedRows = host.querySelector<HTMLElement>(".xterm-rows");
     if (!renderedRows) throw new Error("missing rendered rows");
@@ -103,17 +103,17 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 100,
       endLine: 134,
       rowHeight: 20,
       topOffset: -40,
     });
 
-    const snapshot = host.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
-    const rows = snapshot?.querySelector<HTMLElement>(".xterm-rows");
-    expect(snapshot?.style.top).toBe("-40px");
-    expect(snapshot?.style.height).toBe("700px");
+    const backfill = host.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+    const rows = backfill?.querySelector<HTMLElement>(".xterm-rows");
+    expect(backfill?.style.top).toBe("-40px");
+    expect(backfill?.style.height).toBe("700px");
     expect(rows?.style.height).toBe("700px");
     expect(rows?.firstElementChild).toHaveStyle({ height: "20px", lineHeight: "20px" });
   });
@@ -126,7 +126,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 0,
       endLine: 0,
       rowHeight: 20,
@@ -134,7 +134,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     const cell = host.querySelector<HTMLElement>(
-      '[data-slot="pty-review-snapshot"] .xterm-rows > div > span',
+      '[data-slot="pty-live-backfill"] .xterm-rows > div > span',
     );
     const foreground = cell?.firstElementChild;
     expect(cell?.style.backgroundColor).toBe("rgb(52, 55, 60)");
@@ -163,7 +163,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 0,
       endLine: 0,
       rowHeight: 20,
@@ -171,7 +171,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     const spans = host.querySelectorAll<HTMLElement>(
-      '[data-slot="pty-review-snapshot"] .xterm-rows > div > span',
+      '[data-slot="pty-live-backfill"] .xterm-rows > div > span',
     );
     expect(spans[1]?.textContent).toBe("RGB");
     expect(spans[1]?.style.color).toBe("rgb(205, 214, 244)");
@@ -195,7 +195,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 0,
       endLine: 1,
       rowHeight: 20,
@@ -203,7 +203,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     const rows = host.querySelectorAll<HTMLElement>(
-      '[data-slot="pty-review-snapshot"] .xterm-rows > div',
+      '[data-slot="pty-live-backfill"] .xterm-rows > div',
     );
     expect(rows[0]?.lastElementChild).toHaveStyle({ color: "rgb(205, 214, 244)" });
     expect((rows[0]?.lastElementChild as HTMLElement | null)?.style.opacity).toBe("");
@@ -225,7 +225,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 0,
       endLine: 3,
       rowHeight: 20,
@@ -233,13 +233,13 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     const rows = host.querySelectorAll<HTMLElement>(
-      '[data-slot="pty-review-snapshot"] .xterm-rows > div',
+      '[data-slot="pty-live-backfill"] .xterm-rows > div',
     );
     expect(rows[2]?.firstElementChild).toHaveStyle({ backgroundColor: "#393939" });
     expect(rows[3]?.lastElementChild).not.toHaveAttribute("style");
   });
 
-  it("replaces the whole snapshot after deliberate navigation", () => {
+  it("replaces the whole live backfill after its serialized range changes", () => {
     const host = createHost();
     const serializeRangeAsHtml = vi
       .fn()
@@ -252,31 +252,31 @@ describe("attachPtyHistoryProjection", () => {
     const controller = attachPtyHistoryProjection(host, { serializeRangeAsHtml });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 10,
       endLine: 10,
       rowHeight: 20,
       topOffset: 0,
     });
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 11,
       endLine: 11,
       rowHeight: 20,
       topOffset: 0,
     });
 
-    const snapshots = host.querySelectorAll<HTMLElement>('[data-slot="pty-review-snapshot"]');
-    expect(snapshots).toHaveLength(1);
-    expect(snapshots[0]?.textContent).toContain("next viewport");
+    const backfills = host.querySelectorAll<HTMLElement>('[data-slot="pty-live-backfill"]');
+    expect(backfills).toHaveLength(1);
+    expect(backfills[0]?.textContent).toContain("next viewport");
   });
 
-  it("atomically replaces review with preceding live rows above a short host", () => {
+  it("atomically refreshes preceding live rows above a short host", () => {
     const host = createHost();
     const serializeRangeAsHtml = vi
       .fn()
       .mockReturnValueOnce(
-        "<html><body><pre><div><div><span>review frame</span></div></div></pre></body></html>",
+        "<html><body><pre><div><div><span>previous backfill</span></div></div></pre></body></html>",
       )
       .mockReturnValueOnce(
         "<html><body><pre><div><div><span>history 2005</span></div><div><span>history 2006</span></div><div><span>history 2007</span></div><div><span>history 2008</span></div><div><span>history 2009</span></div></div></pre></body></html>",
@@ -284,7 +284,7 @@ describe("attachPtyHistoryProjection", () => {
     const controller = attachPtyHistoryProjection(host, { serializeRangeAsHtml });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 1900,
       endLine: 1902,
       rowHeight: 20,
@@ -298,7 +298,6 @@ describe("attachPtyHistoryProjection", () => {
       topOffset: -100,
     });
 
-    expect(host.querySelector('[data-slot="pty-review-snapshot"]')).toBeNull();
     const backfill = host.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
     expect(backfill?.textContent).toContain("history 2005");
     expect(backfill?.textContent).toContain("history 2009");
@@ -308,7 +307,7 @@ describe("attachPtyHistoryProjection", () => {
     expect(serializeRangeAsHtml).toHaveBeenLastCalledWith(2005, 2009);
   });
 
-  it("clears the frozen layer when following resumes", () => {
+  it("clears live backfill when the projection is no longer needed", () => {
     const host = createHost();
     const controller = attachPtyHistoryProjection(host, {
       serializeRangeAsHtml: () =>
@@ -316,7 +315,7 @@ describe("attachPtyHistoryProjection", () => {
     });
 
     controller.render({
-      kind: "review",
+      kind: "live-backfill",
       startLine: 0,
       endLine: 0,
       rowHeight: 20,
@@ -324,7 +323,7 @@ describe("attachPtyHistoryProjection", () => {
     });
     controller.render(null);
 
-    expect(host.querySelector('[data-slot="pty-review-snapshot"]')).toBeNull();
+    expect(host.querySelector('[data-slot="pty-live-backfill"]')).toBeNull();
     expect(host.style.overflow).toBe("");
   });
 });

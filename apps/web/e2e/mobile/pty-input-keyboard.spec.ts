@@ -65,8 +65,9 @@ async function readClosedPtyLiveTailGeometry(page: Page, sessionId: string) {
     const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
     const screen = host?.querySelector<HTMLElement>(".xterm-screen");
     const backToBottom = document.querySelector<HTMLElement>('[data-slot="back-to-bottom"]');
-    const reviewSnapshot = screen?.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
-    const reviewRows = reviewSnapshot?.querySelector<HTMLElement>(".xterm-rows");
+    const legacyReviewSnapshot = screen?.querySelector<HTMLElement>(
+      '[data-slot="pty-review-snapshot"]',
+    );
     if (!term || !terminal || !host || !screen) return null;
 
     const buffer = term.buffer.active;
@@ -98,18 +99,127 @@ async function readClosedPtyLiveTailGeometry(page: Page, sessionId: string) {
     const debug = window.__devAnywherePtyDebug?.();
     const visibleClientTop = terminalRect.top + paddingTop;
     const visibleClientBottom = terminalRect.top + terminal.clientHeight - paddingBottom;
-    const renderedReviewRows = Array.from(reviewRows?.children ?? [])
-      .filter((row): row is HTMLElement => row instanceof HTMLElement && Boolean(row.textContent))
-      .map((row) => ({ text: row.textContent ?? "", rect: row.getBoundingClientRect() }))
-      .filter(({ rect }) => rect.bottom > visibleClientTop && rect.top < visibleClientBottom);
-    const reviewContentTop =
-      renderedReviewRows.length > 0
-        ? Math.min(...renderedReviewRows.map(({ rect }) => rect.top))
-        : null;
-    const reviewContentBottom =
-      renderedReviewRows.length > 0
-        ? Math.max(...renderedReviewRows.map(({ rect }) => rect.bottom))
-        : null;
+    const nativeRows = Array.from(screen.children).find(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement &&
+        child.classList.contains("xterm-rows") &&
+        child.dataset.slot === undefined,
+    );
+    const backfill = screen.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+    const backfillRows = backfill?.querySelector<HTMLElement>(".xterm-rows") ?? null;
+    const backfillStartLine = Number(backfill?.dataset.startLine);
+    const backfillEndLine = Number(backfill?.dataset.endLine);
+    const viewportBridgeActive =
+      Number.isInteger(backfillEndLine) && backfillEndLine >= buffer.viewportY;
+    const rowSources: Array<{
+      kind: "live-backfill" | "native";
+      rows: HTMLElement;
+      startLine: number | null;
+      clipTop: number;
+      clipBottom: number;
+    }> = [];
+    if (backfill && backfillRows) {
+      const rect = backfill.getBoundingClientRect();
+      rowSources.push({
+        kind: "live-backfill",
+        rows: backfillRows,
+        startLine: Number.isInteger(backfillStartLine) ? backfillStartLine : null,
+        clipTop: rect.top,
+        clipBottom: rect.bottom,
+      });
+    }
+    // A transient bridge is opaque until xterm paints its requested viewport. Sampling the stale
+    // native rows underneath would double-count the visible frame and invent false row drift.
+    if (!viewportBridgeActive && nativeRows) {
+      rowSources.push({
+        kind: "native",
+        rows: nativeRows,
+        startLine: buffer.viewportY,
+        clipTop: screenRect.top,
+        clipBottom: screenRect.bottom,
+      });
+    }
+
+    const paintedIntervals: Array<{ top: number; bottom: number }> = [];
+    const visibleRows: Array<{
+      bufferLine: number | null;
+      source: "live-backfill" | "native";
+      text: string;
+      top: number;
+      bottom: number;
+      height: number;
+      historyIndex: number | null;
+    }> = [];
+    for (const source of rowSources) {
+      for (const [rowIndex, child] of Array.from(source.rows.children).entries()) {
+        if (!(child instanceof HTMLElement)) continue;
+        const rect = child.getBoundingClientRect();
+        const paintedTop = Math.max(visibleClientTop, source.clipTop, rect.top);
+        const paintedBottom = Math.min(visibleClientBottom, source.clipBottom, rect.bottom);
+        if (paintedBottom <= paintedTop) continue;
+        paintedIntervals.push({ top: paintedTop, bottom: paintedBottom });
+        const text = child.textContent ?? "";
+        const historyMatch = text.match(/keyboard (?:close history|review line)\s+(\d+)/);
+        visibleRows.push({
+          bufferLine: source.startLine === null ? null : source.startLine + rowIndex,
+          source: source.kind,
+          text,
+          top: rect.top,
+          bottom: rect.bottom,
+          height: rect.height,
+          historyIndex: historyMatch ? Number.parseInt(historyMatch[1], 10) : null,
+        });
+      }
+    }
+
+    paintedIntervals.sort((left, right) => left.top - right.top);
+    let paintedThrough = visibleClientTop;
+    let compositeTopOrSeamGap = 0;
+    for (const interval of paintedIntervals) {
+      compositeTopOrSeamGap = Math.max(
+        compositeTopOrSeamGap,
+        Math.max(0, interval.top - paintedThrough),
+      );
+      paintedThrough = Math.max(paintedThrough, interval.bottom);
+    }
+    const compositeBlankBelow = Math.max(0, visibleClientBottom - paintedThrough);
+
+    visibleRows.sort(
+      (left, right) =>
+        left.top - right.top ||
+        (left.bufferLine ?? Number.POSITIVE_INFINITY) -
+          (right.bufferLine ?? Number.POSITIVE_INFINITY),
+    );
+    const uniqueVisibleRows = visibleRows.filter(
+      (row, index, rows) =>
+        index === 0 ||
+        row.bufferLine === null ||
+        rows[index - 1]?.bufferLine === null ||
+        row.bufferLine !== rows[index - 1]?.bufferLine,
+    );
+    const identifiedRows = visibleRows.filter(
+      (
+        row,
+      ): row is typeof row & {
+        bufferLine: number;
+        historyIndex: number;
+      } => row.bufferLine !== null && row.historyIndex !== null,
+    );
+    const compositeAnchor = identifiedRows[0] ?? null;
+    const compositeFrameIdentityDriftRows = compositeAnchor
+      ? Math.max(
+          ...identifiedRows.map((row) => {
+            const physicalRowDelta =
+              (row.top - compositeAnchor.top) / Math.max(compositeAnchor.height, 1);
+            const historyIdentityDelta = row.historyIndex - compositeAnchor.historyIndex;
+            const bufferIdentityDelta = row.bufferLine - compositeAnchor.bufferLine;
+            return Math.max(
+              Math.abs(physicalRowDelta - historyIdentityDelta),
+              Math.abs(bufferIdentityDelta - historyIdentityDelta),
+            );
+          }),
+        )
+      : null;
 
     return {
       blankBelowLiveTail: visibleBottom - liveTailBottom,
@@ -132,17 +242,36 @@ async function readClosedPtyLiveTailGeometry(page: Page, sessionId: string) {
       backToBottomInert: backToBottom?.hasAttribute("inert") ?? false,
       backToBottomLabel: backToBottom?.getAttribute("aria-label") ?? null,
       backToBottomPointerEvents: backToBottom ? getComputedStyle(backToBottom).pointerEvents : null,
-      reviewBlankAbove:
-        reviewContentTop === null ? null : Math.max(0, reviewContentTop - visibleClientTop),
-      reviewBlankBelow:
-        reviewContentBottom === null
+      backfillPresent: Boolean(backfill),
+      compositeAnchorAbsoluteTop:
+        compositeAnchor === null
           ? null
-          : Math.max(0, visibleClientBottom - reviewContentBottom),
-      reviewContentBottom,
-      reviewContentTop,
-      reviewSnapshotPresent: Boolean(reviewSnapshot),
-      reviewVisibleRowCount: renderedReviewRows.length,
-      reviewVisibleText: renderedReviewRows.map(({ text }) => text).join("\n"),
+          : compositeAnchor.top - visibleClientTop + terminal.scrollTop,
+      compositeAnchorBufferLine: compositeAnchor?.bufferLine ?? null,
+      compositeAnchorClientTop: compositeAnchor?.top ?? null,
+      compositeAnchorHistoryIndex: compositeAnchor?.historyIndex ?? null,
+      compositeAnchorSource: compositeAnchor?.source ?? null,
+      compositeBlankAbove:
+        paintedIntervals.length === 0
+          ? null
+          : Math.max(0, paintedIntervals[0]!.top - visibleClientTop),
+      compositeBlankBelow,
+      compositeContentBottom:
+        paintedIntervals.length === 0
+          ? null
+          : Math.max(...paintedIntervals.map((interval) => interval.bottom)),
+      compositeContentTop:
+        paintedIntervals.length === 0
+          ? null
+          : Math.min(...paintedIntervals.map((interval) => interval.top)),
+      compositeFrameIdentityDriftRows,
+      compositeTopOrSeamGap,
+      compositeVisibleRowCount: uniqueVisibleRows.length,
+      compositeVisibleText: uniqueVisibleRows
+        .filter(({ text }) => Boolean(text))
+        .map(({ text }) => text)
+        .join("\n"),
+      legacyReviewSnapshotPresent: Boolean(legacyReviewSnapshot),
       rows: term.rows,
       screenBottomDelta:
         terminalRect.top + terminal.clientHeight - paddingBottom - screenRect.bottom,
@@ -155,6 +284,7 @@ async function readClosedPtyLiveTailGeometry(page: Page, sessionId: string) {
       visibleClientBottom,
       visibleClientTop,
       visibleContentHeight: terminal.clientHeight - paddingTop - paddingBottom,
+      viewportBridgeActive,
       viewportY: buffer.viewportY,
     };
   }, sessionId);
@@ -172,10 +302,16 @@ async function waitForPtyKeyboardGeometryToSettle(page: Page, sessionId: string)
           const terminal = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
           const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
           const screen = host?.querySelector<HTMLElement>(".xterm-screen");
-          const reviewSnapshot = screen?.querySelector<HTMLElement>(
-            '[data-slot="pty-review-snapshot"]',
-          );
-          const reviewRows = reviewSnapshot?.querySelector<HTMLElement>(".xterm-rows");
+          const nativeRows =
+            screen &&
+            Array.from(screen.children).find(
+              (child): child is HTMLElement =>
+                child instanceof HTMLElement &&
+                child.classList.contains("xterm-rows") &&
+                child.dataset.slot === undefined,
+            );
+          const backfill = screen?.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+          const backfillRows = backfill?.querySelector<HTMLElement>(".xterm-rows");
           const debug = window.__devAnywherePtyDebug?.();
           const viewport = window.visualViewport;
           if (term && terminal && host && screen && debug) {
@@ -185,9 +321,14 @@ async function waitForPtyKeyboardGeometryToSettle(page: Page, sessionId: string)
               hostTop: getComputedStyle(host).top,
               hostPaddingTop: getComputedStyle(host).paddingTop,
               screenTop: screen.getBoundingClientRect().top,
-              reviewSnapshotTop: reviewSnapshot?.getBoundingClientRect().top ?? null,
-              reviewSnapshotHeight: reviewSnapshot?.getBoundingClientRect().height ?? null,
-              reviewRowCount: reviewRows?.childElementCount ?? 0,
+              nativeRowsTop: nativeRows?.getBoundingClientRect().top ?? null,
+              nativeRowsHeight: nativeRows?.getBoundingClientRect().height ?? null,
+              nativeRowCount: nativeRows?.childElementCount ?? 0,
+              backfillTop: backfill?.getBoundingClientRect().top ?? null,
+              backfillHeight: backfill?.getBoundingClientRect().height ?? null,
+              backfillStartLine: backfill?.dataset.startLine ?? null,
+              backfillEndLine: backfill?.dataset.endLine ?? null,
+              backfillRowCount: backfillRows?.childElementCount ?? 0,
               viewportY: term.buffer.active.viewportY,
               keyboardOffset: document
                 .querySelector("[data-keyboard-offset]")
@@ -461,7 +602,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     }
   });
 
-  test("keeps keyboard-dismiss history review filled, frozen, and explicitly resumable", async ({
+  test("keeps keyboard-dismiss history live, anchored through output, and explicitly resumable", async ({
     emuPage,
   }, testInfo) => {
     test.setTimeout(90_000);
@@ -514,16 +655,22 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       const gesture = await swipeDownPtyToDismissSoftKeyboard(emuPage);
       await waitForPtyKeyboardGeometryToSettle(emuPage, sessionId);
       const closed = await readClosedPtyLiveTailGeometry(emuPage, sessionId);
+      const legacyReviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+      await expect(legacyReviewSnapshot).toHaveCount(0);
 
-      const reviewMarker = "keyboard review remains frozen";
-      await emuPage.evaluate((marker) => {
-        window.__ptySmoke.sendPty(`${marker}\r\n`);
-      }, reviewMarker);
+      const latestOutputMarker = "keyboard live append 24";
+      await emuPage.evaluate(async () => {
+        for (let index = 1; index <= 24; index += 1) {
+          window.__ptySmoke.sendPty(`keyboard live append ${String(index).padStart(2, "0")}\r\n`);
+          await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+        }
+      });
       await expect
         .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
-        .toContain(reviewMarker);
+        .toContain(latestOutputMarker);
       await waitForPtyKeyboardGeometryToSettle(emuPage, sessionId);
       const afterOutput = await readClosedPtyLiveTailGeometry(emuPage, sessionId);
+      await expect(legacyReviewSnapshot).toHaveCount(0);
 
       const backToBottom = emuPage.locator('[data-slot="back-to-bottom"]');
       await tapWithAdb(backToBottom);
@@ -574,40 +721,56 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       expect(closed?.verticalIntentMode).toBe("reviewing");
       expect(closed?.verticalIntentSource).toBe("touch");
       expect(closed?.semanticAtBottom).toBe(false);
-      // The frozen review projection is the user-visible viewport. The live xterm underneath may
-      // advance to baseY as output arrives or the keyboard releases more rows; requiring its
-      // private viewportY to remain below baseY contradicts that separation and is timing-racy.
-      // Prove the actual review instead: it is at least one row away from the live tail and the
-      // first painted history line precedes the live base.
       expect(closed?.scrollTopDeltaToBottom ?? 0).toBeLessThan(-(closed?.cellHeight ?? Infinity));
-      const firstReviewedHistoryIndex = Number(
-        closed?.reviewVisibleText.match(/keyboard close history (\d+)/)?.[1] ?? NaN,
-      );
-      expect(firstReviewedHistoryIndex).toBeLessThan(closed?.baseY ?? 0);
+      expect(closed?.compositeAnchorHistoryIndex ?? Infinity).toBeLessThan(closed?.baseY ?? 0);
+      expect(closed?.compositeAnchorBufferLine ?? Infinity).toBeLessThan(closed?.baseY ?? 0);
+      expect(closed?.compositeAnchorSource).toBe("live-backfill");
       expect(closed?.pendingContainerSyncRetry).toBe(false);
       expect(closed?.backToBottomInert).toBe(false);
       expect(closed?.backToBottomPointerEvents).toBe("auto");
-      expect(closed?.reviewSnapshotPresent).toBe(true);
-      // Fractional native scroll can cut through one terminal row on either edge. A gap smaller
-      // than one cell is a partial row; the field bug leaves many complete rows uncovered. Check
-      // both edges of the entire closed viewport, not only the strip newly released by the IME.
-      expect(closed?.reviewBlankAbove ?? Infinity).toBeLessThan(closed?.cellHeight ?? 0);
-      expect(closed?.reviewBlankBelow ?? Infinity).toBeLessThan(closed?.cellHeight ?? 0);
-      expect(closed?.reviewVisibleRowCount ?? 0).toBeGreaterThanOrEqual(
+      expect(closed?.backfillPresent).toBe(true);
+      expect(closed?.legacyReviewSnapshotPresent).toBe(false);
+      // The expanded keyboard-closed viewport is painted by one live composite: serialized
+      // history above the short xterm host and native xterm rows below it. Fractional scrolling
+      // may clip edge rows, but it must not expose a blank row or an identity discontinuity.
+      expect(closed?.compositeBlankAbove ?? Infinity).toBeLessThanOrEqual(1);
+      expect(closed?.compositeBlankBelow ?? Infinity).toBeLessThanOrEqual(1);
+      expect(closed?.compositeTopOrSeamGap ?? Infinity).toBeLessThanOrEqual(1);
+      expect(closed?.compositeFrameIdentityDriftRows ?? Infinity).toBeLessThanOrEqual(0.05);
+      expect(closed?.compositeVisibleRowCount ?? 0).toBeGreaterThanOrEqual(
         Math.ceil((closed?.visibleContentHeight ?? Infinity) / (closed?.cellHeight ?? 1)),
       );
-      expect(closed?.reviewContentTop ?? Infinity).toBeLessThanOrEqual(
-        (closed?.visibleClientTop ?? -Infinity) + (closed?.cellHeight ?? 0),
+      expect(closed?.compositeContentTop ?? Infinity).toBeLessThanOrEqual(
+        (closed?.visibleClientTop ?? -Infinity) + 1,
       );
-      expect(closed?.reviewContentBottom ?? -Infinity).toBeGreaterThanOrEqual(
-        (closed?.visibleClientBottom ?? Infinity) - (closed?.cellHeight ?? 0),
+      expect(closed?.compositeContentBottom ?? -Infinity).toBeGreaterThanOrEqual(
+        (closed?.visibleClientBottom ?? Infinity) - 1,
       );
 
       expect(afterOutput).not.toBeNull();
       expect(afterOutput?.verticalIntentMode).toBe("reviewing");
-      expect(afterOutput?.viewportY).toBe(closed?.viewportY);
+      expect(afterOutput?.semanticAtBottom).toBe(false);
       expect(afterOutput?.scrollTop).toBeCloseTo(closed?.scrollTop ?? Infinity, 0);
-      expect(afterOutput?.reviewVisibleText).toBe(closed?.reviewVisibleText);
+      expect(afterOutput?.baseY ?? 0).toBeGreaterThan(closed?.baseY ?? Infinity);
+      expect(afterOutput?.bottomScrollTop ?? 0).toBeGreaterThan(
+        closed?.bottomScrollTop ?? Infinity,
+      );
+      expect(afterOutput?.compositeAnchorHistoryIndex).toBe(closed?.compositeAnchorHistoryIndex);
+      expect(afterOutput?.compositeAnchorBufferLine).toBe(closed?.compositeAnchorBufferLine);
+      expect(afterOutput?.compositeAnchorSource).toBe(closed?.compositeAnchorSource);
+      expect(afterOutput?.compositeAnchorClientTop ?? Infinity).toBeCloseTo(
+        closed?.compositeAnchorClientTop ?? -Infinity,
+        0,
+      );
+      expect(afterOutput?.compositeAnchorAbsoluteTop ?? Infinity).toBeCloseTo(
+        closed?.compositeAnchorAbsoluteTop ?? -Infinity,
+        0,
+      );
+      expect(afterOutput?.compositeVisibleText).toBe(closed?.compositeVisibleText);
+      expect(afterOutput?.compositeVisibleText).not.toContain(latestOutputMarker);
+      expect(afterOutput?.legacyReviewSnapshotPresent).toBe(false);
+      expect(afterOutput?.compositeBlankBelow ?? Infinity).toBeLessThanOrEqual(1);
+      expect(afterOutput?.compositeTopOrSeamGap ?? Infinity).toBeLessThanOrEqual(1);
       expect(afterOutput?.backToBottomLabel).toBe("回到最新");
 
       expect(returned).not.toBeNull();
@@ -617,7 +780,8 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       expect(returned?.pendingContainerSyncRetry).toBe(false);
       expect(returned?.backToBottomInert).toBe(true);
       expect(returned?.backToBottomPointerEvents).toBe("none");
-      expect(returned?.reviewSnapshotPresent).toBe(false);
+      expect(returned?.legacyReviewSnapshotPresent).toBe(false);
+      expect(returned?.compositeVisibleText).toContain(latestOutputMarker);
       expect(Math.abs(returned?.scrollTopDeltaToBottom ?? Infinity)).toBeLessThanOrEqual(8);
       expect(returned?.blankBelowLiveTail ?? Infinity).toBeLessThanOrEqual(2);
       expect(returned?.screenBottomDelta ?? Infinity).toBeLessThanOrEqual(2);
@@ -684,24 +848,26 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
         ),
       )
       .toBeGreaterThan(0);
-    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    const legacyReviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
     const backToBottom = emuPage.locator('[data-slot="back-to-bottom"]');
-    await expect(reviewSnapshot).toBeVisible();
+    await expect(legacyReviewSnapshot).toHaveCount(0);
     await expect(backToBottom).toHaveJSProperty("inert", false);
     await expect
       .poll(
         async () => {
           const state = await readClosedPtyLiveTailGeometry(emuPage, sessionId);
           return {
+            hasCompositeAnchor: typeof state?.compositeAnchorHistoryIndex === "number",
+            legacyReviewSnapshotPresent: state?.legacyReviewSnapshotPresent,
             mode: state?.verticalIntentMode,
-            reviewSnapshotPresent: state?.reviewSnapshotPresent,
           };
         },
-        { message: "keyboard-open history review did not become visibly reviewable" },
+        { message: "keyboard-open history did not remain live and visibly reviewable" },
       )
       .toEqual({
+        hasCompositeAnchor: true,
+        legacyReviewSnapshotPresent: false,
         mode: "reviewing",
-        reviewSnapshotPresent: true,
       });
     await expect
       .poll(
@@ -709,15 +875,22 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
           (await readClosedPtyLiveTailGeometry(emuPage, sessionId))?.scrollTopDeltaToBottom ?? 0,
       )
       .toBeLessThan(-20);
+    const reviewingGeometry = await readClosedPtyLiveTailGeometry(emuPage, sessionId);
+    expect(reviewingGeometry?.compositeBlankAbove ?? Infinity).toBeLessThanOrEqual(1);
+    expect(reviewingGeometry?.compositeBlankBelow ?? Infinity).toBeLessThanOrEqual(1);
+    expect(reviewingGeometry?.compositeTopOrSeamGap ?? Infinity).toBeLessThanOrEqual(1);
+    expect(reviewingGeometry?.compositeFrameIdentityDriftRows ?? Infinity).toBeLessThanOrEqual(
+      0.05,
+    );
 
     await emuPage.keyboard.type("resume");
     await expect.poll(() => readRawPtyInput(emuPage)).toContain("resume");
-    await expect(reviewSnapshot).toHaveCount(0);
+    await expect(legacyReviewSnapshot).toHaveCount(0);
     await expect(backToBottom).toHaveJSProperty("inert", true);
     await expectPtyCursorAboveKeyboard(emuPage, sessionId);
 
     // Raw input must not merely jump to the current bottom once. Every later agent frame must
-    // remain live-following; a stale page/review restore used to re-freeze the viewport here.
+    // remain live-following; a stale page/review restore used to reclaim the viewport here.
     await emuPage.evaluate(async () => {
       for (let index = 0; index < 12; index += 1) {
         window.__ptySmoke.sendPty(`continued agent frame ${index}\r\n`);

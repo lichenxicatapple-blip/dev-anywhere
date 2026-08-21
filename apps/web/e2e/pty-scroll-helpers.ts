@@ -26,8 +26,7 @@ export interface PtyRenderedGeometry {
   cursorInViewport: boolean;
   hostTopDrift: number;
   pendingContainerSyncRetry: boolean;
-  reviewSnapshotIntersectsContainer: boolean;
-  reviewSnapshotPresent: boolean;
+  legacyReviewSnapshotPresent: boolean;
   screenIntersectsContainer: boolean;
   scrollTopDeltaToBottom: number;
   viewportHostCoverage: number;
@@ -140,14 +139,15 @@ export async function readPtyRenderedGeometry(page: Page): Promise<PtyRenderedGe
         '[data-slot="pty-keepalive-entry"][data-active="true"] [data-slot="pty-terminal"]',
       ) ?? document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
     const screen = container?.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
-    const reviewSnapshot = screen?.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
+    const legacyReviewSnapshot = screen?.querySelector<HTMLElement>(
+      '[data-slot="pty-review-snapshot"]',
+    );
     const liveBackfill = screen?.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
     const snapshot = window.__devAnywherePtyDebug?.();
     if (!container || !screen || !snapshot) return null;
 
     const containerRect = container.getBoundingClientRect();
     const screenRect = screen.getBoundingClientRect();
-    const reviewSnapshotRect = reviewSnapshot?.getBoundingClientRect() ?? null;
     const liveBackfillRect = liveBackfill?.getBoundingClientRect() ?? null;
     const style = getComputedStyle(container);
     const contentTop = containerRect.top + (Number.parseFloat(style.paddingTop) || 0);
@@ -161,15 +161,7 @@ export async function readPtyRenderedGeometry(page: Page): Promise<PtyRenderedGe
       cursorInViewport: snapshot.anchor.cursorInViewport,
       hostTopDrift: snapshot.host.topDrift,
       pendingContainerSyncRetry: snapshot.pendingContainerSyncRetry,
-      reviewSnapshotIntersectsContainer:
-        reviewSnapshotRect !== null &&
-        reviewSnapshotRect.width > 0 &&
-        reviewSnapshotRect.height > 0 &&
-        reviewSnapshotRect.right > containerRect.left &&
-        reviewSnapshotRect.left < containerRect.right &&
-        reviewSnapshotRect.bottom > containerRect.top &&
-        reviewSnapshotRect.top < containerRect.bottom,
-      reviewSnapshotPresent: reviewSnapshot !== null,
+      legacyReviewSnapshotPresent: legacyReviewSnapshot !== null,
       screenIntersectsContainer:
         screenRect.width > 0 &&
         screenRect.height > 0 &&
@@ -189,11 +181,7 @@ function renderedGeometryFailure(
 ): string {
   if (!geometry) return "geometry-unavailable";
   if (geometry.pendingContainerSyncRetry) return "container-sync-pending";
-  if (geometry.reviewSnapshotPresent) {
-    if (!geometry.reviewSnapshotIntersectsContainer) return "review-snapshot-outside-container";
-    if (options.bottomThresholdPx !== undefined) return "review-snapshot-at-semantic-bottom";
-    return "ready";
-  }
+  if (geometry.legacyReviewSnapshotPresent) return "legacy-review-snapshot-present";
   if (Math.abs(geometry.hostTopDrift) > 1) {
     return `host-top-drift:${geometry.hostTopDrift}`;
   }

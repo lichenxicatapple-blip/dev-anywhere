@@ -181,8 +181,8 @@ function createOverlay(screen: HTMLElement): HTMLElement {
 /**
  * Paints an absolute-buffer selection independently of xterm's native selection service.
  *
- * Rows deliberately are not clamped to xterm's screen: review and live-backfill rows sit above
- * the current viewport, while a selection may continue below it. Each rectangle is clipped only
+ * Rows deliberately are not clamped to xterm's screen: live-backfill rows can sit above the
+ * current viewport, while a selection may continue below it. Each rectangle is clipped only
  * to the outer scroll container's visible vertical span; horizontal overflow remains owned by
  * that container.
  */
@@ -250,54 +250,32 @@ export function attachPtyManagedSelectionOverlay({
       return;
     }
 
-    const viewportY = terminal.buffer.active.viewportY;
-    const nativeVisibleRows = {
-      first: viewportY + Math.floor(visibleTop / metrics.cellH),
-      last: viewportY + Math.ceil(visibleBottom / metrics.cellH) - 1,
-    };
     const projection = terminal.element
       ? getRenderedPtyHistoryProjectionRange(terminal.element)
       : null;
-    const projectionTop = projection
+    const rowOrigin = projection?.startLine ?? terminal.buffer.active.viewportY;
+    const topOrigin = projection
       ? projection.element.getBoundingClientRect().top - screenRect.top
-      : null;
+      : 0;
+    if (!Number.isFinite(topOrigin)) {
+      clearOverlay();
+      return;
+    }
+    const visibleRows = {
+      first: rowOrigin + Math.floor((visibleTop - topOrigin) / metrics.cellH),
+      last: rowOrigin + Math.ceil((visibleBottom - topOrigin) / metrics.cellH) - 1,
+    };
     const getSegmentsForRows = (first: number, last: number): SelectionSegment[] =>
       clipSegmentsToRows(
         getSelectionSegments(range, terminal.cols, getLine, { first, last }),
         first,
         last,
       );
-    const paintGroups: Array<{
-      segments: SelectionSegment[];
-      rowOrigin: number;
-      topOrigin: number;
-    }> = [];
-
-    if (projection && projectionTop !== null) {
-      const projectionSegments = getSegmentsForRows(projection.startLine, projection.endLine);
-      if (projectionSegments.length > 0) {
-        paintGroups.push({
-          segments: projectionSegments,
-          rowOrigin: projection.startLine,
-          topOrigin: projectionTop,
-        });
-      }
-    }
-
-    const nativeIntervals = projection
-      ? [
-          { first: nativeVisibleRows.first, last: projection.startLine - 1 },
-          { first: projection.endLine + 1, last: nativeVisibleRows.last },
-        ]
-      : [nativeVisibleRows];
-    for (const interval of nativeIntervals) {
-      const nativeSegments = getSegmentsForRows(interval.first, interval.last);
-      if (nativeSegments.length > 0) {
-        paintGroups.push({ segments: nativeSegments, rowOrigin: viewportY, topOrigin: 0 });
-      }
-    }
-
-    if (paintGroups.length === 0) {
+    // The live projection is an atomic bridge for the current painted frame. Its first row and
+    // DOM top therefore define one continuous row plane, including rows extrapolated beyond the
+    // serialized band; active.viewportY may already describe a not-yet-painted xterm frame.
+    const segments = getSegmentsForRows(visibleRows.first, visibleRows.last);
+    if (segments.length === 0) {
       clearOverlay();
       return;
     }
@@ -319,33 +297,30 @@ export function attachPtyManagedSelectionOverlay({
       terminal.options.theme?.selectionBackground ??
       DEFAULT_SELECTION_BACKGROUND;
 
-    for (const group of paintGroups) {
-      for (const segment of group.segments) {
-        const naturalTop = group.topOrigin + (segment.firstRow - group.rowOrigin) * metrics.cellH;
-        const naturalBottom =
-          group.topOrigin + (segment.lastRow - group.rowOrigin + 1) * metrics.cellH;
-        const clippedTop = Math.max(naturalTop, visibleTop);
-        const clippedBottom = Math.min(naturalBottom, visibleBottom);
-        if (clippedBottom <= clippedTop || segment.columnCount <= 0) continue;
+    for (const segment of segments) {
+      const naturalTop = topOrigin + (segment.firstRow - rowOrigin) * metrics.cellH;
+      const naturalBottom = topOrigin + (segment.lastRow - rowOrigin + 1) * metrics.cellH;
+      const clippedTop = Math.max(naturalTop, visibleTop);
+      const clippedBottom = Math.min(naturalBottom, visibleBottom);
+      if (clippedBottom <= clippedTop || segment.columnCount <= 0) continue;
 
-        const rectangle = resolvedScreen.ownerDocument.createElement("div");
-        rectangle.dataset.slot = SEGMENT_SLOT;
-        rectangle.dataset.firstRow = String(segment.firstRow);
-        rectangle.dataset.lastRow = String(segment.lastRow);
-        rectangle.dataset.firstColumn = String(segment.firstColumn);
-        rectangle.dataset.columnCount = String(segment.columnCount);
-        Object.assign(rectangle.style, {
-          position: "absolute",
-          left: `${segment.firstColumn * metrics.cellW}px`,
-          top: `${clippedTop}px`,
-          width: `${segment.columnCount * metrics.cellW}px`,
-          height: `${clippedBottom - clippedTop}px`,
-          backgroundColor: background,
-          opacity: SELECTION_OPACITY,
-          pointerEvents: "none",
-        });
-        overlay.append(rectangle);
-      }
+      const rectangle = resolvedScreen.ownerDocument.createElement("div");
+      rectangle.dataset.slot = SEGMENT_SLOT;
+      rectangle.dataset.firstRow = String(segment.firstRow);
+      rectangle.dataset.lastRow = String(segment.lastRow);
+      rectangle.dataset.firstColumn = String(segment.firstColumn);
+      rectangle.dataset.columnCount = String(segment.columnCount);
+      Object.assign(rectangle.style, {
+        position: "absolute",
+        left: `${segment.firstColumn * metrics.cellW}px`,
+        top: `${clippedTop}px`,
+        width: `${segment.columnCount * metrics.cellW}px`,
+        height: `${clippedBottom - clippedTop}px`,
+        backgroundColor: background,
+        opacity: SELECTION_OPACITY,
+        pointerEvents: "none",
+      });
+      overlay.append(rectangle);
     }
   }
 

@@ -21,6 +21,103 @@ function createTerminal(): Terminal {
   });
 }
 
+function readViewportLines(terminal: Terminal): string[] {
+  const buffer = terminal.buffer.active;
+  return Array.from({ length: terminal.rows }, (_, row) =>
+    (buffer.getLine(buffer.viewportY + row)?.translateToString(true) ?? "").trimEnd(),
+  );
+}
+
+function registerMarkerAtRow(terminal: Terminal, row: number) {
+  const buffer = terminal.buffer.active;
+  return terminal.registerMarker(row - (buffer.baseY + buffer.cursorY));
+}
+
+describe("xterm native scrolled-away output contract", () => {
+  it("keeps viewportY and the painted history rows stable while the buffer can still grow", async () => {
+    const terminal = new Terminal({
+      allowProposedApi: true,
+      cols: 10,
+      rows: 3,
+      scrollback: 10,
+    });
+    try {
+      await write(terminal, "0\r\n1\r\n2\r\n3\r\n4\r\n5");
+      terminal.scrollToLine(1);
+
+      expect(terminal.buffer.normal.viewportY).toBe(1);
+      expect(readViewportLines(terminal)).toEqual(["1", "2", "3"]);
+
+      await write(terminal, "\r\n6\r\n7");
+
+      expect(terminal.buffer.normal.baseY).toBe(5);
+      expect(terminal.buffer.normal.viewportY).toBe(1);
+      expect(readViewportLines(terminal)).toEqual(["1", "2", "3"]);
+    } finally {
+      terminal.dispose();
+    }
+  });
+
+  it("rebases a scrolled-away viewport across full-scrollback trims until its oldest row expires", async () => {
+    const terminal = createTerminal();
+    try {
+      await fillScrollback(terminal);
+      terminal.scrollToLine(2);
+      const firstVisible = registerMarkerAtRow(terminal, 2);
+      expect(firstVisible).toBeDefined();
+      expect(readViewportLines(terminal)).toEqual(["2", "3", "4"]);
+
+      await write(terminal, "\r\n6");
+      expect(terminal.buffer.normal.viewportY).toBe(1);
+      expect(firstVisible?.line).toBe(1);
+      expect(readViewportLines(terminal)).toEqual(["2", "3", "4"]);
+
+      await write(terminal, "\r\n7");
+      expect(terminal.buffer.normal.viewportY).toBe(0);
+      expect(firstVisible?.line).toBe(0);
+      expect(readViewportLines(terminal)).toEqual(["2", "3", "4"]);
+
+      // Once the oldest visible row itself leaves the finite scrollback, no terminal can retain it.
+      await write(terminal, "\r\n8");
+      expect(firstVisible?.isDisposed).toBe(true);
+      expect(terminal.buffer.normal.viewportY).toBe(0);
+      expect(readViewportLines(terminal)).toEqual(["3", "4", "5"]);
+    } finally {
+      terminal.dispose();
+    }
+  });
+
+  it("can scroll line by line through output received while away and re-engages the live tail", async () => {
+    const terminal = new Terminal({
+      allowProposedApi: true,
+      cols: 10,
+      rows: 3,
+      scrollback: 10,
+    });
+    try {
+      await write(terminal, "0\r\n1\r\n2\r\n3\r\n4\r\n5");
+      terminal.scrollToLine(1);
+      await write(terminal, "\r\n6\r\n7");
+
+      expect(terminal.buffer.normal.viewportY).toBe(1);
+      expect(terminal.buffer.normal.baseY).toBe(5);
+      for (const expectedViewportY of [2, 3, 4, 5]) {
+        terminal.scrollLines(1);
+        expect(terminal.buffer.normal.viewportY).toBe(expectedViewportY);
+      }
+      expect(readViewportLines(terminal)).toEqual(["5", "6", "7"]);
+
+      // At the tail xterm clears its native user-scrolling latch, so later output follows live.
+      await write(terminal, "\r\n8");
+      expect(terminal.buffer.normal.baseY).toBe(6);
+      expect(terminal.buffer.normal.viewportY).toBe(6);
+      expect(readViewportLines(terminal)).toEqual(["6", "7", "8"]);
+    } finally {
+      terminal.dispose();
+    }
+  });
+});
+
 describe("pty buffer row identity tracker", () => {
   it("tracks trims while viewportY is clamped at the top of scrollback", async () => {
     const terminal = createTerminal();

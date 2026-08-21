@@ -78,7 +78,7 @@ describe("PTY managed selection overlay geometry", () => {
     expect(screen.querySelector('[data-slot="pty-managed-selection-overlay"]')).toBeNull();
   });
 
-  it("keeps selection paint attached to a frozen projection after row identity rebases", () => {
+  it("keeps selection paint attached to live backfill after row identity rebases", () => {
     const container = document.createElement("div");
     const terminalElement = document.createElement("div");
     const screen = document.createElement("div");
@@ -143,7 +143,7 @@ describe("PTY managed selection overlay geometry", () => {
     });
     expect(
       history.render({
-        kind: "review",
+        kind: "live-backfill",
         startLine: 25,
         endLine: 27,
         rowHeight: 20,
@@ -151,8 +151,8 @@ describe("PTY managed selection overlay geometry", () => {
       }),
     ).toBe(true);
     rowIdentityOffset = -3;
-    const projection = screen.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
-    if (!projection) throw new Error("missing review projection");
+    const projection = screen.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+    if (!projection) throw new Error("missing live backfill projection");
     vi.spyOn(projection, "getBoundingClientRect").mockReturnValue({
       left: 0,
       top: -20,
@@ -181,6 +181,118 @@ describe("PTY managed selection overlay geometry", () => {
     expect(segment?.dataset).toMatchObject({ firstRow: "23", lastRow: "23" });
     expect(segment?.style.top).toBe("-20px");
     expect(segment?.style.height).toBe("20px");
+
+    overlay.dispose();
+    history.dispose();
+  });
+
+  it("uses one projected row plane when active viewportY is ahead of the painted frame", () => {
+    const container = document.createElement("div");
+    const terminalElement = document.createElement("div");
+    const screen = document.createElement("div");
+    const renderedRows = document.createElement("div");
+    const renderedRow = document.createElement("div");
+    const nativeSelection = document.createElement("div");
+    screen.className = "xterm-screen";
+    renderedRows.className = "xterm-rows";
+    nativeSelection.className = "xterm-selection";
+    renderedRows.append(renderedRow);
+    screen.append(renderedRows, nativeSelection);
+    terminalElement.append(screen);
+    document.body.append(container, terminalElement);
+
+    vi.spyOn(container, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 80,
+      width: 80,
+      height: 80,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+    vi.spyOn(screen, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 60,
+      right: 80,
+      bottom: 140,
+      width: 80,
+      height: 80,
+      x: 0,
+      y: 60,
+      toJSON: () => ({}),
+    });
+    Object.defineProperty(container, "clientHeight", { configurable: true, value: 80 });
+
+    const cell = { getWidth: () => 1, getChars: () => "x" };
+    const line = {
+      length: 8,
+      isWrapped: false,
+      getCell: () => cell,
+      translateToString: () => "xxxxxxxx",
+    };
+    const terminal = {
+      cols: 8,
+      rows: 4,
+      element: terminalElement,
+      options: { theme: { selectionBackground: "#123456" } },
+      buffer: { active: { viewportY: 70 } },
+      onScroll: () => disposable(),
+      onRender: () => disposable(),
+      onResize: () => disposable(),
+    } as unknown as Terminal;
+    const history = attachPtyHistoryProjection(terminalElement, {
+      serializeRangeAsHtml: () =>
+        "<html><body><pre><div><div>row20</div><div>row21</div><div>row22</div></div></pre></body></html>",
+      getSelectionLine: () => line as never,
+    });
+    expect(
+      history.render({
+        kind: "live-backfill",
+        startLine: 20,
+        endLine: 22,
+        rowHeight: 20,
+        topOffset: -60,
+      }),
+    ).toBe(true);
+    const projection = screen.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+    if (!projection) throw new Error("missing live backfill projection");
+    vi.spyOn(projection, "getBoundingClientRect").mockReturnValue({
+      left: 0,
+      top: 0,
+      right: 80,
+      bottom: 60,
+      width: 80,
+      height: 60,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    });
+
+    const overlay = attachPtyManagedSelectionOverlay({
+      terminal,
+      container,
+      getLine: () => line as never,
+    });
+    overlay.render({
+      anchor: { row: 20, column: 1 },
+      focus: { row: 23, column: 2 },
+      columnMode: true,
+    });
+
+    const segments = screen.querySelectorAll<HTMLElement>(
+      '[data-slot="pty-managed-selection-segment"]',
+    );
+    expect(segments).toHaveLength(1);
+    expect(segments[0]?.dataset).toMatchObject({
+      firstRow: "20",
+      lastRow: "23",
+      firstColumn: "1",
+      columnCount: "2",
+    });
+    expect(segments[0]?.style.top).toBe("-60px");
+    expect(segments[0]?.style.height).toBe("80px");
 
     overlay.dispose();
     history.dispose();

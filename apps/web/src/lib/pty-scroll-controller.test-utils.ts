@@ -57,8 +57,11 @@ type PtyScrollTestTerminal = Terminal & {
   rows: number;
   cols: number;
   scrollToLine: ReturnType<typeof vi.fn>;
+  registerMarker: ReturnType<typeof vi.fn>;
   buffer: {
+    onBufferChange: ReturnType<typeof vi.fn>;
     active: {
+      type: "normal" | "alternate";
       length: number;
       baseY: number;
       viewportY: number;
@@ -69,19 +72,46 @@ type PtyScrollTestTerminal = Terminal & {
   };
 };
 
+export interface PtyScrollTestMarker {
+  line: number;
+  isDisposed: boolean;
+  dispose: ReturnType<typeof vi.fn>;
+}
+
 export function createPtyScrollTerminal(lineTextByIndex: Record<number, string> = {}) {
   let scrollHandler: Handler = () => {};
   let renderHandler: Handler = () => {};
+  let writeParsedHandler: Handler = () => {};
+  let bufferChangeHandler: Handler = () => {};
   const disposeScroll = vi.fn();
   const disposeRender = vi.fn();
+  const disposeWriteParsed = vi.fn();
+  const disposeBufferChange = vi.fn();
+  const markers: PtyScrollTestMarker[] = [];
   const scrollToLine = vi.fn((ydisp: number) => {
     terminal.buffer.active.viewportY = ydisp;
+  });
+  const registerMarker = vi.fn((cursorYOffset = 0) => {
+    const marker: PtyScrollTestMarker = {
+      line: terminal.buffer.active.baseY + terminal.buffer.active.cursorY + cursorYOffset,
+      isDisposed: false,
+      dispose: vi.fn(() => {
+        marker.isDisposed = true;
+      }),
+    };
+    markers.push(marker);
+    return marker;
   });
   const terminal = {
     rows: 20,
     cols: 80,
     buffer: {
+      onBufferChange: vi.fn((handler: Handler) => {
+        bufferChangeHandler = handler;
+        return { dispose: disposeBufferChange };
+      }),
       active: {
+        type: "normal" as "normal" | "alternate",
         length: 100,
         get baseY() {
           return Math.max(0, terminal.buffer.active.length - terminal.rows);
@@ -95,6 +125,7 @@ export function createPtyScrollTerminal(lineTextByIndex: Record<number, string> 
       },
     },
     scrollToLine,
+    registerMarker,
     onScroll: vi.fn((handler: Handler) => {
       scrollHandler = handler;
       return { dispose: disposeScroll };
@@ -103,13 +134,22 @@ export function createPtyScrollTerminal(lineTextByIndex: Record<number, string> 
       renderHandler = handler;
       return { dispose: disposeRender };
     }),
+    onWriteParsed: vi.fn((handler: Handler) => {
+      writeParsedHandler = handler;
+      return { dispose: disposeWriteParsed };
+    }),
   } as unknown as PtyScrollTestTerminal;
 
   return {
     terminal,
     emitScroll: () => scrollHandler(),
     emitRender: () => renderHandler(),
+    emitWriteParsed: () => writeParsedHandler(),
+    emitBufferChange: () => bufferChangeHandler(),
     disposeScroll,
     disposeRender,
+    disposeWriteParsed,
+    disposeBufferChange,
+    markers,
   };
 }

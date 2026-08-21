@@ -3,7 +3,6 @@ export type PtyTouchVerticalDirection = "toward-live" | "toward-history";
 
 export interface PtyTouchScrollState {
   startedAtCursorAwareBottom: boolean;
-  startedReviewing: boolean;
   startClientX: number | null;
   startScrollLeft: number | null;
   lastClientY: number | null;
@@ -11,13 +10,11 @@ export interface PtyTouchScrollState {
   lastHorizontalGestureAt: number | null;
   gestureMode: TouchScrollGestureMode | null;
   verticalDirection: PtyTouchVerticalDirection | null;
-  reviewEndResumeEligible: boolean;
 }
 
 export function createInitialPtyTouchScrollState(): PtyTouchScrollState {
   return {
     startedAtCursorAwareBottom: false,
-    startedReviewing: false,
     startClientX: null,
     startScrollLeft: null,
     lastClientY: null,
@@ -25,7 +22,6 @@ export function createInitialPtyTouchScrollState(): PtyTouchScrollState {
     lastHorizontalGestureAt: null,
     gestureMode: null,
     verticalDirection: null,
-    reviewEndResumeEligible: false,
   };
 }
 
@@ -33,7 +29,6 @@ export function beginPtyTouchScroll(
   state: PtyTouchScrollState,
   input: {
     startedAtCursorAwareBottom: boolean;
-    startedReviewing: boolean;
     startClientX: number | null;
     startClientY: number | null;
     startScrollLeft: number;
@@ -43,14 +38,12 @@ export function beginPtyTouchScroll(
   return {
     ...state,
     startedAtCursorAwareBottom: input.startedAtCursorAwareBottom,
-    startedReviewing: input.startedReviewing,
     startClientX: input.startClientX,
     startScrollLeft: input.startScrollLeft,
     lastClientY: input.startClientY,
     lastGestureAt: input.now,
     gestureMode: input.startClientY === null ? null : "pending",
     verticalDirection: null,
-    reviewEndResumeEligible: false,
   };
 }
 
@@ -106,27 +99,17 @@ export function lockPtyTouchVerticalGesture(
     ...state,
     gestureMode: "vertical",
     verticalDirection: direction,
-    reviewEndResumeEligible: state.startedReviewing && direction === "toward-live",
   };
-}
-
-export function consumePtyTouchReviewEndResume(state: PtyTouchScrollState): PtyTouchScrollState {
-  if (!state.reviewEndResumeEligible) return state;
-  return { ...state, reviewEndResumeEligible: false };
 }
 
 export function resetPtyTouchScrollSession(state: PtyTouchScrollState): PtyTouchScrollState {
   return {
     ...state,
     startedAtCursorAwareBottom: false,
-    startedReviewing: false,
     startClientX: null,
     startScrollLeft: null,
     lastClientY: null,
     gestureMode: null,
     verticalDirection: null,
-    // Keep this one bit through the short native-inertia window after touchend. It describes
-    // ownership established at the first vertical lock, not a second scroll position.
-    reviewEndResumeEligible: state.reviewEndResumeEligible,
   };
 }

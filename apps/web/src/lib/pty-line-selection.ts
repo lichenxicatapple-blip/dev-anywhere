@@ -341,8 +341,11 @@ export function getTerminalPointAtClient({
   if (!measured?.cellW || !measured.cellH) return null;
 
   const rect = screen.getBoundingClientRect();
-  const rawRow =
-    terminal.buffer.active.viewportY + Math.floor((clientY - rect.top) / measured.cellH);
+  const projection = getRenderedPtyHistoryProjectionRange(host);
+  const projectionRect = projection?.element.getBoundingClientRect();
+  const rowOrigin = projection?.startLine ?? terminal.buffer.active.viewportY;
+  const topOrigin = projectionRect?.top ?? rect.top;
+  const rawRow = rowOrigin + Math.floor((clientY - topOrigin) / measured.cellH);
   const rawColumn = Math.floor((clientX - rect.left) / measured.cellW);
   if (clampToBuffer) {
     if (terminal.buffer.active.length <= 0 || terminal.cols <= 0) return null;
@@ -353,28 +356,20 @@ export function getTerminalPointAtClient({
   }
   if (rawColumn < 0 || rawColumn >= terminal.cols) return null;
 
-  // The frozen review and live-backfill rows are real painted buffer rows, but they can sit above
-  // xterm's own viewport. Their shell carries the authoritative buffer interval; hit-test it
-  // before the native screen so blank padding can never be mistaken for selectable content.
-  const projection = getRenderedPtyHistoryProjectionRange(host);
-  if (projection) {
-    const { startLine, endLine } = projection;
-    const projectionRect = projection.element.getBoundingClientRect();
-    const row = startLine + Math.floor((clientY - projectionRect.top) / measured.cellH);
-    if (
-      Number.isInteger(startLine) &&
-      Number.isInteger(endLine) &&
-      row >= startLine &&
-      row <= endLine &&
-      row >= 0 &&
-      row < terminal.buffer.active.length
-    ) {
-      return normalizePointToGlyphStart(terminal, host, { row, column: rawColumn });
-    }
+  // While a live projection is present it is the painted row plane, including the native rows
+  // immediately outside its serialized interval. xterm's active viewport may already point at a
+  // requested future paint, so mixing it back in here would move selections before the pixels do.
+  if (projection && projectionRect) {
+    const projectionBottom =
+      projectionRect.top + (projection.endLine - projection.startLine + 1) * measured.cellH;
+    const screenBottom = rect.top + terminal.rows * measured.cellH;
+    const insideProjection = clientY >= projectionRect.top && clientY < projectionBottom;
+    const insideNativeScreen = clientY >= rect.top && clientY < screenBottom;
+    if (!insideProjection && !insideNativeScreen) return null;
+  } else {
+    const rowInNativeViewport = Math.floor((clientY - rect.top) / measured.cellH);
+    if (rowInNativeViewport < 0 || rowInNativeViewport >= terminal.rows) return null;
   }
-
-  const rowInNativeViewport = Math.floor((clientY - rect.top) / measured.cellH);
-  if (rowInNativeViewport < 0 || rowInNativeViewport >= terminal.rows) return null;
   if (rawRow < 0 || rawRow >= terminal.buffer.active.length) return null;
 
   return normalizePointToGlyphStart(terminal, host, {
@@ -408,12 +403,11 @@ export function getClientPositionForTerminalPoint({
   const width = Math.max(1, line?.getCell(glyphStart)?.getWidth() ?? 1);
   const columnOffset = affinity === "after" ? glyphStart + width : glyphStart;
 
-  // Review/live-backfill rows are painted by a frozen projection shell. Its row identity can
-  // rebase while scrollback trims even though the shell itself deliberately stays in place. Use
-  // the same shell + rebased interval as the forward hit-test above so point -> client and client
-  // -> point remain exact inverses for the frame the user can actually see.
+  // A live projection is the authoritative row plane for the whole painted frame, not only for
+  // rows inside its serialized interval. This keeps handles attached to the visible pixels while
+  // xterm's active viewport is ahead of the host paint during compositor-native scrolling.
   const projection = getRenderedPtyHistoryProjectionRange(host);
-  if (projection && point.row >= projection.startLine && point.row <= projection.endLine) {
+  if (projection) {
     const projectionRect = projection.element.getBoundingClientRect();
     return {
       left: rect.left + columnOffset * measured.cellW,

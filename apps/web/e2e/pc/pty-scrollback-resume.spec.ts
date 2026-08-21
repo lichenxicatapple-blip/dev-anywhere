@@ -7,7 +7,11 @@
 // 如果 bug 在 e2e 能复现, 这条 spec 就是 fail; 修好之后变 green。
 import { expect, test } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
-import { expectPtyCursorAwareBottom, expectPtyRendered } from "../pty-scroll-helpers";
+import {
+  expectPtyCursorAwareBottom,
+  expectPtyRendered,
+  readPtyScrollMetrics,
+} from "../pty-scroll-helpers";
 
 const SESSION_ID = "pty-scrollback-resume";
 const PROBE_TOKEN = "PROBE-AFTER-SCROLLBACK-RESUME";
@@ -38,6 +42,8 @@ test.describe("PTY scrollback resume", () => {
       .toContain("line 199");
 
     const terminal = page.locator('[data-slot="pty-terminal"]');
+    await expectPtyCursorAwareBottom(page);
+    const liveBottomBeforeReview = (await readPtyScrollMetrics(page)).scrollTop;
 
     // page.mouse.wheel 走真 wheel 事件路径, 比 dispatchEvent 更接近真实交互。
     const termBox = await terminal.boundingBox();
@@ -71,23 +77,65 @@ test.describe("PTY scrollback resume", () => {
         ),
       )
       .toBeGreaterThanOrEqual(10);
-    expect(await terminal.evaluate((node) => node.scrollTop)).toBeCloseTo(reviewedScrollTop, 0);
-    await expectPtyRendered(page);
-
-    // 走 controller-owned wheel 路径回到底部。这里故意使用与离开历史相同量级的
-    // 普通滚轮步进，而不是一个 10_000px 巨跳：review 的可见末端仍是输出前的底部，
-    // 新增的 10 行位于该冻结边界之后。用户越过冻结边界时应恢复 live，不需要追逐
-    // 一个还会随输出继续增长的不可见像素目标。
-    for (let i = 0; i < 6; i++) {
-      await page.mouse.wheel(0, 120);
-    }
-    await page.evaluate(() => {
-      const current = window as Window & { __ptyScrollbackOutputTimer?: number };
+    const appendedCount = await page.evaluate(() => {
+      const current = window as Window & {
+        __ptyScrollbackOutputCount?: number;
+        __ptyScrollbackOutputTimer?: number;
+      };
       if (current.__ptyScrollbackOutputTimer !== undefined) {
         window.clearInterval(current.__ptyScrollbackOutputTimer);
         delete current.__ptyScrollbackOutputTimer;
       }
+      return current.__ptyScrollbackOutputCount ?? 0;
     });
+    const lastMidToken = `mid ${String(appendedCount - 1).padStart(2, "0")}`;
+    await expect
+      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+      .toContain(lastMidToken);
+    expect(await terminal.evaluate((node) => node.scrollTop)).toBeCloseTo(reviewedScrollTop, 0);
+    await expectPtyRendered(page);
+    await expect(page.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
+
+    const currentBottom = await readPtyScrollMetrics(page);
+    expect(currentBottom.maxScrollTop).toBeGreaterThan(liveBottomBeforeReview + 100);
+    const cellHeight = await page
+      .locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows > div')
+      .first()
+      .evaluate((row) => row.getBoundingClientRect().height);
+
+    // Ordinary wheel input must walk through the buffer that grew while the user was reading.
+    // Crossing the old live bottom is not permission to jump to the new one; only the explicit
+    // "back to latest" action may skip intermediate rows.
+    let crossedOldBottomWhileStillReviewing = false;
+    for (let i = 0; i < 24; i++) {
+      const beforeStep = await readPtyScrollMetrics(page);
+      if (beforeStep.bottomGap <= 8) break;
+      await page.mouse.wheel(0, 120);
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
+      const afterStep = await readPtyScrollMetrics(page);
+      const travel = afterStep.scrollTop - beforeStep.scrollTop;
+      expect(
+        travel,
+        `wheel step ${i + 1} must not jump to the latest output`,
+      ).toBeGreaterThanOrEqual(0);
+      expect(
+        travel,
+        `wheel step ${i + 1} must remain proportional to its input`,
+      ).toBeLessThanOrEqual(120 + cellHeight + 2);
+      if (
+        beforeStep.scrollTop < liveBottomBeforeReview - 8 &&
+        afterStep.scrollTop >= liveBottomBeforeReview - 8
+      ) {
+        expect(afterStep.bottomGap).toBeGreaterThan(8);
+        crossedOldBottomWhileStillReviewing = true;
+      }
+    }
+    expect(crossedOldBottomWhileStillReviewing).toBe(true);
     await expectPtyCursorAwareBottom(page);
 
     // 探针: 滚回底之后再 sendPty 一行, 必须能在合理时间内看见 (说明渲染没冻)。

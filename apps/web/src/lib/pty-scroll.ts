@@ -46,6 +46,12 @@ interface PtyLiveBackfillPlan {
   topOffset: number;
 }
 
+interface PtyLiveViewportBridgeInput extends HostTopInput {
+  bufferLength: number;
+  visibleTopLine: number;
+  visibleContentHeight: number;
+}
+
 function normalizeNearIntegerRows(value: number): number {
   const nearest = Math.round(value);
   const tolerance = Number.EPSILON * Math.max(1, Math.abs(value));
@@ -258,6 +264,7 @@ interface HostTopInput {
   rows: number;
   cellH: number;
   visibleContentHeight?: number;
+  visibleTopLine?: number;
 }
 
 /**
@@ -280,8 +287,9 @@ export function computeHostTop(input: HostTopInput): number {
 }
 
 /**
- * Projects the scrollback rows immediately before xterm's live viewport into
- * the otherwise unused space above a short, bottom-aligned server-owned PTY.
+ * Projects the live buffer rows immediately before xterm's viewport into space that xterm's
+ * integer-row renderer cannot cover. This includes both a short, bottom-aligned server-owned PTY
+ * and the leading sliver exposed by a fractional native scroll position.
  *
  * This is derived rendering only: the remote rows, xterm viewport and semantic
  * scroll position stay unchanged. A fresh terminal without preceding history
@@ -289,6 +297,18 @@ export function computeHostTop(input: HostTopInput): number {
  */
 export function computePtyLiveBackfill(input: HostTopInput): PtyLiveBackfillPlan | null {
   if (input.cellH <= 0 || input.rows <= 0 || input.ydisp <= 0) return null;
+  if (input.visibleTopLine !== undefined) {
+    const startLine = Math.max(0, Math.floor(input.visibleTopLine));
+    const endLine = Math.floor(input.ydisp) - 1;
+    if (endLine < startLine) return null;
+    return {
+      startLine,
+      endLine,
+      rowCount: endLine - startLine + 1,
+      rowHeight: input.cellH,
+      topOffset: (startLine - input.ydisp) * input.cellH,
+    };
+  }
   const visibleContentHeight = Math.max(0, input.visibleContentHeight ?? 0);
   const hostHeight = input.rows * input.cellH;
   const gapHeight = Math.max(0, visibleContentHeight - hostHeight);
@@ -304,6 +324,45 @@ export function computePtyLiveBackfill(input: HostTopInput): PtyLiveBackfillPlan
     rowCount,
     rowHeight: input.cellH,
     topOffset: -rowCount * input.cellH,
+  };
+}
+
+/**
+ * Builds a one-paint live bridge while xterm is replacing its integer-row viewport.
+ *
+ * A native compositor scroll moves the outer container before xterm's DOM renderer paints the
+ * newly requested viewport. Moving the host immediately would put the previous glyph rows at the
+ * new buffer coordinates; leaving it alone can expose space beyond the old host. This projection
+ * covers exactly the browser-visible buffer rows from xterm's current buffer until `onRender`
+ * commits the new host position. It has no independent/frozen scroll boundary.
+ */
+export function computePtyLiveViewportBridge(
+  input: PtyLiveViewportBridgeInput,
+): PtyLiveBackfillPlan | null {
+  if (
+    input.cellH <= 0 ||
+    input.rows <= 0 ||
+    input.bufferLength <= 0 ||
+    input.visibleContentHeight <= 0
+  ) {
+    return null;
+  }
+
+  const visibleTopLine = Math.max(0, input.visibleTopLine);
+  const visibleEndLine = normalizeNearIntegerRows(
+    visibleTopLine + input.visibleContentHeight / input.cellH,
+  );
+  const startLine = Math.min(input.bufferLength - 1, Math.floor(visibleTopLine));
+  const endLine = Math.min(
+    input.bufferLength - 1,
+    Math.max(startLine, Math.ceil(visibleEndLine) - 1),
+  );
+  return {
+    startLine,
+    endLine,
+    rowCount: endLine - startLine + 1,
+    rowHeight: input.cellH,
+    topOffset: (startLine - input.ydisp) * input.cellH,
   };
 }
 

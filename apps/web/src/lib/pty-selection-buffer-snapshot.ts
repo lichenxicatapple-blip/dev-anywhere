@@ -7,8 +7,8 @@ const CELL_HAS_CONTENT = 0b0000_0100;
  * Clone the public, text-relevant part of an xterm line.
  *
  * xterm recycles mutable buffer lines as output arrives. A managed selection must keep the exact
- * cells the user saw when the range was established, especially when the visible review layer is
- * an older frozen projection of that buffer.
+ * cells painted by a transient live-backfill row when the range was established, even if the
+ * underlying live buffer trims or repaints before the user copies it.
  */
 export function snapshotPtySelectionBufferLine(line: IBufferLine, cols: number): IBufferLine {
   const length = Math.max(0, Math.min(line.length, cols));

@@ -119,10 +119,63 @@ interface ReviewScrollSample {
   touchActive: boolean;
   hostTopDrift: number;
   renderedLine: number | null;
+  renderedBufferLine: number | null;
+  renderedSource: "live-backfill" | "native" | null;
+  viewportBridgeActive: boolean;
   renderedLineContentTop: number | null;
-  renderedLineViewportTop: number | null;
   renderedRowHeight: number | null;
+  renderedFrameIdentityDriftRows: number | null;
+  renderedTopOrSeamGap: number | null;
   renderedBottomGap: number | null;
+}
+
+interface VisibleNativeRow {
+  text: string;
+  top: number;
+  bottom: number;
+  height: number;
+  fullyVisible: boolean;
+}
+
+async function visibleNativeRows(page: Page): Promise<VisibleNativeRow[]> {
+  return ptyTerminal(page).evaluate((container) => {
+    const containerRect = container.getBoundingClientRect();
+    const containerStyle = getComputedStyle(container);
+    const contentTop = containerRect.top + (Number.parseFloat(containerStyle.paddingTop) || 0);
+    const contentBottom =
+      containerRect.bottom - (Number.parseFloat(containerStyle.paddingBottom) || 0);
+    const screen = container.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+    if (!screen) return [];
+    const nativeRows = Array.from(screen.children).find(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement &&
+        child.classList.contains("xterm-rows") &&
+        child.dataset.slot === undefined,
+    );
+    if (!nativeRows) return [];
+
+    return Array.from(nativeRows.children)
+      .filter((row): row is HTMLElement => row instanceof HTMLElement)
+      .map((row) => {
+        const rect = row.getBoundingClientRect();
+        return {
+          text: row.textContent ?? "",
+          top: rect.top,
+          bottom: rect.bottom,
+          height: rect.height,
+          fullyVisible: rect.top >= contentTop - 1 && rect.bottom <= contentBottom + 1,
+        };
+      })
+      .filter((row) => row.bottom > contentTop && row.top < contentBottom);
+  });
+}
+
+async function waitForAnimationFrames(page: Page, count = 2): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
 }
 
 async function startReviewScrollSampling(page: Page): Promise<void> {
@@ -139,39 +192,133 @@ async function startReviewScrollSampling(page: Page): Promise<void> {
       const snapshot = window.__devAnywherePtyDebug?.();
       const scrollContainer = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
       if (snapshot && scrollContainer) {
-        const frozenRows = document.querySelector<HTMLElement>(
-          '[data-slot="pty-review-snapshot"] .xterm-rows',
-        );
         const screen = document.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
-        const liveRows =
+        const nativeRows =
           screen &&
           Array.from(screen.children).find(
             (child): child is HTMLElement =>
-              child instanceof HTMLElement && child.classList.contains("xterm-rows"),
+              child instanceof HTMLElement &&
+              child.classList.contains("xterm-rows") &&
+              child.dataset.slot === undefined,
           );
-        const rows = frozenRows ?? liveRows ?? null;
+        const backfill = screen?.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+        const backfillRows = backfill?.querySelector<HTMLElement>(".xterm-rows") ?? null;
+        const backfillStartLine = Number(backfill?.dataset.startLine);
+        const backfillEndLine = Number(backfill?.dataset.endLine);
+        const viewportBridgeActive =
+          Number.isInteger(backfillEndLine) && backfillEndLine >= snapshot.term.viewportY;
+        // A short remote PTY paints one continuous viewport from two sources: serialized rows
+        // above the host and xterm's native rows below it. Sample that visible composite instead
+        // of assuming either source owns the whole phone viewport during a deferred touch frame.
+        const rowSources: Array<{
+          kind: "live-backfill" | "native";
+          rows: HTMLElement;
+          startLine: number | null;
+          clipTop: number;
+          clipBottom: number;
+        }> = [];
+        if (backfill && backfillRows) {
+          const rect = backfill.getBoundingClientRect();
+          rowSources.push({
+            kind: "live-backfill",
+            rows: backfillRows,
+            startLine: Number.isInteger(backfillStartLine) ? backfillStartLine : null,
+            clipTop: rect.top,
+            clipBottom: rect.bottom,
+          });
+        }
+        // A viewport bridge is opaque and intentionally covers the old native rows until xterm's
+        // next render. Do not count the hidden rows underneath as a second visible source.
+        if (!viewportBridgeActive && screen && nativeRows) {
+          const rect = screen.getBoundingClientRect();
+          rowSources.push({
+            kind: "native",
+            rows: nativeRows,
+            startLine: snapshot.term.viewportY,
+            clipTop: rect.top,
+            clipBottom: rect.bottom,
+          });
+        }
         let renderedLine: number | null = null;
+        let renderedBufferLine: number | null = null;
+        let renderedSource: "live-backfill" | "native" | null = null;
         let renderedLineContentTop: number | null = null;
-        let renderedLineViewportTop: number | null = null;
         let renderedRowHeight: number | null = null;
+        let renderedFrameIdentityDriftRows: number | null = null;
+        let renderedTopOrSeamGap: number | null = null;
         let renderedBottomGap: number | null = null;
-        if (rows) {
+        if (rowSources.length > 0) {
           const containerRect = scrollContainer.getBoundingClientRect();
-          const paddingBottom =
-            Number.parseFloat(getComputedStyle(scrollContainer).paddingBottom) || 0;
-          renderedBottomGap = Math.max(
-            0,
-            containerRect.bottom - paddingBottom - rows.getBoundingClientRect().bottom,
-          );
-          for (const row of Array.from(rows.children)) {
-            const match = row.textContent?.match(/(?:rapid-review|visible-live-tail)\s+(\d+)/);
-            if (!match) continue;
-            renderedLine = Number.parseInt(match[1], 10);
-            const rowRect = row.getBoundingClientRect();
-            renderedLineContentTop = rowRect.top - containerRect.top + snapshot.container.scrollTop;
-            renderedLineViewportTop = rowRect.top - containerRect.top;
-            renderedRowHeight = rowRect.height;
-            break;
+          const containerStyle = getComputedStyle(scrollContainer);
+          const contentTop =
+            containerRect.top + (Number.parseFloat(containerStyle.paddingTop) || 0);
+          const contentBottom =
+            containerRect.bottom - (Number.parseFloat(containerStyle.paddingBottom) || 0);
+          const paintedIntervals: Array<{ top: number; bottom: number }> = [];
+          const identifiedRows: Array<{
+            line: number;
+            bufferLine: number | null;
+            source: "live-backfill" | "native";
+            top: number;
+            height: number;
+          }> = [];
+
+          for (const source of rowSources) {
+            for (const [rowIndex, child] of Array.from(source.rows.children).entries()) {
+              if (!(child instanceof HTMLElement)) continue;
+              const rect = child.getBoundingClientRect();
+              const paintedTop = Math.max(contentTop, source.clipTop, rect.top);
+              const paintedBottom = Math.min(contentBottom, source.clipBottom, rect.bottom);
+              if (paintedBottom <= paintedTop) continue;
+              paintedIntervals.push({ top: paintedTop, bottom: paintedBottom });
+
+              const match = child.textContent?.match(/(?:rapid-review|visible-live-tail)\s+(\d+)/);
+              if (!match) continue;
+              identifiedRows.push({
+                line: Number.parseInt(match[1], 10),
+                bufferLine: source.startLine === null ? null : source.startLine + rowIndex,
+                source: source.kind,
+                top: rect.top,
+                height: rect.height,
+              });
+            }
+          }
+
+          paintedIntervals.sort((left, right) => left.top - right.top);
+          let paintedThrough = contentTop;
+          renderedTopOrSeamGap = 0;
+          for (const interval of paintedIntervals) {
+            renderedTopOrSeamGap = Math.max(
+              renderedTopOrSeamGap,
+              Math.max(0, interval.top - paintedThrough),
+            );
+            paintedThrough = Math.max(paintedThrough, interval.bottom);
+          }
+          renderedBottomGap = Math.max(0, contentBottom - paintedThrough);
+
+          identifiedRows.sort((left, right) => left.top - right.top || left.line - right.line);
+          const firstVisible = identifiedRows[0] ?? null;
+          if (firstVisible) {
+            renderedLine = firstVisible.line;
+            renderedBufferLine = firstVisible.bufferLine;
+            renderedSource = firstVisible.source;
+            renderedLineContentTop = firstVisible.top - contentTop + snapshot.container.scrollTop;
+            renderedRowHeight = firstVisible.height;
+            renderedFrameIdentityDriftRows = Math.max(
+              ...identifiedRows.map((row) => {
+                const physicalRowDelta =
+                  (row.top - firstVisible.top) / Math.max(firstVisible.height, 1);
+                const contentIdentityDelta = row.line - firstVisible.line;
+                const bufferIdentityDelta =
+                  row.bufferLine === null || firstVisible.bufferLine === null
+                    ? contentIdentityDelta
+                    : row.bufferLine - firstVisible.bufferLine;
+                return Math.max(
+                  Math.abs(physicalRowDelta - contentIdentityDelta),
+                  Math.abs(bufferIdentityDelta - contentIdentityDelta),
+                );
+              }),
+            );
           }
         }
         testWindow.__ptyReviewScrollSamples?.push({
@@ -183,9 +330,13 @@ async function startReviewScrollSampling(page: Page): Promise<void> {
           touchActive: snapshot.touchScrollActive,
           hostTopDrift: snapshot.host.topDrift,
           renderedLine,
+          renderedBufferLine,
+          renderedSource,
+          viewportBridgeActive,
           renderedLineContentTop,
-          renderedLineViewportTop,
           renderedRowHeight,
+          renderedFrameIdentityDriftRows,
+          renderedTopOrSeamGap,
           renderedBottomGap,
         });
       }
@@ -224,18 +375,21 @@ function expectReviewScrollSamplesStable(
   samples: ReviewScrollSample[],
   options: { minimumScrollRange: number },
 ): void {
-  const maxHostTopDrift = Math.max(...samples.map((sample) => Math.abs(sample.hostTopDrift)));
   const renderedSamples = samples.filter(
     (
       sample,
     ): sample is ReviewScrollSample & {
       renderedLine: number;
+      renderedBufferLine: number;
       renderedLineContentTop: number;
       renderedRowHeight: number;
+      renderedFrameIdentityDriftRows: number;
     } =>
       sample.renderedLine !== null &&
+      sample.renderedBufferLine !== null &&
       sample.renderedLineContentTop !== null &&
-      sample.renderedRowHeight !== null,
+      sample.renderedRowHeight !== null &&
+      sample.renderedFrameIdentityDriftRows !== null,
   );
   const baseline = renderedSamples[0];
   if (!baseline) throw new Error("PTY rendered row samples are not available");
@@ -254,15 +408,40 @@ function expectReviewScrollSamplesStable(
   const maxRenderedRowHeight = Math.max(
     ...renderedSamples.map((sample) => sample.renderedRowHeight),
   );
+  const settledHostSamples = samples.filter((sample) => !sample.viewportBridgeActive);
+  const maxSettledHostTopDrift = Math.max(
+    0,
+    ...settledHostSamples.map((sample) => Math.abs(sample.hostTopDrift)),
+  );
+  const maxRenderedBufferIdentityDriftRows = Math.max(
+    ...renderedSamples.map((sample) =>
+      Math.abs(
+        sample.renderedBufferLine -
+          baseline.renderedBufferLine -
+          (sample.renderedLine - baseline.renderedLine),
+      ),
+    ),
+  );
+  const maxRenderedFrameIdentityDriftRows = Math.max(
+    ...renderedSamples.map((sample) => sample.renderedFrameIdentityDriftRows),
+  );
+  const maxRenderedTopOrSeamGap = Math.max(
+    ...samples.map((sample) => sample.renderedTopOrSeamGap ?? Number.POSITIVE_INFINITY),
+  );
   const maxRenderedBottomGap = Math.max(...samples.map((sample) => sample.renderedBottomGap ?? 0));
 
   expect(samples.length).toBeGreaterThan(10);
   expect(scrollRange).toBeGreaterThan(options.minimumScrollRange);
-  expect(maxHostTopDrift).toBeLessThanOrEqual(maxRenderedRowHeight + 1);
-  // The frozen snapshot starts at the first physically visible buffer row, while xterm keeps a
-  // separate fixed-size viewport that covers the visible bottom edge. Their row indices are not
-  // expected to share a constant offset; physical line/content continuity below is the invariant.
+  // While the compositor is ahead of xterm, the opaque live bridge is the visual authority and
+  // the host deliberately stays at its last painted row. Once the bridge settles, host geometry
+  // must again agree with the logical viewport within one row.
+  expect(maxSettledHostTopDrift).toBeLessThanOrEqual(maxRenderedRowHeight + 1);
+  // The xterm buffer may swap which row occupies a viewport slot as the user scrolls. Its buffer
+  // line number and physical content position must nevertheless advance together without gaps.
   expect(maxRenderedGeometryDriftRows).toBeLessThanOrEqual(0.05);
+  expect(maxRenderedBufferIdentityDriftRows).toBeLessThanOrEqual(0);
+  expect(maxRenderedFrameIdentityDriftRows).toBeLessThanOrEqual(0.05);
+  expect(maxRenderedTopOrSeamGap).toBeLessThanOrEqual(1);
   expect(maxRenderedBottomGap).toBeLessThanOrEqual(8);
 }
 
@@ -277,30 +456,6 @@ function expectViewportNeverPulledTowardBottom(samples: ReviewScrollSample[]): v
     .map((sample, index) => ({ previous: samples[index], sample }))
     .filter(({ previous, sample }) => sample.viewportY > previous.viewportY);
   expect(Math.max(...viewportMoves), JSON.stringify(upwardMoves, null, 2)).toBeLessThanOrEqual(0);
-}
-
-function expectReviewedFrameFrozen(samples: ReviewScrollSample[]): void {
-  const renderedSamples = samples.filter(
-    (
-      sample,
-    ): sample is ReviewScrollSample & {
-      renderedLine: number;
-      renderedLineViewportTop: number;
-    } => sample.renderedLine !== null && sample.renderedLineViewportTop !== null,
-  );
-  const baseline = renderedSamples[0];
-  if (!baseline) throw new Error("PTY reviewed frame samples are not available");
-
-  expect(renderedSamples.length).toBeGreaterThan(10);
-  expect(new Set(renderedSamples.map((sample) => sample.renderedLine))).toEqual(
-    new Set([baseline.renderedLine]),
-  );
-  const maxViewportDrift = Math.max(
-    ...renderedSamples.map((sample) =>
-      Math.abs(sample.renderedLineViewportTop - baseline.renderedLineViewportTop),
-    ),
-  );
-  expect(maxViewportDrift).toBeLessThanOrEqual(1);
 }
 
 async function readPtyScreenBottomGap(page: Page): Promise<number> {
@@ -462,6 +617,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expect
       .poll(() => readPtyScrollMetrics(emuPage).then((metrics) => metrics.bottomGap))
       .toBeGreaterThan(200);
+    await expect(emuPage.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
 
     const button = backToBottom(emuPage);
     await expect(button).toBeVisible();
@@ -469,6 +625,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
 
     await touchTap(emuPage, button);
     await expectPtyCursorAwareBottom(emuPage);
+    await expect(emuPage.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
     await expect(button).toHaveJSProperty("inert", true);
   });
 
@@ -513,7 +670,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       .toContain("WORKING elapsed 02s");
   });
 
-  test("shallow review keeps the visible frame frozen while live output continues", async ({
+  test("shallow history touch keeps a visible live status updating without a snapshot", async ({
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-visible-live-tail`;
@@ -521,85 +678,61 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 120, rows: 54 });
     await sendPtyLines(emuPage, { count: 260, prefix: "visible-live-tail" });
+    await sendPtyOutput(emuPage, "WORKING elapsed 01s\r\nSTATUS FOOTER A\r\nSTATUS FOOTER B");
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("WORKING elapsed 01s");
     await expectPtyCursorAwareBottom(emuPage);
 
-    await ptyTerminal(emuPage).evaluate((element) => {
-      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -4, cancelable: true }));
-    });
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    const rowHeight = await emuPage
+      .locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows > div')
+      .first()
+      .evaluate((row) => row.getBoundingClientRect().height);
+    const x = box.x + box.width / 2;
+    const startY = box.y + box.height * 0.42;
+    const shallowDistance = Math.max(20, Math.min(rowHeight * 1.25, 30));
+    await touchDrag(emuPage, { x, y: startY }, { x, y: startY + shallowDistance });
+    await waitForAnimationFrames(emuPage);
 
     await expect
       .poll(async () => {
         const snapshot = await readPtyDebugSnapshot(emuPage);
         return {
           mode: snapshot?.verticalIntent.mode,
-          cursorInViewport: snapshot?.anchor.cursorInViewport,
+          awayFromBottom: (snapshot?.anchor.scrollTopDeltaToBottom ?? 0) < -8,
         };
       })
-      .toEqual({ mode: "reviewing", cursorInViewport: true });
+      .toEqual({ mode: "reviewing", awayFromBottom: true });
 
+    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    await expect(reviewSnapshot).toHaveCount(0);
     const beforeUpdate = await readPtyDebugSnapshot(emuPage);
     if (!beforeUpdate) throw new Error("PTY debug snapshot is not available");
-    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
-    await expect(reviewSnapshot).toBeVisible();
-    const frozenText = await reviewSnapshot.textContent();
-    const frozenBox = await reviewSnapshot.boundingBox();
-    const frozenFirstLine = Number(
-      frozenText?.match(/visible-live-tail\s+(\d+)/)?.[1] ?? Number.NaN,
+    const workingBefore = (await visibleNativeRows(emuPage)).find((row) =>
+      row.text.includes("WORKING elapsed 01s"),
     );
-    expect(frozenFirstLine).not.toBeNaN();
+    expect(workingBefore, "the in-place Working row must remain visible").toBeTruthy();
 
-    await startReviewScrollSampling(emuPage);
-
-    await sendPtyOutput(
-      emuPage,
-      "\u001b7\u001b[1A\rWORKING elapsed 03s                              \u001b8",
-    );
+    await sendPtyOutput(emuPage, "\u001b7\u001b[2A\rWORKING elapsed 02s\u001b[K\u001b8");
     await expect
       .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
-      .toContain("WORKING elapsed 03s");
-    await expect(reviewSnapshot).toContainText("WORKING elapsed 03s");
-
-    for (let index = 1; index <= 12; index += 1) {
-      await sendPtyOutput(emuPage, `visible-tail-append ${String(index).padStart(2, "0")}\r\n`);
-      await emuPage.waitForTimeout(50);
-    }
+      .toContain("WORKING elapsed 02s");
     await expect
-      .poll(
-        () =>
-          emuPage.evaluate(
-            () =>
-              (
-                window as typeof window & {
-                  __ptyReviewScrollSamples?: ReviewScrollSample[];
-                }
-              ).__ptyReviewScrollSamples?.filter(
-                (sample) => sample.renderedLine !== null && sample.renderedLineViewportTop !== null,
-              ).length ?? 0,
-          ),
-        {
-          timeout: 10_000,
-          message: "PTY frozen review did not produce enough rendered frame samples",
-        },
-      )
-      .toBeGreaterThan(10);
-    const reviewSamples = await stopReviewScrollSampling(emuPage);
-    expectReviewedFrameFrozen(reviewSamples);
-    expect(await reviewSnapshot.boundingBox()).toEqual(frozenBox);
+      .poll(() => visibleNativeRows(emuPage).then((rows) => rows.map((row) => row.text).join("\n")))
+      .toContain("WORKING elapsed 02s");
 
     const afterUpdate = await readPtyDebugSnapshot(emuPage);
     if (!afterUpdate) throw new Error("PTY debug snapshot is not available");
     expect(afterUpdate.container.scrollTop).toBeCloseTo(beforeUpdate.container.scrollTop, 0);
     expect(afterUpdate.verticalIntent.mode).toBe("reviewing");
-
-    await ptyTerminal(emuPage).evaluate((element, deltaY) => {
-      element.dispatchEvent(new WheelEvent("wheel", { deltaY, cancelable: true }));
-    }, -Math.ceil(beforeUpdate.cell.h));
-    await expect
-      .poll(async () => {
-        const text = (await reviewSnapshot.textContent()) ?? "";
-        return Number(text.match(/visible-live-tail\s+(\d+)/)?.[1] ?? Number.NaN);
-      })
-      .toBe(frozenFirstLine - 1);
+    const workingAfter = (await visibleNativeRows(emuPage)).find((row) =>
+      row.text.includes("WORKING elapsed 02s"),
+    );
+    expect(workingAfter, "the updated Working row must remain visible in place").toBeTruthy();
+    expect(workingAfter?.top).toBeCloseTo(workingBefore?.top ?? Number.NaN, 0);
+    await expect(reviewSnapshot).toHaveCount(0);
   });
 
   test("fast upward flick keeps host geometry aligned with the xterm viewport", async ({
@@ -630,6 +763,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     const samples = await stopReviewScrollSampling(emuPage);
 
     expectReviewScrollSamplesStable(samples, { minimumScrollRange: 100 });
+    await expect(emuPage.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
   });
 
   test("ordinary upward drag keeps a newly created PTY fully painted", async ({ emuPage }) => {
@@ -658,6 +792,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     const samples = await stopReviewScrollSampling(emuPage);
 
     expectReviewScrollSamplesStable(samples, { minimumScrollRange: 60 });
+    await expect(emuPage.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
   });
 
   test("slow upward review is never pulled one row back by pending output", async ({ emuPage }) => {
@@ -706,6 +841,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     expectViewportNeverPulledTowardBottom(samples);
     const snapshot = await readPtyDebugSnapshot(emuPage);
     expect(snapshot?.verticalIntent.mode).toBe("reviewing");
+    await expect(emuPage.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
   });
 
   test("new PTY output while scrolled up surfaces 有新消息 indicator without snapping to bottom", async ({
@@ -722,6 +858,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       .poll(() => readPtyScrollMetrics(emuPage).then((metrics) => metrics.bottomGap))
       .toBeGreaterThan(200);
     await expect(backToBottom(emuPage)).toBeVisible();
+    await expect(emuPage.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
     const beforeScrollTop = (await readPtyScrollMetrics(emuPage)).scrollTop;
 
     await sendPtyOutput(emuPage, "frame-while-user-scrolled-up\r\n");
@@ -729,105 +866,178 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     await expect(backToBottomNewIndicator(emuPage)).toBeVisible();
     const afterScrollTop = (await readPtyScrollMetrics(emuPage)).scrollTop;
     expect(afterScrollTop).toBeLessThanOrEqual(beforeScrollTop + 8);
+    await expect(emuPage.locator('[data-slot="pty-review-snapshot"]')).toHaveCount(0);
   });
 
-  test("continuous output freezes review and returns to the latest live output", async ({
+  test("continuous output keeps the read position anchored; BackToBottom jumps explicitly", async ({
     emuPage,
   }) => {
-    const sessionId = `${SESSION_ID}-frozen-review`;
+    const sessionId = `${SESSION_ID}-history-anchor`;
     await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
-    await sendPtyLines(emuPage, { count: 240, prefix: "frozen-history" });
+    await sendPtyLines(emuPage, { count: 240, prefix: "anchored-history" });
     await expectPtyScrollable(emuPage, 200);
+    await expectPtyCursorAwareBottom(emuPage);
 
-    // Touch gesture recognition is covered by the preceding Android cases. Keep
-    // this continuous-output case focused on review-frame freezing by entering
-    // the prerequisite state deterministically and verifying it explicitly.
-    await scrollPtyToTop(emuPage);
+    const terminalBox = await ptyTerminal(emuPage).boundingBox();
+    if (!terminalBox) throw new Error("PTY terminal is not visible");
+    const x = terminalBox.x + terminalBox.width / 2;
+    await touchDrag(
+      emuPage,
+      { x, y: terminalBox.y + terminalBox.height * 0.28 },
+      { x, y: terminalBox.y + terminalBox.height * 0.72 },
+    );
+    await waitForAnimationFrames(emuPage);
     await expect
       .poll(() => readPtyDebugSnapshot(emuPage).then((debug) => debug?.verticalIntent.mode))
       .toBe("reviewing");
     await expect
       .poll(() => readPtyScrollMetrics(emuPage).then((metrics) => metrics.bottomGap))
-      .toBeGreaterThan(200);
+      .toBeGreaterThan(100);
 
-    const snapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
-    await expect(snapshot).toBeVisible();
-    const frozenText = await snapshot.textContent();
-    const frozenBox = await snapshot.boundingBox();
+    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    await expect(reviewSnapshot).toHaveCount(0);
+    const anchor = (await visibleNativeRows(emuPage)).find(
+      (row) => row.fullyVisible && row.text.includes("anchored-history"),
+    );
+    expect(anchor, "a fully visible history row is required as the mobile anchor").toBeTruthy();
+    const beforeOutput = await readPtyScrollMetrics(emuPage);
 
-    for (let index = 1; index <= 12; index += 1) {
+    for (let index = 1; index <= 24; index += 1) {
       await sendPtyOutput(emuPage, `mobile-live-append ${String(index).padStart(2, "0")}\r\n`);
-      await emuPage.waitForTimeout(50);
+      await emuPage.waitForTimeout(25);
     }
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("mobile-live-append 24");
+    await waitForAnimationFrames(emuPage);
 
-    await expect(snapshot).toHaveText(frozenText ?? "");
-    await expect(snapshot).not.toContainText("mobile-live-append");
-    expect(await snapshot.boundingBox()).toEqual(frozenBox);
+    const afterOutput = await readPtyScrollMetrics(emuPage);
+    expect(afterOutput.scrollTop).toBeCloseTo(beforeOutput.scrollTop, 0);
+    expect(afterOutput.maxScrollTop).toBeGreaterThan(beforeOutput.maxScrollTop);
+    const anchoredAfterOutput = (await visibleNativeRows(emuPage)).find(
+      (row) => row.text === anchor?.text,
+    );
+    expect(anchoredAfterOutput, "background output must preserve the row being read").toBeTruthy();
+    expect(anchoredAfterOutput?.top).toBeCloseTo(anchor?.top ?? Number.NaN, 0);
+    await expect(reviewSnapshot).toHaveCount(0);
+    await expect(backToBottomNewIndicator(emuPage)).toBeVisible();
     const button = backToBottom(emuPage);
     await expect(button).toHaveAttribute("aria-label", "回到最新");
 
     await touchTap(emuPage, button);
 
     await expectPtyCursorAwareBottom(emuPage);
-    await expect(snapshot).toHaveCount(0);
+    await expect(reviewSnapshot).toHaveCount(0);
     await expect(button).toHaveJSProperty("inert", true);
     const liveRows = emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows');
-    await expect(liveRows).toContainText("mobile-live-append 12");
+    await expect(liveRows).toContainText("mobile-live-append 24");
 
     await sendPtyOutput(emuPage, "mobile-live-after-return\r\n");
     await expect(liveRows).toContainText("mobile-live-after-return");
     await expectPtyCursorAwareBottom(emuPage);
   });
 
-  test("toward-live touch leaves a frozen review without exposing a bottom blank", async ({
+  test("toward-live touch walks through appended rows before reaching the latest output", async ({
     emuPage,
   }) => {
-    const sessionId = `${SESSION_ID}-touch-frozen-end`;
+    const sessionId = `${SESSION_ID}-touch-progressive-tail`;
     await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 270, rows: 57 });
-    await sendPtyLines(emuPage, { count: 520, prefix: "touch-frozen-history" });
+    await sendPtyLines(emuPage, { count: 520, prefix: "touch-history" });
     await expectPtyCursorAwareBottom(emuPage);
-
-    await ptyTerminal(emuPage).evaluate((element) => {
-      element.dispatchEvent(new WheelEvent("wheel", { deltaY: -320, cancelable: true }));
-    });
-    await expect
-      .poll(() => readPtyDebugSnapshot(emuPage).then((debug) => debug?.verticalIntent.mode))
-      .toBe("reviewing");
-
-    for (let index = 1; index <= 12; index += 1) {
-      await sendPtyOutput(emuPage, `touch-frozen-live ${String(index).padStart(2, "0")}\r\n`);
-    }
-    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
-    await expect(reviewSnapshot).toBeVisible();
-    await expect(reviewSnapshot).not.toContainText("touch-frozen-live 12");
+    const oldLiveBottom = (await readPtyScrollMetrics(emuPage)).scrollTop;
 
     const box = await ptyTerminal(emuPage).boundingBox();
     if (!box) throw new Error("PTY terminal is not visible");
     const x = box.x + box.width / 2;
-    await touchFlick(
+    await touchDrag(
       emuPage,
+      { x, y: box.y + box.height * 0.22 },
       { x, y: box.y + box.height * 0.78 },
-      { x, y: box.y + box.height * 0.18 },
     );
+    await waitForAnimationFrames(emuPage);
+    await expect
+      .poll(() => readPtyDebugSnapshot(emuPage).then((debug) => debug?.verticalIntent.mode))
+      .toBe("reviewing");
+    await expect
+      .poll(() => readPtyScrollMetrics(emuPage).then((metrics) => metrics.bottomGap))
+      .toBeGreaterThan(200);
+    const reviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
+    await expect(reviewSnapshot).toHaveCount(0);
+    const historyAnchor = (await visibleNativeRows(emuPage)).find(
+      (row) => row.fullyVisible && row.text.includes("touch-history"),
+    );
+    expect(historyAnchor, "a visible mobile history row is required before output").toBeTruthy();
+    const beforeOutput = await readPtyScrollMetrics(emuPage);
 
+    for (let index = 1; index <= 48; index += 1) {
+      await sendPtyOutput(emuPage, `touch-live ${String(index).padStart(2, "0")}\r\n`);
+    }
+    await expect
+      .poll(() => emuPage.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", sessionId))
+      .toContain("touch-live 48");
+    await waitForAnimationFrames(emuPage);
+    const afterOutput = await readPtyScrollMetrics(emuPage);
+    expect(afterOutput.scrollTop).toBeCloseTo(beforeOutput.scrollTop, 0);
+    expect(afterOutput.maxScrollTop).toBeGreaterThan(beforeOutput.maxScrollTop);
+    const historyAnchorAfterOutput = (await visibleNativeRows(emuPage)).find(
+      (row) => row.text === historyAnchor?.text,
+    );
+    expect(
+      historyAnchorAfterOutput,
+      "new output must not replace the history viewport",
+    ).toBeTruthy();
+    expect(historyAnchorAfterOutput?.top).toBeCloseTo(historyAnchor?.top ?? Number.NaN, 0);
+    await expect(reviewSnapshot).toHaveCount(0);
+
+    const cellHeight = historyAnchor?.height ?? 0;
+    const gestureDistance = Math.max(72, Math.min(box.height * 0.18, 112));
+    const traversedFrames: string[] = [];
+    let crossedOldBottomWhileStillReviewing = false;
+    for (let step = 0; step < 24; step += 1) {
+      const beforeStep = await readPtyScrollMetrics(emuPage);
+      if (beforeStep.bottomGap <= 8) break;
+
+      const startY = box.y + box.height * 0.7;
+      await touchDrag(emuPage, { x, y: startY }, { x, y: startY - gestureDistance });
+      await waitForAnimationFrames(emuPage);
+      const afterStep = await readPtyScrollMetrics(emuPage);
+      const travel = afterStep.scrollTop - beforeStep.scrollTop;
+      expect(travel, `touch step ${step + 1} must move toward live output`).toBeGreaterThanOrEqual(
+        -2,
+      );
+      expect(
+        travel,
+        `touch step ${step + 1} must not jump across the newly appended range`,
+      ).toBeLessThanOrEqual(gestureDistance + cellHeight + 16);
+      traversedFrames.push((await visibleNativeRows(emuPage)).map((row) => row.text).join("\n"));
+      if (beforeStep.scrollTop < oldLiveBottom - 8 && afterStep.scrollTop >= oldLiveBottom - 8) {
+        expect(afterStep.bottomGap).toBeGreaterThan(8);
+        crossedOldBottomWhileStillReviewing = true;
+      }
+    }
+
+    expect(crossedOldBottomWhileStillReviewing).toBe(true);
+    expect(
+      traversedFrames.some(
+        (text) => /touch-live (?:0[1-9]|1\d)/.test(text) && !text.includes("touch-live 48"),
+      ),
+      "ordinary touch scrolling must expose intermediate appended rows before the latest row",
+    ).toBe(true);
     await expectPtyCursorAwareBottom(emuPage);
     await expect(reviewSnapshot).toHaveCount(0);
     await expect(
       emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows'),
-    ).toContainText("touch-frozen-live 12");
+    ).toContainText("touch-live 48");
     await expect.poll(() => readPtyScreenBottomGap(emuPage)).toBeLessThanOrEqual(8);
 
-    // Reaching the frozen boundary must clear logical review ownership, not merely make the
-    // current frame look aligned. The production failure stayed visually plausible at the old
-    // tail, then the next remote frame exposed that it was still frozen in review mode.
-    await sendPtyOutput(emuPage, "touch-frozen-after-return\r\n");
+    await sendPtyOutput(emuPage, "touch-after-return\r\n");
     await expect(
       emuPage.locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows'),
-    ).toContainText("touch-frozen-after-return");
+    ).toContainText("touch-after-return");
     await expect
       .poll(() => readPtyDebugSnapshot(emuPage).then((debug) => debug?.verticalIntent.mode))
       .toBe("following");

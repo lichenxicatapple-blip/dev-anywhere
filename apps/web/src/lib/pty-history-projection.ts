@@ -1,7 +1,7 @@
 import type { IBufferLine } from "@xterm/xterm";
 import { snapshotPtySelectionBufferLine } from "./pty-selection-buffer-snapshot";
 
-export type PtyHistoryProjectionKind = "review" | "live-backfill";
+export type PtyHistoryProjectionKind = "live-backfill";
 
 export interface PtyHistoryProjection {
   kind: PtyHistoryProjectionKind;
@@ -29,7 +29,6 @@ interface PtyHistorySerializedCell {
   isRenderedFgRGB: boolean;
 }
 
-const REVIEW_SLOT = "pty-review-snapshot";
 const LIVE_BACKFILL_SLOT = "pty-live-backfill";
 interface PtyHistoryProjectionSelectionSource {
   readonly capturedRowIdentityOffset: number;
@@ -43,9 +42,7 @@ const projectionSelectionLines = new WeakMap<HTMLElement, PtyHistoryProjectionSe
 const EMPTY_PROJECTION_SELECTION_LINES: ReadonlyMap<number, IBufferLine> = new Map();
 
 function getRenderedProjection(host: HTMLElement): HTMLElement | null {
-  return host.querySelector<HTMLElement>(
-    '.xterm-screen [data-slot="pty-review-snapshot"], .xterm-screen [data-slot="pty-live-backfill"]',
-  );
+  return host.querySelector<HTMLElement>('.xterm-screen [data-slot="pty-live-backfill"]');
 }
 
 function getProjectionRowDelta(source: PtyHistoryProjectionSelectionSource): number {
@@ -67,7 +64,7 @@ export function getRenderedPtyHistoryProjectionRange(
   return { element: projection, startLine, endLine };
 }
 
-/** Returns the immutable lines painted by the current review/backfill shell. */
+/** Returns the immutable lines painted by the current live derived-row shell. */
 export function getRenderedPtyHistorySelectionLines(
   host: HTMLElement,
 ): ReadonlyMap<number, IBufferLine> {
@@ -76,7 +73,7 @@ export function getRenderedPtyHistorySelectionLines(
   if (!source) return EMPTY_PROJECTION_SELECTION_LINES;
 
   // A public xterm marker supplies the row-identity delta even when viewportY is clamped at the
-  // absolute top of scrollback. Rebase immutable rows instead of replacing the frozen frame.
+  // absolute top of scrollback. Rebase immutable rows until the live projection is refreshed.
   const delta = getProjectionRowDelta(source);
   if (delta === 0) return source.lines;
   if (source.rebasedDelta === delta && source.rebasedLines) return source.rebasedLines;
@@ -90,7 +87,7 @@ export function getRenderedPtyHistorySelectionLines(
   return rebased;
 }
 
-/** Returns the immutable line painted by the current review/backfill shell, if that row is one. */
+/** Returns the immutable line painted by the current live-backfill shell, if that row is one. */
 export function getRenderedPtyHistorySelectionLine(
   host: HTMLElement,
   row: number,
@@ -102,9 +99,7 @@ function findRenderedRows(screen: HTMLElement): HTMLElement | null {
   return (
     Array.from(screen.children).find(
       (child): child is HTMLElement =>
-        child instanceof HTMLElement &&
-        child.classList.contains("xterm-rows") &&
-        child.dataset.slot !== REVIEW_SLOT,
+        child instanceof HTMLElement && child.classList.contains("xterm-rows"),
     ) ?? null
   );
 }
@@ -113,13 +108,12 @@ function createSnapshotShell(
   screen: HTMLElement,
   rows: HTMLElement,
   topOffset: number,
-  slot: typeof REVIEW_SLOT | typeof LIVE_BACKFILL_SLOT,
   startLine: number,
   endLine: number,
   capturedRowIdentityOffset: number,
 ): HTMLElement {
   const next = document.createElement("div");
-  next.dataset.slot = slot;
+  next.dataset.slot = LIVE_BACKFILL_SLOT;
   next.dataset.startLine = String(startLine);
   next.dataset.endLine = String(endLine);
   next.dataset.rowIdentityOffset = String(capturedRowIdentityOffset);
@@ -131,7 +125,14 @@ function createSnapshotShell(
     left: "0",
     height: rows.style.height || "100%",
     overflow: "hidden",
-    pointerEvents: "none",
+    // Keep the live backfill in the same native pan hit surface as xterm. When this derived row
+    // band is taller than the live host (common on phones connected to a short remote PTY), making
+    // it transparent to hit testing targets the overflow-hidden spacer instead; Android Chrome
+    // then does not hand that gesture to the outer overflow scroller. Selection/link hit testing
+    // already resolves projected buffer rows from client coordinates, so this shell can safely
+    // participate in the xterm event path without owning its own interaction state.
+    pointerEvents: "auto",
+    touchAction: "pan-x pan-y",
     backgroundColor: getComputedStyle(screen).backgroundColor,
   });
   next.append(rows);
@@ -259,12 +260,10 @@ function createSerializedRows(
 }
 
 /**
- * Renders the single derived history layer used around xterm's server-owned viewport.
- *
- * `review` freezes the rows the user is reading. `live-backfill` paints the real
- * rows immediately preceding a short, bottom-aligned live viewport. Both are
- * projections of xterm's buffer, never independent scroll state, and this
- * renderer owns exactly one projection node at a time.
+ * Renders rows derived from xterm's live buffer. In steady state they fill the fractional/short-
+ * host band immediately preceding xterm's viewport. During a native compositor scroll they may
+ * briefly cover the visible plane until xterm paints its requested integer-row viewport. They
+ * never own scroll state or a frozen boundary; user review stays anchored to the live buffer.
  */
 export function attachPtyHistoryProjection(
   host: HTMLElement,
@@ -317,30 +316,28 @@ export function attachPtyHistoryProjection(
       options.getSerializedCell,
     );
     if (!rows) return false;
-    const slot = projection.kind === "review" ? REVIEW_SLOT : LIVE_BACKFILL_SLOT;
     const capturedRowIdentityOffset = options.getBufferRowIdentityOffset?.() ?? 0;
     const next = createSnapshotShell(
       screen,
       rows,
       projection.topOffset,
-      slot,
       projection.startLine,
       projection.endLine,
       capturedRowIdentityOffset,
     );
-    const frozenLines = new Map<number, IBufferLine>();
+    const projectedLines = new Map<number, IBufferLine>();
     if (options.getSelectionLine) {
       for (let line = projection.startLine; line <= projection.endLine; line += 1) {
         const sourceLine = options.getSelectionLine(line);
         if (sourceLine) {
-          frozenLines.set(line, snapshotPtySelectionBufferLine(sourceLine, sourceLine.length));
+          projectedLines.set(line, snapshotPtySelectionBufferLine(sourceLine, sourceLine.length));
         }
       }
     }
     projectionSelectionLines.set(next, {
       capturedRowIdentityOffset,
       getCurrentRowIdentityOffset: options.getBufferRowIdentityOffset,
-      lines: frozenLines,
+      lines: projectedLines,
     });
     replaceProjection(next);
     return true;

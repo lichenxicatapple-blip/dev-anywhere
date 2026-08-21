@@ -59,8 +59,12 @@ describe("PTY buffer/client coordinate projection", () => {
     ).toEqual({ left: 40, top: 80 });
   });
 
-  it("hits the same frozen projected row after scrollback trim rebases viewportY", () => {
+  it("uses the live-backfill row plane while active viewportY is far ahead", () => {
     const { terminal, host } = geometryFixture();
+    Object.defineProperty(terminal.buffer.active, "viewportY", {
+      configurable: true,
+      value: 60,
+    });
     let rowIdentityOffset = 0;
     const line = {
       length: 20,
@@ -81,7 +85,7 @@ describe("PTY buffer/client coordinate projection", () => {
     });
     expect(
       projectionController.render({
-        kind: "review",
+        kind: "live-backfill",
         startLine: 25,
         endLine: 27,
         rowHeight: 20,
@@ -89,8 +93,8 @@ describe("PTY buffer/client coordinate projection", () => {
       }),
     ).toBe(true);
     rowIdentityOffset = -3;
-    const projection = screen.querySelector<HTMLElement>('[data-slot="pty-review-snapshot"]');
-    if (!projection) throw new Error("missing review projection");
+    const projection = screen.querySelector<HTMLElement>('[data-slot="pty-live-backfill"]');
+    if (!projection) throw new Error("missing live backfill projection");
     projection.getBoundingClientRect = () =>
       ({ left: 10, top: -20, width: 200, height: 60, right: 210, bottom: 40 }) as DOMRect;
 
@@ -113,5 +117,38 @@ describe("PTY buffer/client coordinate projection", () => {
         cellHeight: 20,
       }),
     ).toEqual({ left: 30, top: 20 });
+
+    // Row 26 is below the three serialized projection rows, but it is still on the same painted
+    // plane. Falling back to active.viewportY here would incorrectly resolve this point as row 62.
+    expect(
+      getTerminalPointAtClient({
+        terminal,
+        host,
+        clientX: 35,
+        clientY: 70,
+        cellWidth: 10,
+        cellHeight: 20,
+      }),
+    ).toEqual({ row: 26, column: 2 });
+    expect(
+      getTerminalPointAtClient({
+        terminal,
+        host,
+        clientX: 35,
+        clientY: 70,
+        cellWidth: 10,
+        cellHeight: 20,
+        clampToBuffer: true,
+      }),
+    ).toEqual({ row: 26, column: 2 });
+    expect(
+      getClientPositionForTerminalPoint({
+        terminal,
+        host,
+        point: { row: 29, column: 2 },
+        cellWidth: 10,
+        cellHeight: 20,
+      }),
+    ).toEqual({ left: 30, top: 140 });
   });
 });

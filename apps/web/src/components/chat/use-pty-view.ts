@@ -158,7 +158,6 @@ interface ScrollControllerHandle {
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
-  refreshReviewSnapshot: () => void;
   getDebugProbe: () => PtyScrollDebugProbe;
 }
 
@@ -835,7 +834,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       isInputEnabled: canAcceptInput,
       canFocus: canAcceptInput,
       onTerminalReady: (term) => {
-        // A rebuilt Terminal is a new buffer identity. Managed ranges, frozen row snapshots,
+        // A rebuilt Terminal is a new buffer identity. Managed ranges, captured selection rows,
         // markers and overlay listeners from the previous instance must never cross that boundary.
         clearPtySelection();
         const xterm = term as Terminal;
@@ -919,6 +918,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           },
           onTouchReviewStart: suppressPtyFocus,
           onHistoryProjectionChange: historyProjection.render,
+          getBufferRowIdentityOffset: bufferRowIdentity.getOffset,
         });
         scrollControllerRef.current = scrollCtrl;
         scrollDispose = scrollCtrl.dispose;

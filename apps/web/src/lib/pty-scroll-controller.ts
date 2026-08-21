@@ -1,8 +1,9 @@
-import type { Terminal } from "@xterm/xterm";
+import type { IMarker, Terminal } from "@xterm/xterm";
 import {
   computeHostTop,
   computePtyHostLayout,
   computePtyLiveBackfill,
+  computePtyLiveViewportBridge,
   computeScrollAnchor,
   computeScrollTarget,
   ydispToScrollTop,
@@ -56,30 +57,8 @@ interface PtyScrollControllerOptions {
   onUserVerticalScrollIntentChange?: (value: boolean) => void;
   onTouchReviewStart?: () => void;
   onHistoryProjectionChange?: (projection: PtyHistoryProjection | null) => boolean;
+  getBufferRowIdentityOffset?: () => number;
   atBottomThreshold?: number;
-}
-
-interface PtyReviewScrollAnchor {
-  scrollTop: number;
-  ydisp: number;
-  logicalTop: number;
-  cellH: number;
-  geometryOrigin: number;
-  frozenEndLine: number;
-  layoutSignature: string;
-}
-
-interface PtyReviewLayoutPlan {
-  ydisp: number;
-  snapshotStartLine: number;
-  logicalTop: number;
-  rowCount: number;
-  cellH: number;
-  hostTop: number;
-  scrollTop: number;
-  topOffset: number;
-  maxEndLine: number;
-  layoutSignature: string;
 }
 
 interface PtyLiveFrameSnapshot {
@@ -88,6 +67,14 @@ interface PtyLiveFrameSnapshot {
   viewportY: number;
   cursorBufferRow: number;
   anchor: ReturnType<typeof computeScrollAnchor>;
+}
+
+interface PtyLiveReviewAnchor {
+  marker: IMarker;
+  fractionalRowOffset: number;
+  lastLine: number;
+  rowIdentityOffset: number;
+  scrollTopAtCapture: number;
 }
 
 interface PtyVerticalFramePlan {
@@ -123,7 +110,6 @@ interface PtyScrollController {
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
   traceRawInputFollowFire: () => void;
-  refreshReviewSnapshot: () => void;
   // 暴露内部状态给 buildPtyScrollDebugSnapshot 拼装。生产路径不使用。
   getDebugProbe: () => PtyScrollDebugProbe;
 }
@@ -159,6 +145,7 @@ export function attachPtyScrollController(
     onUserVerticalScrollIntentChange,
     onTouchReviewStart,
     onHistoryProjectionChange,
+    getBufferRowIdentityOffset = () => 0,
     atBottomThreshold = PTY_SCROLL_CONFIG.bottom.defaultThresholdPx,
   } = options;
 
@@ -223,16 +210,26 @@ export function attachPtyScrollController(
   let pendingTermScrollReconcileFrame: number | null = null;
   let pendingTermScrollReconcileCancel: ((handle: number) => void) | null = null;
   let disposed = false;
-  let reviewProjectionRefreshPending = initialUserHasVerticalScrollIntent;
   let activeHistoryProjection: {
     kind: PtyHistoryProjection["kind"];
     key: string;
   } | null = null;
-  let reviewScrollAnchor: PtyReviewScrollAnchor | null = null;
+  let liveReviewAnchor: PtyLiveReviewAnchor | null = null;
+  // `term.buffer.active.viewportY` changes synchronously, while xterm's DOM rows paint on its next
+  // render frame. Keep the last host/DOM coordinate explicit so a native compositor scroll can
+  // bridge that interval without moving old glyphs to new buffer coordinates.
+  let positionedHostYdisp: number | null = null;
+  let deferredViewportPaintPending = false;
+  let activeBufferType = term.buffer.active.type;
+  let bufferBoundaryReconcileQueued = false;
+  let bufferBoundaryCrossedType = false;
+  // A same-type normal reset can be followed by an authoritative snapshot write in a later task.
+  // xterm parses that snapshot with user-scrolling reset to false, so it may advance viewportY to
+  // the tail again. Re-assert the replacement row-0 review anchor at onWriteParsed, before the
+  // renderer's RAF gets a chance to expose that tail for one frame.
+  let sameTypeReviewBoundaryAwaitingWrite = false;
 
   const userHasVerticalScrollIntent = (): boolean => isReviewing(verticalIntent);
-  const shouldPreserveReviewHost = (): boolean =>
-    userHasVerticalScrollIntent() && activeHistoryProjection?.kind === "review";
 
   const traceAdapter = createPtyScrollTraceAdapter({
     container,
@@ -381,8 +378,6 @@ export function attachPtyScrollController(
     notifyScrollState();
   };
 
-  const shouldDeferHostCommitForYdisp = (): boolean => verticalIntent.touchActive;
-
   const cancelPendingTouchScrollNotify = (): void => {
     if (pendingTouchScrollNotifyFrame === null) return;
     pendingTouchScrollNotifyCancel?.(pendingTouchScrollNotifyFrame);
@@ -423,10 +418,118 @@ export function attachPtyScrollController(
     trace("rawInputFollow:fire");
   };
 
-  function getReviewLayoutSignature(cellH: number): string {
+  const clearLiveReviewAnchor = (): void => {
+    liveReviewAnchor?.marker.dispose();
+    liveReviewAnchor = null;
+  };
+
+  const readReviewGeometry = (cellH: number) => {
     const { paddingTop, paddingBottom } = getVerticalInsets();
-    return [cellH, container.clientHeight, paddingTop, paddingBottom].join(":");
-  }
+    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
+    const geometryOrigin = computeHostTop({
+      ydisp: 0,
+      rows: term.rows,
+      cellH,
+      visibleContentHeight,
+    });
+    return { geometryOrigin, visibleContentHeight };
+  };
+
+  const captureLiveReviewAnchor = (): void => {
+    if (!userHasVerticalScrollIntent()) {
+      clearLiveReviewAnchor();
+      return;
+    }
+    const { cellH } = getDims();
+    const buffer = term.buffer.active;
+    if (
+      cellH <= 0 ||
+      buffer.length <= 0 ||
+      (buffer as typeof buffer & { type?: "normal" | "alternate" }).type === "alternate"
+    ) {
+      clearLiveReviewAnchor();
+      return;
+    }
+    const { geometryOrigin } = readReviewGeometry(cellH);
+    const logicalTop = Math.max(0, (container.scrollTop - geometryOrigin) / cellH);
+    const clampedLogicalTop = Math.min(buffer.length - 1, logicalTop);
+    const row = Math.floor(clampedLogicalTop);
+    const cursorRow = buffer.baseY + buffer.cursorY;
+    const marker = term.registerMarker(row - cursorRow);
+    clearLiveReviewAnchor();
+    liveReviewAnchor = {
+      marker,
+      fractionalRowOffset: clampedLogicalTop - row,
+      lastLine: marker.line,
+      rowIdentityOffset: getBufferRowIdentityOffset(),
+      scrollTopAtCapture: container.scrollTop,
+    };
+  };
+
+  const reconcileLiveReviewAnchor = (
+    cellH: number,
+    options: { includeDomDelta?: boolean } = {},
+  ): void => {
+    if (!userHasVerticalScrollIntent() || cellH <= 0) return;
+    const buffer = term.buffer.active;
+    if ((buffer as typeof buffer & { type?: "normal" | "alternate" }).type === "alternate") {
+      clearLiveReviewAnchor();
+      return;
+    }
+    const anchor = liveReviewAnchor;
+    if (!anchor) {
+      captureLiveReviewAnchor();
+      return;
+    }
+
+    const { geometryOrigin, visibleContentHeight } = readReviewGeometry(cellH);
+    const currentRowIdentityOffset = getBufferRowIdentityOffset();
+    const rowIdentityDelta = currentRowIdentityOffset - anchor.rowIdentityOffset;
+    const markerDisposed = anchor.marker.isDisposed || anchor.marker.line < 0;
+    const resolvedLine = Math.max(
+      0,
+      Math.min(
+        Math.max(0, buffer.length - 1),
+        markerDisposed ? anchor.lastLine + Math.min(0, rowIdentityDelta) : anchor.marker.line,
+      ),
+    );
+    const userDelta = options.includeDomDelta ? container.scrollTop - anchor.scrollTopAtCapture : 0;
+
+    const desiredScrollTop = Math.max(
+      0,
+      geometryOrigin + (resolvedLine + anchor.fractionalRowOffset) * cellH + userDelta,
+    );
+    if (Math.abs(container.scrollTop - desiredScrollTop) > 0.5) {
+      // xterm has already rebased its viewport for a trim. Move the outer native scroller by the
+      // same row delta before paint so the same buffer content stays under the reader's finger.
+      // When a compositor-owned gesture landed in the same frame, `userDelta` keeps that physical
+      // movement on top of the row-identity correction instead of letting either side win.
+      if (deferredViewportPaintPending) {
+        syncTransientViewportBridge(
+          positionedHostYdisp ?? term.buffer.active.viewportY,
+          cellH,
+          visibleContentHeight,
+          desiredScrollTop,
+        );
+      } else {
+        positionHostAt(term.buffer.active.viewportY, cellH, visibleContentHeight, desiredScrollTop);
+      }
+      container.scrollTop = desiredScrollTop;
+      lastSeenScrollTop = container.scrollTop;
+    }
+
+    if (markerDisposed || options.includeDomDelta) {
+      // A compositor/user delta changes which logical row the marker must identify. Re-register
+      // immediately at the corrected DOM coordinate so a second reconciliation in the same
+      // event cannot apply that delta twice against the old marker.
+      clearLiveReviewAnchor();
+      captureLiveReviewAnchor();
+      return;
+    }
+    anchor.lastLine = resolvedLine;
+    anchor.rowIdentityOffset = currentRowIdentityOffset;
+    anchor.scrollTopAtCapture = desiredScrollTop;
+  };
 
   function normalizeNearInteger(value: number): number {
     const rounded = Math.round(value);
@@ -434,129 +537,10 @@ export function attachPtyScrollController(
     return Math.abs(value - rounded) <= ulpTolerance ? rounded : value;
   }
 
-  function getFrozenReviewEndLine(): number {
-    const buffer = term.buffer.active;
-    const semanticEndLine = buffer.baseY + Math.max(buffer.cursorY, getCachedLiveLastY()) + 1;
-    return Math.max(1, Math.min(buffer.length, semanticEndLine));
-  }
-
-  function getReviewViewportY(
-    anchor: PtyReviewScrollAnchor,
-    logicalTop: number,
-    visibleRows: number,
-    cellH: number,
-  ): number {
-    const visibleEndLine = normalizeNearInteger(logicalTop + visibleRows);
-    const edgeViewportY = Math.max(
-      0,
-      Math.min(term.buffer.active.baseY, Math.ceil(visibleEndLine) - term.rows),
-    );
-    const layoutUnchanged = anchor.layoutSignature === getReviewLayoutSignature(cellH);
-    const notMovingTowardLive = logicalTop <= anchor.logicalTop;
-    // On the same layout, an upward/no-op gesture must never advance xterm beyond the row that
-    // was actually painted when review ownership began. `ceil(visibleEnd) - rows` is still the
-    // right coverage target once it moves upward, and remains authoritative during a real layout
-    // change where the expanded viewport needs more live rows below the snapshot.
-    return layoutUnchanged && notMovingTowardLive
-      ? Math.min(edgeViewportY, anchor.ydisp)
-      : edgeViewportY;
-  }
-
-  function createReviewScrollAnchor(cellH: number): PtyReviewScrollAnchor {
-    const ydisp = term.buffer.active.viewportY;
-    const { paddingTop, paddingBottom } = getVerticalInsets();
-    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    // Derive the origin from the logical layout, never from possibly deferred host.style.top.
-    // A short server-owned PTY is bottom-aligned inside a taller viewport; dropping that offset at
-    // review entry makes the whole frame jump by exactly the unused height. A keyboard-open long
-    // host has no offset, so its later long→short review reflow still uses the raw row origin.
-    const geometryOrigin =
-      computeHostTop({ ydisp, rows: term.rows, cellH, visibleContentHeight }) - ydisp * cellH;
-    const logicalTop = normalizeNearInteger((container.scrollTop - geometryOrigin) / cellH);
-    return {
-      scrollTop: container.scrollTop,
-      ydisp,
-      logicalTop,
-      cellH,
-      geometryOrigin,
-      frozenEndLine: getFrozenReviewEndLine(),
-      layoutSignature: getReviewLayoutSignature(cellH),
-    };
-  }
-
-  function computeReviewLayoutPlan(cellH: number): PtyReviewLayoutPlan | null {
-    const anchor = reviewScrollAnchor;
-    if (!anchor || cellH <= 0) return null;
-    const { frozenEndLine, visibleRows, maxLogicalTop } = getReviewLogicalRange(anchor, cellH);
-    const sourceCellH = anchor.cellH > 0 ? anchor.cellH : cellH;
-    // The painted row and DOM scroll offset are an atomic pair. Mapping from that pair preserves
-    // cases such as viewportY=10 at scrollTop=199.7; absolute floor(199.7 / 20) would invent row 9.
-    const requestedLogicalTop = normalizeNearInteger(
-      anchor.logicalTop + (container.scrollTop - anchor.scrollTop) / sourceCellH,
-    );
-    const logicalTop = Math.max(0, Math.min(requestedLogicalTop, maxLogicalTop));
-    const snapshotStartLine = Math.floor(logicalTop);
-    const visibleEndLine = normalizeNearInteger(logicalTop + visibleRows);
-    // The serialized snapshot starts at the physical first visible row. xterm's separate integer
-    // viewport follows the same row delta from the captured frame, preserving their offset and
-    // fractional boundary instead of recalculating a second coordinate from the viewport bottom.
-    const ydisp = getReviewViewportY(anchor, logicalTop, visibleRows, cellH);
-    const hostTop = anchor.geometryOrigin + ydisp * cellH;
-    const scrollTop = Math.max(0, anchor.geometryOrigin + logicalTop * cellH);
-    const availableRows = Math.max(1, frozenEndLine - snapshotStartLine);
-    const visibleRowCount = Math.max(1, Math.ceil(visibleEndLine) - snapshotStartLine);
-    return {
-      ydisp,
-      snapshotStartLine,
-      logicalTop,
-      rowCount: Math.min(visibleRowCount, availableRows),
-      cellH,
-      hostTop,
-      scrollTop,
-      topOffset: (snapshotStartLine - ydisp) * cellH,
-      maxEndLine: frozenEndLine - 1,
-      layoutSignature: getReviewLayoutSignature(cellH),
-    };
-  }
-
-  function getReviewLogicalRange(anchor: PtyReviewScrollAnchor, cellH: number) {
-    const { paddingTop, paddingBottom } = getVerticalInsets();
-    const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    const frozenEndLine = Math.max(1, Math.min(anchor.frozenEndLine, term.buffer.active.length));
-    const visibleRows = visibleContentHeight / cellH;
-    return {
-      frozenEndLine,
-      visibleRows,
-      maxLogicalTop: Math.max(0, frozenEndLine - visibleRows),
-    };
-  }
-
-  function getFrozenReviewScrollEnd(): number | null {
-    const anchor = reviewScrollAnchor;
-    if (!anchor) return null;
-    const { cellH } = getDims();
-    if (cellH <= 0) return null;
-    const { maxLogicalTop } = getReviewLogicalRange(anchor, cellH);
-    return Math.max(0, anchor.geometryOrigin + maxLogicalTop * cellH);
-  }
-
-  function getReviewProjection(plan: PtyReviewLayoutPlan): PtyHistoryProjection {
-    return {
-      kind: "review",
-      startLine: plan.snapshotStartLine,
-      // One extra buffer row keeps the bottom covered while native scrolling sits between
-      // xterm's integer viewport rows. It is visual overscan, not a second viewport size.
-      endLine: Math.min(plan.snapshotStartLine + plan.rowCount, plan.maxEndLine),
-      rowHeight: plan.cellH,
-      topOffset: plan.topOffset,
-    };
-  }
-
   function getHistoryProjectionKey(projection: PtyHistoryProjection): string {
-    const revision = projection.kind === "live-backfill" ? bufferRevision : "frozen";
     return [
       projection.kind,
-      revision,
+      bufferRevision,
       projection.startLine,
       projection.endLine,
       projection.rowHeight,
@@ -588,94 +572,6 @@ export function attachPtyScrollController(
     return false;
   }
 
-  function renderReviewProjection(plan: PtyReviewLayoutPlan): boolean {
-    return renderHistoryProjection(getReviewProjection(plan), { force: true });
-  }
-
-  function commitReviewLayout(reason: string, options: { capture?: boolean } = {}): boolean {
-    const plan = computeReviewLayoutPlan(getDims().cellH);
-    if (!plan) return false;
-    const anchor = reviewScrollAnchor;
-    if (!anchor) return false;
-
-    const layoutChanged = anchor.layoutSignature !== plan.layoutSignature;
-    const scrollClampTolerance =
-      Number.EPSILON * Math.max(1, Math.abs(plan.scrollTop), Math.abs(container.scrollTop)) * 8;
-    const scrollWasClamped = Math.abs(plan.scrollTop - container.scrollTop) > scrollClampTolerance;
-    if (layoutChanged || scrollWasClamped) {
-      reviewScrollAnchor = {
-        ...anchor,
-        scrollTop: plan.scrollTop,
-        ydisp: plan.ydisp,
-        logicalTop: plan.logicalTop,
-        cellH: plan.cellH,
-        layoutSignature: plan.layoutSignature,
-      };
-    }
-    // Grow/shrink the native range from the frozen logical end before committing scrollTop.
-    // This prevents Chrome from clamping the review frame between the host and viewport writes.
-    updateSpacer();
-    if (options.capture ?? true) {
-      reviewProjectionRefreshPending = !renderReviewProjection(plan);
-    }
-    lastSeenScrollTop = commitVerticalFrameCoordinates({
-      viewportY: plan.ydisp,
-      scrollTop: plan.scrollTop,
-      cellH: plan.cellH,
-    });
-    trace("review-layout:commit", {
-      ydisp: plan.ydisp,
-      details: `reason=${reason} rows=${plan.rowCount} scrollTop=${plan.scrollTop} hostTop=${plan.hostTop}`,
-    });
-    notifyScroll();
-    return true;
-  }
-
-  function captureRenderedReviewFrame(cellH: number): boolean {
-    // Freeze the geometry origin of the frame xterm has already painted. In review mode this
-    // origin, rather than a later short-host offset, remains the row-coordinate basis across
-    // keyboard and visual-viewport changes.
-    reviewScrollAnchor = createReviewScrollAnchor(cellH);
-    const plan = computeReviewLayoutPlan(cellH);
-    if (!plan) return false;
-    const captured = renderReviewProjection(plan);
-    if (!captured) reviewScrollAnchor = null;
-    reviewProjectionRefreshPending = !captured;
-    if (captured) {
-      // Capturing more rows is only half of the review transaction. When the visible area is
-      // taller than the server-owned host (or the frozen end is close), the planned first row
-      // can differ from the live xterm viewport that was painted before review ownership was
-      // established. Commit the host / xterm viewport / DOM scroll pair immediately so there is
-      // no frame where an expanded snapshot still sits on the old short-host bottom offset.
-      commitReviewLayout("review-entry", { capture: false });
-    }
-    return captured;
-  }
-
-  function reconcileReviewProjection(): void {
-    if (!userHasVerticalScrollIntent()) return;
-    const { cellH } = getDims();
-    if (cellH <= 0) return;
-    if (!reviewScrollAnchor) {
-      captureRenderedReviewFrame(cellH);
-      return;
-    }
-    const layoutChanged = reviewScrollAnchor.layoutSignature !== getReviewLayoutSignature(cellH);
-    if (layoutChanged) {
-      commitReviewLayout("geometry-change");
-      return;
-    }
-    if (!reviewProjectionRefreshPending) return;
-    const plan = computeReviewLayoutPlan(cellH);
-    if (!plan) return;
-    reviewProjectionRefreshPending = !renderReviewProjection(plan);
-  }
-
-  const refreshReviewSnapshot = (): void => {
-    reviewProjectionRefreshPending = true;
-    reconcileReviewProjection();
-  };
-
   const dispatchVerticalIntent = (event: PtyVerticalIntentEvent): PtyVerticalIntentResult => {
     const previousReviewing = isReviewing(verticalIntent);
     const result = reducePtyVerticalIntent(verticalIntent, event, { atBottomThreshold });
@@ -690,17 +586,8 @@ export function attachPtyScrollController(
     const nextReviewing = isReviewing(verticalIntent);
     if (previousReviewing !== nextReviewing) {
       onUserVerticalScrollIntentChange?.(nextReviewing);
-      if (nextReviewing) {
-        reviewProjectionRefreshPending = true;
-        const { cellH } = getDims();
-        if (cellH > 0) {
-          reviewProjectionRefreshPending = !captureRenderedReviewFrame(cellH);
-        }
-      } else {
-        reviewProjectionRefreshPending = false;
-        reviewScrollAnchor = null;
-        renderHistoryProjection(null);
-      }
+      if (nextReviewing) captureLiveReviewAnchor();
+      else clearLiveReviewAnchor();
     }
     if (result.notifyTouchReviewStart) {
       cancelPendingPageResumeRestore("touch-review");
@@ -709,13 +596,24 @@ export function attachPtyScrollController(
     return result;
   };
 
-  const syncLiveBackfill = (ydisp: number, cellH: number, visibleContentHeight: number): void => {
-    if (userHasVerticalScrollIntent()) return;
+  const syncLiveBackfill = (
+    ydisp: number,
+    cellH: number,
+    visibleContentHeight: number,
+    scrollTop: number,
+  ): void => {
+    const geometryOrigin = computeHostTop({
+      ydisp: 0,
+      rows: term.rows,
+      cellH,
+      visibleContentHeight,
+    });
     const plan = computePtyLiveBackfill({
       ydisp,
       rows: term.rows,
       cellH,
       visibleContentHeight,
+      visibleTopLine: Math.max(0, (scrollTop - geometryOrigin) / cellH),
     });
     if (!plan) {
       renderHistoryProjection(null);
@@ -730,7 +628,61 @@ export function attachPtyScrollController(
     });
   };
 
-  const positionHostAt = (ydisp: number, cellH: number, visibleContentHeight?: number): void => {
+  const syncTransientViewportBridge = (
+    paintedYdisp: number,
+    cellH: number,
+    visibleContentHeight: number,
+    scrollTop: number,
+  ): void => {
+    const geometryOrigin = computeHostTop({
+      ydisp: 0,
+      rows: term.rows,
+      cellH,
+      visibleContentHeight,
+    });
+    const plan = computePtyLiveViewportBridge({
+      ydisp: paintedYdisp,
+      rows: term.rows,
+      cellH,
+      bufferLength: term.buffer.active.length,
+      visibleContentHeight,
+      visibleTopLine: Math.max(0, (scrollTop - geometryOrigin) / cellH),
+    });
+    if (!plan) {
+      renderHistoryProjection(null);
+      return;
+    }
+    // The xterm rows still represent `paintedYdisp`, but a keyboard/font/layout change may already
+    // have changed the row height or the short-host geometry origin while that paint is pending.
+    // Anchor the live bridge in the *current* buffer coordinate plane relative to the host's actual
+    // (still old) DOM position. When geometry is unchanged this reduces exactly to
+    // `(startLine - paintedYdisp) * cellH`; during relayout it prevents the bridge from inheriting
+    // the old host origin and jumping by the keyboard/viewport delta for one frame.
+    const currentHostTop = Number.parseFloat(host.style.top);
+    const paintedHostTop = Number.isFinite(currentHostTop)
+      ? currentHostTop
+      : computeHostTop({
+          ydisp: paintedYdisp,
+          rows: term.rows,
+          cellH,
+          visibleContentHeight,
+        });
+    const topOffset = geometryOrigin + plan.startLine * cellH - paintedHostTop;
+    renderHistoryProjection({
+      kind: "live-backfill",
+      startLine: plan.startLine,
+      endLine: plan.endLine,
+      rowHeight: plan.rowHeight,
+      topOffset,
+    });
+  };
+
+  const positionHostAt = (
+    ydisp: number,
+    cellH: number,
+    visibleContentHeight?: number,
+    scrollTop: number = container.scrollTop,
+  ): void => {
     if (cellH <= 0) return;
     const resolvedVisibleContentHeight =
       visibleContentHeight ??
@@ -738,21 +690,20 @@ export function attachPtyScrollController(
         const { paddingTop, paddingBottom } = getVerticalInsets();
         return Math.max(0, container.clientHeight - paddingTop - paddingBottom);
       })();
-    const top =
-      userHasVerticalScrollIntent() && reviewScrollAnchor
-        ? reviewScrollAnchor.geometryOrigin + ydisp * cellH
-        : computeHostTop({
-            ydisp,
-            rows: term.rows,
-            cellH,
-            visibleContentHeight: resolvedVisibleContentHeight,
-          });
+    const top = computeHostTop({
+      ydisp,
+      rows: term.rows,
+      cellH,
+      visibleContentHeight: resolvedVisibleContentHeight,
+    });
     const prevTopPx = host.style.top;
     const nextTopPx = `${top}px`;
     setStyle(host, "position", "absolute");
     setStyle(host, "left", "0px");
     setStyle(host, "top", nextTopPx);
-    syncLiveBackfill(ydisp, cellH, resolvedVisibleContentHeight);
+    positionedHostYdisp = ydisp;
+    deferredViewportPaintPending = false;
+    syncLiveBackfill(ydisp, cellH, resolvedVisibleContentHeight, scrollTop);
     // host.top 没变那一帧 (focus 切换 / theme 重绘 / 同 buffer 重 paint) 不 trace, 减少稳态噪音。
     if (prevTopPx === nextTopPx) return;
     trace("host-position", {
@@ -767,7 +718,7 @@ export function attachPtyScrollController(
     // callback; keeping it set across the native container write changes review/touch event
     // ownership and can collapse a real history gesture back onto xterm's live viewport.
     if (plan.cellH > 0) {
-      positionHostAt(plan.viewportY, plan.cellH, plan.visibleContentHeight);
+      positionHostAt(plan.viewportY, plan.cellH, plan.visibleContentHeight, plan.scrollTop);
     }
     syncing.internal = true;
     try {
@@ -874,6 +825,69 @@ export function attachPtyScrollController(
     trace("scroll-to-bottom:end", { ydisp: expectedYdisp });
   };
 
+  const reconcileActiveBufferSwitch = (
+    site: string,
+    options: { forceBoundary?: boolean; crossedTypeBoundary?: boolean } = {},
+  ): boolean => {
+    const nextType = term.buffer.active.type;
+    if (nextType === activeBufferType && !options.forceBoundary) return false;
+    const previousType = activeBufferType;
+    const crossedTypeBoundary = options.crossedTypeBoundary === true || nextType !== previousType;
+    const isSameTypeBoundary = !crossedTypeBoundary && nextType === previousType;
+    const preserveReviewIntent =
+      isSameTypeBoundary && nextType === "normal" && userHasVerticalScrollIntent();
+    activeBufferType = nextType;
+
+    // Every buffer-change event is a row-space identity boundary. In particular, xterm reuses the
+    // public normal BufferApiView across RIS/Terminal.reset, so neither its old marker nor its old
+    // numeric row can be trusted after this point.
+    clearLiveReviewAnchor();
+    renderHistoryProjection(null);
+    deferredViewportPaintPending = false;
+    positionedHostYdisp = null;
+    pendingContainerSyncRetry = false;
+    trace("buffer-switch", {
+      details: `${previousType}->${nextType} site=${site} forced=${options.forceBoundary ? 1 : 0} crossed=${crossedTypeBoundary ? 1 : 0}`,
+    });
+    updateSpacer();
+
+    if (preserveReviewIntent) {
+      // A new authoritative normal row space has no old->new row identity mapping. Do not invent
+      // one, but also never reinterpret "the user is reviewing" as permission to jump to the live
+      // tail. Anchor the replacement buffer at its earliest surviving row and let subsequent live
+      // output grow below it. This is deterministic, keeps the follow lock intact, and prevents a
+      // reconnect/reset from turning into an implicit Back-to-bottom action.
+      prevCursorBufferRow = null;
+      pendingProgrammaticScrollTop = null;
+      pendingFollowCursorScrollTop = null;
+      sameTypeReviewBoundaryAwaitingWrite = true;
+      const { cellH, visibleContentHeight } = readLiveFrameSnapshot();
+      if (cellH > 0) {
+        lastSeenScrollTop = commitVerticalFrameCoordinates({
+          viewportY: 0,
+          scrollTop: 0,
+          cellH,
+          visibleContentHeight,
+        });
+        captureLiveReviewAnchor();
+      } else {
+        container.scrollTop = 0;
+        lastSeenScrollTop = container.scrollTop;
+        pendingContainerSyncRetry = true;
+      }
+      notifyScroll();
+      return true;
+    }
+
+    // Normal and alternate buffers have independent screen ownership. A real type switch exits
+    // review and shows the new active screen's live tail; horizontal coordinates are independent
+    // as well, so stale sideways review must not leak across the switch.
+    sameTypeReviewBoundaryAwaitingWrite = false;
+    if (crossedTypeBoundary) resetHorizontalScroll(`bufferSwitch:${previousType}->${nextType}`);
+    scrollToBottom(`bufferSwitch:${previousType}->${nextType}`, { force: true });
+    return true;
+  };
+
   const preparePageResumeRestore = (): void => {
     pageResumeRestorePending = true;
     trace("page-resume:prepare");
@@ -894,8 +908,7 @@ export function attachPtyScrollController(
     const clamped = Math.max(0, Math.min(1, ratio));
     if (clamped === 1) {
       // The native PTY scrollbar is hidden, so the custom ratio control is an explicit owner.
-      // Its bottom endpoint means "resume live following". Commit the semantic target because
-      // a preserved review range can extend beyond that target after a keyboard transition.
+      // Its bottom endpoint means "resume live following" and commits the semantic target.
       scrollToBottom("scrollToRatio", { force: true });
       return;
     }
@@ -905,7 +918,6 @@ export function attachPtyScrollController(
       ratio: clamped,
       scrollTop: nextScrollTop,
     });
-    reviewProjectionRefreshPending = true;
     container.scrollTop = nextScrollTop;
     syncContainerScroll();
   };
@@ -916,34 +928,17 @@ export function attachPtyScrollController(
     trace("wheel");
     const anchor = getCurrentAnchor();
     const previous = container.scrollTop;
-    const frozenReviewScrollEnd = getFrozenReviewScrollEnd();
-    const frozenEndTolerance =
-      frozenReviewScrollEnd === null
-        ? 0
-        : Number.EPSILON *
-          Math.max(1, Math.abs(previous + deltaY), Math.abs(frozenReviewScrollEnd)) *
-          8;
-    // A captured review frame has one authoritative exit boundary: its frozen logical end.
-    // Falling back to the live semantic bottom is only for degraded/no-snapshot review. Mixing
-    // both boundaries makes users chase an invisible target while output keeps extending it.
-    const reachedFrozenReviewEnd =
-      deltaY > 0 &&
-      frozenReviewScrollEnd !== null &&
-      previous + deltaY >= frozenReviewScrollEnd - frozenEndTolerance;
-    const reachedFallbackSemanticBottom =
-      frozenReviewScrollEnd === null &&
-      shouldWheelCommitPtySemanticBottom({
-        reviewing: userHasVerticalScrollIntent(),
-        deltaY,
-        currentScrollTop: previous,
-        bottomScrollTop: anchor.bottomScrollTop,
-        atBottomThreshold,
-      });
-    if (reachedFrozenReviewEnd || reachedFallbackSemanticBottom) {
-      trace(reachedFrozenReviewEnd ? "wheel:frozen-review-end" : "wheel:semantic-bottom");
+    const reachedSemanticBottom = shouldWheelCommitPtySemanticBottom({
+      reviewing: userHasVerticalScrollIntent(),
+      deltaY,
+      currentScrollTop: previous,
+      bottomScrollTop: anchor.bottomScrollTop,
+      atBottomThreshold,
+    });
+    if (reachedSemanticBottom) {
+      trace("wheel:semantic-bottom");
       // The semantic bottom is a coupled viewportY / host.top / scrollTop target. Reuse the
-      // canonical commit instead of first mapping the target through a review anchor: that
-      // mapping can stop one row short and leave `isAtBottom` and review intent split.
+      // canonical commit so viewport, host and browser scroll land in the same frame.
       scrollToBottom("wheel", { force: true });
       return;
     }
@@ -981,14 +976,9 @@ export function attachPtyScrollController(
         reachedCursorAwareBottom: false,
       });
     }
-    const viewportYBeforeScroll = term.buffer.active.viewportY;
     container.scrollTop = next;
     lastSeenScrollTop = next;
     syncContainerScroll();
-    if (userHasVerticalScrollIntent() && term.buffer.active.viewportY !== viewportYBeforeScroll) {
-      reviewProjectionRefreshPending = true;
-      reconcileReviewProjection();
-    }
     // 向下滚到底 (next > previous 且抵达 atBottom) 释放 intent。向上滚不清, 即便
     // longHost 模式下 cursor 仍可见 (atBottom 仍 true)。
     if (deltaY > 0) {
@@ -1062,14 +1052,14 @@ export function attachPtyScrollController(
   let cachedLiveLastY = -1;
   const getCachedLiveLastY = (): number => {
     const buffer = term.buffer.active;
-    const key = `${bufferRevision}:${buffer.baseY}:${buffer.length}:${term.rows}`;
+    const key = `${buffer.type}:${bufferRevision}:${buffer.baseY}:${buffer.length}:${term.rows}`;
     if (key === cachedLiveLastYKey) return cachedLiveLastY;
     cachedLiveLastY = findLiveScreenLastNonEmptyRow(buffer, term.rows);
     cachedLiveLastYKey = key;
     return cachedLiveLastY;
   };
 
-  const updateSpacer = (): void => {
+  const updateSpacer = (options: { commitDeferredPaint?: boolean } = {}): void => {
     const { cellH, cellW } = getDims();
     if (cellH === 0 || cellW === 0) return;
     const { paddingTop, paddingBottom } = getVerticalInsets();
@@ -1091,21 +1081,12 @@ export function attachPtyScrollController(
       liveLastY,
     );
     if (!layout) return;
-    // Review owns a frozen logical end, not the pre-layout raw scrollTop. Keep exactly that
-    // row range reachable while the viewport changes; commitReviewLayout can then re-anchor the
-    // first visible row without a second pixel-coordinate preservation policy. Before review is
-    // established, an active touch still needs its in-flight compositor position to remain valid.
-    const frozenReviewContentEnd = reviewScrollAnchor
-      ? reviewScrollAnchor.geometryOrigin + reviewScrollAnchor.frozenEndLine * cellH
-      : null;
-    const requiredTouchRange =
-      verticalIntent.touchActive && frozenReviewContentEnd === null
-        ? container.scrollTop + visibleContentHeight
-        : 0;
-    const spacerHeight = Math.max(
-      layout.spacerHeight,
-      frozenReviewContentEnd ?? requiredTouchRange,
-    );
+    // Keep an in-flight compositor position reachable while a touch is active. Outside that
+    // transient window the spacer always reflects the current, growing xterm buffer.
+    const requiredTouchRange = verticalIntent.touchActive
+      ? container.scrollTop + visibleContentHeight
+      : 0;
+    const spacerHeight = Math.max(layout.spacerHeight, requiredTouchRange);
     setStyle(spacer, "overflow", "hidden");
     setStyle(spacer, "height", `${spacerHeight}px`);
     setStyle(spacer, "width", `${layout.spacerWidth}px`);
@@ -1113,11 +1094,16 @@ export function attachPtyScrollController(
     setStyle(host, "height", `${layout.hostHeight}px`);
     setStyle(host, "paddingTop", `${layout.hostPaddingTop}px`);
     lastSpacerUpdateAt = performance.now();
-    // A captured review frame lives inside host. Live output may advance xterm's
-    // viewport, but it must not move that host until the user navigates again.
-    if (!shouldPreserveReviewHost()) {
-      positionHostAt(buffer.viewportY, cellH, visibleContentHeight);
+    if (deferredViewportPaintPending && !options.commitDeferredPaint) {
+      syncTransientViewportBridge(
+        positionedHostYdisp ?? buffer.viewportY,
+        cellH,
+        visibleContentHeight,
+        container.scrollTop,
+      );
+      return;
     }
+    positionHostAt(buffer.viewportY, cellH, visibleContentHeight);
   };
 
   const syncViewportAndHostAt = (
@@ -1125,23 +1111,45 @@ export function attachPtyScrollController(
     cellH: number,
     opts: { deferHostUntilRender?: boolean } = {},
   ): void => {
-    if (ydisp === term.buffer.active.viewportY) {
-      if (!opts.deferHostUntilRender) {
-        positionHostAt(ydisp, cellH);
+    // Once a viewport paint is pending, no later caller may opt back into synchronous host moves.
+    // xterm synchronized-output can legitimately delay onRender beyond the native inertia window;
+    // moving the host in that interval would expose old glyph rows at the requested coordinates.
+    const deferHostUntilRender =
+      opts.deferHostUntilRender === true ||
+      deferredViewportPaintPending ||
+      verticalIntent.touchActive;
+    if (deferHostUntilRender) {
+      const { visibleContentHeight } = readReviewGeometry(cellH);
+      const paintedYdisp = positionedHostYdisp ?? term.buffer.active.viewportY;
+      const viewportAlreadyPainted =
+        !deferredViewportPaintPending && paintedYdisp === term.buffer.active.viewportY;
+      if (ydisp === term.buffer.active.viewportY && viewportAlreadyPainted) {
+        positionHostAt(ydisp, cellH, visibleContentHeight);
+        return;
       }
+
+      // The outer native scroller has already moved. Keep the old xterm rows at their old absolute
+      // coordinates and cover the current browser viewport from the live buffer until xterm tells
+      // us that the requested viewport has painted.
+      syncTransientViewportBridge(paintedYdisp, cellH, visibleContentHeight, container.scrollTop);
+      deferredViewportPaintPending = true;
+      if (ydisp === term.buffer.active.viewportY) return;
+      syncing.internal = true;
+      try {
+        term.scrollToLine(ydisp);
+      } finally {
+        syncing.internal = false;
+      }
+      return;
+    }
+
+    if (ydisp === term.buffer.active.viewportY) {
+      positionHostAt(ydisp, cellH);
       return;
     }
 
     syncing.internal = true;
     try {
-      if (opts.deferHostUntilRender) {
-        term.scrollToLine(ydisp);
-        return;
-      }
-      // Most callers keep host geometry ahead of xterm's synchronous onScroll observers.
-      // Native scrollers are different: the compositor has already moved the scroll
-      // container, so moving host.top before xterm paints the new row exposes a one-row
-      // visual jump. Those callers defer host positioning until onRender.
       positionHostAt(ydisp, cellH);
       term.scrollToLine(ydisp);
     } finally {
@@ -1173,6 +1181,15 @@ export function attachPtyScrollController(
 
   function getAbsoluteYdispForScrollTop(scrollTop: number, cellH: number): number {
     const buffer = term.buffer.active;
+    if (userHasVerticalScrollIntent()) {
+      const { geometryOrigin, visibleContentHeight } = readReviewGeometry(cellH);
+      const logicalTop = Math.max(0, (scrollTop - geometryOrigin) / cellH);
+      const logicalVisibleEnd = normalizeNearInteger(logicalTop + visibleContentHeight / cellH);
+      // Render the smallest xterm viewport that still covers the outer browser viewport's lower
+      // edge. This enters xterm's native user-scrolling mode as soon as a whole row is available,
+      // while the marker above preserves sub-row/shallow review across full-scrollback trims.
+      return Math.max(0, Math.min(buffer.baseY, Math.ceil(logicalVisibleEnd) - term.rows));
+    }
     return computeScrollTarget(scrollTop, {
       bufferLength: buffer.length,
       rows: term.rows,
@@ -1184,25 +1201,6 @@ export function attachPtyScrollController(
   }
 
   function getYdispForScrollTop(scrollTop: number, cellH: number): number {
-    if (reviewScrollAnchor) {
-      const sourceCellH = reviewScrollAnchor.cellH > 0 ? reviewScrollAnchor.cellH : cellH;
-      const requestedLogicalTop = normalizeNearInteger(
-        reviewScrollAnchor.logicalTop + (scrollTop - reviewScrollAnchor.scrollTop) / sourceCellH,
-      );
-      const { paddingTop, paddingBottom } = getVerticalInsets();
-      const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-      const frozenEndLine = Math.max(
-        1,
-        Math.min(reviewScrollAnchor.frozenEndLine, term.buffer.active.length),
-      );
-      const visibleRows = visibleContentHeight / cellH;
-      const logicalTop = Math.max(
-        0,
-        Math.min(requestedLogicalTop, Math.max(0, frozenEndLine - visibleRows)),
-      );
-      return getReviewViewportY(reviewScrollAnchor, logicalTop, visibleRows, cellH);
-    }
-
     // A semantic bottom is not necessarily an exact DOM pixel boundary. Chrome
     // quantizes scrollHeight/scrollTop, so the landed value can be a fraction below
     // `bottomScrollTop`; flooring that pixel value would move xterm back one row.
@@ -1227,23 +1225,14 @@ export function attachPtyScrollController(
       return;
     }
     pendingContainerSyncRetry = false;
-    const reviewing = userHasVerticalScrollIntent();
-    if (reviewing) {
-      if (!reviewScrollAnchor) {
-        captureRenderedReviewFrame(cellH);
-      }
-      if (reviewScrollAnchor) {
-        commitReviewLayout("container-scroll", {
-          capture: reviewProjectionRefreshPending || activeHistoryProjection?.kind !== "review",
-        });
-        trace("container-sync:end", { ydisp: term.buffer.active.viewportY });
-        return;
-      }
+    if (userHasVerticalScrollIntent()) {
+      reconcileLiveReviewAnchor(cellH, { includeDomDelta: true });
     }
     const ydisp = getYdispForScrollTop(container.scrollTop, cellH);
     syncViewportAndHostAt(ydisp, cellH, {
-      deferHostUntilRender: opts.deferHostUntilRender ?? shouldDeferHostCommitForYdisp(),
+      deferHostUntilRender: opts.deferHostUntilRender,
     });
+    if (userHasVerticalScrollIntent()) captureLiveReviewAnchor();
     notifyScroll();
     trace("container-sync:end", { ydisp });
   };
@@ -1251,35 +1240,27 @@ export function attachPtyScrollController(
   const isRecentTouchNativeScroll = (): boolean =>
     verticalIntent.touchActive || touchHandler.isRecentNativeScroll();
 
-  const skipSameRowTouchScrollSync = (effectiveScrollTop: number): boolean => {
+  const skipSameRowTouchScrollSync = (): boolean => {
     if (!isRecentTouchNativeScroll()) return false;
     const { cellH } = getDims();
     if (cellH === 0) return false;
     if (userHasVerticalScrollIntent()) {
-      const plan = computeReviewLayoutPlan(cellH);
-      if (plan) {
-        const clampTolerance =
-          Number.EPSILON * Math.max(1, Math.abs(plan.scrollTop), Math.abs(effectiveScrollTop)) * 8;
-        // `getYdispForScrollTop` clamps through the frozen review range. At its live-side edge an
-        // Android inertia frame can therefore report the same xterm row even though the DOM has
-        // moved beyond the last serializable review pixel. That is not a harmless sub-row move:
-        // commitReviewLayout must pull the DOM back (or the owned toward-live gesture above will
-        // resume the live tail), otherwise the viewport can expose blank space below the capture.
-        if (Math.abs(plan.scrollTop - effectiveScrollTop) > clampTolerance) {
-          trace("container-sync:cannot-skip[review-clamp]", {
-            ydisp: plan.ydisp,
-            details: `scrollTop=${effectiveScrollTop} reviewEnd=${plan.scrollTop}`,
-          });
-          return false;
-        }
-      }
+      reconcileLiveReviewAnchor(cellH, { includeDomDelta: true });
     }
-    const ydisp = getYdispForScrollTop(effectiveScrollTop, cellH);
+    const currentScrollTop = container.scrollTop;
+    const ydisp = getYdispForScrollTop(currentScrollTop, cellH);
     if (ydisp !== term.buffer.active.viewportY) return false;
+    // A fractional outer scroll can expose the preceding buffer row before the integer xterm
+    // viewport changes (especially when the phone viewport is taller than the remote PTY). Refresh
+    // the live derived rows even on this same-ydisp path; otherwise the newly exposed sliver is a
+    // real black seam until the next whole-row transition.
+    syncViewportAndHostAt(ydisp, cellH, {
+      deferHostUntilRender: isRecentTouchNativeScroll(),
+    });
     scheduleTouchScrollNotify();
     trace("container-sync:skip[same-row-touch]", {
       ydisp,
-      details: `scrollTop=${Math.round(effectiveScrollTop)} viewportY=${term.buffer.active.viewportY}`,
+      details: `scrollTop=${Math.round(currentScrollTop)} viewportY=${term.buffer.active.viewportY}`,
     });
     return true;
   };
@@ -1319,10 +1300,6 @@ export function attachPtyScrollController(
     dispatchVerticalIntent,
     getCurrentAnchor,
     getLastSeenScrollTop: () => lastSeenScrollTop,
-    getFrozenReviewScrollEnd,
-    resumeLiveAtFrozenReviewEnd: (source) => {
-      scrollToBottom(`touchFrozenReviewEnd:${source}`, { force: true });
-    },
     hasHorizontalOverflow,
     clearHorizontalIntentIfUnscrollable,
     markHorizontalUserInput,
@@ -1391,6 +1368,7 @@ export function attachPtyScrollController(
 
   const onContainerScroll = (): void => {
     trace("container-scroll");
+    if (reconcileActiveBufferSwitch("containerScroll")) return;
     const horizontalResult = reducePtyHorizontalContainerScroll(horizontalState, {
       hasOverflow: hasHorizontalOverflow(),
       scrollLeft: container.scrollLeft,
@@ -1475,12 +1453,6 @@ export function attachPtyScrollController(
       scrollToBottom("programmaticDrift");
       return;
     }
-    if (
-      !pageResumeRestorePending &&
-      touchHandler.tryResumeLiveAtFrozenReviewEnd(effectiveScrollTop, "native-scroll")
-    ) {
-      return;
-    }
     if (restoreImpossibleTouchScrollJump(effectiveScrollTop)) {
       return;
     }
@@ -1492,6 +1464,17 @@ export function attachPtyScrollController(
       // review state and do not write an older saved coordinate back; activation performs one
       // canonical live-tail commit.
       notifyScroll();
+      return;
+    }
+    if (
+      userHasVerticalScrollIntent() &&
+      isRecentTouchNativeScroll() &&
+      verticalDelta > 0 &&
+      effectiveScrollTop >= getCurrentAnchor().bottomScrollTop - atBottomThreshold
+    ) {
+      // Native inertia may reach the real, growing live tail after touchend. Release the follow
+      // lock only at that current semantic boundary; there is no captured/old review boundary.
+      scrollToBottom("touchSemanticBottom", { force: true });
       return;
     }
     // The browser-native scrollbar is hidden. Every real user-owned vertical path establishes
@@ -1515,27 +1498,16 @@ export function attachPtyScrollController(
       scrollToBottom("containerBrowserSync");
       return;
     }
-    // 内容高度、横向滚动或布局更新也可能派发 scroll，即使 scrollTop 没有变化。
-    // 此时不能重新拍摄回看快照，否则下一帧实时输出会混入用户正在看的历史。
-    if (userHasVerticalScrollIntent() && verticalDelta !== 0) {
-      const { cellH } = getDims();
-      const plan = cellH > 0 ? computeReviewLayoutPlan(cellH) : null;
-      const nextProjection = plan ? getReviewProjection(plan) : null;
-      reviewProjectionRefreshPending =
-        reviewProjectionRefreshPending ||
-        plan === null ||
-        (nextProjection !== null &&
-          getHistoryProjectionKey(nextProjection) !== activeHistoryProjection?.key);
-    }
-    if (skipSameRowTouchScrollSync(effectiveScrollTop)) {
-      reconcileReviewProjection();
+    if (skipSameRowTouchScrollSync()) {
+      if (userHasVerticalScrollIntent() && verticalDelta !== 0) captureLiveReviewAnchor();
       return;
     }
-    syncContainerScroll();
+    syncContainerScroll({ deferHostUntilRender: isRecentTouchNativeScroll() });
   };
 
   const reconcileTermScroll = (): void => {
     trace("term-scroll");
+    if (reconcileActiveBufferSwitch("termScroll")) return;
     syncing.external = true;
     try {
       updateSpacer();
@@ -1550,32 +1522,10 @@ export function attachPtyScrollController(
         scrollToBottom("termScroll");
         return;
       }
-      if (userHasVerticalScrollIntent() && reviewScrollAnchor) {
-        const { cellH } = getDims();
-        if (pendingFrame === "marked" && getCurrentAnchor().cursorInViewport) {
-          // An in-place status repaint still belongs to the frame currently under review. Mark it
-          // for replacement after xterm's render; once the live cursor leaves that viewport,
-          // later output must remain excluded from the frozen snapshot.
-          reviewProjectionRefreshPending = true;
-        }
-        if (cellH > 0 && reviewScrollAnchor.layoutSignature !== getReviewLayoutSignature(cellH)) {
-          commitReviewLayout("term-scroll");
-        } else {
-          notifyScroll();
-        }
-        return;
-      }
       const { cellH } = getDims();
       if (cellH !== 0) {
-        const buffer = term.buffer.active;
-        const { ydisp } = computeScrollTarget(container.scrollTop, {
-          bufferLength: buffer.length,
-          rows: term.rows,
-          cols: term.cols,
-          viewportY: buffer.viewportY,
-          cellH,
-          cellW: 1,
-        });
+        if (userHasVerticalScrollIntent()) reconcileLiveReviewAnchor(cellH);
+        const ydisp = getYdispForScrollTop(container.scrollTop, cellH);
         syncViewportAndHostAt(ydisp, cellH);
       }
       notifyScroll();
@@ -1614,6 +1564,7 @@ export function attachPtyScrollController(
   const relayout = (): void => {
     // start/end 不 trace, layout 真改了 (host-position) / scrollToBottom 真触发 / pending-sync-retry-fire
     // 这些子路径自己有独立 trace, 框 trace 是稳态噪音。
+    if (reconcileActiveBufferSwitch("relayout")) return;
     updateSpacer();
     const pendingFrame = handlePendingNewFrame();
     if (pendingFrame === "followed") return;
@@ -1631,21 +1582,19 @@ export function attachPtyScrollController(
         notifyScroll();
         return;
       }
-      if (!reviewScrollAnchor) {
-        captureRenderedReviewFrame(cellH);
-      }
-      if (
-        reviewScrollAnchor &&
-        reviewScrollAnchor.layoutSignature !== getReviewLayoutSignature(cellH)
-      ) {
-        commitReviewLayout("relayout");
+      // A user scroll can land while font/layout measurement temporarily reports cellH=0.
+      // That DOM position is newer than the marker captured before the measurement gap. Apply it
+      // first and let syncContainerScroll replace the marker; reconciling the old marker here
+      // would incorrectly pull the reader back to the previous row.
+      if (pendingContainerSyncRetry) {
+        trace("pending-sync-retry-fire");
+        syncContainerScroll();
         return;
       }
-      if (reviewScrollAnchor) {
-        reconcileReviewProjection();
-        notifyScroll();
-        return;
-      }
+      reconcileLiveReviewAnchor(cellH);
+      syncViewportAndHostAt(getYdispForScrollTop(container.scrollTop, cellH), cellH);
+      notifyScroll();
+      return;
     }
 
     const { cellH } = getDims();
@@ -1823,7 +1772,10 @@ export function attachPtyScrollController(
 
   const onRender = (): void => {
     trace("render");
-    updateSpacer();
+    if (reconcileActiveBufferSwitch("render")) return;
+    // xterm has now painted its current viewport. Move the host and replace the one-paint live
+    // bridge in this same callback so old glyph rows are never exposed at the new coordinates.
+    updateSpacer({ commitDeferredPaint: true });
     // 顺序很关键: retry 必须在 handlePendingNewFrame 之前。如果反过来,
     // handlePendingNewFrame 在 follow 路径里会调 scrollToBottom 改写 scrollTop,
     // 后跑的 syncContainerScroll 就会按"被改写后的 scrollTop"重新对齐,等于无视
@@ -1832,20 +1784,23 @@ export function attachPtyScrollController(
       trace("pending-sync-retry-fire");
       syncContainerScroll();
     }
-    const pendingFrame = handlePendingNewFrame();
+    handlePendingNewFrame();
     followCursorX();
     followCursorY();
     if (userHasVerticalScrollIntent()) {
-      if (pendingFrame === "marked" && getCurrentAnchor().cursorInViewport) {
-        reviewProjectionRefreshPending = true;
+      const { cellH } = getDims();
+      if (cellH > 0) {
+        reconcileLiveReviewAnchor(cellH);
+        syncViewportAndHostAt(getYdispForScrollTop(container.scrollTop, cellH), cellH);
       }
-      reconcileReviewProjection();
     }
     notifyScroll();
   };
 
   updateSpacer();
   if (userHasVerticalScrollIntent()) {
+    captureLiveReviewAnchor();
+    lastSeenScrollTop = container.scrollTop;
     notifyScroll();
   } else {
     scrollToBottom("init");
@@ -1886,7 +1841,46 @@ export function attachPtyScrollController(
     onRelayout: relayout,
     onWriteParsed: () => {
       bufferRevision += 1;
+      if (!sameTypeReviewBoundaryAwaitingWrite) return;
+      sameTypeReviewBoundaryAwaitingWrite = false;
+      if (!userHasVerticalScrollIntent() || term.buffer.active.type !== "normal") return;
+      const { cellH } = getDims();
+      if (cellH <= 0) {
+        pendingContainerSyncRetry = true;
+        return;
+      }
+      reconcileLiveReviewAnchor(cellH);
+      syncViewportAndHostAt(getYdispForScrollTop(container.scrollTop, cellH), cellH);
     },
+  });
+  const bufferChangeDisposable = term.buffer.onBufferChange(() => {
+    // Direct Terminal.reset does not necessarily produce a later onWriteParsed callback. Invalidate
+    // every buffer-derived cache synchronously at the identity boundary itself.
+    bufferRevision += 1;
+    // A single parser chunk may enter and leave the alternate screen before this microtask runs.
+    // Remember that a real type boundary occurred even if the final public type equals the type
+    // at the start of the task; final-state comparison alone would misclassify that round trip as
+    // a same-type normal reset.
+    if (term.buffer.active.type !== activeBufferType) bufferBoundaryCrossedType = true;
+    // xterm fires this while processing DECSET/DECRST. Finish the control sequence first, then
+    // commit the new buffer before its already-scheduled render RAF. This prevents an onRender
+    // callback from reporting the preserved viewport and only afterwards moving its glyphs to the
+    // live tail for a frame.
+    if (bufferBoundaryReconcileQueued) return;
+    bufferBoundaryReconcileQueued = true;
+    queueMicrotask(() => {
+      bufferBoundaryReconcileQueued = false;
+      if (disposed) return;
+      const crossedTypeBoundary = bufferBoundaryCrossedType;
+      bufferBoundaryCrossedType = false;
+      // onBufferChange also fires for RIS/Terminal.reset, where a brand-new normal buffer has the
+      // same public `type`. The event itself is the row-space identity boundary; never let markers
+      // or review pixels survive merely because both sides are named "normal".
+      reconcileActiveBufferSwitch("bufferChange", {
+        forceBoundary: true,
+        crossedTypeBoundary,
+      });
+    });
   });
 
   const getDebugProbe = (): PtyScrollDebugProbe => {
@@ -1923,9 +1917,11 @@ export function attachPtyScrollController(
     dispose: () => {
       disposed = true;
       cancelPendingTermScrollReconcile();
+      bufferChangeDisposable.dispose();
       domAdapter.dispose();
       traceAdapter.dispose();
       cancelPendingTouchScrollNotify();
+      clearLiveReviewAnchor();
       renderHistoryProjection(null);
     },
     relayout,
@@ -1939,7 +1935,6 @@ export function attachPtyScrollController(
     markHorizontalScrollIntent,
     traceRawInputFollowScheduled,
     traceRawInputFollowFire,
-    refreshReviewSnapshot,
     getDebugProbe,
   };
 }

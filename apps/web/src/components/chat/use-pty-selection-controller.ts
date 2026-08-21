@@ -460,7 +460,7 @@ export function usePtySelectionController(
       const renderedLines = getRenderedPtyHistorySelectionLines(host);
       for (const [row, line] of renderedLines) {
         if (row >= firstRow && row <= lastRow) {
-          // Only serialized review/backfill rows need a frozen source. Native rows remain live,
+          // Only derived live-backfill rows need a captured source. Native rows remain live,
           // matching xterm's normal rule that an in-place TUI redraw changes selected text too.
           // Overwrite projected rows when scrolling replaces the projection so painted text and
           // the copy source cannot drift apart.
@@ -754,7 +754,9 @@ export function usePtySelectionController(
         committedSelectionMarkersRef.current = binding;
         binding.subscriptions.push(
           terminal.onResize(binding.sync),
-          terminal.buffer.onBufferChange(binding.sync),
+          // onBufferChange is a row-space identity boundary even when xterm resets normal ->
+          // normal and reuses the same public BufferApiView object.
+          terminal.buffer.onBufferChange(invalidate),
         );
         return true;
       }
@@ -860,7 +862,7 @@ export function usePtySelectionController(
         focus.onDispose(invalidate),
         terminal.onWriteParsed(binding.sync),
         terminal.onResize(binding.sync),
-        terminal.buffer.onBufferChange(binding.sync),
+        terminal.buffer.onBufferChange(invalidate),
       );
       return true;
     },
@@ -1069,7 +1071,7 @@ export function usePtySelectionController(
       binding.subscriptions.push(
         terminal.onWriteParsed(sync),
         terminal.onResize(sync),
-        terminal.buffer.onBufferChange(sync),
+        terminal.buffer.onBufferChange(invalidate),
       );
       if (marker) binding.subscriptions.push(marker.onDispose(invalidate));
       return true;
@@ -1228,7 +1230,7 @@ export function usePtySelectionController(
       const target = event.target;
       if (!terminal || !(target instanceof Element)) return;
       const point = getPointAtClient(event.clientX, event.clientY, false);
-      // Review/backfill rows are painted above `.xterm-screen` with pointer-events disabled. The
+      // Live-backfill rows are painted above `.xterm-screen` with pointer-events disabled. The
       // browser therefore reports the underlying spacer as the event target even though the user
       // pressed a real terminal cell. Geometry, not `closest('.xterm')`, is authoritative there.
       if (!target.closest(".xterm") && !point) return;

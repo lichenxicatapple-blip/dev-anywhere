@@ -6,6 +6,7 @@ import {
   expectPtyCursorAwareBottom,
   expectPtyRendered,
   ptyTerminal,
+  readPtyScrollMetrics,
   sendPtyOutput,
 } from "../pty-scroll-helpers";
 
@@ -25,122 +26,210 @@ async function directRenderedRowsText(page: import("@playwright/test").Page): Pr
   });
 }
 
-test("keeps a coherent frame while live rows update across the scrollback boundary", async ({
+interface VisibleNativeRow {
+  text: string;
+  top: number;
+  bottom: number;
+  height: number;
+  fullyVisible: boolean;
+}
+
+async function visibleNativeRows(
+  page: import("@playwright/test").Page,
+): Promise<VisibleNativeRow[]> {
+  return ptyTerminal(page).evaluate((container) => {
+    const containerRect = container.getBoundingClientRect();
+    const containerStyle = getComputedStyle(container);
+    const contentTop = containerRect.top + (Number.parseFloat(containerStyle.paddingTop) || 0);
+    const contentBottom =
+      containerRect.bottom - (Number.parseFloat(containerStyle.paddingBottom) || 0);
+    const screen = container.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+    if (!screen) return [];
+    const nativeRows = Array.from(screen.children).find(
+      (child): child is HTMLElement =>
+        child instanceof HTMLElement &&
+        child.classList.contains("xterm-rows") &&
+        child.dataset.slot === undefined,
+    );
+    if (!nativeRows) return [];
+
+    return Array.from(nativeRows.children)
+      .filter((row): row is HTMLElement => row instanceof HTMLElement)
+      .map((row) => {
+        const rect = row.getBoundingClientRect();
+        return {
+          text: row.textContent ?? "",
+          top: rect.top,
+          bottom: rect.bottom,
+          height: rect.height,
+          fullyVisible: rect.top >= contentTop - 1 && rect.bottom <= contentBottom + 1,
+        };
+      })
+      .filter((row) => row.bottom > contentTop && row.top < contentBottom);
+  });
+}
+
+async function waitForAnimationFrames(
+  page: import("@playwright/test").Page,
+  count = 2,
+): Promise<void> {
+  await page.evaluate(async (frameCount) => {
+    for (let index = 0; index < frameCount; index += 1) {
+      await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+    }
+  }, count);
+}
+
+test("keeps a partially visible live status updating after a shallow wheel-up", async ({
   page,
 }) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
     cols: 80,
-    rows: 24,
+    rows: 40,
     withVisualViewportMock: true,
   });
   await expectPtyTerminalMounted(page);
 
-  await page.evaluate(() => window.__ptySmoke.resize(80, 24));
+  await page.evaluate(() => window.__ptySmoke.resize(80, 40));
   await page.waitForTimeout(100);
+  await sendPtyOutput(
+    page,
+    `${Array.from(
+      { length: 160 },
+      (_, index) => `STATUS HISTORY ${String(index + 1).padStart(3, "0")}\r\n`,
+    ).join("")}WORKING elapsed 01s`,
+  );
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+    .toContain("WORKING elapsed 01s");
+  await expectPtyCursorAwareBottom(page);
+
+  const box = await ptyTerminal(page).boundingBox();
+  if (!box) throw new Error("PTY terminal is not visible");
+  const cellHeight = await page
+    .locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows > div')
+    .first()
+    .evaluate((row) => row.getBoundingClientRect().height);
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -Math.max(9, Math.ceil(cellHeight * 0.75)));
+  await waitForAnimationFrames(page);
+
+  // Review is scroll intent only. It must not replace live xterm rows with a serialized frame.
+  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
+  await expect(snapshot).toHaveCount(0);
+  await expect(backToBottom(page)).toHaveAttribute("aria-label", "回到底部");
+
+  const before = (await visibleNativeRows(page)).find((row) =>
+    row.text.includes("WORKING elapsed 01s"),
+  );
+  expect(before, "the live Working row should remain partially visible").toBeTruthy();
+  expect(before?.fullyVisible).toBe(false);
+
+  await sendPtyOutput(page, "\rWORKING elapsed 02s\u001b[K");
+
+  await expect.poll(() => directRenderedRowsText(page)).toContain("WORKING elapsed 02s");
+  await expect(snapshot).toHaveCount(0);
+  const after = (await visibleNativeRows(page)).find((row) =>
+    row.text.includes("WORKING elapsed 02s"),
+  );
+  expect(after, "the updated Working row should still be visible").toBeTruthy();
+  expect(after?.top).toBeCloseTo(before?.top ?? Number.NaN, 0);
+});
+
+test("anchors history during output and traverses appended rows before reaching the live tail", async ({
+  page,
+}) => {
+  await setupPtyChat(page, {
+    sessionId: SESSION_ID,
+    cols: 80,
+    rows: 40,
+    withVisualViewportMock: true,
+  });
+  await expectPtyTerminalMounted(page);
+
+  await page.evaluate(() => window.__ptySmoke.resize(80, 40));
+  await page.waitForTimeout(100);
+  await sendPtyOutput(
+    page,
+    Array.from(
+      { length: 300 },
+      (_, index) => `APPEND HISTORY ${String(index + 1).padStart(3, "0")}\r\n`,
+    ).join(""),
+  );
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+    .toContain("APPEND HISTORY 300");
+  await expectPtyCursorAwareBottom(page);
+
+  const box = await ptyTerminal(page).boundingBox();
+  if (!box) throw new Error("PTY terminal is not visible");
+  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+  await page.mouse.wheel(0, -360);
+  await waitForAnimationFrames(page);
+
+  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
+  await expect(snapshot).toHaveCount(0);
+  const anchor = (await visibleNativeRows(page)).find(
+    (row) => row.fullyVisible && row.text.includes("APPEND HISTORY"),
+  );
+  expect(anchor, "a fully visible history row is required as the viewport anchor").toBeTruthy();
+
   await sendPtyOutput(
     page,
     Array.from(
       { length: 48 },
-      (_, index) => `SCROLLBACK HISTORY ${String(index + 1).padStart(2, "0")}\r\n`,
-    ).join(""),
-  );
-  await expect
-    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
-    .toContain("SCROLLBACK HISTORY 48");
-
-  await sendPtyOutput(
-    page,
-    `\u001b7${Array.from(
-      { length: 24 },
-      (_, index) =>
-        `\u001b[${index + 1};1HCURRENT SCREEN ${String(index + 1).padStart(2, "0")}${" ".repeat(45)}`,
-    ).join("")}\u001b8`,
-  );
-
-  const box = await ptyTerminal(page).boundingBox();
-  if (!box) throw new Error("PTY terminal is not visible");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -180);
-
-  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
-  await expect(snapshot).toBeVisible();
-  await expect(snapshot).toContainText("SCROLLBACK HISTORY");
-  await expect(snapshot).toContainText("CURRENT SCREEN");
-  const frozenText = await snapshot.textContent();
-
-  await sendPtyOutput(
-    page,
-    "\u001b7\u001b[8;1HLIVE UPDATE tick 01                              \u001b8",
-  );
-
-  await expect.poll(() => directRenderedRowsText(page)).toContain("LIVE UPDATE tick 01");
-  await expect(snapshot).toHaveText(frozenText ?? "");
-  await expect(snapshot).not.toContainText("LIVE UPDATE tick 01");
-  await expect(backToBottomNewIndicator(page)).toBeVisible();
-  await expect(backToBottom(page)).toHaveAttribute("aria-label", "回到最新");
-
-  await page.mouse.wheel(0, 40);
-  await expect(snapshot).toContainText("LIVE UPDATE tick 01");
-
-  await page.mouse.wheel(0, 10_000);
-  await expect(snapshot).toHaveCount(0);
-  await expect(backToBottom(page)).toHaveJSProperty("inert", true);
-  await expectPtyCursorAwareBottom(page);
-});
-
-test("keeps the reviewed frame frozen while live output appends new lines", async ({ page }) => {
-  await setupPtyChat(page, {
-    sessionId: SESSION_ID,
-    cols: 80,
-    rows: 24,
-    withVisualViewportMock: true,
-  });
-  await expectPtyTerminalMounted(page);
-
-  await page.evaluate(() => window.__ptySmoke.resize(80, 24));
-  await page.waitForTimeout(100);
-  await sendPtyOutput(
-    page,
-    Array.from(
-      { length: 5_200 },
-      (_, index) => `APPEND HISTORY ${String(index + 1).padStart(4, "0")}\r\n`,
-    ).join(""),
-  );
-  await expect
-    .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
-    .toContain("APPEND HISTORY 5199");
-
-  const box = await ptyTerminal(page).boundingBox();
-  if (!box) throw new Error("PTY terminal is not visible");
-  await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
-  await page.mouse.wheel(0, -240);
-
-  const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
-  await expect(snapshot).toBeVisible();
-  const frozenText = await snapshot.textContent();
-  const frozenBox = await snapshot.boundingBox();
-
-  await sendPtyOutput(
-    page,
-    Array.from(
-      { length: 12 },
       (_, index) => `LIVE APPEND ${String(index + 1).padStart(2, "0")}\r\n`,
     ).join(""),
   );
-
   await expect
     .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
-    .toContain("LIVE APPEND 12");
-  await expect(snapshot).toHaveText(frozenText ?? "");
-  await expect(snapshot).not.toContainText("LIVE APPEND");
-  expect(await snapshot.boundingBox()).toEqual(frozenBox);
-  await expect(backToBottom(page)).toHaveAttribute("aria-label", "回到最新");
+    .toContain("LIVE APPEND 48");
+  await waitForAnimationFrames(page);
+
+  const anchoredAfterOutput = (await visibleNativeRows(page)).find(
+    (row) => row.text === anchor?.text,
+  );
+  expect(anchoredAfterOutput, "background output must not replace the row being read").toBeTruthy();
+  expect(anchoredAfterOutput?.top).toBeCloseTo(anchor?.top ?? Number.NaN, 0);
+  await expect(snapshot).toHaveCount(0);
+  await expect(backToBottomNewIndicator(page)).toBeVisible();
+
+  const cellHeight = anchor?.height ?? 0;
+  const traversedFrames: string[] = [];
+  for (let step = 0; step < 24; step += 1) {
+    const beforeStep = await readPtyScrollMetrics(page);
+    if (beforeStep.bottomGap <= 8) break;
+
+    await page.mouse.wheel(0, 120);
+    await waitForAnimationFrames(page);
+    const afterStep = await readPtyScrollMetrics(page);
+    const travel = afterStep.scrollTop - beforeStep.scrollTop;
+    expect(
+      travel,
+      `wheel step ${step + 1} must not jump across the appended range`,
+    ).toBeGreaterThanOrEqual(0);
+    expect(
+      travel,
+      `wheel step ${step + 1} must remain proportional to its 120px input`,
+    ).toBeLessThanOrEqual(120 + cellHeight + 2);
+    traversedFrames.push((await visibleNativeRows(page)).map((row) => row.text).join("\n"));
+  }
+
+  expect(
+    traversedFrames.some(
+      (text) => /LIVE APPEND (?:0[1-9]|1\d)/.test(text) && !text.includes("LIVE APPEND 48"),
+    ),
+    "ordinary downward scrolling should expose intermediate appended rows before the latest row",
+  ).toBe(true);
+
+  await expect(snapshot).toHaveCount(0);
+  await expect(backToBottom(page)).toHaveJSProperty("inert", true);
+  await expect.poll(() => directRenderedRowsText(page)).toContain("LIVE APPEND 48");
+  await expectPtyCursorAwareBottom(page);
 });
 
-test("keeps dim truecolor foregrounds unchanged when review projection takes over", async ({
-  page,
-}) => {
+test("keeps dim truecolor foregrounds unchanged while scrolling native rows", async ({ page }) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
     cols: 80,
@@ -185,25 +274,28 @@ test("keeps dim truecolor foregrounds unchanged when review projection takes ove
   if (!box) throw new Error("PTY terminal is not visible");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, -80);
+  await waitForAnimationFrames(page);
 
   const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
-  await expect(snapshot).toContainText("RGB DIM TARGET");
-  const projectedAppearance = await snapshot.evaluate((element) => {
-    const glyph = Array.from(element.querySelectorAll<HTMLElement>("span"))
-      .filter((span) => span.textContent?.includes("RGB DIM TARGET"))
-      .at(-1);
-    if (!glyph) return null;
-    let effectiveOpacity = 1;
-    for (let current: HTMLElement | null = glyph; current && current !== element; ) {
-      effectiveOpacity *= Number.parseFloat(getComputedStyle(current).opacity);
-      current = current.parentElement;
-    }
-    return { color: getComputedStyle(glyph).color, opacity: effectiveOpacity };
-  });
-  expect(projectedAppearance).toEqual({ color: liveAppearance.color, opacity: 1 });
+  await expect(snapshot).toHaveCount(0);
+  const scrolledAppearance = await page
+    .locator('[data-slot="pty-host"] .xterm-screen > .xterm-rows:not([data-slot])')
+    .evaluate((element) => {
+      const glyph = Array.from(element.querySelectorAll<HTMLElement>("span"))
+        .filter((span) => span.textContent?.includes("RGB DIM TARGET"))
+        .at(-1);
+      if (!glyph) return null;
+      let effectiveOpacity = 1;
+      for (let current: HTMLElement | null = glyph; current && current !== element; ) {
+        effectiveOpacity *= Number.parseFloat(getComputedStyle(current).opacity);
+        current = current.parentElement;
+      }
+      return { color: getComputedStyle(glyph).color, opacity: effectiveOpacity };
+    });
+  expect(scrolledAppearance).toEqual({ color: liveAppearance.color, opacity: 1 });
 });
 
-test("ignores passive container scroll events while the reviewed frame is frozen", async ({
+test("keeps native live rows authoritative across passive container scroll events", async ({
   page,
 }) => {
   await setupPtyChat(page, {
@@ -228,17 +320,17 @@ test("ignores passive container scroll events while the reviewed frame is frozen
   if (!box) throw new Error("PTY terminal is not visible");
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
   await page.mouse.wheel(0, -240);
+  await waitForAnimationFrames(page);
 
   const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
-  await expect(snapshot).toBeVisible();
-  const frozenText = await snapshot.textContent();
+  await expect(snapshot).toHaveCount(0);
 
   await sendPtyOutput(
     page,
     "\u001b7\u001b[8;1HPASSIVE LIVE UPDATE 01                         \u001b8",
   );
   await expect.poll(() => directRenderedRowsText(page)).toContain("PASSIVE LIVE UPDATE 01");
-  await expect(snapshot).toHaveText(frozenText ?? "");
+  await expect(snapshot).toHaveCount(0);
 
   await ptyTerminal(page).evaluate((element) => {
     element.dispatchEvent(new Event("scroll"));
@@ -249,11 +341,12 @@ test("ignores passive container scroll events while the reviewed frame is frozen
   );
 
   await expect.poll(() => directRenderedRowsText(page)).toContain("PASSIVE LIVE UPDATE 02");
-  await expect(snapshot).toHaveText(frozenText ?? "");
-  await expect(snapshot).not.toContainText("PASSIVE LIVE UPDATE");
+  await expect(snapshot).toHaveCount(0);
 });
 
-test("preserves BCE-only padding around Codex prompts in the reviewed frame", async ({ page }) => {
+test("preserves BCE-only padding around Codex prompts while scrolling native rows", async ({
+  page,
+}) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
     provider: "codex",
@@ -326,15 +419,16 @@ test("preserves BCE-only padding around Codex prompts in the reviewed frame", as
   await expectPtyRendered(page);
 
   const snapshot = page.locator('[data-slot="pty-review-snapshot"]');
-  await expect(snapshot).toContainText("真实 Codex 历史输入");
-  const bottomPaddingBackground = await snapshot.evaluate((element) => {
-    const rows = element.querySelector(".xterm-rows");
-    const promptRow = rows
-      ? Array.from(rows.children).findIndex((row) =>
-          row.textContent?.includes("真实 Codex 历史输入"),
-        )
-      : -1;
-    const bottomPadding = promptRow >= 0 ? rows?.children[promptRow + 1] : null;
+  await expect(snapshot).toHaveCount(0);
+  const nativeRows = page.locator(
+    '[data-slot="pty-host"] .xterm-screen > .xterm-rows:not([data-slot])',
+  );
+  await expect(nativeRows).toContainText("真实 Codex 历史输入");
+  const bottomPaddingBackground = await nativeRows.evaluate((element) => {
+    const promptRow = Array.from(element.children).findIndex((row) =>
+      row.textContent?.includes("真实 Codex 历史输入"),
+    );
+    const bottomPadding = promptRow >= 0 ? element.children[promptRow + 1] : null;
     const contentSpan = bottomPadding
       ? Array.from(bottomPadding.children).find((child) => child.textContent?.length)
       : null;

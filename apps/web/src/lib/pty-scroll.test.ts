@@ -4,6 +4,7 @@ import {
   computePtyHostLayout,
   computePtyLiveBackfill,
   computePtyLiveBottom,
+  computePtyLiveViewportBridge,
   computeScrollAnchor,
   computeScrollTarget,
   ydispToScrollTop,
@@ -431,6 +432,82 @@ describe("PTY scroll geometry", () => {
         rowCount: 3,
         rowHeight: 20,
         topOffset: -60,
+      });
+    });
+
+    it("fills the leading sliver exposed by a fractional full-height native scroll", () => {
+      expect(
+        computePtyLiveBackfill({
+          ydisp: 80,
+          rows: 20,
+          cellH: 20,
+          visibleContentHeight: 400,
+          visibleTopLine: 79.7,
+        }),
+      ).toEqual({
+        startLine: 79,
+        endLine: 79,
+        rowCount: 1,
+        rowHeight: 20,
+        topOffset: -20,
+      });
+    });
+
+    it("adds the fractional overscan row on top of a short-host backfill", () => {
+      expect(
+        computePtyLiveBackfill({
+          ydisp: 81,
+          rows: 20,
+          cellH: 20,
+          visibleContentHeight: 600,
+          visibleTopLine: 70.5,
+        }),
+      ).toEqual({
+        startLine: 70,
+        endLine: 80,
+        rowCount: 11,
+        rowHeight: 20,
+        topOffset: -220,
+      });
+    });
+  });
+
+  describe("computePtyLiveViewportBridge", () => {
+    it("covers the full fractional browser viewport relative to the last painted xterm row", () => {
+      expect(
+        computePtyLiveViewportBridge({
+          ydisp: 80,
+          rows: 20,
+          cellH: 20,
+          bufferLength: 120,
+          visibleContentHeight: 400,
+          visibleTopLine: 78.985,
+        }),
+      ).toEqual({
+        startLine: 78,
+        endLine: 98,
+        rowCount: 21,
+        rowHeight: 20,
+        topOffset: -40,
+      });
+    });
+
+    it("bridges both sides of a short host while a downward viewport paint is pending", () => {
+      expect(
+        computePtyLiveViewportBridge({
+          ydisp: 86,
+          rows: 24,
+          cellH: 20,
+          bufferLength: 200,
+          visibleContentHeight: 760,
+          visibleTopLine: 74.5,
+        }),
+      ).toEqual({
+        startLine: 74,
+        endLine: 112,
+        rowCount: 39,
+        rowHeight: 20,
+        topOffset: -240,
       });
     });
   });
