@@ -13,6 +13,8 @@ const WEB_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const PHASE_SCRIPT = fileURLToPath(new URL("./websocket-background.phase.ts", import.meta.url));
 const RESULT_PREFIX = "BACKGROUND_PHASE_RESULT=";
 const PHASE_CDP_DETACH_GRACE_MS = 500;
+const REQUIRED_BACKGROUND_DURATION_MS = 5_000;
+const ANDROID_VISIBILITY_SETTLE_BUDGET_MS = 5_000;
 
 type PhaseResult = Record<string, boolean | number | string | null>;
 
@@ -43,7 +45,13 @@ async function runPhase(phase: "setup" | "inspect-healthy" | "inspect-dead") {
 }
 
 async function waitForBackgroundWindow(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 6_500));
+  // `topResumedActivity=false` precedes Chrome dispatching `visibilitychange` to the document.
+  // Do not attach CDP to poll that transition: an attached debugger can keep the target visible.
+  // Instead, leave a full lifecycle-settle budget around the required hidden interval and let the
+  // page's passive lifecycle timestamps prove the real duration after Chrome is foregrounded.
+  await new Promise((resolve) =>
+    setTimeout(resolve, REQUIRED_BACKGROUND_DURATION_MS + ANDROID_VISIBILITY_SETTLE_BUDGET_MS),
+  );
 }
 
 test.describe("L4 mobile / background WebSocket liveness", () => {
@@ -66,7 +74,7 @@ test.describe("L4 mobile / background WebSocket liveness", () => {
     expect(healthy.documentId).toBe(setup.documentId);
     expect(healthy.route).toBe(setup.route);
     expect(healthy.backgroundEmissions).toBeGreaterThan(0);
-    expect(healthy.backgroundDurationMs).toBeGreaterThanOrEqual(5_000);
+    expect(healthy.backgroundDurationMs).toBeGreaterThanOrEqual(REQUIRED_BACKGROUND_DURATION_MS);
     expect(healthy.pingDelta).toBe(1);
     expect(healthy.openDelta).toBe(0);
     expect(healthy.closeDelta).toBe(0);
@@ -86,7 +94,7 @@ test.describe("L4 mobile / background WebSocket liveness", () => {
     // The first background phase proves healthy streaming continues. The dead phase must be fully
     // silent; otherwise an ordinary inbound frame legitimately proves the socket is still alive.
     expect(recovered.backgroundEmissions).toBe(0);
-    expect(recovered.backgroundDurationMs).toBeGreaterThanOrEqual(5_000);
+    expect(recovered.backgroundDurationMs).toBeGreaterThanOrEqual(REQUIRED_BACKGROUND_DURATION_MS);
     expect(recovered.pingDelta).toBe(1);
     expect(recovered.openDelta).toBe(1);
     expect(recovered.closeDelta).toBe(1);
