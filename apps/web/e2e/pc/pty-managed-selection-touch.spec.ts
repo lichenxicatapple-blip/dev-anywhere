@@ -647,9 +647,46 @@ test("a real touch drag moves one handle while a later light tap clears selectio
   try {
     const { snapshot: initialSelection } = await establishSelection(page, client, sessionId);
     const handle = page.locator('[data-slot="pty-selection-handle"][data-kind="focus"]');
+    const terminalBox = await terminalRect(page);
+
+    // Reveal the transient scrollbar while the focus handle overlaps its 32px hit area. The
+    // handle must own this point; otherwise a real drag becomes a scrollbar track jump.
+    await touchPan(
+      client,
+      {
+        x: terminalBox.left + 48,
+        y: terminalBox.top + terminalBox.height * 0.55,
+      },
+      {
+        x: terminalBox.left + 48,
+        y: terminalBox.top + terminalBox.height * 0.7,
+      },
+      { steps: 6, settleMs: 30 },
+    );
+    await expect(page.locator('[data-slot="pty-selection-toolbar"]')).toHaveCount(1);
+    const scrollbar = page.locator('[data-slot="pty-scrollbar"]');
+    await expect(scrollbar).toHaveClass(/opacity-100/);
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const focusHandle = document.querySelector<HTMLElement>(
+            '[data-slot="pty-selection-handle"][data-kind="focus"]',
+          );
+          if (!focusHandle) return null;
+          const rect = focusHandle.getBoundingClientRect();
+          const hit = document.elementFromPoint(
+            rect.left + rect.width / 2,
+            rect.top + rect.height / 2,
+          );
+          return hit
+            ?.closest<HTMLElement>('[data-slot="pty-selection-handle"]')
+            ?.getAttribute("data-kind");
+        }),
+      )
+      .toBe("focus");
+
     const handleBox = await handle.boundingBox();
     const screenBox = await page.locator('[data-slot="pty-host"] .xterm-screen').boundingBox();
-    const terminalBox = await terminalRect(page);
     if (!handleBox || !screenBox) throw new Error("focus handle or xterm screen is unavailable");
     const cellHeight = screenBox.height / ROWS;
     const start = {
@@ -690,7 +727,7 @@ test("a real touch drag moves one handle while a later light tap clears selectio
       { steps: 8, stepDelayMs: 8, settleMs: 0 },
     );
     await expect(page.locator('[data-slot="pty-selection-toolbar"]')).toHaveCount(0);
-    await page.waitForTimeout(40);
+    await expect(page.locator('[data-slot="pty-selection-toolbar"]')).toHaveCount(1);
     await touchTap(client, await tapPointOutsideTerminal(page));
     await expect(page.locator('[data-slot="pty-selection-handle"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="pty-managed-selection-overlay"]')).toHaveCount(0);

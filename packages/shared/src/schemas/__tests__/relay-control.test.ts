@@ -755,6 +755,7 @@ describe("RelayControlSchema", () => {
   it("parses session_history_response with sessions array", () => {
     const result = RelayControlSchema.parse({
       type: "session_history_response",
+      success: true,
       sessions: [
         {
           id: "s1",
@@ -772,6 +773,24 @@ describe("RelayControlSchema", () => {
       expect(result.sessions[0].title).toBe("Fix bug");
       expect(result.sessions[0].preferredMode).toBe("json");
     }
+  });
+
+  it("parses an explicit session_history_response failure", () => {
+    const result = RelayControlSchema.parse({
+      type: "session_history_response",
+      requestId: "history-1",
+      success: false,
+      sessions: [],
+      errorCode: "UNKNOWN",
+      error: "历史会话扫描失败",
+    });
+
+    expect(result).toMatchObject({
+      type: "session_history_response",
+      success: false,
+      sessions: [],
+      errorCode: "UNKNOWN",
+    });
   });
 
   it("parses file_tree_push with grouped entries per directory", () => {

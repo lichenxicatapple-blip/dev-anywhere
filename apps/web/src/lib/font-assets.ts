@@ -1,5 +1,6 @@
 const SARASA_FIXED_SC_BASE = "/fonts/sarasa-fixed-sc";
 const stylesheetLoads = new WeakMap<HTMLLinkElement, Promise<void>>();
+const POWERLINE_FONT_SHARD = "090128a865f81baab82dfa2776ef9d39.woff2";
 const CRITICAL_FONT_SHARDS = [
   // Provider 状态行高频使用 "•"，对应 unicode-range: U+2022。
   "58e7c2324d8d292d58534d9f236f1552.woff2",
@@ -9,6 +10,11 @@ const CRITICAL_FONT_SHARDS = [
   "ac9e1d7b7d0e738c0965e0c37a171594.woff2", // U+2501-U+2523
   "911993a058e817f1a231fbac27b3781c.woff2", // U+2524-U+25C7
 ];
+
+interface LoadFontCSSOptions {
+  // Powerline 分片约 100 KiB，仅在真正创建 xterm 时提前拉取，避免列表/JSON 页面消耗 Relay 带宽。
+  preloadPowerline?: boolean;
+}
 
 function waitForStylesheet(link: HTMLLinkElement): Promise<void> {
   if (link.dataset.fontCssSettled === "true" || link.sheet) return Promise.resolve();
@@ -35,12 +41,15 @@ function waitForStylesheet(link: HTMLLinkElement): Promise<void> {
 // relay 静态目录 ~/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css 由 package 内置字体资产安装生成。
 // 返回的 Promise 在 @font-face 规则已注册（或加载失败）后 settle，让 xterm 可以在
 // DOM renderer 首次字宽测量前精确等待必要的 unicode-range shard。
-export function loadFontCSS(relayUrl: string): Promise<void> {
+export function loadFontCSS(relayUrl: string, options: LoadFontCSSOptions = {}): Promise<void> {
   const base = relayUrl
     .replace(/^ws:/, "http:")
     .replace(/^wss:/, "https:")
     .replace(/\/(proxy|client)$/, "");
-  for (const shard of CRITICAL_FONT_SHARDS) {
+  const criticalShards = options.preloadPowerline
+    ? [CRITICAL_FONT_SHARDS[0], POWERLINE_FONT_SHARD, ...CRITICAL_FONT_SHARDS.slice(1)]
+    : CRITICAL_FONT_SHARDS;
+  for (const shard of criticalShards) {
     const fontHref = `${base}${SARASA_FIXED_SC_BASE}/${shard}`;
     if (document.querySelector(`link[href="${fontHref}"]`)) continue;
     const preload = document.createElement("link");

@@ -19,11 +19,12 @@ interface CreateXtermOptions {
   fontSize?: number;
 }
 
-// Codex renders `›` at the start of its input row and uses `·` / `•` in status text. Keep them in
-// the preflight set: if a unicode-range shard arrives only after the DOM renderer has measured a
-// fallback glyph, xterm keeps that fallback width and applies the wrong letter-spacing later.
+// Codex renders `›` at the start of its input row and uses `·` / `•` in status text. Shell prompts
+// commonly use Powerline's branch marker and separators (``, ``-``). Keep them in the preflight set:
+// if a unicode-range shard arrives only after the DOM renderer has measured a fallback glyph,
+// xterm keeps that fallback width and applies the wrong letter-spacing later.
 // For `›`, that made a full-width prompt background end ~1.6 CSS px before the fixed row edge.
-const TERMINAL_FONT_METRIC_GLYPHS = "─│╭╮╰╯›·•";
+const TERMINAL_FONT_METRIC_GLYPHS = "─│╭╮╰╯›·•";
 
 function refreshXtermFontMetrics(terminal: Terminal): void {
   // xterm 6's DOM WidthCache is not cleared by refresh(). A semantically identical font option
@@ -73,7 +74,7 @@ export async function createXtermTerminal(
   // React passive effects run child-first, so the PTY can mount before useRelaySetup has appended
   // result.css. Waiting here makes the subsequent FontFaceSet.load an actual font request instead
   // of a successful no-op with zero matching @font-face rules.
-  await loadFontCSS(window.location.origin);
+  await loadFontCSS(window.location.origin, { preloadPowerline: true });
   await document.fonts.ready;
 
   // split font 的框线字形默认按需加载。必须在 xterm DOM renderer 首次测量前请求，

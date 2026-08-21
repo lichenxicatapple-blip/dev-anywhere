@@ -6,7 +6,7 @@ describe("loadFontCSS", () => {
     document.head.innerHTML = "";
   });
 
-  it("preloads provider and terminal metric shards before loading the split CSS", () => {
+  it("preloads shared provider and terminal metric shards before loading the split CSS", () => {
     loadFontCSS("http://localhost:3100");
 
     const preloads = Array.from(
@@ -23,6 +23,19 @@ describe("loadFontCSS", () => {
     expect(preloads.every((link) => link.type === "font/woff2")).toBe(true);
     expect(preloads.every((link) => link.crossOrigin === "anonymous")).toBe(true);
     expect(stylesheet?.href).toBe("http://localhost:3100/fonts/sarasa-fixed-sc/result.css");
+  });
+
+  it("adds the Powerline shard only for a terminal preload", () => {
+    loadFontCSS("http://localhost:3100");
+    loadFontCSS("http://localhost:3100", { preloadPowerline: true });
+
+    const preloads = Array.from(
+      document.head.querySelectorAll<HTMLLinkElement>('link[rel="preload"][as="font"]'),
+    );
+    expect(preloads.map((link) => link.href)).toContain(
+      "http://localhost:3100/fonts/sarasa-fixed-sc/090128a865f81baab82dfa2776ef9d39.woff2",
+    );
+    expect(preloads).toHaveLength(5);
   });
 
   it("does not append duplicate font links", () => {

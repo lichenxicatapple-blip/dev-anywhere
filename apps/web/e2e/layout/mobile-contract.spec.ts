@@ -534,6 +534,7 @@ test.describe("mobile UX contract", () => {
     await page.evaluate((title) => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "session_history_response",
+        success: true,
         sessions: [
           {
             id: "hist-mobile-restore-sheet",

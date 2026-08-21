@@ -64,6 +64,7 @@ function handlePtyState(msg: Extract<RelayControlMessage, { type: "pty_state" }>
 function handleSessionHistoryResponse(
   msg: Extract<RelayControlMessage, { type: "session_history_response" }>,
 ): void {
+  if (!msg.success) return;
   useSessionStore.getState().setHistorySessions(msg.sessions);
 }
 

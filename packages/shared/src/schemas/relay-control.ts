@@ -445,7 +445,12 @@ const relayControlDefinitions = [
   control("session_history_request", RequestIdShape, "client_to_proxy"),
   control(
     "session_history_response",
-    { ...RequestIdShape, sessions: z.array(HistorySessionSchema) },
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      success: z.boolean(),
+      sessions: z.array(HistorySessionSchema),
+    },
     "proxy_to_client",
   ),
 

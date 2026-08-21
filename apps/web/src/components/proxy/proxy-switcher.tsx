@@ -12,6 +12,7 @@ import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover
 import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
 import { STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
+import { loadSessionHistory } from "@/services/session-history-loader";
 import { ProxyStatusDot } from "./proxy-status-dot";
 
 interface ProxySwitcherProps {
@@ -78,15 +79,11 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
         .catch((err: unknown) => {
           console.error("[proxy-switcher] post-bind data fetch failed", err);
         });
-      void relay
-        .requestSessionHistory()
-        .then((sessions) => {
-          if (useAppStore.getState().selectedProxyId !== proxyId) return;
-          useSessionStore.getState().setHistorySessions(sessions);
-        })
-        .catch((err: unknown) => {
-          console.error("[proxy-switcher] post-bind data fetch failed", err);
-        });
+      void loadSessionHistory(relay).then((result) => {
+        if (result.status === "failed") {
+          console.error("[proxy-switcher] post-bind data fetch failed", result.error);
+        }
+      });
       setDropdownOpen(false);
       if (layout === "page") {
         navigate("/sessions");

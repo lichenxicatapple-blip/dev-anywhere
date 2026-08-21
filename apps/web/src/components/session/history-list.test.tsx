@@ -31,14 +31,21 @@ vi.mock("@/components/toast", () => ({
 }));
 
 import type { HistorySession } from "@dev-anywhere/shared";
-import { useSessionStore } from "@/stores/session-store";
+import { useAppStore } from "@/stores/app-store";
+import { type HistoryLoadStatus, useSessionStore } from "@/stores/session-store";
 import { HistoryList } from "./history-list";
 
-function renderHistoryList(historySessions: HistorySession[]) {
+function renderHistoryList(
+  historySessions: HistorySession[],
+  historyLoadStatus: HistoryLoadStatus = "loaded",
+) {
+  useAppStore.setState({ selectedProxyId: "proxy-1" });
   useSessionStore.setState({
     sessions: [],
     sessionListLoaded: true,
     historySessions,
+    historyLoadStatus,
+    historyLoadGeneration: 0,
     ptyTitles: {},
     ptyStateBySessionId: {},
     agentStatusBySessionId: {},
@@ -118,6 +125,36 @@ describe("HistoryList", () => {
     expect(groupHeaders[0].textContent).toContain("2");
   });
 
+  it("shows an honest initial loading placeholder and disables refresh", () => {
+    const { container } = renderHistoryList([], "loading");
+
+    expect(screen.getByRole("status").textContent).toContain("正在加载会话记录");
+    expect(container.querySelector('[data-slot="history-empty"]')).toBeNull();
+    const refreshButton = screen.getByRole("button", { name: "刷新全部会话" });
+    expect(refreshButton).toBeDisabled();
+    expect(refreshButton.getAttribute("aria-busy")).toBe("true");
+  });
+
+  it("does not present an unrequested history snapshot as a real empty result", () => {
+    const { container } = renderHistoryList([], "idle");
+
+    expect(container.querySelector('[data-slot="history-idle"]')?.textContent).toContain(
+      "尚未加载",
+    );
+    expect(container.querySelector('[data-slot="history-empty"]')).toBeNull();
+    expect(screen.getByRole("button", { name: "刷新全部会话" })).not.toBeDisabled();
+  });
+
+  it("shows the empty state only after a successful empty snapshot", () => {
+    const { container } = renderHistoryList([], "loaded");
+
+    expect(container.querySelector('[data-slot="history-empty"]')?.textContent).toContain(
+      "暂无会话记录",
+    );
+    expect(container.querySelector('[data-slot="history-loading"]')).toBeNull();
+    expect(container.querySelector('[data-slot="history-error"]')).toBeNull();
+  });
+
   it("spins the refresh button while refreshing all sessions", async () => {
     let resolveRefresh: (sessions: HistorySession[]) => void = () => {};
     requestSessionHistory.mockReturnValueOnce(
@@ -139,6 +176,7 @@ describe("HistoryList", () => {
     const refreshButton = container.querySelector<HTMLElement>('[data-slot="history-refresh"]');
     if (!refreshButton) throw new Error("missing history refresh button");
     fireEvent.click(refreshButton);
+    fireEvent.click(refreshButton);
 
     expect(requestSessionHistory).toHaveBeenCalledTimes(1);
     expect(refreshButton.getAttribute("aria-busy")).toBe("true");
@@ -150,6 +188,44 @@ describe("HistoryList", () => {
     await waitFor(() => {
       expect(refreshButton.getAttribute("aria-busy")).toBe("false");
     });
+    expect(container.querySelector('[data-slot="history-empty"]')).not.toBeNull();
+  });
+
+  it("unlocks refresh and exposes a retry state after a request timeout", async () => {
+    requestSessionHistory.mockRejectedValueOnce(new Error("请求超时"));
+    const { container } = renderHistoryList([]);
+    const refreshButton = screen.getByRole("button", { name: "刷新全部会话" });
+
+    fireEvent.click(refreshButton);
+    expect(refreshButton).toBeDisabled();
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-slot="history-error"]')?.textContent).toContain(
+        "请点击刷新重试",
+      );
+    });
+    expect(refreshButton).not.toBeDisabled();
+    expect(refreshButton.getAttribute("aria-busy")).toBe("false");
+    expect(toastError).toHaveBeenCalledWith("请求超时");
+  });
+
+  it("keeps cached history visible when a background refresh fails", () => {
+    const history = {
+      id: "cached-history",
+      title: "Cached history",
+      projectDir: "/workspace",
+      updatedAt: 1,
+      provider: "claude" as const,
+    };
+    const { container } = renderHistoryList([history], "error");
+
+    expect(container.querySelector('[data-slot="history-stale"]')?.textContent).toContain(
+      "上次加载的结果",
+    );
+    expect(container.querySelector('[data-slot="history-section-header"]')?.textContent).toContain(
+      "· 1",
+    );
+    expect(screen.getByRole("button", { name: "刷新全部会话" })).not.toBeDisabled();
   });
 
   it("opens a restore dialog for a preferred JSON history row and shows its mode tag", async () => {

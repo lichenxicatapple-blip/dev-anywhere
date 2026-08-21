@@ -6,7 +6,14 @@
 // group 顺序沿用 historySessions 的 updatedAt 降序 (proxy 保证), 最近活跃的 project 在最上
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
-import { Check, ChevronRight, MessageSquare, RefreshCw, TerminalSquare } from "lucide-react";
+import {
+  Check,
+  ChevronRight,
+  Loader2,
+  MessageSquare,
+  RefreshCw,
+  TerminalSquare,
+} from "lucide-react";
 import type { HistorySession, SessionInfo } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
 import {
@@ -38,6 +45,7 @@ import {
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { HistoryRow } from "./history-row";
 import { BypassPermissionWarning } from "./bypass-permission-warning";
+import { loadSessionHistory } from "@/services/session-history-loader";
 
 interface HistoryListProps {
   now?: number;
@@ -48,12 +56,12 @@ type RestorePermissionMode = "default" | "auto" | "bypassPermissions";
 
 export function HistoryList({ now }: HistoryListProps) {
   const historySessions = useSessionStore((s) => s.historySessions);
+  const historyLoadStatus = useSessionStore((s) => s.historyLoadStatus);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<HistorySession | null>(null);
   const [restoreMode, setRestoreMode] = useState<RestoreMode>("json");
   const [restorePermissionMode, setRestorePermissionMode] =
     useState<RestorePermissionMode>("default");
-  const [refreshing, setRefreshing] = useState(false);
   // 整个历史会话区默认折叠, 让活跃会话占据主视野; 点 header 整体展开后再点 group chevron 看行
   const [sectionExpanded, setSectionExpanded] = useState(false);
   const [collapsedProviders, setCollapsedProviders] = useState<Set<SessionProvider>>(new Set());
@@ -139,17 +147,13 @@ export function HistoryList({ now }: HistoryListProps) {
 
   function handleRefresh() {
     const relay = relayClientRef;
-    if (!relay || refreshing) return;
-    setRefreshing(true);
-    void relay
-      .requestSessionHistory()
-      .then((sessions) => useSessionStore.getState().setHistorySessions(sessions))
-      .catch((err) => {
-        toast.error(err instanceof Error ? err.message : String(err));
-      })
-      .finally(() => {
-        setRefreshing(false);
-      });
+    // 两套响应式列表会同时挂载；以 store 的同步值做最后一道门禁，避免快速双击/跨布局重复扫描。
+    if (!relay || useSessionStore.getState().historyLoadStatus === "loading") return;
+    void loadSessionHistory(relay).then((result) => {
+      if (result.status === "failed") {
+        toast.error(result.error instanceof Error ? result.error.message : String(result.error));
+      }
+    });
   }
 
   function toggleGroup(provider: SessionProvider, dir: string) {
@@ -172,13 +176,14 @@ export function HistoryList({ now }: HistoryListProps) {
   }
 
   const hasHistory = historySessions.length > 0;
+  const historyLoading = historyLoadStatus === "loading";
   const restoreModes = restoreTarget ? availableRestoreModes() : [];
 
   return (
     <div data-slot="history-list" className="flex flex-col">
       {/* section header 只负责展开/折叠; 刷新按钮独立，避免嵌套交互控件。 */}
       {/* 历史为空时 header 的 toggle/chevron 都禁用, 只保留刷新 (可能扫完 claude 目录后就出来了) */}
-      <div className="flex min-h-[36px] w-full items-center gap-1.5 px-4 py-1.5">
+      <div className="flex min-h-11 w-full items-center gap-1.5 px-4 py-1.5 md:min-h-[36px]">
         <button
           type="button"
           onClick={() => hasHistory && setSectionExpanded((v) => !v)}
@@ -216,16 +221,61 @@ export function HistoryList({ now }: HistoryListProps) {
           variant="ghost"
           size="icon-sm"
           aria-label="刷新全部会话"
-          aria-busy={refreshing}
-          title="刷新"
+          aria-busy={historyLoading}
+          title={historyLoading ? "正在加载" : "刷新"}
           onClick={handleRefresh}
-          disabled={refreshing}
+          disabled={historyLoading}
           data-slot="history-refresh"
+          className="size-11 md:size-8"
         >
-          <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} aria-hidden="true" />
+          <RefreshCw
+            className={cn("size-3.5", historyLoading && "animate-spin motion-reduce:animate-none")}
+            aria-hidden="true"
+          />
         </Button>
       </div>
-      {!hasHistory && (
+      {!hasHistory && historyLoading && (
+        <div
+          className="flex items-center gap-2 px-4 py-3 text-sm text-muted-foreground/80"
+          data-slot="history-loading"
+          role="status"
+          aria-live="polite"
+        >
+          <Loader2
+            className="size-3.5 shrink-0 animate-spin motion-reduce:animate-none"
+            aria-hidden="true"
+          />
+          <span>正在加载会话记录...</span>
+        </div>
+      )}
+      {!hasHistory && historyLoadStatus === "idle" && (
+        <div
+          className="px-4 py-3 text-sm text-muted-foreground/80"
+          data-slot="history-idle"
+          role="status"
+        >
+          会话记录尚未加载
+        </div>
+      )}
+      {!hasHistory && historyLoadStatus === "error" && (
+        <div
+          className="px-4 py-3 text-sm text-muted-foreground/80"
+          data-slot="history-error"
+          role="status"
+        >
+          会话记录加载失败，请点击刷新重试
+        </div>
+      )}
+      {hasHistory && historyLoadStatus === "error" && (
+        <div
+          className="px-4 pb-2 text-xs text-muted-foreground/80"
+          data-slot="history-stale"
+          role="status"
+        >
+          刷新失败，当前显示上次加载的结果
+        </div>
+      )}
+      {!hasHistory && historyLoadStatus === "loaded" && (
         <div className="px-4 py-3 text-sm text-muted-foreground/70" data-slot="history-empty">
           暂无会话记录
         </div>

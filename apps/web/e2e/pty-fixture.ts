@@ -173,6 +173,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
             this.emitJson({
               type: "session_history_response",
               requestId: msg.requestId,
+              success: true,
               sessions: [],
             });
             return;
