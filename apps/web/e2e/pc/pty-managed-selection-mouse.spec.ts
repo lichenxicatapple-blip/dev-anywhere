@@ -219,6 +219,36 @@ async function requireOverlayRange(page: Page): Promise<OverlayRangeSnapshot> {
   return range;
 }
 
+async function readSingleLineAsciiRangeText(
+  page: Page,
+  sessionId: string,
+  range: OverlayRangeSnapshot,
+): Promise<string> {
+  expect(range.anchorRow).toBe(range.focusRow);
+  const text = await page.evaluate(
+    ({ sid, anchorRow, anchorColumn, focusColumn }) => {
+      const terminal = window.__ccTestPtyTerminals?.get(sid);
+      const row = Number.parseInt(anchorRow, 10);
+      const anchor = Number.parseInt(anchorColumn, 10);
+      const focus = Number.parseInt(focusColumn, 10);
+      const line = terminal?.buffer.active.getLine(row);
+      if (!line || !Number.isFinite(anchor) || !Number.isFinite(focus)) return null;
+      const start = Math.min(anchor, focus);
+      const endExclusive = Math.max(anchor, focus) + 1;
+      return line.translateToString(true, start, endExclusive).replace(/\u00a0/g, " ");
+    },
+    {
+      sid: sessionId,
+      anchorRow: range.anchorRow,
+      anchorColumn: range.anchorColumn,
+      focusColumn: range.focusColumn,
+    },
+  );
+  if (text === null)
+    throw new Error(`Cannot resolve horizontal selection range: ${JSON.stringify(range)}`);
+  return text;
+}
+
 function expectSameAnchor(before: OverlayRangeSnapshot, after: OverlayRangeSnapshot): void {
   expect({ row: after.anchorRow, column: after.anchorColumn }).toEqual({
     row: before.anchorRow,
@@ -417,7 +447,10 @@ async function dragSelectionAcrossVerticalViewport(
   }
 }
 
-async function dragSelectionHorizontally(page: Page, direction: "left" | "right"): Promise<void> {
+async function dragSelectionHorizontally(
+  page: Page,
+  direction: "left" | "right",
+): Promise<OverlayRangeSnapshot> {
   let geometry = await requireTerminalDom(page);
   const y = liveScreenY(geometry);
   const startX =
@@ -456,6 +489,7 @@ async function dragSelectionHorizontally(page: Page, direction: "left" | "right"
   } finally {
     await page.mouse.up();
   }
+  return requireOverlayRange(page);
 }
 
 test("a stationary mouse hold on live buffer rows cannot start selection autoscroll", async ({
@@ -564,16 +598,20 @@ test("horizontal edge selection autoscrolls right and left with a fixed anchor",
   const geometry = await requireTerminalDom(page);
   expect(geometry.maxScrollLeft).toBeGreaterThan(300);
 
-  await dragSelectionHorizontally(page, "right");
+  const rightRange = await dragSelectionHorizontally(page, "right");
   const copiedRight = await copyManagedSelection(page);
   expect(copiedRight.length).toBeGreaterThan(20);
-  expect(copiedRight).toContain("0123456789");
+  expect(copiedRight).toBe(
+    await readSingleLineAsciiRangeText(page, "gate-managed-horizontal", rightRange),
+  );
   await clearSelectionWithClick(page);
 
-  await dragSelectionHorizontally(page, "left");
+  const leftRange = await dragSelectionHorizontally(page, "left");
   const copiedLeft = await copyManagedSelection(page);
   expect(copiedLeft.length).toBeGreaterThan(20);
-  expect(copiedLeft).toContain("0123456789");
+  expect(copiedLeft).toBe(
+    await readSingleLineAsciiRangeText(page, "gate-managed-horizontal", leftRange),
+  );
   await clearSelectionWithClick(page);
 });
 
