@@ -442,11 +442,11 @@ const relayControlDefinitions = [
   ),
 
   // 会话历史浏览
-  control("session_history_request", RequestIdShape, "client_to_proxy"),
+  control("session_history_request", RequiredRequestIdShape, "client_to_proxy"),
   control(
     "session_history_response",
     {
-      ...RequestIdShape,
+      ...RequiredRequestIdShape,
       ...RequestErrorShape,
       success: z.boolean(),
       sessions: z.array(HistorySessionSchema),

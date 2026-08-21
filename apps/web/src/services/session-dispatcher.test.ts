@@ -116,27 +116,39 @@ describe("session-dispatcher lifecycle reconciliation", () => {
     expect(useSessionStore.getState().historySessions.map((item) => item.id)).toEqual(["current"]);
   });
 
-  it("does not turn an unsolicited history scan failure into an empty snapshot", () => {
+  it("does not revive a timed-out history load when its late response arrives", () => {
     const current = {
       id: "current",
-      title: "Current history",
+      title: "Last known history",
       projectDir: "/current",
       updatedAt: 1,
       provider: "claude" as const,
     };
-    useSessionStore.setState({ historySessions: [current], historyLoadStatus: "loaded" });
+    useSessionStore.setState({
+      historySessions: [current],
+      historyLoadStatus: "error",
+      historyLoadGeneration: 7,
+    });
 
     createSessionMessageHandler()({
       type: "session_history_response",
-      success: false,
-      sessions: [],
-      errorCode: "UNKNOWN",
-      error: "历史会话扫描失败",
+      requestId: "timed-out-request",
+      success: true,
+      sessions: [
+        {
+          id: "late",
+          title: "Late response",
+          projectDir: "/late",
+          updatedAt: 2,
+          provider: "claude",
+        },
+      ],
     });
 
     expect(useSessionStore.getState()).toMatchObject({
       historySessions: [current],
-      historyLoadStatus: "loaded",
+      historyLoadStatus: "error",
+      historyLoadGeneration: 7,
     });
   });
 });

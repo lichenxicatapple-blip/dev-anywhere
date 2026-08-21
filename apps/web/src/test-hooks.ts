@@ -5,6 +5,7 @@ import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import { DEFAULT_VOICE_PILOT_STATE, useVoicePilotStore } from "@/voice/voice-pilot-store";
 import { toast } from "@/components/toast";
+import type { HistorySession } from "@dev-anywhere/shared";
 import type { ILinkProvider, Terminal } from "@xterm/xterm";
 
 // PTY xterm link provider 在真实浏览器里需要鼠标精确落到字符 cell 才会激活,
@@ -23,6 +24,7 @@ interface CCTestHooks {
   };
   session: {
     setPtyTitle: (sessionId: string, title: string) => void;
+    setHistorySessions: (sessions: HistorySession[]) => void;
   };
   voice: {
     snapshot: (sessionId: string) => {
@@ -73,6 +75,7 @@ export function installTestHooks(): void {
     },
     session: {
       setPtyTitle: (sid, title) => useSessionStore.getState().setPtyTitle(sid, title),
+      setHistorySessions: (sessions) => useSessionStore.getState().setHistorySessions(sessions),
     },
     voice: {
       snapshot: (sid) => {

@@ -532,20 +532,16 @@ test.describe("mobile UX contract", () => {
     const longTitle =
       "This is an automated dev-anywhere restore-session title long enough to stress the mobile sheet bounds";
     await page.evaluate((title) => {
-      window.__devAnywhereE2E?.socket?.emitJson({
-        type: "session_history_response",
-        success: true,
-        sessions: [
-          {
-            id: "hist-mobile-restore-sheet",
-            title,
-            projectDir: "/home/dev/projects/sample-app",
-            updatedAt: Date.now() - 1_000,
-            provider: "claude",
-            preferredMode: "pty",
-          },
-        ],
-      });
+      window.__ccTest?.session.setHistorySessions([
+        {
+          id: "hist-mobile-restore-sheet",
+          title,
+          projectDir: "/home/dev/projects/sample-app",
+          updatedAt: Date.now() - 1_000,
+          provider: "claude",
+          preferredMode: "pty",
+        },
+      ]);
     }, longTitle);
 
     await page.locator('[data-slot="history-section-header"]:visible').click();

@@ -22,6 +22,7 @@ import { createVoiceProviderRegistry, type VoiceProviderRegistry } from "./voice
 import { RemoteFileBridge } from "./remote-file-bridge.js";
 import { mountWebApp } from "./web-app.js";
 import { PtySnapshotRouteRegistry } from "./pty-snapshot-route-registry.js";
+import { SessionHistoryRouteRegistry } from "./session-history-route-registry.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -110,6 +111,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
 
   const registry = new RelayRegistry();
   const ptySnapshotRoutes = new PtySnapshotRouteRegistry();
+  const sessionHistoryRoutes = new SessionHistoryRouteRegistry();
   const remoteFileBridge = new RemoteFileBridge({ registry, logger });
   const voiceConfigStore = createVoiceConfigStore({
     dataDir,
@@ -270,7 +272,15 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   });
 
   proxyWss.on("connection", (ws) => {
-    handleProxyConnection(ws, registry, logger, ptySnapshotRoutes, relayChaos, remoteFileBridge);
+    handleProxyConnection(
+      ws,
+      registry,
+      logger,
+      ptySnapshotRoutes,
+      sessionHistoryRoutes,
+      relayChaos,
+      remoteFileBridge,
+    );
   });
 
   clientWss.on("connection", (ws, request) => {
@@ -279,6 +289,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       registry,
       logger,
       ptySnapshotRoutes,
+      sessionHistoryRoutes,
       relayChaos,
       voiceConfigStore,
       voiceProviders,

@@ -13,6 +13,7 @@ import type { RelayChaos } from "../chaos.js";
 import { completeRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
 import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js";
+import type { SessionHistoryRouteRegistry } from "../session-history-route-registry.js";
 
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
@@ -83,6 +84,7 @@ export function handleProxyConnection(
   registry: RelayRegistry,
   logger: Logger,
   ptySnapshotRoutes: PtySnapshotRouteRegistry,
+  sessionHistoryRoutes: SessionHistoryRouteRegistry,
   chaos?: RelayChaos,
   remoteFileBridge?: RemoteFileBridge,
 ): void {
@@ -141,7 +143,10 @@ export function handleProxyConnection(
       const { proxyId, name } = result.message;
       const status = registry.registerProxy(proxyId, proxyWs, name);
       proxyWs.proxyId = proxyId;
-      if (status === "reconnected") ptySnapshotRoutes.clearProxy(proxyId);
+      if (status === "reconnected") {
+        ptySnapshotRoutes.clearProxy(proxyId);
+        sessionHistoryRoutes.clearProxy(proxyId);
+      }
       logger.info({ proxyId, status }, "Proxy registered");
 
       proxyWs.send(
@@ -162,6 +167,7 @@ export function handleProxyConnection(
     if (result.kind === "control" && result.message.type === "proxy_disconnect") {
       if (proxyWs.proxyId) {
         ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
+        sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info(
@@ -253,6 +259,57 @@ export function handleProxyConnection(
         );
         return;
       }
+      if (result.message.type === "session_history_response") {
+        if (!proxyWs.proxyId) {
+          rejectNotRegistered(proxyWs);
+          return;
+        }
+        const route = sessionHistoryRoutes.resolve(
+          proxyWs.proxyId,
+          result.message.requestId,
+          proxyWs,
+        );
+        if (route.kind === "matched") {
+          let delivered = 0;
+          for (const target of route.targets) {
+            if (target.clientWs.readyState !== WebSocket.OPEN) continue;
+            const response = serializeControl({
+              ...result.message,
+              requestId: target.requestId,
+            });
+            if (chaos) {
+              chaos.send(target.clientWs, response, {
+                direction: "proxy_to_client",
+                type: result.message.type,
+              });
+            } else {
+              target.clientWs.send(response);
+            }
+            delivered += 1;
+          }
+          logger.debug(
+            {
+              proxyId: proxyWs.proxyId,
+              upstreamRequestId: result.message.requestId,
+              waiterCount: route.targets.length,
+              delivered,
+              success: result.message.success,
+            },
+            "Session history response fanned out",
+          );
+          return;
+        }
+
+        logger.debug(
+          {
+            proxyId: proxyWs.proxyId,
+            requestId: result.message.requestId,
+            route: route.kind,
+          },
+          "Unmatched session history response dropped",
+        );
+        return;
+      }
       if (isProxyToClientRelayControlType(result.message.type)) {
         if (!proxyWs.proxyId) {
           rejectNotRegistered(proxyWs);
@@ -320,6 +377,7 @@ export function handleProxyConnection(
       return;
     }
     ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
+    sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
     notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
     try {
       registry.transitionProxy(proxyWs.proxyId, "online", "offline");

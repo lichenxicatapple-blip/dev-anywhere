@@ -135,7 +135,8 @@ export function useRelaySetup(): void {
     // Chat 模式消息 dispatcher: 订阅 MessageEnvelope + RelayControl chat 类 type, 写 chat-store.
     // 必须在 relayClientRef 赋值后注册 (上方 L35), 否则 registerChatDispatcher 会 no-op 并警告.
     const unregisterChat = registerChatDispatcher();
-    // Session 生命周期 dispatcher: session_list / session_status / agent_status / session_history_response → session-store
+    // Session 生命周期 dispatcher: session_list / session_status / agent_status → session-store。
+    // request-scoped session_history_response 由对应 loader 独占处理。
     const unregisterSession = registerSessionDispatcher();
     // 资源 dispatcher: command_list_push / dir_list_response / file_tree_push → command-store / file-store
     const unregisterResource = registerResourceDispatcher();
