@@ -23,15 +23,24 @@ type StreamEmission = {
   visibility: DocumentVisibilityState;
 };
 
+type LifecycleEvent = {
+  event: string;
+  focused: boolean;
+  timestamp: number;
+  visibility: DocumentVisibilityState;
+};
+
 type BackgroundResumeAudit = {
   deadBaseline?: RelayCounts;
   deadEmissionStart?: number;
+  deadLifecycleStart?: number;
   documentId: string;
   emissions: StreamEmission[];
   emitNext(): void;
   healthyBaseline: RelayCounts;
   healthyEmissionStart: number;
   intervalId: number;
+  lifecycle: LifecycleEvent[];
   originalSocket: unknown;
   preDeadSocket?: unknown;
   revision: number;
@@ -41,6 +50,72 @@ type BackgroundResumeAudit = {
 type BackgroundResumeWindow = Window & {
   __backgroundResumeAudit?: BackgroundResumeAudit;
 };
+
+type AuditDiagnostics = {
+  auditPresent: boolean;
+  backgroundEmissions: number | null;
+  baseline: RelayCounts | null;
+  counts: RelayCounts;
+  deadBaseline: RelayCounts | null;
+  documentId: string | null;
+  focused: boolean;
+  inputVisible: boolean;
+  lifecycle: LifecycleEvent[];
+  revision: number | null;
+  route: string;
+  sameSocket: boolean | null;
+  visibility: DocumentVisibilityState;
+};
+
+async function readAuditDiagnostics(page: Page): Promise<AuditDiagnostics> {
+  return page.evaluate(() => {
+    const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
+    const events = window.__devAnywhereE2E?.events ?? [];
+    return {
+      auditPresent: Boolean(audit),
+      backgroundEmissions: audit
+        ? audit.emissions.slice(audit.healthyEmissionStart).filter((emission) => !emission.focused)
+            .length
+        : null,
+      baseline: audit?.healthyBaseline ?? null,
+      counts: {
+        close: events.filter((event) => event === "relay:close").length,
+        open: events.filter((event) => event === "relay:open").length,
+        ping: events.filter((event) => event === "relay:send:latency_web_relay_ping").length,
+      },
+      deadBaseline: audit?.deadBaseline ?? null,
+      documentId: audit?.documentId ?? null,
+      focused: document.hasFocus(),
+      inputVisible: Boolean(document.querySelector('[data-slot="input-bar"][data-mode="json"]')),
+      lifecycle: audit?.lifecycle.slice(-20) ?? [],
+      revision: audit?.revision ?? null,
+      route: location.href,
+      sameSocket: audit ? audit.originalSocket === window.__devAnywhereE2E?.socket : null,
+      visibility: document.visibilityState,
+    };
+  });
+}
+
+async function waitForAuditState(
+  page: Page,
+  description: string,
+  predicate: (state: AuditDiagnostics) => boolean,
+  timeout = 10_000,
+): Promise<AuditDiagnostics> {
+  const deadline = Date.now() + timeout;
+  let state = await readAuditDiagnostics(page);
+  while (!predicate(state) && Date.now() < deadline) {
+    // Poll from this Node process instead of page.waitForFunction. Android Chrome suspends
+    // requestAnimationFrame (Playwright's default polling primitive) while the target tab is
+    // hidden, even after the Activity has already become top-resumed.
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    state = await readAuditDiagnostics(page);
+  }
+  if (!predicate(state)) {
+    throw new Error(`${description} timed out: ${JSON.stringify(state)}`);
+  }
+  return state;
+}
 
 async function connectToMobilePage(): Promise<Page> {
   phaseLog(`connecting to ${CDP_ENDPOINT}`);
@@ -138,11 +213,26 @@ async function setup(): Promise<Record<string, unknown>> {
         healthyBaseline: readCounts(),
         healthyEmissionStart: 0,
         intervalId: 0,
+        lifecycle: [],
         originalSocket: window.__devAnywhereE2E?.socket ?? null,
         revision: 0,
         route: location.href,
       };
       currentWindow.__backgroundResumeAudit = audit;
+      const recordLifecycle = (event: string): void => {
+        audit.lifecycle.push({
+          event,
+          focused: document.hasFocus(),
+          timestamp: Date.now(),
+          visibility: document.visibilityState,
+        });
+      };
+      document.addEventListener("visibilitychange", () => recordLifecycle("visibilitychange"));
+      window.addEventListener("blur", () => recordLifecycle("blur"));
+      window.addEventListener("focus", () => recordLifecycle("focus"));
+      window.addEventListener("pagehide", () => recordLifecycle("pagehide"));
+      window.addEventListener("pageshow", () => recordLifecycle("pageshow"));
+      recordLifecycle("setup");
       audit.emitNext();
       audit.healthyEmissionStart = audit.emissions.length;
     },
@@ -174,17 +264,14 @@ async function setup(): Promise<Record<string, unknown>> {
 
 async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> {
   const page = await connectToMobilePage();
-  await page.waitForFunction(
-    () => {
-      const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
-      const pingCount =
-        window.__devAnywhereE2E?.events.filter(
-          (event) => event === "relay:send:latency_web_relay_ping",
-        ).length ?? 0;
-      return Boolean(audit && pingCount > audit.healthyBaseline.ping);
-    },
-    undefined,
-    { timeout: 10_000 },
+  await waitForAuditState(
+    page,
+    "Waiting for the visible audited document to send its foreground liveness probe",
+    (state) =>
+      state.auditPresent &&
+      state.visibility === "visible" &&
+      state.baseline !== null &&
+      state.counts.ping > state.baseline.ping,
   );
   // A matching pong must still own the same socket after the replacement deadline passes.
   await page.waitForTimeout(2_200);
@@ -206,6 +293,12 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
       .filter((emission) => !emission.focused).length;
     const latestText = `后台持续更新 ${audit.revision}`;
     const sameSocket = audit.originalSocket === window.__devAnywhereE2E?.socket;
+    const hiddenEvent = audit.lifecycle.find((event) => event.visibility === "hidden");
+    const visibleEvent = hiddenEvent
+      ? audit.lifecycle.find(
+          (event) => event.timestamp >= hiddenEvent.timestamp && event.visibility === "visible",
+        )
+      : undefined;
 
     // Keep the explicit post-resume revision stable until the assertion observes it. Otherwise
     // the one-second stream interval can replace revision N with N+1 before the CDP client starts
@@ -216,9 +309,12 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
     audit.preDeadSocket = window.__devAnywhereE2E?.socket ?? null;
     audit.deadBaseline = readCounts();
     audit.deadEmissionStart = audit.emissions.length;
+    audit.deadLifecycleStart = audit.lifecycle.length;
 
     return {
       backgroundEmissions,
+      backgroundDurationMs:
+        hiddenEvent && visibleEvent ? visibleEvent.timestamp - hiddenEvent.timestamp : null,
       closeDelta: counts.close - audit.healthyBaseline.close,
       documentId: audit.documentId,
       latestText,
@@ -239,47 +335,18 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
 
 async function inspectDead(): Promise<Record<string, unknown>> {
   const page = await connectToMobilePage();
-  try {
-    await page.waitForFunction(
-      () => {
-        const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
-        const baseline = audit?.deadBaseline;
-        if (!audit || !baseline) return false;
-        const events = window.__devAnywhereE2E?.events ?? [];
-        const counts = {
-          close: events.filter((event) => event === "relay:close").length,
-          open: events.filter((event) => event === "relay:open").length,
-          ping: events.filter((event) => event === "relay:send:latency_web_relay_ping").length,
-        };
-        return (
-          counts.ping > baseline.ping &&
-          counts.close > baseline.close &&
-          counts.open > baseline.open
-        );
-      },
-      undefined,
-      { timeout: 12_000 },
-    );
-  } catch (error) {
-    const diagnostics = await page.evaluate(() => {
-      const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
-      const events = window.__devAnywhereE2E?.events ?? [];
-      return {
-        auditPresent: Boolean(audit),
-        baseline: audit?.deadBaseline ?? null,
-        counts: {
-          close: events.filter((event) => event === "relay:close").length,
-          open: events.filter((event) => event === "relay:open").length,
-          ping: events.filter((event) => event === "relay:send:latency_web_relay_ping").length,
-        },
-        documentId: audit?.documentId ?? null,
-        route: location.href,
-      };
-    });
-    throw new Error(`Dead-socket recovery timed out: ${JSON.stringify(diagnostics)}`, {
-      cause: error,
-    });
-  }
+  await waitForAuditState(
+    page,
+    "Waiting for the visible audited document to replace its silent socket",
+    (state) =>
+      state.auditPresent &&
+      state.visibility === "visible" &&
+      state.deadBaseline !== null &&
+      state.counts.ping > state.deadBaseline.ping &&
+      state.counts.close > state.deadBaseline.close &&
+      state.counts.open > state.deadBaseline.open,
+    12_000,
+  );
 
   // A new WebSocket `open` precedes proxy rebind, history replay, and the React commit that restores
   // the composer. Assert the user-visible recovery point instead of snapshotting that async phase
@@ -292,7 +359,12 @@ async function inspectDead(): Promise<Record<string, unknown>> {
   const state = await page.evaluate(() => {
     const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
     const baseline = audit?.deadBaseline;
-    if (!audit || !baseline || audit.deadEmissionStart === undefined) {
+    if (
+      !audit ||
+      !baseline ||
+      audit.deadEmissionStart === undefined ||
+      audit.deadLifecycleStart === undefined
+    ) {
       throw new Error("the original page document or dead-socket baseline was lost");
     }
     const events = window.__devAnywhereE2E?.events ?? [];
@@ -305,6 +377,13 @@ async function inspectDead(): Promise<Record<string, unknown>> {
       .slice(audit.deadEmissionStart)
       .filter((emission) => !emission.focused).length;
     const socketReplaced = audit.preDeadSocket !== window.__devAnywhereE2E?.socket;
+    const deadLifecycle = audit.lifecycle.slice(audit.deadLifecycleStart);
+    const hiddenEvent = deadLifecycle.find((event) => event.visibility === "hidden");
+    const visibleEvent = hiddenEvent
+      ? deadLifecycle.find(
+          (event) => event.timestamp >= hiddenEvent.timestamp && event.visibility === "visible",
+        )
+      : undefined;
 
     window.__devAnywhereE2E?.setRelayLivenessPongEnabled(true);
     audit.emitNext();
@@ -312,6 +391,8 @@ async function inspectDead(): Promise<Record<string, unknown>> {
 
     return {
       backgroundEmissions,
+      backgroundDurationMs:
+        hiddenEvent && visibleEvent ? visibleEvent.timestamp - hiddenEvent.timestamp : null,
       closeDelta: counts.close - baseline.close,
       documentId: audit.documentId,
       inputVisible: Boolean(document.querySelector('[data-slot="input-bar"][data-mode="json"]')),

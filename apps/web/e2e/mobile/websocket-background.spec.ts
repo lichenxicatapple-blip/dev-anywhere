@@ -12,6 +12,7 @@ const execFileAsync = promisify(execFile);
 const WEB_ROOT = fileURLToPath(new URL("../..", import.meta.url));
 const PHASE_SCRIPT = fileURLToPath(new URL("./websocket-background.phase.ts", import.meta.url));
 const RESULT_PREFIX = "BACKGROUND_PHASE_RESULT=";
+const PHASE_CDP_DETACH_GRACE_MS = 500;
 
 type PhaseResult = Record<string, boolean | number | string | null>;
 
@@ -33,7 +34,12 @@ async function runPhase(phase: "setup" | "inspect-healthy" | "inspect-dead") {
   }
   const resultLine = stdout.split("\n").findLast((line) => line.startsWith(RESULT_PREFIX));
   if (!resultLine) throw new Error(`Background phase ${phase} returned no result:\n${stdout}`);
-  return JSON.parse(resultLine.slice(RESULT_PREFIX.length)) as PhaseResult;
+  const result = JSON.parse(resultLine.slice(RESULT_PREFIX.length)) as PhaseResult;
+  // Each phase uses a short-lived CDP client because an attached debugger can keep Android Chrome's
+  // target visible after KEYCODE_HOME. Give Chrome time to consume the detached websocket before
+  // asking the OS to background it; the lifecycle timestamps below still prove the full 5s window.
+  await new Promise((resolve) => setTimeout(resolve, PHASE_CDP_DETACH_GRACE_MS));
+  return result;
 }
 
 async function waitForBackgroundWindow(): Promise<void> {
@@ -60,6 +66,7 @@ test.describe("L4 mobile / background WebSocket liveness", () => {
     expect(healthy.documentId).toBe(setup.documentId);
     expect(healthy.route).toBe(setup.route);
     expect(healthy.backgroundEmissions).toBeGreaterThan(0);
+    expect(healthy.backgroundDurationMs).toBeGreaterThanOrEqual(5_000);
     expect(healthy.pingDelta).toBe(1);
     expect(healthy.openDelta).toBe(0);
     expect(healthy.closeDelta).toBe(0);
@@ -79,6 +86,7 @@ test.describe("L4 mobile / background WebSocket liveness", () => {
     // The first background phase proves healthy streaming continues. The dead phase must be fully
     // silent; otherwise an ordinary inbound frame legitimately proves the socket is still alive.
     expect(recovered.backgroundEmissions).toBe(0);
+    expect(recovered.backgroundDurationMs).toBeGreaterThanOrEqual(5_000);
     expect(recovered.pingDelta).toBe(1);
     expect(recovered.openDelta).toBe(1);
     expect(recovered.closeDelta).toBe(1);
