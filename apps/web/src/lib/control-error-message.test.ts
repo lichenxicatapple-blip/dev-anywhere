@@ -27,6 +27,22 @@ describe("describeControlError", () => {
         fallback: "下载失败",
       }),
     ).toBe("会话已结束");
+
+    expect(
+      describeControlError({
+        errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+        rawError: "thread already has an active writer",
+        fallback: "恢复失败",
+      }),
+    ).toBe("Codex 会话仍在运行");
+
+    expect(
+      describeControlError({
+        errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+        rawError: "unsupported approval policy",
+        fallback: "创建失败",
+      }),
+    ).toBe("不支持的审批策略");
   });
 
   it("falls back to rawError for UNKNOWN errorCode", () => {

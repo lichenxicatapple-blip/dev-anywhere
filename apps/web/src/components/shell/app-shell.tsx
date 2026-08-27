@@ -10,6 +10,7 @@ import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { PtyAutoYesController } from "@/components/chat/pty-auto-yes-controller";
 import { PtyKeepAliveProvider } from "@/components/chat/pty-keepalive-provider";
+import { CodexActiveWriterDialog } from "@/components/session/codex-active-writer-dialog";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { getTopLevelSubtitle } from "@/lib/top-level-subtitle";
@@ -185,6 +186,7 @@ export function AppShell() {
       </div>
 
       <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+      <CodexActiveWriterDialog />
       <BrowserStateDumpController />
       <LatencyMonitor />
       <Toaster />

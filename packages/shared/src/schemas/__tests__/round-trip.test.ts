@@ -116,6 +116,41 @@ describe("RelayControlSchema round-trip stability", () => {
     expect(b).toMatchObject({ name: "Release checklist", nameLocked: true });
   });
 
+  it("session_create_response preserves a Codex active-writer PID", () => {
+    const original = {
+      type: "session_create_response",
+      requestId: "req-conflict",
+      errorCode: "SESSION_ALREADY_ACTIVE",
+      error: "另一个 Codex 进程正在使用此会话",
+      activeWriterPid: 46559,
+    };
+    const a = RelayControlSchema.parse(original);
+    const b = roundTrip(RelayControlSchema, original);
+    expect(b).toEqual(a);
+    expect(b).toMatchObject({
+      errorCode: "SESSION_ALREADY_ACTIVE",
+      activeWriterPid: 46559,
+    });
+  });
+
+  it("session_runtime_error preserves structured Codex conflict details", () => {
+    const original = {
+      type: "session_runtime_error",
+      sessionId: "sess-rt",
+      errorCode: "SESSION_ALREADY_ACTIVE",
+      error: "另一个 Codex 进程正在使用此会话",
+      activeWriterPid: 46559,
+    };
+    const a = RelayControlSchema.parse(original);
+    const b = roundTrip(RelayControlSchema, original);
+    expect(b).toEqual(a);
+    expect(b).toMatchObject({
+      sessionId: "sess-rt",
+      errorCode: "SESSION_ALREADY_ACTIVE",
+      activeWriterPid: 46559,
+    });
+  });
+
   it("proxy_list_response with mixed online states preserved", () => {
     const original = {
       type: "proxy_list_response",

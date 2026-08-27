@@ -79,11 +79,9 @@ const sessionCreatePermissionCases = [
   ["Claude", "json", "claude", "自动接受编辑", "acceptEdits"],
   ["Claude", "json", "claude", "只读规划", "plan"],
   ["Claude", "json", "claude", "跳过全部审批", "bypassPermissions"],
-  ["Codex", "pty", "codex", "严格审批", "default"],
-  ["Codex", "pty", "codex", "自动判定", "auto"],
+  ["Codex", "pty", "codex", "按需审批", "auto"],
   ["Codex", "pty", "codex", "跳过全部审批", "bypassPermissions"],
-  ["Codex", "json", "codex", "严格审批", "default"],
-  ["Codex", "json", "codex", "自动判定", "auto"],
+  ["Codex", "json", "codex", "按需审批", "auto"],
   ["Codex", "json", "codex", "跳过全部审批", "bypassPermissions"],
 ] as const;
 
@@ -207,7 +205,7 @@ describe("CreateSessionDialog", () => {
           cwd: "/home/dev",
           mode: "json",
           provider: "codex",
-          permissionMode: "default",
+          permissionMode: "auto",
         }),
         expect.any(Number),
       );

@@ -191,6 +191,38 @@ describe("IPC Protocol", () => {
 
       expect(result.success).toBe(true);
     });
+
+    it("accepts a structured provider startup error", async () => {
+      const { WorkerMessageSchema } = await importIpc();
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "worker_startup_error",
+          provider: "codex",
+          message: "thread already has an active writer",
+          errorCode: "SESSION_ALREADY_ACTIVE",
+          nativeSessionId: "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a",
+        }).success,
+      ).toBe(true);
+    });
+
+    it("preserves bounded diagnostics on nonzero PTY and JSON exits", async () => {
+      const { IpcMessageSchema, WorkerMessageSchema } = await importIpc();
+      expect(
+        IpcMessageSchema.parse({
+          type: "pty_deregister",
+          sessionId: "pty-1",
+          exitCode: 1,
+          errorTail: "Error: resume failed",
+        }),
+      ).toMatchObject({ exitCode: 1, errorTail: "Error: resume failed" });
+      expect(
+        WorkerMessageSchema.parse({
+          type: "worker_exit",
+          code: 1,
+          errorTail: "Error: app-server exited",
+        }),
+      ).toMatchObject({ code: 1, errorTail: "Error: app-server exited" });
+    });
   });
 
   describe("createIpcReader", () => {
@@ -675,7 +707,10 @@ describe("Worker Protocol", () => {
         type: "worker_event",
         payload: { type: "worker_event", seq: 1, event: { kind: "text", data: { nested: true } } },
       },
-      { type: "worker_exit", payload: { type: "worker_exit", code: 0 } },
+      {
+        type: "worker_exit",
+        payload: { type: "worker_exit", code: 1, errorTail: "Error: provider failed" },
+      },
       {
         type: "worker_approval_request",
         payload: {

@@ -3,6 +3,7 @@ import type { IPty } from "node-pty";
 import {
   PTY_INITIAL_MIN_COLS,
   PTY_INITIAL_MIN_ROWS,
+  ControlErrorCode,
   SessionState,
   encodeBinaryFrame,
   serializeControl,
@@ -12,6 +13,12 @@ import pkg from "@xterm/headless";
 const { Terminal: HeadlessTerminal } = pkg;
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { serviceLogger } from "../common/logger.js";
+import { findCodexActiveWriter } from "../common/codex-active-writer.js";
+import {
+  classifyCodexActiveWriterError,
+  codexActiveWriterMessage,
+  sanitizeProviderErrorTail,
+} from "../common/codex-session-conflict.js";
 import {
   appendPtySemanticTextTail,
   extractOscWorkingDirectory,
@@ -41,7 +48,6 @@ import type { SessionManager } from "./session-manager.js";
 
 const IDLE_CHECK_INTERVAL_MS = 3_000;
 const IDLE_THRESHOLD_MS = 3_000;
-const STARTUP_EXIT_DIAGNOSTIC_WINDOW_MS = 10_000;
 const STARTUP_OUTPUT_PREVIEW_LIMIT = 8_192;
 
 const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
@@ -51,10 +57,6 @@ const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
 
 const HOSTED_PTY_TERM = "xterm-256color";
 const HOSTED_PTY_COLORTERM = "truecolor";
-const ANSI_OSC_RE = new RegExp(String.raw`\x1b\][^\x07]*(?:\x07|\x1b\\)`, "g");
-const ANSI_CSI_RE = new RegExp(String.raw`\x1b\[[0-?]*[ -/]*[@-~]`, "g");
-const ANSI_CHARSET_RE = new RegExp(String.raw`\x1b[()][A-Za-z0-9]`, "g");
-
 interface HostedPtyRegistryDeps {
   sessionManager: SessionManager;
   relayConnection: RelayConnection;
@@ -73,6 +75,7 @@ interface HostedPtyStartOptions {
   cwd: string;
   args: string[];
   permissionMode?: string;
+  nativeSessionId?: string;
   hook: ProviderHookContext;
   cols?: number;
   rows?: number;
@@ -89,6 +92,8 @@ interface HostedShellStartOptions {
 
 interface HostedPtySession {
   kind: "agent" | "terminal";
+  provider?: ProviderId;
+  nativeSessionId?: string;
   child: IPty;
   terminal: InstanceType<typeof HeadlessTerminal>;
   serializeAddon: SerializeAddon;
@@ -129,22 +134,10 @@ export function normalizeHostedPtyEnv(env: NodeJS.ProcessEnv): Record<string, st
 }
 
 function appendStartupOutput(current: string, data: string): string {
-  if (current.length >= STARTUP_OUTPUT_PREVIEW_LIMIT) return current;
   const next = current + data;
   return next.length > STARTUP_OUTPUT_PREVIEW_LIMIT
-    ? next.slice(0, STARTUP_OUTPUT_PREVIEW_LIMIT)
+    ? next.slice(-STARTUP_OUTPUT_PREVIEW_LIMIT)
     : next;
-}
-
-function cleanPtyOutputPreview(output: string): string {
-  return output
-    .replace(ANSI_OSC_RE, "")
-    .replace(ANSI_CSI_RE, "")
-    .replace(ANSI_CHARSET_RE, "")
-    .replace(/\r/g, "\n")
-    .replace(/[^\t\n\x20-\x7e\u0080-\uffff]/g, "")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
 }
 
 export class HostedPtyRegistry {
@@ -194,6 +187,10 @@ export class HostedPtyRegistry {
 
     const hosted: HostedPtySession = {
       kind,
+      ...(options.kind === "terminal" ? {} : { provider: options.provider }),
+      ...(options.kind === "terminal" || !options.nativeSessionId
+        ? {}
+        : { nativeSessionId: options.nativeSessionId }),
       child,
       terminal,
       serializeAddon,
@@ -220,21 +217,40 @@ export class HostedPtyRegistry {
       const code = signal ? 128 + signal : exitCode;
       const current = this.sessions.get(options.sessionId);
       const uptimeMs = current ? Date.now() - current.startedAt : undefined;
-      const outputPreview = current ? cleanPtyOutputPreview(current.startupOutput) : "";
-      const shouldIncludeStartupOutput =
-        current &&
-        uptimeMs !== undefined &&
-        uptimeMs <= STARTUP_EXIT_DIAGNOSTIC_WINDOW_MS &&
-        outputPreview.length > 0;
+      const startupErrorTail =
+        code !== 0 && current ? sanitizeProviderErrorTail(current.startupOutput) : "";
+      const activeWriter =
+        code !== 0 && current?.provider === "codex"
+          ? classifyCodexActiveWriterError(current.startupOutput)
+          : null;
+      const activeWriterThreadId =
+        activeWriter?.threadId ??
+        (current?.provider === "codex" &&
+        current.nativeSessionId &&
+        /already has an active writer/i.test(current.startupOutput)
+          ? current.nativeSessionId
+          : null);
+      if (activeWriterThreadId) {
+        const writer = findCodexActiveWriter(activeWriterThreadId, this.deps.getProviderEnv());
+        this.deps.relayConnection.sendRaw(
+          serializeControl({
+            type: "session_runtime_error",
+            sessionId: options.sessionId,
+            errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+            error: codexActiveWriterMessage(writer?.pid),
+            ...(writer ? { activeWriterPid: writer.pid } : {}),
+          }),
+        );
+      }
       serviceLogger.info(
         {
           sessionId: options.sessionId,
           code,
           ...(uptimeMs !== undefined ? { uptimeMs } : {}),
-          ...(shouldIncludeStartupOutput
+          ...(startupErrorTail
             ? {
-                startupOutputChars: current.startupOutput.length,
-                startupOutputPreview: outputPreview,
+                startupOutputChars: current?.startupOutput.length,
+                startupErrorTail,
               }
             : {}),
         },

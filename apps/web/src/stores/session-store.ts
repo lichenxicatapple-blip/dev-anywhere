@@ -17,6 +17,10 @@ import {
 
 export type HistoryLoadStatus = "idle" | "loading" | "loaded" | "error";
 
+export interface CodexActiveWriterConflict {
+  activeWriterPid?: number;
+}
+
 export function ptyAutoYesSessionKey(
   proxyId: string | null | undefined,
   sessionId: string,
@@ -71,6 +75,7 @@ interface SessionStoreState {
   agentStatusBySessionId: Record<string, AgentStatusPayload>;
   // PTY "Always yes" 是用户对某个开发机上的某个会话做出的临时授权，不跟随页面路由重置。
   ptyAutoYesBySessionKey: Record<string, boolean>;
+  codexActiveWriterConflict: CodexActiveWriterConflict | null;
 
   setSessions: (sessions: SessionInfo[]) => void;
   addSession: (session: SessionInfo) => void;
@@ -89,6 +94,7 @@ interface SessionStoreState {
   rejectHistoryLoad: (generation: number) => boolean;
   cancelHistoryLoad: (generation: number) => boolean;
   prepareForProxySwitch: (proxyName: string) => void;
+  setCodexActiveWriterConflict: (conflict: CodexActiveWriterConflict | null) => void;
 }
 
 export const useSessionStore = create<SessionStoreState>()(
@@ -104,6 +110,7 @@ export const useSessionStore = create<SessionStoreState>()(
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
       ptyAutoYesBySessionKey: readPtyAutoYesBySessionKey(),
+      codexActiveWriterConflict: null,
 
       setSessions: (sessions) =>
         set((state) => {
@@ -127,7 +134,12 @@ export const useSessionStore = create<SessionStoreState>()(
             ),
           };
         }),
-      addSession: (session) => set((state) => ({ sessions: [...state.sessions, session] })),
+      addSession: (session) =>
+        set((state) =>
+          state.sessions.some((existing) => existing.sessionId === session.sessionId)
+            ? state
+            : { sessions: [...state.sessions, session] },
+        ),
       removeSession: (sessionId) =>
         set((state) => {
           const ptyAutoYesBySessionKey = Object.fromEntries(
@@ -245,7 +257,10 @@ export const useSessionStore = create<SessionStoreState>()(
           ptyTitles: {},
           ptyStateBySessionId: {},
           agentStatusBySessionId: {},
+          codexActiveWriterConflict: null,
         })),
+      setCodexActiveWriterConflict: (codexActiveWriterConflict) =>
+        set({ codexActiveWriterConflict }),
     }),
     { name: "session-store" },
   ),

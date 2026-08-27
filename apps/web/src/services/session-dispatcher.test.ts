@@ -28,7 +28,11 @@ function envelope(
 describe("session-dispatcher lifecycle reconciliation", () => {
   beforeEach(() => {
     useAppStore.setState({ selectedProxyId: "proxy-1" });
-    useSessionStore.setState({ sessions: [], sessionListLoaded: false });
+    useSessionStore.setState({
+      sessions: [],
+      sessionListLoaded: false,
+      codexActiveWriterConflict: null,
+    });
     useChatStore.getState().clearAllSessions();
   });
 
@@ -149,6 +153,20 @@ describe("session-dispatcher lifecycle reconciliation", () => {
       historySessions: [current],
       historyLoadStatus: "error",
       historyLoadGeneration: 7,
+    });
+  });
+
+  it("surfaces a late Codex active-writer failure through global session state", () => {
+    createSessionMessageHandler()({
+      type: "session_runtime_error",
+      sessionId: "failed-pty",
+      errorCode: "SESSION_ALREADY_ACTIVE",
+      error: "another writer",
+      activeWriterPid: 46559,
+    });
+
+    expect(useSessionStore.getState().codexActiveWriterConflict).toEqual({
+      activeWriterPid: 46559,
     });
   });
 });

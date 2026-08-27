@@ -46,6 +46,7 @@ const denyAllStrategy: ApprovalStrategy = async () => ({
   behavior: "deny" as const,
   message: "Tool use denied by default policy. Remote approval not yet configured.",
 });
+const STDERR_TAIL_LIMIT = 8_192;
 
 // 会话级别的工具白名单，用户点击"全部允许"后同名工具自动审批
 export class ToolWhitelist {
@@ -85,7 +86,7 @@ export class JsonSession {
   private readonly interruptedChildren = new WeakSet<ChildProcess>();
   private readonly interruptedExitResolvers = new WeakMap<ChildProcess, () => void>();
   private interruptPending = false;
-  private stderrChunks: string[] = [];
+  private stderrTail = "";
   private writeQueue: Promise<void> = Promise.resolve();
   private claudeSessionId: string | null = null;
   private readonly workDir: string;
@@ -219,7 +220,7 @@ export class JsonSession {
   }
 
   getStderr(): string {
-    return this.stderrChunks.join("");
+    return this.stderrTail;
   }
 
   private setupStdoutParsing(): void {
@@ -266,7 +267,7 @@ export class JsonSession {
     const child = this.child;
     if (!child?.stderr) return;
     child.stderr.on("data", (chunk: Buffer | string) => {
-      this.stderrChunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+      this.appendStderr(typeof chunk === "string" ? chunk : chunk.toString());
     });
   }
 
@@ -297,7 +298,7 @@ export class JsonSession {
       fireOnce();
     });
     child.on("error", (err: Error) => {
-      this.stderrChunks.push(`Process failed to start: ${err.message}\n`);
+      this.appendStderr(`Process failed to start: ${err.message}\n`);
       exitCode = 1;
       exited = true;
       stdoutEnded = true;
@@ -313,6 +314,10 @@ export class JsonSession {
       }, 1000).unref();
       fireOnce();
     });
+  }
+
+  private appendStderr(chunk: string): void {
+    this.stderrTail = `${this.stderrTail}${chunk}`.slice(-STDERR_TAIL_LIMIT);
   }
 
   private handleControlRequest(event: z.infer<typeof ControlRequestEventSchema>): void {

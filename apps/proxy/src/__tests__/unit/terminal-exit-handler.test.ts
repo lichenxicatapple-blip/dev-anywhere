@@ -29,7 +29,7 @@ describe("createExitHandler", () => {
       exit,
     });
 
-    cleanup(42);
+    cleanup(42, "Error: provider failed safely");
 
     expect(fsm.current()).toBe(TerminalState.EXITED);
     expect(stopIdleChecker).toHaveBeenCalledTimes(1);
@@ -37,6 +37,10 @@ describe("createExitHandler", () => {
     const [msg] = end.mock.calls[0];
     expect(msg).toContain("pty_deregister");
     expect(msg).toContain("sess-1");
+    expect(JSON.parse(msg)).toMatchObject({
+      exitCode: 42,
+      errorTail: "Error: provider failed safely",
+    });
     expect(exit).toHaveBeenCalledWith(42);
   });
 

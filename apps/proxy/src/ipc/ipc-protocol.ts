@@ -1,6 +1,7 @@
 import { z } from "zod";
 import {
   SessionState,
+  ControlErrorCode,
   encodeBinaryFrame,
   decodeBinaryFrame,
   ptySemanticStateValues,
@@ -78,6 +79,8 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("pty_deregister"),
     sessionId: z.string(),
+    exitCode: z.number().int().optional(),
+    errorTail: z.string().max(2048).optional(),
   }),
 
   // 输入，从服务端转发到客户端的 PTY stdin（手机远程输入注入）
@@ -254,6 +257,7 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
   z.object({
     type: z.literal("worker_exit"),
     code: z.number(),
+    errorTail: z.string().max(2048).optional(),
   }),
 
   // worker → serve: 当前 turn 已中断，JSON 会话仍可继续接收后续输入。
@@ -280,6 +284,16 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
         sessionId: z.string(),
       })
       .optional(),
+  }),
+
+  // Provider 在 worker_ready 之前失败时保留一小段脱敏后的诊断；可识别错误同时携带
+  // 结构化 code，serve 不再只能把它降级成笼统的 WORKER_START_FAILED。
+  z.object({
+    type: z.literal("worker_startup_error"),
+    provider: z.enum(["claude", "codex"]),
+    message: z.string().max(2048),
+    errorCode: z.literal(ControlErrorCode.SESSION_ALREADY_ACTIVE).optional(),
+    nativeSessionId: z.string().optional(),
   }),
 
   // worker → serve: 从 stream-json 的 system.init 事件捕获 Claude CLI 侧的 session ID

@@ -22,8 +22,7 @@ export const PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: stri
 ];
 
 export const CODEX_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
-  { value: "default", label: "严格审批" },
-  { value: "auto", label: "自动判定" },
+  { value: "auto", label: "按需审批" },
   { value: "bypassPermissions", label: "跳过全部审批" },
 ];
 
@@ -123,7 +122,7 @@ export function normalizePermissionModeForProvider(
   if (provider !== "codex") return permissionMode;
   return CODEX_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
     ? permissionMode
-    : "default";
+    : "auto";
 }
 
 export async function submitSessionCreate({

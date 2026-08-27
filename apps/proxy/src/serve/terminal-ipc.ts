@@ -273,7 +273,14 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
           );
           sessionManager.terminateSession(msg.sessionId);
           terminalSockets.delete(msg.sessionId);
-          serviceLogger.info({ sessionId: msg.sessionId }, "PTY session deregistered");
+          serviceLogger[msg.exitCode === undefined || msg.exitCode === 0 ? "info" : "warn"](
+            {
+              sessionId: msg.sessionId,
+              ...(msg.exitCode !== undefined ? { exitCode: msg.exitCode } : {}),
+              ...(msg.errorTail ? { errorTail: msg.errorTail } : {}),
+            },
+            "PTY session deregistered",
+          );
           break;
         }
 

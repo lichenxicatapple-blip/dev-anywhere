@@ -1,6 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { LineBuffer } from "../ipc/line-buffer.js";
 import { CODEX_PROVIDER } from "../providers/index.js";
+import { resolveCodexPermissionPolicy } from "../providers/codex.js";
 import type { ApprovalStrategy, StreamJsonEvent } from "./json-session.js";
 
 type JsonRpcId = string | number;
@@ -31,24 +32,7 @@ const CLIENT_INFO = {
   version: "0.0.0",
 };
 const DEFAULT_REQUEST_TIMEOUT_MS = 10_000;
-
-function approvalPolicy(permissionMode?: string): "untrusted" | "on-request" | "never" {
-  switch (permissionMode) {
-    case "auto":
-      return "on-request";
-    case "bypassPermissions":
-    case "dontAsk":
-      return "never";
-    default:
-      return "untrusted";
-  }
-}
-
-function sandboxMode(permissionMode?: string): "danger-full-access" | null {
-  return permissionMode === "bypassPermissions" || permissionMode === "dontAsk"
-    ? "danger-full-access"
-    : null;
-}
+const STDERR_TAIL_LIMIT = 8_192;
 
 function getThreadId(result: unknown): string | null {
   if (!result || typeof result !== "object") return null;
@@ -78,7 +62,7 @@ const denyAllStrategy: ApprovalStrategy = async () => ({
 
 export class CodexAppServerSession {
   private child: ChildProcess | null = null;
-  private stderrChunks: string[] = [];
+  private stderrTail = "";
   private nextRequestId = 1;
   private pendingRequests = new Map<JsonRpcId, PendingRequest>();
   private threadReady: Promise<string>;
@@ -138,17 +122,18 @@ export class CodexAppServerSession {
 
   sendMessage(content: string): void {
     void this.threadReady
-      .then((threadId) =>
-        this.request("turn/start", {
+      .then((threadId) => {
+        const permission = resolveCodexPermissionPolicy(this.permissionMode);
+        return this.request("turn/start", {
           threadId,
           input: [{ type: "text", text: content, text_elements: [] }],
-          approvalPolicy: approvalPolicy(this.permissionMode),
+          ...(permission.approvalPolicy ? { approvalPolicy: permission.approvalPolicy } : {}),
         }).then((result) => {
           if (isRecord(result) && isRecord(result.turn) && typeof result.turn.id === "string") {
             this.activeTurnId = result.turn.id;
           }
-        }),
-      )
+        });
+      })
       .catch(() => {
         // Startup failure is surfaced through waitUntilReady / worker_ready; queued user input is dropped.
       });
@@ -185,7 +170,7 @@ export class CodexAppServerSession {
   }
 
   getStderr(): string {
-    return this.stderrChunks.join("");
+    return this.stderrTail;
   }
 
   private async initializeThread(): Promise<void> {
@@ -209,12 +194,12 @@ export class CodexAppServerSession {
   }
 
   private threadParams(extra: Record<string, unknown> = {}): Record<string, unknown> {
-    const sandbox = sandboxMode(this.permissionMode);
+    const permission = resolveCodexPermissionPolicy(this.permissionMode);
     return {
       ...extra,
       cwd: this.workDir,
-      approvalPolicy: approvalPolicy(this.permissionMode),
-      ...(sandbox ? { sandbox } : {}),
+      ...(permission.approvalPolicy ? { approvalPolicy: permission.approvalPolicy } : {}),
+      ...(permission.sandbox ? { sandbox: permission.sandbox } : {}),
       experimentalRawEvents: false,
       persistExtendedHistory: false,
     };
@@ -381,7 +366,7 @@ export class CodexAppServerSession {
     const child = this.child;
     if (!child?.stderr) return;
     child.stderr.on("data", (chunk: Buffer | string) => {
-      this.stderrChunks.push(typeof chunk === "string" ? chunk : chunk.toString());
+      this.appendStderr(typeof chunk === "string" ? chunk : chunk.toString());
     });
   }
 
@@ -390,7 +375,7 @@ export class CodexAppServerSession {
     if (!child) return;
     child.on("error", (err: Error) => {
       const error = new Error(`Codex app-server failed to start: ${err.message}`);
-      this.stderrChunks.push(`${error.message}\n`);
+      this.appendStderr(`${error.message}\n`);
       this.rejectAllPendingRequests(error);
       this.rejectThreadReadyOnce(error);
       this.reportExit(1);
@@ -408,6 +393,10 @@ export class CodexAppServerSession {
     if (this.exitReported) return;
     this.exitReported = true;
     this.onExitCb?.(code);
+  }
+
+  private appendStderr(chunk: string): void {
+    this.stderrTail = `${this.stderrTail}${chunk}`.slice(-STDERR_TAIL_LIMIT);
   }
 
   private resolveThreadReadyOnce(threadId: string): void {

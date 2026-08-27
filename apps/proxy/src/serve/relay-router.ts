@@ -33,6 +33,7 @@ import { VoiceSummaryHandler, type VoiceSummaryRunner } from "./voice-summary-ha
 import type { RemoteFileUploadManager } from "./remote-file-upload.js";
 import type { RemoteFileStreamManager } from "./remote-file-stream.js";
 import type { TerminalSubscriptionBacklog } from "./terminal-subscription-backlog.js";
+import type { CodexActiveWriter } from "../common/codex-active-writer.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -62,6 +63,8 @@ interface RelayRouterDeps {
   remoteFileUploadManager: RemoteFileUploadManager;
   terminalSubscriptionBacklog: TerminalSubscriptionBacklog;
   voiceSummaryRunner?: VoiceSummaryRunner;
+  findCodexActiveWriter?: (threadId: string, env?: NodeJS.ProcessEnv) => CodexActiveWriter | null;
+  findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -118,6 +121,8 @@ export class RelayRouter {
       cleanupHookContext: deps.cleanupHookContext,
       broadcastSessionSync: deps.broadcastSessionSync,
       broadcastSessionList: deps.broadcastSessionList,
+      findCodexActiveWriter: deps.findCodexActiveWriter,
+      findClosestAncestorPid: deps.findClosestAncestorPid,
     });
     this.voiceSummaryHandler = new VoiceSummaryHandler({
       relaySend: deps.relaySend,

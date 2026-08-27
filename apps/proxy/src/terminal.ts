@@ -27,6 +27,7 @@ import {
   createCodexXtermHistoryCompat,
   type CodexXtermHistoryCompat,
 } from "./common/codex-xterm-history-compat.js";
+import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";
 import { SOCK_PATH, STOPPED_PATH, tildify } from "./common/paths.js";
@@ -90,7 +91,8 @@ class TerminalSession {
   // 初值 null 确保首次状态变更（无论 true/false）都触发一次输出
   private lastBridgeConnected: boolean | null = null;
   // 收尾函数在 run() 里创建一次，PTY 退出与 SIGTERM 共用；内部通过 fsm EXITED 检查短路
-  private cleanupAndExit!: (code: number) => void;
+  private cleanupAndExit!: (code: number, errorTail?: string) => void;
+  private providerOutputTail = "";
 
   constructor(
     private readonly provider: ProviderAdapter,
@@ -201,7 +203,8 @@ class TerminalSession {
       },
       onSessionExit: (code: number) => {
         log.info({ sessionId: this.sessionId, exitCode: code }, "PTY exited, cleaning up");
-        this.cleanupAndExit(code);
+        const errorTail = code === 0 ? "" : sanitizeProviderErrorTail(this.providerOutputTail);
+        this.cleanupAndExit(code, errorTail || undefined);
       },
     });
     this.ptyManager.start();
@@ -211,6 +214,7 @@ class TerminalSession {
   // PTY 的每一帧输出都要：追到 headless terminal 状态、推 binary IPC、提取 provider 语义事件
   private handlePtyData(data: string): void {
     this.lastOutputTime = Date.now();
+    this.providerOutputTail = `${this.providerOutputTail}${data}`.slice(-8_192);
     const previousRewriteCount = this.xtermHistoryCompat?.stats.rewrittenTransactions ?? 0;
     const renderData = this.xtermHistoryCompat?.push(data) ?? data;
     this.emitRenderData(renderData);

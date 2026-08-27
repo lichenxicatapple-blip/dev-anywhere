@@ -117,6 +117,18 @@ describe("CodexAppServerSession", () => {
     expect(session.getStderr()).toContain("spawn ENOENT");
   });
 
+  it("keeps only a bounded tail of app-server stderr", () => {
+    const session = new CodexAppServerSession({ cwd: "/tmp/project" });
+    session.start();
+    readStdinLines();
+
+    mockChild.mockStderr.write(`prefix-${"x".repeat(9_000)}-tail`);
+
+    expect(session.getStderr().length).toBe(8_192);
+    expect(session.getStderr()).not.toContain("prefix-");
+    expect(session.getStderr()).toContain("-tail");
+  });
+
   it("rejects readiness when thread start does not return a thread id", async () => {
     const session = new CodexAppServerSession({ cwd: "/tmp/project" });
     session.start();
@@ -168,8 +180,59 @@ describe("CodexAppServerSession", () => {
     });
   });
 
+  it("rejects the removed legacy strict approval policy", async () => {
+    const session = new CodexAppServerSession({
+      cwd: "/tmp/project",
+      resumeSessionId: "thread-existing",
+      permissionMode: "default",
+    });
+    session.start();
+    readStdinLines();
+
+    writeStdout({
+      id: 1,
+      result: {
+        userAgent: "codex",
+        codexHome: "/tmp",
+        platformFamily: "unix",
+        platformOs: "macos",
+      },
+    });
+
+    await expect(session.waitUntilReady()).rejects.toThrow(/不支持.*严格审批/);
+    expect(readStdinLines()).toEqual([]);
+  });
+
+  it("preserves the canonical active-writer error from thread/resume", async () => {
+    const threadId = "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a";
+    const session = new CodexAppServerSession({
+      cwd: "/tmp/project",
+      resumeSessionId: threadId,
+      permissionMode: "auto",
+    });
+    session.start();
+    readStdinLines();
+
+    writeStdout({ id: 1, result: { userAgent: "codex" } });
+    const threadResume = (await waitForStdinLines())[0];
+    writeStdout({
+      id: threadResume.id,
+      error: {
+        code: -32600,
+        message: `thread ${threadId} already has an active writer`,
+      },
+    });
+
+    await expect(session.waitUntilReady()).rejects.toThrow(
+      `thread ${threadId} already has an active writer`,
+    );
+  });
+
   it("queues user input until the thread is ready, then starts a turn", async () => {
-    const session = new CodexAppServerSession({ cwd: "/tmp/project" });
+    const session = new CodexAppServerSession({
+      cwd: "/tmp/project",
+      permissionMode: "auto",
+    });
     session.start();
     readStdinLines();
     session.sendMessage("Hello Codex");
@@ -184,6 +247,12 @@ describe("CodexAppServerSession", () => {
       },
     });
     const threadStart = (await waitForStdinLines())[0];
+    expect(threadStart).toMatchObject({
+      method: "thread/start",
+      params: {
+        approvalPolicy: "on-request",
+      },
+    });
     writeStdout({
       id: threadStart.id,
       result: {
@@ -196,6 +265,7 @@ describe("CodexAppServerSession", () => {
       params: {
         threadId: "thread-1",
         input: [{ type: "text", text: "Hello Codex", text_elements: [] }],
+        approvalPolicy: "on-request",
       },
     });
   });

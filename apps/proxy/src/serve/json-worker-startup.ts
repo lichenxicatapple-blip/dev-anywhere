@@ -67,12 +67,19 @@ export async function waitForJsonWorkerStartup(options: {
       throwIfAborted(options.signal);
     }
     if (!socket) {
+      const startupFailure = options.workerRegistry.getStartupFailure(options.sessionId);
+      if (startupFailure) throw startupFailure;
       if (!options.workerRegistry.hasProcess(options.sessionId)) {
         throw new Error("JSON worker exited before opening its control socket");
       }
       continue;
     }
 
+    const startupFailure = options.workerRegistry.getStartupFailure(options.sessionId);
+    if (startupFailure) {
+      socket.destroy();
+      throw startupFailure;
+    }
     if (!options.workerRegistry.hasProcess(options.sessionId)) {
       socket.destroy();
       throw new Error("JSON worker exited before reporting ready");

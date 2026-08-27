@@ -230,6 +230,70 @@ describe("Hosted PTY registry", () => {
     });
   });
 
+  it("pushes a structured conflict when Codex reports an active writer after navigation", () => {
+    withExecutable("codex", (codexBin) => {
+      const relayConnection = {
+        sendRaw: vi.fn(),
+        sendBinary: vi.fn(),
+      };
+      const registry = new HostedPtyRegistry({
+        sessionManager: {
+          getSession: vi.fn(() => ({
+            id: "s1",
+            mode: "pty",
+            provider: "codex",
+            state: SessionState.IDLE,
+            cwd: "/tmp/project",
+            pid: 2468,
+          })),
+          terminateSession: vi.fn(() => ({ success: true })),
+        } as never,
+        relayConnection: relayConnection as never,
+        getProviderEnv: () => ({ CODEX_BIN: codexBin }),
+        touchSessionActivity: vi.fn(() => true),
+        updateTerminalCwd: vi.fn(() => true),
+        applyPtyStateToSession: vi.fn(),
+      });
+      const nativeSessionId = "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a";
+
+      registry.start({
+        sessionId: "s1",
+        provider: "codex",
+        cwd: "/tmp/project",
+        args: ["resume", nativeSessionId],
+        permissionMode: "auto",
+        nativeSessionId,
+        hook: {
+          provider: "codex",
+          sessionId: "s1",
+          hookUrl: "http://127.0.0.1:1/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+      const onExit = spawned.onExit.mock.calls[0][0] as (event: {
+        exitCode: number;
+        signal: number;
+      }) => void;
+
+      onData("ordinary terminal output".repeat(600));
+      onData(`\r\nError: thread ${nativeSessionId} already has an active writer (code -32600)\r\n`);
+      onExit({ exitCode: 1, signal: 0 });
+
+      const messages = relayConnection.sendRaw.mock.calls.map(([raw]) => JSON.parse(raw));
+      expect(messages).toContainEqual(
+        expect.objectContaining({
+          type: "session_runtime_error",
+          sessionId: "s1",
+          errorCode: "SESSION_ALREADY_ACTIVE",
+          error: expect.stringContaining("不会自动终止"),
+        }),
+      );
+    });
+  });
+
   it("waits for queued output before sending a hosted PTY snapshot", async () => {
     const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-hosted-pty-snapshot-"));
     const shellPath = join(dir, "zsh");

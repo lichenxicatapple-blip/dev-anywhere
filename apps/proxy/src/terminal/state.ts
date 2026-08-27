@@ -44,9 +44,11 @@ interface ExitHandlerDeps {
 // 构造统一的收尾函数：转 EXITED → 停 idle 定时器 → 给 serve 发 pty_deregister → 退进程。
 // onSessionExit 与 SIGTERM handler 共享同一实例；Ctrl+C 两连击或 PTY 退出与 SIGTERM 竞争时，
 // 第二次调用通过 fsm EXITED 检查直接短路。
-export function createExitHandler(deps: ExitHandlerDeps): (code: number) => void {
+export function createExitHandler(
+  deps: ExitHandlerDeps,
+): (code: number, errorTail?: string) => void {
   const exit = deps.exit ?? ((code: number) => process.exit(code));
-  return (code: number) => {
+  return (code: number, errorTail?: string) => {
     if (deps.fsm.is(TerminalState.EXITED)) return;
     deps.fsm.transitionTo(TerminalState.EXITED);
     deps.stopIdleChecker();
@@ -54,7 +56,15 @@ export function createExitHandler(deps: ExitHandlerDeps): (code: number) => void
     const socket = deps.getSocket();
     const sessionId = deps.getSessionId();
     if (socket.writable && sessionId) {
-      socket.end(serializeIpc({ type: "pty_deregister", sessionId }), () => exit(code));
+      socket.end(
+        serializeIpc({
+          type: "pty_deregister",
+          sessionId,
+          exitCode: code,
+          ...(errorTail ? { errorTail } : {}),
+        }),
+        () => exit(code),
+      );
     } else {
       exit(code);
     }

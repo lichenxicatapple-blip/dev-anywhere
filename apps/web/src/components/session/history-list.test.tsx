@@ -30,10 +30,11 @@ vi.mock("@/components/toast", () => ({
   },
 }));
 
-import type { HistorySession } from "@dev-anywhere/shared";
+import { ControlErrorCode, type HistorySession } from "@dev-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
 import { type HistoryLoadStatus, useSessionStore } from "@/stores/session-store";
 import { HistoryList } from "./history-list";
+import { CodexActiveWriterDialog } from "./codex-active-writer-dialog";
 
 function renderHistoryList(
   historySessions: HistorySession[],
@@ -49,10 +50,12 @@ function renderHistoryList(
     ptyTitles: {},
     ptyStateBySessionId: {},
     agentStatusBySessionId: {},
+    codexActiveWriterConflict: null,
   });
   return render(
     <MemoryRouter>
       <HistoryList now={Date.now()} />
+      <CodexActiveWriterDialog />
     </MemoryRouter>,
   );
 }
@@ -267,7 +270,7 @@ describe("HistoryList", () => {
     expect(navigateMock).toHaveBeenCalledWith("/chat/restored-session?mode=json");
   });
 
-  it("lets Codex JSON history restore as chat with the selected permission mode", async () => {
+  it("restores Codex JSON history with its supported approval policy by default", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       sessionId: "codex-json-session",
@@ -289,7 +292,12 @@ describe("HistoryList", () => {
     fireEvent.click(screen.getByRole("button", { name: "恢复会话：Codex JSON 会话" }));
     expect(screen.getByRole("radio", { name: "聊天" }).getAttribute("aria-checked")).toBe("true");
     expect(screen.getByRole("radio", { name: "终端" })).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: "自动判定" }));
+    expect(screen.queryByRole("radio", { name: "严格审批" })).toBeNull();
+    expect(screen.queryByRole("radio", { name: "自动判定" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "按需审批" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(screen.getByText("Codex 在需要时请求确认。")).toBeTruthy();
     fireEvent.click(screen.getByRole("button", { name: "恢复" }));
 
     await waitFor(() => {
@@ -302,6 +310,72 @@ describe("HistoryList", () => {
       });
     });
     expect(navigateMock).toHaveBeenCalledWith("/chat/codex-json-session?mode=json");
+  });
+
+  it("shows a blocking PID-aware explanation when an external Codex writer owns the session", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+      error: "另一个 Codex 进程正在使用此会话",
+      activeWriterPid: 46559,
+    });
+    const { container } = renderHistoryList([
+      {
+        id: "codex-active-writer",
+        title: "被占用的 Codex 会话",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "codex",
+        preferredMode: "json",
+      },
+    ]);
+    expandHistory(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：被占用的 Codex 会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+
+    expect(await screen.findByRole("heading", { name: "该 Codex 会话仍在运行" })).toBeTruthy();
+    expect(screen.getByText("46559")).toBeTruthy();
+    expect(screen.getByText(/不会自动终止该进程/)).toBeTruthy();
+    expect(toastError).not.toHaveBeenCalled();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it("enters an already managed DEV Anywhere Codex session without another prompt", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "managed-codex-session",
+      mode: "pty",
+      provider: "codex",
+      ptyOwner: "local-terminal",
+    });
+    const { container } = renderHistoryList([
+      {
+        id: "codex-managed-native-thread",
+        title: "仍在 DEV Anywhere 运行的会话",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "codex",
+        preferredMode: "json",
+      },
+    ]);
+    expandHistory(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：仍在 DEV Anywhere 运行的会话" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith("/chat/managed-codex-session?mode=pty");
+    });
+    expect(useSessionStore.getState().sessions).toContainEqual({
+      sessionId: "managed-codex-session",
+      state: "idle",
+      mode: "pty",
+      provider: "codex",
+      ptyOwner: "local-terminal",
+    });
+    expect(useSessionStore.getState().codexActiveWriterConflict).toBeNull();
+    expect(screen.queryByRole("heading", { name: "该 Codex 会话仍在运行" })).toBeNull();
   });
 
   it("keeps permission choices visible when switching from Chat to Terminal", async () => {

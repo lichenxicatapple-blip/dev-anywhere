@@ -14,7 +14,17 @@ import {
 } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
+import { findCodexActiveWriter, type CodexActiveWriter } from "../common/codex-active-writer.js";
+import {
+  codexActiveWriterMessage,
+  sanitizeProviderErrorTail,
+} from "../common/codex-session-conflict.js";
+import { findClosestAncestorPid } from "../common/process-ancestry.js";
 import type { ProviderHookContext, ProviderId } from "../providers/index.js";
+import {
+  CodexApprovalPolicyUnsupportedError,
+  resolveCodexPermissionPolicy,
+} from "../providers/codex.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import { buildHostedPtyArgs, type HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { PermissionBroker } from "./permission-broker.js";
@@ -22,7 +32,7 @@ import type { RelaySend } from "./relay-router-types.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 import { readSessionMessagesPage } from "./session-history.js";
 import type { TerminalWorkerSpawner } from "./terminal-worker-spawner.js";
-import type { WorkerRegistry } from "./worker-registry.js";
+import { WorkerStartupError, type WorkerRegistry } from "./worker-registry.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
 import { classifyPathError } from "./path-errors.js";
 import { JsonWorkerStartupTimeoutError, waitForJsonWorkerStartup } from "./json-worker-startup.js";
@@ -51,6 +61,8 @@ interface RelaySessionCreateHandlerDeps {
   cleanupHookContext: (sessionId: string) => void;
   broadcastSessionSync: (session: SessionInfo) => void;
   broadcastSessionList: () => void;
+  findCodexActiveWriter?: (threadId: string, env?: NodeJS.ProcessEnv) => CodexActiveWriter | null;
+  findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
 }
 
 interface SessionCwdValidationError {
@@ -132,6 +144,80 @@ export class RelaySessionCreateHandler {
     }
 
     const { requestId, cwd } = msg;
+    const provider = msg.provider ?? "claude";
+    const mode = msg.mode ?? "json";
+    const permissionMode = msg.permissionMode;
+    const resumeSessionId = msg.resumeSessionId;
+
+    if (provider === "codex") {
+      if (resumeSessionId) {
+        const managedSessions = this.deps.sessionManager.listSessions();
+        const existing = managedSessions.find(
+          (session) => session.provider === "codex" && session.historySessionId === resumeSessionId,
+        );
+        if (existing) {
+          this.respondWithExistingSession(requestId, existing);
+          return;
+        }
+
+        const activeWriter = (this.deps.findCodexActiveWriter ?? findCodexActiveWriter)(
+          resumeSessionId,
+          this.deps.getProviderEnv(),
+        );
+        if (activeWriter) {
+          // 本地 `dev-anywhere codex resume` 的历史选择发生在 Codex TUI 内，旧版本没有
+          // 回传所选 thread ID。用真实 writer PID 的父进程链确认归属，仍能无提示复用
+          // 当前 DEV Anywhere 会话；只有不属于任何登记会话时才视为外部占用。
+          const managedOwnerPid = (this.deps.findClosestAncestorPid ?? findClosestAncestorPid)(
+            activeWriter.pid,
+            managedSessions.map((session) => session.pid),
+          );
+          const managedOwner =
+            managedOwnerPid === null
+              ? undefined
+              : managedSessions.find((session) => session.pid === managedOwnerPid);
+          if (managedOwner) {
+            this.respondWithExistingSession(requestId, managedOwner);
+            return;
+          }
+
+          this.deps.relaySend(
+            serializeControl({
+              type: "session_create_response",
+              requestId,
+              errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+              error: codexActiveWriterMessage(activeWriter.pid),
+              activeWriterPid: activeWriter.pid,
+            }),
+          );
+          serviceLogger.warn(
+            { provider, nativeSessionId: resumeSessionId, pid: activeWriter.pid },
+            "Codex resume rejected: native session already has an active writer",
+          );
+          return;
+        }
+      }
+
+      try {
+        resolveCodexPermissionPolicy(permissionMode);
+      } catch (err) {
+        if (!(err instanceof CodexApprovalPolicyUnsupportedError)) throw err;
+        this.deps.relaySend(
+          serializeControl({
+            type: "session_create_response",
+            requestId,
+            errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+            error: err.message,
+          }),
+        );
+        serviceLogger.warn(
+          { provider, permissionMode },
+          "Codex session create rejected: unsupported approval policy",
+        );
+        return;
+      }
+    }
+
     const cwdError = validateSessionCwd(cwd);
     if (cwdError) {
       this.deps.relaySend(
@@ -147,9 +233,6 @@ export class RelaySessionCreateHandler {
     }
     const sessionCwd = typeof cwd === "string" ? cwd.trim() : "";
 
-    const provider = msg.provider ?? "claude";
-    const mode = msg.mode ?? "json";
-    const permissionMode = msg.permissionMode;
     if (mode === "pty") {
       this.createHostedPtySession(msg, sessionCwd, provider ?? "claude", permissionMode);
       return;
@@ -168,7 +251,6 @@ export class RelaySessionCreateHandler {
       return;
     }
 
-    const resumeSessionId = msg.resumeSessionId;
     // Proxy 把 provider delta 聚合为版本化全文快照。Claude 开启 partial stream 后，
     // 刷新或重连才能恢复生成到当前时刻的完整内容。
     const streamDelta = true;
@@ -225,6 +307,26 @@ export class RelaySessionCreateHandler {
           err,
         );
       });
+  }
+
+  private respondWithExistingSession(requestId: string | undefined, session: SessionInfo): void {
+    this.deps.relaySend(
+      serializeControl({
+        type: "session_create_response",
+        requestId,
+        sessionId: session.id,
+        ...(session.kind !== undefined ? { kind: session.kind } : {}),
+        ...(session.name !== undefined ? { name: session.name } : {}),
+        ...(session.nameLocked !== undefined ? { nameLocked: session.nameLocked } : {}),
+        mode: session.mode,
+        provider: session.provider,
+        ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),
+      }),
+    );
+    serviceLogger.info(
+      { sessionId: session.id, nativeSessionId: session.historySessionId },
+      "Codex resume reused an existing DEV Anywhere session",
+    );
   }
 
   private takePendingJsonCreate(sessionId: string): boolean {
@@ -306,19 +408,36 @@ export class RelaySessionCreateHandler {
     reason: unknown,
   ): void {
     this.cleanupPendingJsonSession(sessionId);
+    const reasonText = reason instanceof Error ? reason.message : String(reason);
+    const startupErrorTail = sanitizeProviderErrorTail(reasonText);
+    const activeWriterFailure =
+      reason instanceof WorkerStartupError &&
+      reason.errorCode === ControlErrorCode.SESSION_ALREADY_ACTIVE
+        ? reason
+        : null;
+    const activeWriter = activeWriterFailure?.nativeSessionId
+      ? (this.deps.findCodexActiveWriter ?? findCodexActiveWriter)(
+          activeWriterFailure.nativeSessionId,
+          this.deps.getProviderEnv(),
+        )
+      : null;
     this.deps.relaySend(
       serializeControl({
         type: "session_create_response",
         requestId,
         sessionId,
-        errorCode: ControlErrorCode.WORKER_START_FAILED,
-        error: message,
+        errorCode: activeWriterFailure
+          ? ControlErrorCode.SESSION_ALREADY_ACTIVE
+          : ControlErrorCode.WORKER_START_FAILED,
+        error: activeWriterFailure ? codexActiveWriterMessage(activeWriter?.pid) : message,
+        ...(activeWriter ? { activeWriterPid: activeWriter.pid } : {}),
       }),
     );
     serviceLogger.error(
       {
         sessionId,
-        error: reason instanceof Error ? reason.message : String(reason),
+        ...(startupErrorTail ? { startupErrorTail } : {}),
+        errorCode: activeWriterFailure?.errorCode,
         timedOut: message === WORKER_START_TIMEOUT_MESSAGE,
       },
       "JSON worker startup failed via relay",
@@ -371,6 +490,7 @@ export class RelaySessionCreateHandler {
         cwd,
         args: buildHostedPtyArgs(provider, resumeSessionId),
         permissionMode,
+        nativeSessionId: resumeSessionId,
         hook,
         ...geometry,
       });

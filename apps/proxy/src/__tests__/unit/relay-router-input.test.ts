@@ -15,6 +15,7 @@ import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
 import { sessionPaths, tildify } from "#src/common/paths.js";
 import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
+import { WorkerStartupError } from "#src/serve/worker-registry.js";
 import type { Socket } from "node:net";
 import { existsSync, mkdirSync } from "node:fs";
 import {
@@ -67,6 +68,8 @@ function createRouter(options: {
   broadcastSessionList?: () => void;
   voiceSummaryRunner?: VoiceSummaryRunner;
   remoteFileUploadManager?: ReturnType<typeof createRemoteFileUploadManagerFake>;
+  findCodexActiveWriter?: (threadId: string) => { pid: number } | null;
+  findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -77,6 +80,7 @@ function createRouter(options: {
     sessionManager:
       options.sessionManager ??
       ({
+        listSessions: () => [],
         getSession: (sessionId: string) =>
           sessionId === "s1"
             ? {
@@ -144,6 +148,8 @@ function createRouter(options: {
     remoteFileUploadManager: options.remoteFileUploadManager ?? createRemoteFileUploadManagerFake(),
     terminalSubscriptionBacklog: new TerminalSubscriptionBacklog(),
     voiceSummaryRunner: options.voiceSummaryRunner,
+    findCodexActiveWriter: options.findCodexActiveWriter,
+    findClosestAncestorPid: options.findClosestAncestorPid,
   });
 }
 
@@ -503,7 +509,7 @@ describe("RelayRouter input routing", () => {
     router.destroy();
   });
 
-  it("allows Codex JSON session_create and passes provider to the worker", () => {
+  it("allows Codex JSON session_create with on-request approval", () => {
     const workerSpawn = vi.fn((_sessionId: string, _options?: unknown) => 1234);
     const router = createRouter({
       mode: "json",
@@ -515,16 +521,171 @@ describe("RelayRouter input routing", () => {
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
-      permissionMode: "default",
+      permissionMode: "auto",
     });
 
     expect(workerSpawn).toHaveBeenCalledTimes(1);
     expect(workerSpawn.mock.calls[0][1]).toMatchObject({
       cwd: "/tmp",
       provider: "codex",
-      permissionMode: "default",
+      permissionMode: "auto",
     });
     router.destroy();
+  });
+
+  it("rejects the removed Codex strict approval policy without spawning", () => {
+    const relaySend = vi.fn();
+    const workerSpawn = vi.fn();
+    const router = createRouter({ mode: "json", relaySend, workerSpawn });
+
+    router.handle({
+      type: "session_create",
+      requestId: "codex-strict",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+      permissionMode: "default",
+    });
+
+    expect(workerSpawn).not.toHaveBeenCalled();
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "codex-strict",
+      errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+      error: expect.stringContaining("严格审批"),
+    });
+  });
+
+  it("reports the real PID when an external Codex process owns the native session", () => {
+    const relaySend = vi.fn();
+    const workerSpawn = vi.fn();
+    const findCodexActiveWriter = vi.fn(() => ({ pid: 46559 }));
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn,
+      findCodexActiveWriter,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "codex-active-writer",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+      permissionMode: "auto",
+      resumeSessionId: "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a",
+    });
+
+    expect(workerSpawn).not.toHaveBeenCalled();
+    expect(findCodexActiveWriter).toHaveBeenCalledWith("019fa141-cdaf-78a2-a6c1-9cca04fb9f9a", {});
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "codex-active-writer",
+      errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+      activeWriterPid: 46559,
+      error: expect.stringContaining("不会自动终止"),
+    });
+  });
+
+  it("reuses an already managed Codex session without asking the user or spawning", () => {
+    const relaySend = vi.fn();
+    const workerSpawn = vi.fn();
+    const findCodexActiveWriter = vi.fn(() => ({ pid: 46559 }));
+    const managed = {
+      id: "managed-codex-session",
+      mode: "pty" as const,
+      provider: "codex" as const,
+      ptyOwner: "local-terminal" as const,
+      state: SessionState.IDLE,
+      cwd: "/tmp",
+      pid: 1234,
+      createdAt: 1,
+      updatedAt: 1,
+      historySessionId: "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a",
+    };
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn,
+      findCodexActiveWriter,
+      sessionManager: {
+        listSessions: () => [managed],
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "codex-managed",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+      permissionMode: "auto",
+      resumeSessionId: managed.historySessionId,
+    });
+
+    expect(workerSpawn).not.toHaveBeenCalled();
+    expect(findCodexActiveWriter).not.toHaveBeenCalled();
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "codex-managed",
+      sessionId: managed.id,
+      mode: "pty",
+      provider: "codex",
+      ptyOwner: "local-terminal",
+    });
+  });
+
+  it("reuses a managed local terminal when the Codex writer is its descendant", () => {
+    const relaySend = vi.fn();
+    const workerSpawn = vi.fn();
+    const findCodexActiveWriter = vi.fn(() => ({ pid: 46559 }));
+    const findClosestAncestorPid = vi.fn(() => 46546);
+    const managed = {
+      id: "managed-local-terminal",
+      kind: "agent" as const,
+      mode: "pty" as const,
+      provider: "codex" as const,
+      ptyOwner: "local-terminal" as const,
+      state: SessionState.IDLE,
+      cwd: "/tmp",
+      pid: 46546,
+      createdAt: 1,
+      updatedAt: 1,
+      // Legacy local resumes do not know which native Codex thread the TUI selected.
+      historySessionId: undefined,
+    };
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn,
+      findCodexActiveWriter,
+      findClosestAncestorPid,
+      sessionManager: {
+        listSessions: () => [managed],
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "codex-managed-by-process-tree",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+      permissionMode: "auto",
+      resumeSessionId: "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a",
+    });
+
+    expect(workerSpawn).not.toHaveBeenCalled();
+    expect(findClosestAncestorPid).toHaveBeenCalledWith(46559, [46546]);
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "codex-managed-by-process-tree",
+      sessionId: managed.id,
+      mode: "pty",
+      provider: "codex",
+      ptyOwner: "local-terminal",
+    });
   });
 
   it("waits for worker_ready before creating a JSON session", async () => {
@@ -634,6 +795,46 @@ describe("RelayRouter input routing", () => {
     });
     expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
     expect(cleanupHookContext).toHaveBeenCalledTimes(1);
+  });
+
+  it("classifies an app-server active-writer startup race instead of returning a generic error", async () => {
+    vi.useFakeTimers();
+    const relaySend = vi.fn();
+    const threadId = "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a";
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerConnect: async () => createWritableSocketFake().socket,
+      workerWaitForReady: async () => {
+        throw new WorkerStartupError(
+          `Error: thread ${threadId} already has an active writer`,
+          ControlErrorCode.SESSION_ALREADY_ACTIVE,
+          threadId,
+        );
+      },
+      findCodexActiveWriter: () => ({ pid: 46559 }),
+      sessionManager: {
+        createSession: vi.fn(),
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-json-active-writer-race",
+      cwd: "/tmp",
+      provider: "codex",
+      mode: "json",
+      permissionMode: "auto",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-json-active-writer-race",
+      errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+      activeWriterPid: 46559,
+      error: expect.stringContaining("不会自动终止"),
+    });
   });
 
   it("does not publish a session if the worker exits after ready", async () => {
@@ -782,6 +983,7 @@ describe("RelayRouter input routing", () => {
     const router = createRouter({
       mode: "pty",
       sessionManager: {
+        listSessions: () => [],
         createSession,
         setClaudeSessionId,
         setHistorySessionId,

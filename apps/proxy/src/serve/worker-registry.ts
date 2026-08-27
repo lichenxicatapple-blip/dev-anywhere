@@ -1,7 +1,12 @@
 import { connect, type Socket } from "node:net";
 import { unlinkSync, existsSync, readdirSync } from "node:fs";
 import type { ChildProcess } from "node:child_process";
-import { buildMessage, serializeControl, SessionState } from "@dev-anywhere/shared";
+import {
+  buildMessage,
+  serializeControl,
+  SessionState,
+  type ControlErrorCode as ControlErrorCodeType,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
   IGNORED_EVENT_TYPES,
@@ -65,6 +70,17 @@ interface AssistantSnapshotState {
   status: "streaming" | "completed";
 }
 
+export class WorkerStartupError extends Error {
+  constructor(
+    message: string,
+    readonly errorCode?: ControlErrorCodeType,
+    readonly nativeSessionId?: string,
+  ) {
+    super(message);
+    this.name = "WorkerStartupError";
+  }
+}
+
 const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 
 function normalizeLocalCommandText(content: string): string {
@@ -108,6 +124,7 @@ export class WorkerRegistry {
   private readyWaiters = new Map<string, Set<ReadyWaiter>>();
   private pendingNativeSessions = new Map<string, NativeSessionRef>();
   private assistantSnapshots = new Map<string, AssistantSnapshotState>();
+  private startupFailures = new Map<string, WorkerStartupError>();
   private assistantTurnCounter = 0;
 
   constructor(private deps: WorkerRegistryDeps) {
@@ -156,6 +173,8 @@ export class WorkerRegistry {
   }
 
   waitForReady(sessionId: string, timeoutMs = 15_000): Promise<void> {
+    const startupFailure = this.startupFailures.get(sessionId);
+    if (startupFailure) return Promise.reject(startupFailure);
     if (this.readySessions.has(sessionId)) return Promise.resolve();
     return new Promise((resolve, reject) => {
       const timeout = setTimeout(() => {
@@ -180,8 +199,12 @@ export class WorkerRegistry {
     args.push("--provider", options?.provider ?? "claude");
     if (options?.cwd) args.push("--cwd", options.cwd);
     if (options?.resumeSessionId) args.push("--resume", options.resumeSessionId);
-    // 远程场景默认 default，每个工具都需审批，覆盖用户全局 claude settings 的 defaultMode
-    args.push("--permission-mode", options?.permissionMode ?? "default");
+    // Claude 的远程安全默认值仍是 default；Codex 未显式选择时保留其本机配置。
+    // Codex 的显式值已在 session_create 边界做过严格校验。
+    const provider = options?.provider ?? "claude";
+    const permissionMode =
+      options?.permissionMode ?? (provider === "claude" ? "default" : undefined);
+    if (permissionMode) args.push("--permission-mode", permissionMode);
     if (options?.streamDelta) {
       args.push("--stream-delta");
     }
@@ -328,6 +351,10 @@ export class WorkerRegistry {
     return this.children.has(sessionId);
   }
 
+  getStartupFailure(sessionId: string): WorkerStartupError | undefined {
+    return this.startupFailures.get(sessionId);
+  }
+
   delete(sessionId: string): void {
     this.children.delete(sessionId);
     this.sockets.delete(sessionId);
@@ -348,6 +375,7 @@ export class WorkerRegistry {
     this.readySessions.delete(sessionId);
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
+    this.startupFailures.delete(sessionId);
     this.children.delete(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker process terminated before ready: ${sessionId}`),
@@ -373,12 +401,14 @@ export class WorkerRegistry {
     this.readySessions.clear();
     this.pendingNativeSessions.clear();
     this.assistantSnapshots.clear();
+    this.startupFailures.clear();
     this.rejectReadyWaiters(new Error("Worker registry destroyed"));
   }
 
   private handleWorkerMessage(sessionId: string, msg: WorkerMessage): void {
     switch (msg.type) {
       case "worker_ready":
+        this.startupFailures.delete(sessionId);
         if (msg.nativeSession) {
           this.captureNativeSession(sessionId, msg.nativeSession);
         }
@@ -386,6 +416,21 @@ export class WorkerRegistry {
         this.resolveReadyWaiters(sessionId);
         serviceLogger.info({ sessionId, pid: msg.pid }, "Worker ready");
         break;
+
+      case "worker_startup_error": {
+        const startupError = new WorkerStartupError(
+          msg.message,
+          msg.errorCode,
+          msg.nativeSessionId,
+        );
+        this.startupFailures.set(sessionId, startupError);
+        this.rejectReadyWaiters(startupError, sessionId);
+        serviceLogger.warn(
+          { sessionId, provider: msg.provider, errorCode: msg.errorCode, errorTail: msg.message },
+          "JSON worker provider failed before ready",
+        );
+        break;
+      }
 
       case "worker_event":
         try {
@@ -402,7 +447,14 @@ export class WorkerRegistry {
       case "worker_exit":
         this.deps.sessionManager.terminateSession(sessionId);
         this.delete(sessionId);
-        serviceLogger.info({ sessionId, exitCode: msg.code }, "JSON session exited");
+        serviceLogger[msg.code === 0 ? "info" : "warn"](
+          {
+            sessionId,
+            exitCode: msg.code,
+            ...(msg.errorTail ? { errorTail: msg.errorTail } : {}),
+          },
+          "JSON session exited",
+        );
         break;
 
       case "worker_interrupted":

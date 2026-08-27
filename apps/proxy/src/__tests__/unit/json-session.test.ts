@@ -383,6 +383,17 @@ describe("JsonSession", () => {
       );
       expect(session.getStderr()).toBe("warning: something\nerror: something else\n");
     });
+
+    it("keeps only a bounded stderr tail", async () => {
+      const session = new JsonSession();
+      session.start();
+
+      mockChild.mockStderr.write(`prefix-${"x".repeat(9_000)}-tail`);
+      await waitForCondition(() => session.getStderr().endsWith("-tail"), "stderr tail timed out");
+
+      expect(session.getStderr().length).toBe(8_192);
+      expect(session.getStderr()).not.toContain("prefix-");
+    });
   });
 
   describe("exit handling", () => {

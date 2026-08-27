@@ -14,7 +14,7 @@ import {
   RefreshCw,
   TerminalSquare,
 } from "lucide-react";
-import type { HistorySession, SessionInfo } from "@dev-anywhere/shared";
+import { ControlErrorCode, type HistorySession, type SessionInfo } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -101,7 +101,7 @@ export function HistoryList({ now }: HistoryListProps) {
   function openRestoreDialog(h: HistorySession) {
     setRestoreTarget(h);
     setRestoreMode(defaultRestoreMode(h));
-    setRestorePermissionMode("default");
+    setRestorePermissionMode(defaultRestorePermissionMode(h));
   }
 
   async function handleResume(
@@ -126,14 +126,25 @@ export function HistoryList({ now }: HistoryListProps) {
         ...(permissionMode ? { permissionMode } : {}),
       });
       if (ctrl.error || !ctrl.sessionId) {
+        if (ctrl.errorCode === ControlErrorCode.SESSION_ALREADY_ACTIVE) {
+          useSessionStore.getState().setCodexActiveWriterConflict({
+            ...(ctrl.activeWriterPid ? { activeWriterPid: ctrl.activeWriterPid } : {}),
+          });
+          setRestoreTarget(null);
+          return;
+        }
         toast.error(`恢复失败：${ctrl.error ?? "未知错误"}`);
         return;
       }
       const newSession: SessionInfo = {
         sessionId: ctrl.sessionId,
+        ...(ctrl.kind !== undefined ? { kind: ctrl.kind } : {}),
+        ...(ctrl.name !== undefined ? { name: ctrl.name } : {}),
+        ...(ctrl.nameLocked !== undefined ? { nameLocked: ctrl.nameLocked } : {}),
         state: "idle",
         mode: ctrl.mode ?? mode,
         provider: ctrl.provider ?? "claude",
+        ...(ctrl.ptyOwner !== undefined ? { ptyOwner: ctrl.ptyOwner } : {}),
       };
       useSessionStore.getState().addSession(newSession);
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? mode}`);
@@ -411,6 +422,13 @@ function defaultRestoreMode(session: HistorySession): RestoreMode {
   return modes[0] ?? "json";
 }
 
+function defaultRestorePermissionMode(session: HistorySession): RestorePermissionMode {
+  // Newer Codex CLIs no longer expose the old strict `untrusted` policy. Keep
+  // the wire value as `auto` so this Web build also works with older Proxies,
+  // which already map it to Codex's cross-version `on-request` policy.
+  return historySessionProvider(session) === "codex" ? "auto" : "default";
+}
+
 function HistoryRestoreDialog({
   session,
   open,
@@ -437,6 +455,7 @@ function HistoryRestoreDialog({
   const [confirmingBypass, setConfirmingBypass] = useState(false);
   const destructiveConfirm = permissionMode === "bypassPermissions";
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const isCodex = session ? historySessionProvider(session) === "codex" : false;
 
   useEffect(() => {
     if (!open) setConfirmingBypass(false);
@@ -474,17 +493,19 @@ function HistoryRestoreDialog({
       <div className="grid min-w-0 gap-2">
         <span className="text-sm font-medium">权限模式</span>
         <div role="radiogroup" aria-label="权限模式" className="grid min-w-0 gap-2">
-          <PermissionChoiceButton
-            checked={permissionMode === "default"}
-            label="严格审批"
-            description="所有需要权限的操作都要确认。"
-            disabled={submitting}
-            onClick={() => onPermissionModeChange("default")}
-          />
+          {!isCodex && (
+            <PermissionChoiceButton
+              checked={permissionMode === "default"}
+              label="严格审批"
+              description="所有需要权限的操作都要确认。"
+              disabled={submitting}
+              onClick={() => onPermissionModeChange("default")}
+            />
+          )}
           <PermissionChoiceButton
             checked={permissionMode === "auto"}
-            label="自动判定"
-            description="交给 Agent CLI 的原生策略判断。"
+            label={isCodex ? "按需审批" : "自动判定"}
+            description={isCodex ? "Codex 在需要时请求确认。" : "交给 Agent CLI 的原生策略判断。"}
             disabled={submitting}
             onClick={() => onPermissionModeChange("auto")}
           />

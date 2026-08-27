@@ -64,6 +64,7 @@ export function createWorkerRegistryFake(options?: {
   connect?: unknown;
   has?: unknown;
   hasProcess?: unknown;
+  getStartupFailure?: unknown;
   waitForReady?: unknown;
   terminateProcess?: unknown;
   takePendingNativeSession?: unknown;
@@ -74,6 +75,7 @@ export function createWorkerRegistryFake(options?: {
     connect: options?.connect ?? vi.fn(),
     has: options?.has ?? vi.fn(() => true),
     hasProcess: options?.hasProcess ?? vi.fn(() => true),
+    getStartupFailure: options?.getStartupFailure ?? vi.fn(),
     waitForReady: options?.waitForReady ?? vi.fn(async () => {}),
     terminateProcess: options?.terminateProcess ?? vi.fn(() => false),
     takePendingNativeSession: options?.takePendingNativeSession ?? vi.fn(),

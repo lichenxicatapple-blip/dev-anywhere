@@ -25,8 +25,8 @@ describe("create-session submit model", () => {
     );
   });
 
-  it("normalizes unsupported Codex permission modes back to default", () => {
-    expect(normalizePermissionModeForProvider("codex", "acceptEdits")).toBe("default");
+  it("normalizes unsupported Codex permission modes to on-request approval", () => {
+    expect(normalizePermissionModeForProvider("codex", "acceptEdits")).toBe("auto");
     expect(normalizePermissionModeForProvider("claude", "acceptEdits")).toBe("acceptEdits");
   });
 

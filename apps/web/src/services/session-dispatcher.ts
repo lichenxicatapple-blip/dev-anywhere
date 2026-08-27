@@ -62,6 +62,15 @@ function handlePtyState(msg: Extract<RelayControlMessage, { type: "pty_state" }>
   useSessionStore.getState().setPtyState(msg.sessionId, msg.payload);
 }
 
+function handleSessionRuntimeError(
+  msg: Extract<RelayControlMessage, { type: "session_runtime_error" }>,
+): void {
+  if (msg.errorCode !== "SESSION_ALREADY_ACTIVE") return;
+  useSessionStore.getState().setCodexActiveWriterConflict({
+    ...(msg.activeWriterPid ? { activeWriterPid: msg.activeWriterPid } : {}),
+  });
+}
+
 export function registerSessionDispatcher(): () => void {
   return registerDispatcher("registerSessionDispatcher", () => createSessionMessageHandler());
 }
@@ -87,6 +96,9 @@ export function createSessionMessageHandler(): (
         break;
       case "pty_state":
         handlePtyState(msg);
+        break;
+      case "session_runtime_error":
+        handleSessionRuntimeError(msg);
         break;
       case "session_history_response":
         // 历史响应必须带 requestId，只能由发起请求的 loader 在校验目标开发机后写入。

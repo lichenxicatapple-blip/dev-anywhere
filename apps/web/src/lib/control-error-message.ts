@@ -10,8 +10,10 @@ const ERROR_CODE_MESSAGES: Partial<Record<ControlErrorCodeType, string>> = {
   [ControlErrorCode.PATH_ACCESS_DENIED]: "无权访问该路径",
   [ControlErrorCode.INVALID_PATH]: "路径无效",
   [ControlErrorCode.SESSION_NOT_FOUND]: "会话已结束",
+  [ControlErrorCode.SESSION_ALREADY_ACTIVE]: "Codex 会话仍在运行",
   [ControlErrorCode.PROXY_OFFLINE]: "开发机已离线",
   [ControlErrorCode.PROVIDER_UNSUPPORTED]: "不支持的 Provider",
+  [ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED]: "不支持的审批策略",
   [ControlErrorCode.WORKER_START_FAILED]: "Worker 启动失败",
   [ControlErrorCode.PROCESS_START_FAILED]: "进程启动失败",
 };

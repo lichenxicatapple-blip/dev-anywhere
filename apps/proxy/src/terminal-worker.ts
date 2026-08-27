@@ -9,6 +9,7 @@ import type { Socket } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { existsSync } from "node:fs";
 import { extractOscSignals, extractOscWorkingDirectory } from "./common/osc-extractor.js";
+import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
 import { terminalLogger as log } from "./common/logger.js";
 import { SOCK_PATH, STOPPED_PATH } from "./common/paths.js";
 import { capturePtySnapshot } from "./common/pty-snapshot.js";
@@ -47,6 +48,7 @@ class ShellTerminalWorker {
   private exiting = false;
   private reconnecting = false;
   private currentCwd: string;
+  private outputTail = "";
 
   constructor(
     private readonly sessionId: string,
@@ -114,7 +116,8 @@ class ShellTerminalWorker {
     child.onExit(({ exitCode, signal }) => {
       const code = signal ? 128 + signal : exitCode;
       log.info({ sessionId: this.sessionId, code }, "Terminal worker PTY exited");
-      this.exit(code);
+      const errorTail = code === 0 ? "" : sanitizeProviderErrorTail(this.outputTail);
+      this.exit(code, errorTail || undefined);
     });
     log.info(
       { sessionId: this.sessionId, pid: child.pid, shell, cwd: this.cwd },
@@ -124,6 +127,7 @@ class ShellTerminalWorker {
 
   private handlePtyData(data: string): void {
     this.outputSeq += 1;
+    this.outputTail = `${this.outputTail}${data}`.slice(-8_192);
     this.terminal.write(data);
     const signal = extractOscSignals(data);
     const cwd = extractOscWorkingDirectory(data);
@@ -252,7 +256,7 @@ class ShellTerminalWorker {
     this.exit(code);
   }
 
-  private exit(code: number): void {
+  private exit(code: number, errorTail?: string): void {
     if (this.exiting && !this.child) return;
     this.exiting = true;
     this.child = null;
@@ -260,10 +264,18 @@ class ShellTerminalWorker {
     if (this.socket?.writable) {
       const socket = this.socket;
       const timer = setTimeout(() => process.exit(code), 500);
-      socket.end(serializeIpc({ type: "pty_deregister", sessionId: this.sessionId }), () => {
-        clearTimeout(timer);
-        process.exit(code);
-      });
+      socket.end(
+        serializeIpc({
+          type: "pty_deregister",
+          sessionId: this.sessionId,
+          exitCode: code,
+          ...(errorTail ? { errorTail } : {}),
+        }),
+        () => {
+          clearTimeout(timer);
+          process.exit(code);
+        },
+      );
       return;
     }
     process.exit(code);

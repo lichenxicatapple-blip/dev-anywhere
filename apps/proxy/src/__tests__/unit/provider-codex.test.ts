@@ -23,7 +23,7 @@ describe("Codex provider", () => {
     });
   });
 
-  it("builds PTY command without mutating args or env when hooks are absent", () => {
+  it("does not override the local approval config when permission mode is omitted", () => {
     const args = ["exec", "--json", "Say OK"];
     withExecutable("codex", (codexBin) => {
       const env = { CODEX_BIN: codexBin, TERM: "xterm" } as NodeJS.ProcessEnv;
@@ -35,6 +35,7 @@ describe("Codex provider", () => {
         args,
         env,
       });
+      expect(args).toEqual(["exec", "--json", "Say OK"]);
     });
   });
 
@@ -64,11 +65,15 @@ describe("Codex provider", () => {
 
   it("maps terminal permission modes to Codex approval flags", () => {
     withExecutable("codex", (codexBin) => {
-      const strict = CODEX_PROVIDER.buildTerminalCommand(
-        { args: [], permissionMode: "default" },
-        { CODEX_BIN: codexBin },
-      );
-      expect(strict.args).toEqual(["--ask-for-approval", "untrusted"]);
+      const omitted = CODEX_PROVIDER.buildTerminalCommand({ args: [] }, { CODEX_BIN: codexBin });
+      expect(omitted.args).toEqual([]);
+
+      expect(() =>
+        CODEX_PROVIDER.buildTerminalCommand(
+          { args: [], permissionMode: "default" },
+          { CODEX_BIN: codexBin },
+        ),
+      ).toThrow(/不支持.*严格审批/);
 
       const automatic = CODEX_PROVIDER.buildTerminalCommand(
         { args: [], permissionMode: "auto" },
@@ -95,11 +100,11 @@ describe("Codex provider", () => {
 
     withExecutable("codex", (codexBin) => {
       const command = CODEX_PROVIDER.buildTerminalCommand(
-        { args: ["resume", "codex-session"], permissionMode: "default", hook },
+        { args: ["resume", "codex-session"], permissionMode: "auto", hook },
         { CODEX_BIN: codexBin },
       );
 
-      expect(command.args).toEqual(["--ask-for-approval", "untrusted", "resume", "codex-session"]);
+      expect(command.args).toEqual(["--ask-for-approval", "on-request", "resume", "codex-session"]);
     });
   });
 

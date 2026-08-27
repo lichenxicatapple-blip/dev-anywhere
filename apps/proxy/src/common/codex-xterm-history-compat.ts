@@ -1,7 +1,10 @@
 const SYNC_OUTPUT_START = "\x1b[?2026h";
 const SYNC_OUTPUT_END = "\x1b[?2026l";
 const MAX_SYNC_BLOCK_CHARS = 1024 * 1024;
+// ANSI ESC is intentional: these patterns match terminal control sequences from Codex.
+// eslint-disable-next-line no-control-regex
 const ALT_SCREEN_SEQUENCE_RE = /\x1b\[\?(?:47|1047|1049)([hl])/g;
+// eslint-disable-next-line no-control-regex
 const HISTORY_INSERT_RE = /\x1b\[1;([1-9]\d*)r\x1b\[(\d*)S\x1b\[r\x1b\[([1-9]\d*);1H\x1b\[J/g;
 
 export const CODEX_XTERM_HISTORY_COMPAT_ENV = "DEV_ANYWHERE_CODEX_XTERM_HISTORY_COMPAT";

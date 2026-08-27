@@ -13,6 +13,11 @@ import { SeqCounter } from "./common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "./ipc/ipc-protocol.js";
 import { takeoverServeSocket } from "./worker/serve-socket-takeover.js";
 import type { ProviderHookContext } from "./providers/index.js";
+import { ControlErrorCode } from "@dev-anywhere/shared";
+import {
+  classifyCodexActiveWriterError,
+  sanitizeProviderErrorTail,
+} from "./common/codex-session-conflict.js";
 
 // 参数格式: session-worker.ts <sessionId> <socketPath> [--provider <provider>] [--cwd <dir>] [--resume <id>] [-- provider args...]
 const sessionId = process.argv[2];
@@ -136,7 +141,12 @@ function handleProviderExit(code: number): void {
   if (exiting) return;
   exiting = true;
   whitelist.clear();
-  sendToServe({ type: "worker_exit", code });
+  const errorTail = code === 0 ? "" : sanitizeProviderErrorTail(session.getStderr());
+  sendToServe({
+    type: "worker_exit",
+    code,
+    ...(errorTail ? { errorTail } : {}),
+  });
   cleanup();
   process.exit(0);
 }
@@ -285,7 +295,22 @@ server.listen(sockPath, () => {
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
-        console.error(`[worker] Codex app-server failed to initialize: ${message}`);
+        const failureOutput = `${message}\n${session.getStderr()}`;
+        const diagnostic =
+          sanitizeProviderErrorTail(failureOutput) || "Codex app-server 初始化失败";
+        const activeWriter = classifyCodexActiveWriterError(failureOutput);
+        sendToServe({
+          type: "worker_startup_error",
+          provider: "codex",
+          message: diagnostic,
+          ...(activeWriter
+            ? {
+                errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+                nativeSessionId: activeWriter.threadId,
+              }
+            : {}),
+        });
+        console.error(`[worker] Codex app-server failed to initialize: ${diagnostic}`);
         void session.stop(0).finally(() => handleProviderExit(1));
       });
   } else {

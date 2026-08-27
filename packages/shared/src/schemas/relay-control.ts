@@ -560,7 +560,8 @@ const relayControlDefinitions = [
       // 重连或换设备不会隐式重排既有终端内容。
       cols: z.number().int().positive().max(PTY_INITIAL_MAX_COLS).optional(),
       rows: z.number().int().positive().max(PTY_INITIAL_MAX_ROWS).optional(),
-      // 透传给 claude CLI 的 --permission-mode, undefined 时 proxy 兜底为 "default"
+      // Provider 级审批策略。Claude 未提供时仍使用其 default；Codex 未提供时尊重
+      // 用户本机配置，不由 DEV Anywhere 注入覆盖值。
       permissionMode: z
         .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
         .optional(),
@@ -579,7 +580,22 @@ const relayControlDefinitions = [
       mode: z.enum(sessionModeValues).optional(),
       provider: z.enum(providerValues).optional(),
       ptyOwner: z.enum(ptyOwnerValues).optional(),
+      // Codex 原生 thread 被其他进程持有时返回真实锁持有 PID；无法探测时省略。
+      activeWriterPid: z.number().int().positive().optional(),
       ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
+
+  // 会话创建响应已经成功返回、页面已进入终端后，Provider 仍可能在 bootstrap 阶段
+  // 非零退出。把可识别的运行时错误结构化推给 Web，避免关键错误只留在终端闪屏里。
+  control(
+    "session_runtime_error",
+    {
+      sessionId: IdSchema,
+      error: z.string(),
+      errorCode: ControlErrorCodeSchema,
+      activeWriterPid: z.number().int().positive().optional(),
     },
     "proxy_to_client",
   ),

@@ -78,6 +78,7 @@ function resolveInterruptedApprovals(
 export interface ServiceOptions {
   relayUrl?: string;
   relayName?: string;
+  preserveStoppedMarker?: boolean;
 }
 
 function parseServiceOptions(argv: readonly string[]): ServiceOptions {
@@ -97,6 +98,10 @@ function parseServiceOptions(argv: readonly string[]): ServiceOptions {
       const relayName = arg.slice("--relay=".length);
       if (!relayName) throw new Error("Missing value for --relay");
       options.relayName = relayName;
+      continue;
+    }
+    if (arg === "--preserve-stopped-marker") {
+      options.preserveStoppedMarker = true;
     }
   }
   return options;
@@ -105,10 +110,12 @@ function parseServiceOptions(argv: readonly string[]): ServiceOptions {
 export async function startService(options?: ServiceOptions): Promise<void> {
   ensureProfileWorkspace();
   await cleanupStaleResources();
-  try {
-    unlinkSync(STOPPED_PATH);
-  } catch {
-    // STOPPED 文件不存在时忽略
+  if (!options?.preserveStoppedMarker) {
+    try {
+      unlinkSync(STOPPED_PATH);
+    } catch {
+      // STOPPED 文件不存在时忽略
+    }
   }
 
   const permissionBroker = new PermissionBroker();
