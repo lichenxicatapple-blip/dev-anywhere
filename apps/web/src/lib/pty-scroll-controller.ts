@@ -106,6 +106,7 @@ interface PtyScrollController {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
+  markHorizontalLiveFramePending: () => void;
   markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
@@ -187,6 +188,11 @@ export function attachPtyScrollController(
   // 否则用户滚到光标视窗外 → onRender → followCursorX snap 回 → onContainerScroll
   // 误把这次改写当成用户滚动 → 状态错乱。
   let horizontalState = createInitialPtyHorizontalScrollState();
+  // 右侧 8 列的提前跟随只属于实时 PTY 输出。snapshot 恢复、cursor blink、focus/theme
+  // 重绘也会触发 onRender，但这些帧没有“用户正在继续输入”的含义，不能仅因一个仍可见
+  // 的历史光标落在 lookahead 区就改写 scrollLeft。一个 xterm write 可能在解析期间产生
+  // 多次 render；资格必须从二进制帧入队一直保留到 onWriteParsed 后的最终 render。
+  let horizontalLookaheadPhase: "idle" | "parsing" | "parsed" = "idle";
   // 纵向同样需要"用户向下滚到底"的方向判定来释放 intent。longHost 模式下
   // isAtBottom = cursorInViewport, 用户小幅 wheel up 时 cursor 仍可见 → atBottom 仍 true,
   // 仅看 atBottom + 时间窗会把刚 set 的 intent 立刻清掉。改成跟 onContainerScroll 拿到的
@@ -846,6 +852,7 @@ export function attachPtyScrollController(
     deferredViewportPaintPending = false;
     positionedHostYdisp = null;
     pendingContainerSyncRetry = false;
+    horizontalLookaheadPhase = "idle";
     trace("buffer-switch", {
       details: `${previousType}->${nextType} site=${site} forced=${options.forceBoundary ? 1 : 0} crossed=${crossedTypeBoundary ? 1 : 0}`,
     });
@@ -1011,6 +1018,7 @@ export function attachPtyScrollController(
     reason: string = "external",
     opts: { holdUntilCursorVisible?: boolean } = {},
   ): void => {
+    horizontalLookaheadPhase = "idle";
     const previous = container.scrollLeft;
     const result = clearPtyHorizontalIntent(horizontalState, {
       details: `site=resetHorizontalScroll reason=${reason}`,
@@ -1032,6 +1040,10 @@ export function attachPtyScrollController(
 
   const markHorizontalScrollIntent = (reason: string = "external"): void => {
     markHorizontalUserInput(`site=${reason}`);
+  };
+
+  const markHorizontalLiveFramePending = (): void => {
+    horizontalLookaheadPhase = "parsing";
   };
 
   const markSelectionAutoscrollIntent = (reason: string = "selection-autoscroll"): void => {
@@ -1709,16 +1721,18 @@ export function attachPtyScrollController(
     });
   };
 
-  // 长行场景下光标跟着输入向右移到屏外, 把 scrollLeft 调到能让光标位于视窗中部 (留出
-  // 左右上下文)。仅在光标真正出视窗时触发; 用户主动横向滚到光标视窗外后, 通过
-  // userHasHorizontalScrollIntent 持续抑制直到用户滚回到光标可见范围。
-  const followCursorX = (): void => {
+  // 长行实时输出让光标进入右侧 lookahead 区时，把 scrollLeft 调到能让光标位于视窗
+  // 中部并留出输入上下文；snapshot / 普通重绘则只在光标真正出视窗时救回。用户主动
+  // 横向滚到光标视窗外后，通过 horizontal intent 持续抑制直到光标重新可见。
+  const followCursorX = (allowLookaheadFollow: boolean): boolean => {
     if (!hasHorizontalOverflow()) {
       clearHorizontalIntentIfUnscrollable("followCursorX");
-      return;
+      return true;
     }
     const { cellW } = getDims();
-    if (cellW <= 0) return;
+    // Metrics can be temporarily unavailable between xterm parsing and layout. Keep the live
+    // frame latch for the next render instead of silently downgrading it to a snapshot repaint.
+    if (cellW <= 0) return false;
     const cursorPxX = term.buffer.active.cursorX * cellW;
     const viewportLeft = container.scrollLeft;
     const viewportRight = viewportLeft + container.clientWidth;
@@ -1728,7 +1742,7 @@ export function attachPtyScrollController(
         trace("followCursorX:skip", {
           details: `horizontalTouchIntent cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
         });
-        return;
+        return true;
       }
       // 用户滚回到光标可见范围 (或光标自己进了 viewport), 重新 engage 跟踪
       const result = clearPtyHorizontalIntent(horizontalState, {
@@ -1739,26 +1753,28 @@ export function attachPtyScrollController(
       traceHorizontalIntent(result.trace);
       if (result.trace) {
         trace("followCursorX:skip", { details: "cursorInViewport" });
-        return;
+        return true;
       }
     }
     if (horizontalState.intent) {
       trace("followCursorX:skip", {
         details: `horizontalIntent cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
       });
-      return;
+      return true;
     }
     const rightMarginPx = Math.min(
       container.clientWidth / 2,
       PTY_SCROLL_CONFIG.horizontal.cursorFollowRightMarginColumns * cellW,
     );
     const rightFollowBoundary = viewportRight - rightMarginPx;
-    const cursorNeedsFollow = cursorPxX < viewportLeft || cursorPxX >= rightFollowBoundary;
+    const cursorOutsideViewport = cursorPxX < viewportLeft || cursorPxX >= viewportRight;
+    const cursorNeedsFollow =
+      cursorOutsideViewport || (allowLookaheadFollow && cursorPxX >= rightFollowBoundary);
     if (!cursorNeedsFollow) {
       trace("followCursorX:skip", {
-        details: `cursorSafe cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} rightBoundary=${rightFollowBoundary}`,
+        details: `cursorSafe cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} rightBoundary=${rightFollowBoundary} lookahead=${allowLookaheadFollow ? 1 : 0}`,
       });
-      return;
+      return true;
     }
     const target = Math.max(0, cursorPxX - container.clientWidth / 2);
     const maxScrollLeft = Math.max(0, container.scrollWidth - container.clientWidth);
@@ -1766,8 +1782,9 @@ export function attachPtyScrollController(
     horizontalState = setPtyHorizontalPendingFollow(horizontalState, pendingFollowLeft);
     container.scrollLeft = pendingFollowLeft;
     trace("followCursorX:hit", {
-      details: `cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} rightBoundary=${rightFollowBoundary} target=${pendingFollowLeft}`,
+      details: `cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight} rightBoundary=${rightFollowBoundary} target=${pendingFollowLeft} trigger=${cursorOutsideViewport ? "offscreen" : "live-lookahead"}`,
     });
+    return true;
   };
 
   const onRender = (): void => {
@@ -1785,7 +1802,14 @@ export function attachPtyScrollController(
       syncContainerScroll();
     }
     handlePendingNewFrame();
-    followCursorX();
+    const lookaheadPhaseAtRender = horizontalLookaheadPhase;
+    if (
+      followCursorX(lookaheadPhaseAtRender !== "idle") &&
+      lookaheadPhaseAtRender === "parsed" &&
+      horizontalLookaheadPhase === lookaheadPhaseAtRender
+    ) {
+      horizontalLookaheadPhase = "idle";
+    }
     followCursorY();
     if (userHasVerticalScrollIntent()) {
       const { cellH } = getDims();
@@ -1841,6 +1865,9 @@ export function attachPtyScrollController(
     onRelayout: relayout,
     onWriteParsed: () => {
       bufferRevision += 1;
+      if (horizontalLookaheadPhase === "parsing") {
+        horizontalLookaheadPhase = "parsed";
+      }
       if (!sameTypeReviewBoundaryAwaitingWrite) return;
       sameTypeReviewBoundaryAwaitingWrite = false;
       if (!userHasVerticalScrollIntent() || term.buffer.active.type !== "normal") return;
@@ -1931,6 +1958,7 @@ export function attachPtyScrollController(
     scrollToRatio,
     scrollToXRatio,
     resetHorizontalScroll,
+    markHorizontalLiveFramePending,
     markSelectionAutoscrollIntent,
     markHorizontalScrollIntent,
     traceRawInputFollowScheduled,

@@ -162,6 +162,7 @@ interface ScrollControllerHandle {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
+  markHorizontalLiveFramePending: () => void;
   markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
   traceRawInputFollowScheduled: (source?: string) => void;
@@ -807,6 +808,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
     const onFramePending = (): void => {
       pendingNewFrameRef.current = true;
+      scrollControllerRef.current?.markHorizontalLiveFramePending();
       if (userHasVerticalScrollIntentRef.current && !follow.hasNewFramesWhileAwayRef.current) {
         follow.setHasNewFramesWhileAway(true);
       }

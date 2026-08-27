@@ -116,6 +116,53 @@ test.describe("L4 mobile / PTY input scroll", () => {
     expect(resizeRequests).toEqual([]);
   });
 
+  test("keeps a visible restored cursor left-aligned until live output advances it", async ({
+    emuPage,
+  }) => {
+    const sessionId = `${SESSION_ID}-snapshot-lookahead`;
+    await setupPtyChat(emuPage, {
+      sessionId,
+      cols: 270,
+      rows: 52,
+      snapshotData: "x".repeat(40),
+      baseUrl: mobileBaseUrl,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+
+    await expect
+      .poll(() =>
+        emuPage.evaluate((sid) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          const debug = window.__devAnywherePtyDebug?.();
+          if (!term || !debug || debug.cell.w <= 0) return null;
+          const cursorPx = term.buffer.active.cursorX * debug.cell.w;
+          return {
+            cursorX: term.buffer.active.cursorX,
+            visible: cursorPx < debug.container.clientWidth,
+            insideLookahead: cursorPx >= debug.container.clientWidth - 8 * debug.cell.w,
+          };
+        }, sessionId),
+      )
+      .toEqual({ cursorX: 40, visible: true, insideLookahead: true });
+    await emuPage.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
+
+    const restored = await readPtyHorizontalScrollMetrics(emuPage);
+    expect(restored.maxScrollLeft).toBeGreaterThan(100);
+    expect(restored.scrollLeft).toBeLessThanOrEqual(1);
+
+    // Preserve the v0.5.21 behavior: once a real PTY frame advances the cursor inside the
+    // right-side lookahead zone, follow early so mobile typing retains one tab stop of context.
+    await sendPtyOutput(emuPage, "x");
+    await expect
+      .poll(() => readPtyHorizontalScrollMetrics(emuPage).then((metrics) => metrics.scrollLeft))
+      .toBeGreaterThan(1);
+  });
+
   test("touch-drag pans horizontally when the PTY overflows the mobile viewport", async ({
     emuPage,
   }) => {

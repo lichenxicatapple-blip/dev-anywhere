@@ -3625,13 +3625,15 @@ describe("attachPtyScrollController", () => {
   // in controller coverage until horizontal scrolling gets its own model.
   // 长行(终端宽度 cols=80, 内容延伸到 cols * 2 等), 光标随输入移到屏外右侧时,
   // 水平滚动条应该自动把光标拉回视窗中部, 留出左右上下文而不是贴着光标。
-  it("starts horizontal cursor following within one tab stop of the right edge", () => {
+  it("keeps a restored visible cursor at the left anchor but still reveals an offscreen cursor", () => {
     const { container, spacer, host } = createDom();
     const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
     defineSize(container, { clientHeight: 347, clientWidth: 360 });
-    defineSize(screen, { clientHeight: 400, clientWidth: 800 });
-    defineScrollWidth(container, 1_600);
+    defineSize(screen, { clientHeight: 1_040, clientWidth: 2_160 });
+    defineScrollWidth(container, 2_184);
     const { terminal, emitRender } = createTerminal({ 99: "prompt" });
+    terminal.rows = 52;
+    terminal.cols = 270;
     attachPtyScrollController({
       container,
       spacer,
@@ -3643,14 +3645,61 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
+    // cellW=8, so cursorX=37 is visible at 296px but exactly enters the 8-column typing
+    // lookahead zone. A restored snapshot has no live frame ownership and must preserve the
+    // left anchor instead of centering that already-visible cursor at scrollLeft=116.
+    terminal.buffer.active.cursorX = 37;
+    emitRender();
+    expect(container.scrollLeft).toBe(0);
+
+    // Snapshot/restyle renders still retain the hard safety net: a cursor that is genuinely
+    // outside the 360px viewport must be revealed even without a live output frame.
+    terminal.buffer.active.cursorX = 46;
+    emitRender();
+    expect(container.scrollLeft).toBe(188);
+  });
+
+  it("starts horizontal cursor following within one tab stop of the right edge", () => {
+    const { container, spacer, host } = createDom();
+    const screen = host.querySelector<HTMLElement>(".xterm-screen")!;
+    defineSize(container, { clientHeight: 347, clientWidth: 360 });
+    defineSize(screen, { clientHeight: 400, clientWidth: 800 });
+    defineScrollWidth(container, 1_600);
+    const { terminal, emitRender, emitWriteParsed } = createTerminal({ 99: "prompt" });
+    let hasNewFrame = false;
+    const consumeNewFrame = vi.fn(() => {
+      hasNewFrame = false;
+    });
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => hasNewFrame,
+      consumeNewFrame,
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+    });
+
     // cellW=10 and the right margin is 8 cells, so [280, 360] is the follow zone.
     terminal.buffer.active.cursorX = 27;
     emitRender();
     expect(container.scrollLeft).toBe(0);
 
+    hasNewFrame = true;
+    controller.markHorizontalLiveFramePending();
+    // Vertical reconciliation is allowed to consume the shared pending-frame flag first. The
+    // horizontal lookahead ownership must survive both that consumption and an early xterm render
+    // which still reports a cursor just before the lookahead boundary.
+    controller.relayout();
+    emitRender();
+    expect(container.scrollLeft).toBe(0);
+
     terminal.buffer.active.cursorX = 28;
+    emitWriteParsed();
     emitRender();
     expect(container.scrollLeft).toBe(100);
+    expect(consumeNewFrame).toHaveBeenCalledOnce();
   });
 
   it("auto-scrolls horizontally to center the cursor when it leaves the viewport", () => {
