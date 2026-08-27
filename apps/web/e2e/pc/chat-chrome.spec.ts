@@ -58,6 +58,22 @@ test.describe("ChatHeader compact navigation controls", () => {
     await expect(stepper).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-font-label"]')).toHaveCount(0);
 
+    // Radix exposes the menu as visible at the start of its zoom-in animation. Measuring both
+    // rows in that transformed frame produced a 1.527px transient x delta in Linux CI even
+    // though the settled layout (and the automatic retry) was aligned. Poll the real <=1px
+    // contract so the assertion still fails on a persistent layout regression without coupling
+    // the test to a fixed animation duration.
+    await expect
+      .poll(async () => {
+        const [stepperBox, resetLabelBox] = await Promise.all([
+          stepper.boundingBox(),
+          resetLabel.boundingBox(),
+        ]);
+        if (!stepperBox || !resetLabelBox) return Number.POSITIVE_INFINITY;
+        return Math.abs(stepperBox.x - resetLabelBox.x);
+      })
+      .toBeLessThanOrEqual(1);
+
     const [rowBox, stepperBox, smallerBox, valueBox, largerBox, resetBox, resetLabelBox] =
       await Promise.all([
         row.boundingBox(),
