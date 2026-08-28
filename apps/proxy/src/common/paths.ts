@@ -136,6 +136,7 @@ export function defaultHookPortForProfile(profileName: string): number {
 
 export const PROFILE_NAME = resolveProxyProfileName();
 const PROFILE_PATHS = buildProxyProfilePaths(HOME, PROFILE_NAME);
+export const APP_DIR = PROFILE_PATHS.appDir;
 
 // 把 cwd 前缀替换为 ~，HOME 为空时原样返回（避免 replace("", "~") 把 ~ 前缀到所有路径）
 export function tildify(cwd: string): string {
@@ -152,6 +153,9 @@ export const PID_PATH = PROFILE_PATHS.pidPath;
 // 防止 stop 结束 daemon 后 terminal 立即将其重新拉起。
 export const STOPPED_PATH = PROFILE_PATHS.stoppedPath;
 export const DESIRED_RELAY_PATH = PROFILE_PATHS.desiredRelayPath;
+// npm 全局安装对同一用户的所有 profile / daemon 都是共享写操作，锁不能放进 profile
+// 自己的 runDir，否则两个 profile 会同时改写同一个 node_modules 目录。
+export const AUTO_UPDATE_LOCK_PATH = `${APP_DIR}/run/auto-update.lock`;
 
 // 持久化状态
 const STATE_DIR = PROFILE_PATHS.stateDir;
@@ -187,6 +191,7 @@ export function isInitialized(): boolean {
 
 const DEFAULT_CONFIG = `{
   "defaultProfile": "default",
+  "autoUpdate": true,
   "profiles": {
     "default": {
       "relay": "cloud"

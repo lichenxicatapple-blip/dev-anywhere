@@ -60,10 +60,18 @@ describe("proxy config relay selection", () => {
     const config = loadConfig();
 
     expect(config.profileName).toBe("default");
+    expect(config.autoUpdate).toBe(true);
     expect(config.relayName).toBe("cloud");
     expect(config.relayUrl).toBe("wss://cloud.example.com");
     expect(config.relayToken).toBe("secret");
     expect(config.sources.relayName).toBe("profile");
+  });
+
+  it("allows Relay-directed automatic updates to be disabled explicitly", async () => {
+    writeConfig({ ...currentConfig, autoUpdate: false });
+
+    const { loadConfig } = await importConfig();
+    expect(loadConfig().autoUpdate).toBe(false);
   });
 
   it("uses --profile to select another profile and that profile's relay", async () => {

@@ -194,15 +194,13 @@ ssh root@your-vps \
 
 ## 升级
 
-升级到最新版本：
+Proxy 默认跟随当前 Relay 自动升级，因此日常只需更新 VPS：
 
 ```bash
 git pull --ff-only
 bash scripts/deploy/install-relay.sh \
   --ssh root@your-vps \
   203.0.113.10
-npm install -g @dev-anywhere/proxy@latest
-dev-anywhere serve restart --relay cloud
 ```
 
 部署脚本会复用 `/opt/dev-anywhere/.env` 中已有的 Token。
@@ -219,6 +217,8 @@ IMAGE_TAG="$VERSION" bash scripts/deploy/install-relay.sh \
 npm install -g "@dev-anywhere/proxy@$VERSION"
 dev-anywhere serve restart --relay cloud
 ```
+
+同时在开发机的 `~/.dev-anywhere/config.json` 顶层设置 `"autoUpdate": false`，否则 Proxy 连接 Relay 后会重新跟随其版本。
 
 ## 排障
 
@@ -241,6 +241,8 @@ ssh root@your-vps \
 ```bash
 tail -f ~/.dev-anywhere/logs/service.log
 ```
+
+自动升级异常记录在 `~/.dev-anywhere/logs/auto-update.log`。
 
 连接失败时依次检查：
 

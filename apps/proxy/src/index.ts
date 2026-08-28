@@ -1,8 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { connect } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
-import { dirname, join } from "node:path";
 import { Command } from "commander";
 import {
   PID_PATH,
@@ -25,11 +23,7 @@ import type { IpcMessage } from "./ipc/ipc-protocol.js";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "./cli-args.js";
 import { waitForProcessExit } from "./common/daemon-stop.js";
 import { readLiveLocalPtySessionIds, waitForSessionHandover } from "./common/restart-handover.js";
-
-const __dirname = dirname(fileURLToPath(import.meta.url));
-const pkg = JSON.parse(readFileSync(join(__dirname, "..", "package.json"), "utf-8")) as {
-  version: string;
-};
+import { PROXY_VERSION } from "./version.js";
 
 const DAEMON_STOP_TIMEOUT_MS = 10_000;
 const SESSION_HANDOVER_TIMEOUT_MS = 10_000;
@@ -167,6 +161,24 @@ function showStatus(): Promise<number> {
         if (msg.type === "service_status_response") {
           const config = msg.config;
           log(`Daemon:  profile ${config.profile ?? PROFILE_NAME}`);
+          log(
+            `Version: ${
+              config.version === undefined
+                ? `daemon unknown (CLI ${PROXY_VERSION})`
+                : config.version === PROXY_VERSION
+                  ? config.version
+                  : `daemon ${config.version} (CLI ${PROXY_VERSION})`
+            }`,
+          );
+          log(
+            `Updates: ${
+              config.autoUpdate === undefined
+                ? "unknown (restart daemon to refresh)"
+                : config.autoUpdate
+                  ? "automatic (follows Relay)"
+                  : "disabled"
+            }`,
+          );
           log(`Relay:   ${config.relayName} (${config.relayNameSource})`);
           log(`Config:  relay ${config.relayUrl ?? "(unset)"} (${config.relayUrlSource})`);
           const relay = msg.relay;
@@ -319,7 +331,7 @@ async function startDaemon(options?: { relayName?: string }): Promise<void> {
 
 const program = new Command("dev-anywhere")
   .description("Dev Anywhere - transparent local AI CLI proxy with remote control")
-  .version(pkg.version, "-v, --version")
+  .version(PROXY_VERSION, "-v, --version")
   .option("--profile <name>", "Use an isolated local proxy profile")
   .allowUnknownOption()
   .allowExcessArguments()

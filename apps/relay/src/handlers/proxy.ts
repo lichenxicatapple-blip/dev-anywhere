@@ -14,6 +14,7 @@ import { completeRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
 import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js";
 import type { SessionHistoryRouteRegistry } from "../session-history-route-registry.js";
+import { RELAY_VERSION } from "../version.js";
 
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
@@ -140,19 +141,20 @@ export function handleProxyConnection(
     const result = parseMessage(raw);
 
     if (result.kind === "control" && result.message.type === "proxy_register") {
-      const { proxyId, name } = result.message;
-      const status = registry.registerProxy(proxyId, proxyWs, name);
+      const { proxyId, name, proxyVersion } = result.message;
+      const status = registry.registerProxy(proxyId, proxyWs, name, proxyVersion);
       proxyWs.proxyId = proxyId;
       if (status === "reconnected") {
         ptySnapshotRoutes.clearProxy(proxyId);
         sessionHistoryRoutes.clearProxy(proxyId);
       }
-      logger.info({ proxyId, status }, "Proxy registered");
+      logger.info({ proxyId, proxyVersion, status }, "Proxy registered");
 
       proxyWs.send(
         serializeControl({
           type: "proxy_register_response",
           status,
+          relayVersion: RELAY_VERSION,
         }),
       );
 

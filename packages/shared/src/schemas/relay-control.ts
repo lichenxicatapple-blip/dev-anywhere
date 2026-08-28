@@ -23,6 +23,7 @@ import { PTY_INITIAL_MAX_COLS, PTY_INITIAL_MAX_ROWS } from "../constants/pty.js"
 export const ProxyInfoSchema = z.object({
   proxyId: IdSchema,
   name: z.string().optional(),
+  version: z.string().optional(),
   online: z.boolean(),
   sessions: z.array(z.string()).optional(),
 });
@@ -158,9 +159,12 @@ const relayControlDefinitions = [
   control("proxy_register", {
     proxyId: IdSchema,
     name: z.string().optional(),
+    proxyVersion: z.string().min(1).max(64).optional(),
   }),
   control("proxy_register_response", {
     status: z.enum(["new", "reconnected"]),
+    // optional 只用于滚动升级：新 Proxy 连接旧 Relay 时继续工作，但不会自动更新。
+    relayVersion: z.string().min(1).max(64).optional(),
   }),
   control("proxy_list_request", RequestIdShape),
   control("proxy_list_response", {

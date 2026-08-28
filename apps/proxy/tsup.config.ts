@@ -4,7 +4,13 @@ import { defineConfig } from "tsup";
 // 所以 inline 进 dist 让 dev-anywhere 成为 self-contained 可独立安装的包
 // node-pty 是 native addon, 保留 external 让 npm install 时走 prebuild / node-gyp
 export default defineConfig({
-  entry: ["src/index.ts", "src/serve.ts", "src/session-worker.ts", "src/terminal-worker.ts"],
+  entry: [
+    "src/index.ts",
+    "src/serve.ts",
+    "src/session-worker.ts",
+    "src/terminal-worker.ts",
+    "src/update-runner.ts",
+  ],
   format: ["esm"],
   dts: false,
   clean: true,

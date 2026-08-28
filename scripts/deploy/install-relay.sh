@@ -392,7 +392,7 @@ if curl -fsS "https://$PUBLIC_HOST/health" >/dev/null 2>&1; then
   echo "  npm install -g @dev-anywhere/proxy"
   echo "  dev-anywhere init"
   echo "  # edit ~/.dev-anywhere/config.json:"
-  echo "  #   { \"defaultProfile\": \"default\", \"profiles\": { \"default\": { \"relay\": \"cloud\" } }, \"relays\": { \"cloud\": { \"url\": \"wss://$PUBLIC_HOST\", \"proxyToken\": \"$PROXY_TOKEN\" } } }"
+  echo "  #   { \"defaultProfile\": \"default\", \"autoUpdate\": true, \"profiles\": { \"default\": { \"relay\": \"cloud\" } }, \"relays\": { \"cloud\": { \"url\": \"wss://$PUBLIC_HOST\", \"proxyToken\": \"$PROXY_TOKEN\" } } }"
   echo "  dev-anywhere serve start --relay cloud"
   echo
   echo "Open the Web UI URL above once. The client token is stored in local browser storage for future launches."

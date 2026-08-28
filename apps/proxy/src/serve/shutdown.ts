@@ -5,6 +5,7 @@ import { unlinkIfPresent } from "../common/safe-unlink.js";
 // 单次执行守卫，便于以纯单元测试的方式覆盖双信号场景而不必拉起整个 service。
 export interface ServeShutdownDeps {
   logger: Logger;
+  autoUpdaterDispose?: () => void;
   sessionManagerStopReaper: () => void;
   relayRouterDestroy: () => void;
   hookServerClose: () => Promise<void>;
@@ -27,6 +28,7 @@ export function createServeShutdown(deps: ServeShutdownDeps): () => Promise<void
     if (shuttingDown) return;
     shuttingDown = true;
     deps.logger.info("Shutting down service");
+    deps.autoUpdaterDispose?.();
     deps.sessionManagerStopReaper();
     // 先 destroy router：清掉 pending session-create retry timer，并 cleanupPendingJsonSession
     // 把已 spawn 但还未 connect 的 worker 子进程收掉，否则进入 destroyAll 时这批子进程

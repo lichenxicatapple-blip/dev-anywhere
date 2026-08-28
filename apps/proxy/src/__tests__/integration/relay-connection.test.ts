@@ -74,6 +74,26 @@ describe("RelayConnection", () => {
     expect(relay.registry.getProxy(proxyId)?.extensions).toContain("permessage-deflate");
   });
 
+  it("exchanges Proxy and Relay versions during registration", async () => {
+    const tmpDir = mkdtempSync(join(tmpdir(), "relay-version-test-"));
+    const idPath = join(tmpDir, "proxy-id");
+    const relayVersions: string[] = [];
+
+    conn = new RelayConnection(`ws://localhost:${relayPort}`, {
+      proxyIdPath: idPath,
+      version: "0.6.2",
+    });
+    conn.on("relay_version", (version: string) => relayVersions.push(version));
+    conn.connect();
+
+    await waitForProxyRegistration(conn);
+    await vi.waitFor(() => expect(relayVersions).toHaveLength(1));
+    expect(relayVersions[0]).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(relay.registry.listProxiesWithName()).toContainEqual(
+      expect.objectContaining({ proxyId: conn.getProxyId(), version: "0.6.2" }),
+    );
+  });
+
   it("sends MessageEnvelope to relay via sendEnvelope()", async () => {
     const tmpDir = mkdtempSync(join(tmpdir(), "relay-test-"));
     const idPath = join(tmpDir, "proxy-id");

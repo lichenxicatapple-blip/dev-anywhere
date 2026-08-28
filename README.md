@@ -173,20 +173,18 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
-在本机克隆的 DEV Anywhere 仓库中执行：
+Proxy 默认跟随当前连接的 Relay 自动升级，因此日常只需在本机克隆的 DEV Anywhere 仓库中更新 VPS：
 
 ```bash
 git pull --ff-only
 bash scripts/deploy/install-relay.sh \
   --ssh root@your-vps \
   dev-anywhere.example.com
-npm install -g @dev-anywhere/proxy@latest
-dev-anywhere serve restart --relay cloud
 ```
 
 最后一个参数应与首次部署时保持一致：使用域名部署就继续传域名，使用公网 IP 部署就传公网 IP。部署脚本会复用 VPS 上已有的 Token。
 
-升级后可以确认本机版本和连接状态：
+升级后可在任意开发机确认版本和连接状态：
 
 ```bash
 dev-anywhere --version

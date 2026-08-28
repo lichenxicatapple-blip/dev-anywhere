@@ -85,6 +85,7 @@ Config file: `~/.dev-anywhere/config.json`
 ```json
 {
   "defaultProfile": "default",
+  "autoUpdate": true,
   "profiles": {
     "default": {
       "relay": "cloud"
@@ -111,6 +112,8 @@ cloud. If the relay also sets `RELAY_CLIENT_TOKEN`, open the web app and paste
 that value in Settings -> Relay Token so the browser client can authenticate.
 
 `dev-anywhere serve start --relay cloud` and `dev-anywhere serve restart --relay cloud` use a named relay without editing the file each time.
+
+`autoUpdate` defaults to `true`. Set it to `false` and restart the service to pin a machine.
 
 Environment variables are reserved for temporary overrides:
 

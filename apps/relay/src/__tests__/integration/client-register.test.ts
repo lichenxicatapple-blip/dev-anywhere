@@ -531,6 +531,7 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
     expect(response.status).toBe("new");
+    expect(response.relayVersion).toMatch(/^\d+\.\d+\.\d+$/);
   });
 
   it("proxy receives proxy_register_response with status 'reconnected' on second register with same proxyId", async () => {

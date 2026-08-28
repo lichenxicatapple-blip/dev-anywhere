@@ -38,6 +38,8 @@ import { RemoteFileUploadManager } from "./serve/remote-file-upload.js";
 import { RemoteFileStreamManager } from "./serve/remote-file-stream.js";
 import { TerminalSubscriptionBacklog } from "./serve/terminal-subscription-backlog.js";
 import type { ProviderId } from "./providers/types.js";
+import { createRelayAutoUpdater } from "./auto-update.js";
+import { PROXY_VERSION } from "./version.js";
 
 function resolveInterruptedApprovals(
   permissionBroker: PermissionBroker,
@@ -172,6 +174,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const relayToken = proxyConfig.relayToken;
   const statusConfig = {
     profile: PROFILE_NAME,
+    version: PROXY_VERSION,
+    autoUpdate: proxyConfig.autoUpdate,
     relayName: proxyConfig.relayName,
     relayNameSource: proxyConfig.sources.relayName,
     relayUrl,
@@ -190,7 +194,22 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const relayConnection = new RelayConnection(relayUrl, {
     name: proxyName,
     token: relayToken,
+    version: PROXY_VERSION,
     proxyIdPath: PROXY_ID_PATH,
+  });
+  const autoUpdater = createRelayAutoUpdater({
+    enabled: proxyConfig.autoUpdate,
+    profileName: PROFILE_NAME,
+    relayName: proxyConfig.relayName,
+    runningVersion: PROXY_VERSION,
+    daemonPid: process.pid,
+    logger: serviceLogger,
+  });
+  let serviceReadyForAutoUpdate = false;
+  let pendingRelayVersion: string | null = null;
+  relayConnection.on("relay_version", (version: string) => {
+    pendingRelayVersion = version;
+    if (serviceReadyForAutoUpdate) autoUpdater.considerRelayVersion(version);
   });
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
   const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
@@ -361,10 +380,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     writeFileSync(PID_PATH, String(process.pid));
     chmodSync(SOCK_PATH, 0o600);
     serviceLogger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
+    serviceReadyForAutoUpdate = true;
+    if (pendingRelayVersion) autoUpdater.considerRelayVersion(pendingRelayVersion);
   });
 
   const shutdown = createServeShutdown({
     logger: serviceLogger,
+    autoUpdaterDispose: () => autoUpdater.dispose(),
     sessionManagerStopReaper: () => sessionManager.stopReaper(),
     relayRouterDestroy: () => relayRouter.destroy(),
     hookServerClose: () => hookRuntime.hookServer.close(),

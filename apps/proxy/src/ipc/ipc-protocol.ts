@@ -127,6 +127,9 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("service_status_response"),
     config: z.object({
       profile: z.string().optional(),
+      // optional 允许刚升级的 CLI 查询尚未重启的旧 daemon。
+      version: z.string().optional(),
+      autoUpdate: z.boolean().optional(),
       relayName: z.string(),
       relayNameSource: z.enum(["cli", "profile", "env"]),
       relayUrl: z.string().optional(),

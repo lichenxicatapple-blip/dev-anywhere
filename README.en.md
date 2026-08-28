@@ -173,20 +173,18 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
-Run the following commands in your local DEV Anywhere clone:
+The Proxy automatically follows its connected Relay, so routine upgrades only require updating the VPS from your local DEV Anywhere clone:
 
 ```bash
 git pull --ff-only
 bash scripts/deploy/install-relay.sh \
   --ssh root@your-vps \
   dev-anywhere.example.com
-npm install -g @dev-anywhere/proxy@latest
-dev-anywhere serve restart --relay cloud
 ```
 
 Keep the last argument consistent with the initial deployment: pass the domain again for a domain deployment, or the public IP for an IP deployment. The installer reuses the existing tokens on the VPS.
 
-After upgrading, verify the local version and connection:
+You can then verify the version and connection on any development machine:
 
 ```bash
 dev-anywhere --version

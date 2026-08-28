@@ -86,6 +86,8 @@ interface RelayConnectionOptions {
   name?: string;
   // 公网 relay 的 /proxy 端点预共享 token, relay 侧 RELAY_PROXY_TOKEN 对应
   token?: string;
+  // 发布包版本会随注册消息上报；Relay 用它做可观测性，响应自己的精确版本供自动升级。
+  version?: string;
   // 测试/特殊部署覆盖；生产默认值见 DEFAULT_HEARTBEAT_*。
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
@@ -116,6 +118,7 @@ export class RelayConnection extends EventEmitter {
   });
   private name?: string;
   private token?: string;
+  private version?: string;
   private heartbeatIntervalMs: number;
   private heartbeatTimeoutMs: number;
 
@@ -125,6 +128,7 @@ export class RelayConnection extends EventEmitter {
     this.proxyId = this.loadOrCreateProxyId(options?.proxyIdPath ?? DEFAULT_PROXY_ID_PATH);
     this.name = options?.name;
     this.token = options?.token;
+    this.version = options?.version;
     this.heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimeoutMs = options?.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
   }
@@ -168,6 +172,7 @@ export class RelayConnection extends EventEmitter {
             type: "proxy_register",
             proxyId: this.proxyId,
             ...(this.name ? { name: this.name } : {}),
+            ...(this.version ? { proxyVersion: this.version } : {}),
           }),
         );
       });
@@ -196,11 +201,16 @@ export class RelayConnection extends EventEmitter {
         }
         this.clearHeartbeatTimeout();
         if (msg.type === "proxy_register_response") {
-          serviceLogger.info({ status: msg.status }, "Received register response");
+          const relayVersion =
+            typeof msg.relayVersion === "string" && msg.relayVersion.length > 0
+              ? msg.relayVersion
+              : undefined;
+          serviceLogger.info({ status: msg.status, relayVersion }, "Received register response");
           if (!this.fsm.tryTransitionTo(RelayConnectionState.SYNCED)) return;
           this.reconnectAttempt = 0;
           this.startHeartbeat();
           this.flushQueue();
+          if (relayVersion) this.emit("relay_version", relayVersion);
           this.emit("connected");
           return;
         }

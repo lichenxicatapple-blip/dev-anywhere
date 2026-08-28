@@ -11,6 +11,8 @@ export type { LogLevel } from "./runtime-env.js";
 
 export interface ProxyConfig {
   profileName: string;
+  // 只跟随当前已认证 Relay 的更高稳定版本；不会独立追 npm latest，也不会降级。
+  autoUpdate: boolean;
   relayName: string;
   relayUrl?: string;
   // /proxy 端点的预共享 token, 和 relay 侧 RELAY_PROXY_TOKEN 对应. 公网 relay 必须设置
@@ -59,6 +61,7 @@ const AgentCliSchema = z
 const ProxyConfigFileSchema = z
   .object({
     defaultProfile: z.string().optional(),
+    autoUpdate: z.boolean().optional(),
     profiles: z.record(z.string(), ProxyProfileSchema),
     relays: z.record(z.string(), RelayTargetSchema),
     agentCli: AgentCliSchema.optional(),
@@ -175,6 +178,8 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
   const codexBin = env.codexBin ?? agentCli.codexBin;
   const config: ProxyConfig = {
     profileName: PROFILE_NAME,
+    // 自动升级是 daemon 的默认维护策略；用户可在 config.json 显式设 false 关闭。
+    autoUpdate: fromFile.autoUpdate ?? true,
     relayName: resolved.relayName,
     relayUrl: env.relayUrl ?? resolved.relay.url,
     relayToken: env.relayProxyToken ?? resolved.relay.proxyToken,
@@ -206,6 +211,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
   serviceLogger.info(
     {
       profile: config.profileName,
+      autoUpdate: config.autoUpdate,
       relayName: config.relayName,
       relayNameSource: config.sources.relayName,
       relayUrl: config.relayUrl ?? "(unset)",

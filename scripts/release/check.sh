@@ -57,6 +57,7 @@ function requireFile(path) {
 requireFile("dist/index.js");
 requireFile("dist/serve.js");
 requireFile("dist/session-worker.js");
+requireFile("dist/update-runner.js");
 requireFile("assets/fonts/sarasa-fixed-sc/result.css");
 requireFile("README.md");
 requireFile("LICENSE");
@@ -120,6 +121,7 @@ HOME="$TMP_HOME" node apps/proxy/dist/index.js serve status >/dev/null
 
 test -f "$TMP_HOME/.dev-anywhere/config.json"
 grep -q '"defaultProfile": "default"' "$TMP_HOME/.dev-anywhere/config.json"
+grep -q '"autoUpdate": true' "$TMP_HOME/.dev-anywhere/config.json"
 grep -q '"profiles"' "$TMP_HOME/.dev-anywhere/config.json"
 grep -q '"relays"' "$TMP_HOME/.dev-anywhere/config.json"
 grep -q '"relay": "cloud"' "$TMP_HOME/.dev-anywhere/config.json"

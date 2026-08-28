@@ -38,3 +38,12 @@ export const terminalLogger = createLogger({
   logDir: LOG_DIR,
   silent: env.isVitest,
 });
+
+// 自动升级器会跨 daemon 重启继续运行，使用独立日志名，避免它创建 logger 时把
+// service.log 的 latest symlink 抢走，导致用户正在 tail 的服务日志突然切文件。
+export const autoUpdateLogger = createLogger({
+  name: "auto-update",
+  level: overrideLevel ?? "info",
+  logDir: LOG_DIR,
+  silent: env.isVitest,
+});
