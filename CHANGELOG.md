@@ -4,6 +4,17 @@
 
 `1.0.0` 之前遵循语义化版本：minor 版本可能包含 breaking change，patch 版本只做兼容修复。
 
+## [0.7.0] - 2026-08-28
+
+### 新功能
+
+- Proxy 支持由当前 Relay 驱动的自动升级：Relay 握手声明精确版本后，较旧的 npm 全局安装会自动安装同版本并通过现有会话交接重启；不会独立追踪 npm `latest`、不会降级，也不会在源码、链接安装或 Quick Tunnel 中改写包。
+- 同一开发机的多个 profile 共用升级锁，避免并发改写全局 npm 包；安装后会先验证新版 CLI，安装失败保持旧 daemon 运行，新版无法启动时自动回滚并恢复旧服务。可在 `~/.dev-anywhere/config.json` 中设置 `"autoUpdate": false` 关闭。
+
+### 可观测性
+
+- `dev-anywhere serve status` 显示 daemon 版本与自动升级状态；Proxy 注册信息携带自身版本，升级过程写入独立的 `auto-update.log`，不会切走现有 `service.log`。
+
 ## [0.6.3] - 2026-08-27
 
 ### 修复
