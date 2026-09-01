@@ -4,19 +4,27 @@ import { fileURLToPath } from "node:url";
 
 const scriptDir = dirname(fileURLToPath(import.meta.url));
 const relayDir = resolve(scriptDir, "..");
-const sourceDir = resolve(relayDir, "../web/dist");
-const targetDir = resolve(relayDir, "assets/web");
+const webSourceDir = resolve(relayDir, "../web/dist");
+const webTargetDir = resolve(relayDir, "assets/web");
+const fontSourceDir = resolve(relayDir, "../proxy/assets/fonts");
+const fontTargetDir = resolve(relayDir, "assets/fonts");
 
-if (!existsSync(resolve(sourceDir, "index.html"))) {
+if (!existsSync(resolve(webSourceDir, "index.html"))) {
   throw new Error(
-    `Web build not found at ${sourceDir}. Run "pnpm --filter @dev-anywhere/web build" first.`,
+    `Web build not found at ${webSourceDir}. Run "pnpm --filter @dev-anywhere/web build" first.`,
   );
 }
+if (!existsSync(resolve(fontSourceDir, "sarasa-fixed-sc/result.css"))) {
+  throw new Error(`Font assets not found at ${fontSourceDir}.`);
+}
 
-rmSync(targetDir, { recursive: true, force: true });
-cpSync(sourceDir, targetDir, {
+rmSync(webTargetDir, { recursive: true, force: true });
+cpSync(webSourceDir, webTargetDir, {
   recursive: true,
   filter: (source) => !source.endsWith(".tsbuildinfo"),
 });
+rmSync(fontTargetDir, { recursive: true, force: true });
+cpSync(fontSourceDir, fontTargetDir, { recursive: true });
 
-console.log(`Copied Web assets: ${sourceDir} -> ${targetDir}`);
+console.log(`Copied Web assets: ${webSourceDir} -> ${webTargetDir}`);
+console.log(`Copied font assets: ${fontSourceDir} -> ${fontTargetDir}`);

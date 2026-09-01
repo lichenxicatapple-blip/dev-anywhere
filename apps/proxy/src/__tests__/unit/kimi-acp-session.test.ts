@@ -3,6 +3,7 @@ import type {
   KimiAcpPermissionDecision,
   KimiAcpSessionOptions,
 } from "#src/worker/kimi-acp-session.js";
+import { PROXY_VERSION } from "#src/version.js";
 import { createChildProcessFake } from "./test-fakes.js";
 
 let mockChild: ReturnType<typeof createChildProcessFake>;
@@ -104,7 +105,7 @@ describe("KimiAcpSession", () => {
           fs: { readTextFile: false, writeTextFile: false },
           terminal: false,
         },
-        clientInfo: { name: "dev-anywhere", title: "Dev Anywhere", version: "0.8.0" },
+        clientInfo: { name: "dev-anywhere", title: "Dev Anywhere", version: PROXY_VERSION },
       },
     });
   });

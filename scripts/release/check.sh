@@ -92,18 +92,26 @@ requireFile("dist/server.js");
 requireFile("assets/web/index.html");
 requireFile("assets/web/sw.js");
 requireFile("assets/web/manifest.webmanifest");
+requireFile("assets/fonts/sarasa-fixed-sc/result.css");
 requireFile("README.md");
 requireFile("LICENSE");
 
 const webAssetCount = [...files].filter((file) => file.startsWith("assets/web/")).length;
 const hashedAssetCount = [...files].filter((file) => file.startsWith("assets/web/assets/")).length;
+const fontShardCount = [...files].filter(
+  (file) => file.startsWith("assets/fonts/sarasa-fixed-sc/") && file.endsWith(".woff2"),
+).length;
 if (hashedAssetCount === 0) {
   console.error("Missing bundled Web asset files");
   process.exit(1);
 }
+if (fontShardCount === 0) {
+  console.error("Missing relay package font shards");
+  process.exit(1);
+}
 
 console.log(
-  `relay files=${pack.files.length}, size=${pack.size}, webAssets=${webAssetCount}`,
+  `relay files=${pack.files.length}, size=${pack.size}, webAssets=${webAssetCount}, fontShards=${fontShardCount}`,
 );
 NODE
 
