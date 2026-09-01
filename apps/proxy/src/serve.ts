@@ -13,6 +13,8 @@ import {
   HISTORY_METADATA_PATH,
   PROXY_ID_PATH,
   PROFILE_NAME,
+  PREVIEWS_PATH,
+  PREVIEW_RUN_DIR,
   ensureProfileWorkspace,
   sessionPaths,
 } from "./common/paths.js";
@@ -40,6 +42,8 @@ import { TerminalSubscriptionBacklog } from "./serve/terminal-subscription-backl
 import type { ProviderId } from "./providers/types.js";
 import { createRelayAutoUpdater } from "./auto-update.js";
 import { PROXY_VERSION } from "./version.js";
+import { PreviewManager } from "./serve/preview/preview-manager.js";
+import { cleanupStalePreviewRuntimes } from "./serve/preview/stale-preview-runtime.js";
 
 const AGENT_CLI_PATH_FIELDS: Record<ProviderId, "claudeBin" | "codexBin" | "kimiBin"> = {
   claude: "claudeBin",
@@ -118,6 +122,7 @@ function parseServiceOptions(argv: readonly string[]): ServiceOptions {
 export async function startService(options?: ServiceOptions): Promise<void> {
   ensureProfileWorkspace();
   await cleanupStaleResources();
+  await cleanupStalePreviewRuntimes(PREVIEW_RUN_DIR);
   if (!options?.preserveStoppedMarker) {
     try {
       unlinkSync(STOPPED_PATH);
@@ -218,6 +223,29 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     if (serviceReadyForAutoUpdate) autoUpdater.considerRelayVersion(version);
   });
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
+  const previewManager = new PreviewManager({
+    persistPath: PREVIEWS_PATH,
+    runtimeRoot: PREVIEW_RUN_DIR,
+    onEvent: (event) => {
+      relaySend(
+        serializeControl(
+          event.type === "state"
+            ? {
+                type: "preview_state_push",
+                epoch: event.epoch,
+                revision: event.revision,
+                preview: event.preview,
+              }
+            : {
+                type: "preview_removed_push",
+                epoch: event.epoch,
+                revision: event.revision,
+                previewId: event.previewId,
+              },
+        ),
+      );
+    },
+  });
   const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
 
   const eventBridge = createEventBridge({
@@ -322,6 +350,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     remoteFileStreamManager,
     remoteFileUploadManager,
     terminalSubscriptionBacklog,
+    previewManager,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
@@ -397,6 +426,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     autoUpdaterDispose: () => autoUpdater.dispose(),
     sessionManagerStopReaper: () => sessionManager.stopReaper(),
     relayRouterDestroy: () => relayRouter.destroy(),
+    previewManagerShutdown: () => previewManager.shutdown(),
     hookServerClose: () => hookRuntime.hookServer.close(),
     relayConnectionClose: () => relayConnection.close(),
     workerRegistryDestroyAll: () => workerRegistry.destroyAll(),

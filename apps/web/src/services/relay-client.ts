@@ -10,12 +10,16 @@ import type {
   HistorySession,
   MessageEnvelope,
   ProviderId,
+  PreviewSummary,
   RelayClientInfo,
   RelayControlMessage,
+  TunnelProvider,
   VoiceConfigUpdate,
   VoiceCapabilities,
   VoiceProviderConfig,
   VoiceSummaryReason,
+  WebPreviewCapability,
+  WebPreviewSourceInput,
 } from "@dev-anywhere/shared";
 import { SESSION_CREATE_CLIENT_TIMEOUT_MS } from "@dev-anywhere/shared";
 import { describeCurrentClientDevice } from "@/lib/client-device";
@@ -134,6 +138,41 @@ export type LatencyProbeResult = {
   error?: string;
 };
 type RequestError = { error?: string; errorCode?: ControlErrorCodeType };
+type ProxyEnvironmentInfo = {
+  homePath: string;
+  agentCli: AgentCliStatus;
+  webPreview?: WebPreviewCapability;
+};
+type PreviewStaticInspectResponse = Extract<
+  RelayControlMessage,
+  { type: "preview_static_inspect_response" }
+>;
+type PreviewCreateResponse = Extract<RelayControlMessage, { type: "preview_create_response" }>;
+type PreviewReconnectResponse = Extract<
+  RelayControlMessage,
+  { type: "preview_reconnect_response" }
+>;
+type PreviewCloseResponse = Extract<RelayControlMessage, { type: "preview_close_response" }>;
+type PreviewStaticInspectResult = {
+  success: boolean;
+  rootPath?: string;
+  entryPath?: string;
+  htmlEntries?: string[];
+} & RequestError;
+type PreviewCreateResult = {
+  operationId: string;
+  accepted: boolean;
+  previewId?: string;
+} & RequestError;
+type PreviewMutationResult = {
+  previewId: string;
+  success: boolean;
+} & RequestError;
+interface PreviewListResult {
+  epoch: string;
+  revision: number;
+  previews: PreviewSummary[];
+}
 
 let requestSeq = 0;
 
@@ -462,18 +501,164 @@ export class RelayClient {
     };
   }
 
-  requestProxyInfo(
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  ): Promise<{ homePath: string; agentCli: AgentCliStatus }> {
+  private requestProxyInfoInternal(
+    refreshPath: boolean,
+    timeoutMs: number,
+  ): Promise<ProxyEnvironmentInfo> {
     const requestId = nextRequestId("proxy-info");
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "proxy_info" }> =>
         msg.type === "proxy_info" && msg.requestId === requestId,
-      () => this.ws.send(JSON.stringify({ type: "proxy_info_request", requestId })),
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "proxy_info_request",
+            requestId,
+            ...(refreshPath ? { refreshPath: true } : {}),
+          }),
+        ),
       "读取开发机信息超时",
       timeoutMs,
       requestId,
-    ).then((resp) => ({ homePath: resp.homePath, agentCli: resp.agentCli }));
+    ).then((resp) => ({
+      homePath: resp.homePath,
+      agentCli: resp.agentCli,
+      webPreview: resp.webPreview,
+    }));
+  }
+
+  requestProxyInfo(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<ProxyEnvironmentInfo> {
+    return this.requestProxyInfoInternal(false, timeoutMs);
+  }
+
+  requestWebPreviewCapabilities(
+    refreshPath = false,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<ProxyEnvironmentInfo> {
+    return this.requestProxyInfoInternal(refreshPath, timeoutMs);
+  }
+
+  inspectStaticWebPreview(
+    path: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<PreviewStaticInspectResult> {
+    const requestId = nextRequestId("preview-static-inspect");
+    return this.waitForMessage(
+      (msg): msg is PreviewStaticInspectResponse =>
+        msg.type === "preview_static_inspect_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(JSON.stringify({ type: "preview_static_inspect_request", requestId, path })),
+      "检查本地网页超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      success: resp.success,
+      rootPath: resp.rootPath,
+      entryPath: resp.entryPath,
+      htmlEntries: resp.htmlEntries,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  createWebPreview(
+    source: WebPreviewSourceInput,
+    options: {
+      tunnelProvider: TunnelProvider;
+      operationId?: string;
+      timeoutMs?: number;
+    },
+  ): Promise<PreviewCreateResult> {
+    const requestId = nextRequestId("preview-create");
+    const tunnelProvider = options.tunnelProvider;
+    const operationId = options.operationId ?? nextRequestId(`preview-operation-${tunnelProvider}`);
+    const timeoutMs = options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
+    return this.waitForMessage(
+      (msg): msg is PreviewCreateResponse =>
+        msg.type === "preview_create_response" &&
+        msg.requestId === requestId &&
+        msg.operationId === operationId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "preview_create_request",
+            requestId,
+            operationId,
+            source,
+            tunnelProvider,
+          }),
+        ),
+      "创建网页预览超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      operationId: resp.operationId,
+      accepted: resp.accepted,
+      previewId: resp.previewId,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestWebPreviewList(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<PreviewListResult> {
+    const requestId = nextRequestId("preview-list");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "preview_list_response" }> =>
+        msg.type === "preview_list_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "preview_list_request", requestId })),
+      "读取网页预览列表超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      epoch: resp.epoch,
+      revision: resp.revision,
+      previews: resp.previews,
+    }));
+  }
+
+  reconnectWebPreview(
+    previewId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<PreviewMutationResult> {
+    const requestId = nextRequestId("preview-reconnect");
+    return this.waitForMessage(
+      (msg): msg is PreviewReconnectResponse =>
+        msg.type === "preview_reconnect_response" &&
+        msg.requestId === requestId &&
+        msg.previewId === previewId,
+      () =>
+        this.ws.send(JSON.stringify({ type: "preview_reconnect_request", requestId, previewId })),
+      "重新连接网页预览超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      previewId: resp.previewId,
+      success: resp.success,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  closeWebPreview(
+    previewId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<PreviewMutationResult> {
+    const requestId = nextRequestId("preview-close");
+    return this.waitForMessage(
+      (msg): msg is PreviewCloseResponse =>
+        msg.type === "preview_close_response" &&
+        msg.requestId === requestId &&
+        msg.previewId === previewId,
+      () => this.ws.send(JSON.stringify({ type: "preview_close_request", requestId, previewId })),
+      "关闭网页预览超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      previewId: resp.previewId,
+      success: resp.success,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
   }
 
   updateAgentCliPath(

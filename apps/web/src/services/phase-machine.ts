@@ -7,6 +7,7 @@ import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
+import { syncWebPreviewSnapshot } from "@/services/preview-snapshot-loader";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { loadSessionHistory } from "@/services/session-history-loader";
 import {
@@ -61,6 +62,7 @@ function requestProxyState(relay: RelayClient): void {
       const fileStore = useFileStore.getState();
       fileStore.setHomePath(info.homePath);
       fileStore.setAgentCli(info.agentCli);
+      syncWebPreviewSnapshot(relay, requestedProxyId, info.webPreview, "phase-machine");
     })
     .catch((err: unknown) => {
       console.error("[phase-machine] requestProxyInfo failed", err);

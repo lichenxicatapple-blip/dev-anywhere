@@ -75,6 +75,28 @@ export type {
   VoiceSummaryReason,
 } from "./schemas/voice.js";
 export {
+  PreviewHtmlEntriesSchema,
+  PreviewSourceSchema,
+  PreviewStateSchema,
+  PreviewSummarySchema,
+  TunnelProviderSchema,
+  WebPreviewCapabilitySchema,
+  WebPreviewPathSchema,
+  WebPreviewSourceInputSchema,
+  WebPreviewTunnelStatusSchema,
+  previewStateValues,
+  tunnelProviderValues,
+} from "./schemas/web-preview.js";
+export type {
+  PreviewSource,
+  PreviewState,
+  PreviewSummary,
+  TunnelProvider,
+  WebPreviewCapability,
+  WebPreviewSourceInput,
+  WebPreviewTunnelStatus,
+} from "./schemas/web-preview.js";
+export {
   VoiceAsrAudioEncodingSchema,
   VoiceAsrClientMessageSchema,
   VoiceAsrServerMessageSchema,

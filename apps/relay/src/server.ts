@@ -23,6 +23,7 @@ import { RemoteFileBridge } from "./remote-file-bridge.js";
 import { mountWebApp } from "./web-app.js";
 import { PtySnapshotRouteRegistry } from "./pty-snapshot-route-registry.js";
 import { SessionHistoryRouteRegistry } from "./session-history-route-registry.js";
+import { WebPreviewRouteRegistry } from "./web-preview-route-registry.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -112,6 +113,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   const registry = new RelayRegistry();
   const ptySnapshotRoutes = new PtySnapshotRouteRegistry();
   const sessionHistoryRoutes = new SessionHistoryRouteRegistry();
+  const webPreviewRoutes = new WebPreviewRouteRegistry();
   const remoteFileBridge = new RemoteFileBridge({ registry, logger });
   const voiceConfigStore = createVoiceConfigStore({
     dataDir,
@@ -278,6 +280,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       logger,
       ptySnapshotRoutes,
       sessionHistoryRoutes,
+      webPreviewRoutes,
       relayChaos,
       remoteFileBridge,
     );
@@ -290,6 +293,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       logger,
       ptySnapshotRoutes,
       sessionHistoryRoutes,
+      webPreviewRoutes,
       relayChaos,
       voiceConfigStore,
       voiceProviders,
@@ -336,6 +340,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     clearInterval(clientHeartbeat);
     clearInterval(voiceAsrHeartbeat);
     clearInterval(voiceTtsHeartbeat);
+    webPreviewRoutes.dispose();
 
     for (const ws of proxyWss.clients) {
       ws.terminate();

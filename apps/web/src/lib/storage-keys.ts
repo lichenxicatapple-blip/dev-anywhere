@@ -16,6 +16,7 @@ export const STORAGE_KEYS = {
   ipadFloatingKeyboardHintDismissed: "dev_anywhere_ipadFloatingKeyboardHintDismissed",
   ptyScrollTraceEnabled: "dev_anywhere_pty_scroll_trace",
   ptyAutoYesSessions: "dev_anywhere_pty_auto_yes_sessions",
+  webPreviewTunnelProvider: "dev_anywhere_web_preview_tunnel_provider",
 } as const;
 
 function getStorage(kind: StorageKind): Storage | null {

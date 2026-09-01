@@ -34,6 +34,8 @@ import type { RemoteFileUploadManager } from "./remote-file-upload.js";
 import type { RemoteFileStreamManager } from "./remote-file-stream.js";
 import type { TerminalSubscriptionBacklog } from "./terminal-subscription-backlog.js";
 import type { CodexActiveWriter } from "../common/codex-active-writer.js";
+import { RelayPreviewHandlers } from "./preview/relay-preview-handlers.js";
+import type { PreviewManager } from "./preview/preview-manager.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -65,6 +67,7 @@ interface RelayRouterDeps {
   voiceSummaryRunner?: VoiceSummaryRunner;
   findCodexActiveWriter?: (threadId: string, env?: NodeJS.ProcessEnv) => CodexActiveWriter | null;
   findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
+  previewManager?: PreviewManager;
 }
 
 // 按 type 分发入站 relay 消息到独立 handler。未知 type warn 不丢，schema 逐步收紧。
@@ -75,6 +78,7 @@ export class RelayRouter {
   private readonly resourceHandlers: RelayResourceHandlers;
   private readonly sessionCreateHandler: RelaySessionCreateHandler;
   private readonly voiceSummaryHandler: VoiceSummaryHandler;
+  private readonly previewHandlers?: RelayPreviewHandlers;
 
   constructor(private deps: RelayRouterDeps) {
     this.historyHandlers = new RelayHistoryHandlers({
@@ -100,6 +104,9 @@ export class RelayRouter {
       getProviderEnv: deps.getProviderEnv,
       getAgentCliSuggestions: deps.getAgentCliSuggestions,
       setAgentCliPath: deps.setAgentCliPath,
+      getWebPreviewCapability: deps.previewManager
+        ? (refreshPath) => deps.previewManager!.inspectCapabilities(refreshPath)
+        : undefined,
     });
     this.permissionHandlers = new RelayPermissionHandlers({
       relaySend: deps.relaySend,
@@ -130,6 +137,12 @@ export class RelayRouter {
       getProviderEnv: deps.getProviderEnv,
       runner: deps.voiceSummaryRunner,
     });
+    if (deps.previewManager) {
+      this.previewHandlers = new RelayPreviewHandlers({
+        relaySend: deps.relaySend,
+        previewManager: deps.previewManager,
+      });
+    }
   }
 
   // shutdown 链路上提供单一 destroy 入口：把 sessionCreateHandler 内部 pending retry timer 清掉
@@ -207,7 +220,22 @@ export class RelayRouter {
         this.permissionHandlers.onToolDeny(msg);
         return;
       case "proxy_info_request":
-        this.resourceHandlers.onProxyInfoRequest(msg);
+        void this.resourceHandlers.onProxyInfoRequest(msg);
+        return;
+      case "preview_static_inspect_request":
+        void this.previewHandlers?.onStaticInspect(msg);
+        return;
+      case "preview_create_request":
+        void this.previewHandlers?.onCreate(msg);
+        return;
+      case "preview_list_request":
+        this.previewHandlers?.onList(msg);
+        return;
+      case "preview_reconnect_request":
+        void this.previewHandlers?.onReconnect(msg);
+        return;
+      case "preview_close_request":
+        void this.previewHandlers?.onClose(msg);
         return;
       case "agent_cli_config_update":
         this.resourceHandlers.onAgentCliConfigUpdate(msg);

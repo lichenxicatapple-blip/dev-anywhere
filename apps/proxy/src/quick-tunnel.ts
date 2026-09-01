@@ -1,6 +1,5 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { resolve4 } from "node:dns/promises";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
@@ -9,12 +8,16 @@ import { createLogger, flushLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "@dev-anywhere/relay/server";
 import { WebSocket } from "ws";
 import { spawnScript } from "./common/env.js";
+import {
+  extractTryCloudflareUrl,
+  startCloudflaredQuickTunnel,
+  terminateCloudflaredChild,
+} from "./common/cloudflared-quick-tunnel.js";
+import { createQuickTunnelAuthoritativeResolver } from "./common/quick-tunnel-readiness.js";
 
 const QUICK_TUNNEL_PROFILE = "quick-tunnel";
-const CLOUDFLARED_URL_TIMEOUT_MS = 30_000;
 const PUBLIC_READINESS_TIMEOUT_MS = 45_000;
 const PROXY_READINESS_TIMEOUT_MS = 15_000;
-const TRY_CLOUDFLARE_URL_PATTERN = /https:\/\/[a-z0-9-]+\.trycloudflare\.com\b/i;
 
 interface CommandResult {
   code: number | null;
@@ -27,9 +30,7 @@ interface QuickTunnelOptions {
   cloudflaredBin?: string;
 }
 
-export function extractTryCloudflareUrl(output: string): string | null {
-  return output.match(TRY_CLOUDFLARE_URL_PATTERN)?.[0] ?? null;
-}
+export { extractTryCloudflareUrl };
 
 export function buildQuickTunnelAccessUrl(publicUrl: string, clientToken: string): string {
   const url = new URL(publicUrl);
@@ -77,80 +78,12 @@ function startCloudflared(
   publicUrl: Promise<string>;
   getOutput: () => string;
 } {
-  const child = spawn(
-    cloudflaredBin,
-    [
-      "tunnel",
-      "--config",
-      configPath,
-      "--no-autoupdate",
-      "--grace-period",
-      "2s",
-      "--url",
-      originUrl,
-      "--loglevel",
-      "info",
-    ],
-    {
-      stdio: ["ignore", "pipe", "pipe"],
-    },
-  );
-
-  let output = "";
-  const publicUrl = new Promise<string>((resolve, reject) => {
-    let settled = false;
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      reject(
-        new Error(
-          `cloudflared did not provide a trycloudflare.com URL within ${
-            CLOUDFLARED_URL_TIMEOUT_MS / 1000
-          }s`,
-        ),
-      );
-    }, CLOUDFLARED_URL_TIMEOUT_MS);
-
-    const inspect = (chunk: string) => {
-      output = `${output}${chunk}`.slice(-64 * 1024);
-      const url = extractTryCloudflareUrl(output);
-      if (!url || settled) return;
-      settled = true;
-      clearTimeout(timer);
-      resolve(url);
-    };
-
-    child.stdout?.setEncoding("utf8");
-    child.stderr?.setEncoding("utf8");
-    child.stdout?.on("data", inspect);
-    child.stderr?.on("data", inspect);
-    child.once("error", (error) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
-        reject(
-          new Error(
-            `cloudflared was not found at "${cloudflaredBin}". Install cloudflared and retry.`,
-          ),
-        );
-        return;
-      }
-      reject(error);
-    });
-    child.once("exit", (code, signal) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      reject(
-        new Error(
-          `cloudflared exited before creating a tunnel (code=${code}, signal=${signal})\n${output.trim()}`,
-        ),
-      );
-    });
-  });
-
-  return { child, publicUrl, getOutput: () => output };
+  const tunnel = startCloudflaredQuickTunnel({ cloudflaredBin, originUrl, configPath });
+  return {
+    child: tunnel.child,
+    publicUrl: tunnel.publicUrl,
+    getOutput: tunnel.getOutput,
+  };
 }
 
 async function waitForProxy(relay: RelayServer): Promise<void> {
@@ -191,10 +124,12 @@ async function waitForPublicEndpoint(publicUrl: string, clientToken: string): Pr
   const deadline = Date.now() + PUBLIC_READINESS_TIMEOUT_MS;
   let lastError: unknown;
   const hostname = new URL(publicUrl).hostname;
+  const resolveAuthoritativeAddresses = createQuickTunnelAuthoritativeResolver();
+  const dnsSignal = new AbortController().signal;
 
   while (Date.now() < deadline) {
     try {
-      const addresses = await resolve4(hostname);
+      const addresses = await resolveAuthoritativeAddresses(hostname, dnsSignal);
       if (addresses.length > 0) break;
     } catch (error) {
       lastError = error;
@@ -230,17 +165,6 @@ async function waitForPublicEndpoint(publicUrl: string, clientToken: string): Pr
         : String(lastError)
     }`,
   );
-}
-
-async function terminateChild(child: ChildProcess | null): Promise<void> {
-  if (!child || child.exitCode !== null || child.signalCode !== null) return;
-  child.kill("SIGTERM");
-  await Promise.race([
-    new Promise<void>((resolve) => child.once("exit", () => resolve())),
-    sleep(5_000).then(() => {
-      if (child.exitCode === null && child.signalCode === null) child.kill("SIGKILL");
-    }),
-  ]);
 }
 
 function waitUntilStopped(cloudflared: ChildProcess): Promise<void> {
@@ -294,7 +218,7 @@ export async function runQuickTunnel(options: QuickTunnelOptions = {}): Promise<
     if (proxyStarted) {
       await runProfileCommand("stop", process.env).catch(() => undefined);
     }
-    await terminateChild(cloudflared);
+    await terminateCloudflaredChild(cloudflared);
     await relay.close().catch(() => undefined);
     await flushLogger(logger);
   };

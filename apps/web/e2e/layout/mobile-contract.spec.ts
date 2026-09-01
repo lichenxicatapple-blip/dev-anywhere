@@ -428,6 +428,8 @@ test.describe("mobile UX contract", () => {
     await expect(sheet).toBeFocused();
     await expectTouchTarget(sheet.locator('[data-slot="create-agent-session-sheet-item"]'));
     await expectTouchTarget(sheet.locator('[data-slot="create-terminal-session-sheet-item"]'));
+    const webPreviewItem = sheet.locator('[data-slot="create-web-preview-sheet-item"]');
+    await expectTouchTarget(webPreviewItem);
     await expectTouchTarget(sheet.locator('[data-slot="sheet-close"]'));
     await sheet.locator('[data-slot="create-agent-session-sheet-item"]').click();
 
@@ -1074,6 +1076,38 @@ test.describe("mobile UX contract", () => {
         }),
       )
       .toBe("rgb(30, 30, 30)");
+  });
+});
+
+test.describe("desktop web preview menu", () => {
+  test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
+
+  test.beforeEach(async ({ page }) => {
+    await installFakeRelay(page);
+  });
+
+  test("info tooltip wraps to its content width without leaving the viewport", async ({ page }) => {
+    await selectFakeProxy(page);
+    await page.locator('[data-slot="create-session-trigger"]:visible').click();
+    await page.locator('[data-slot="web-preview-info-trigger"]').hover();
+
+    const tooltip = page.locator('[data-slot="web-preview-info-tooltip"]');
+    await expect(tooltip).toBeVisible();
+
+    const metrics = await tooltip.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      return {
+        textWrap: getComputedStyle(node).getPropertyValue("text-wrap"),
+        width: rect.width,
+        left: rect.left,
+        right: rect.right,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(metrics.textWrap).toBe("wrap");
+    expect(metrics.width).toBeLessThanOrEqual(256.5);
+    expect(metrics.left).toBeGreaterThanOrEqual(0);
+    expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth);
   });
 });
 

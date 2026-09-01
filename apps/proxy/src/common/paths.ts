@@ -27,7 +27,9 @@ interface ProxyProfilePaths {
   stateDir: string;
   sessionsPath: string;
   historyMetadataPath: string;
+  previewsPath: string;
   hookRegistryPath: string;
+  previewRunDir: string;
   dataDir: string;
   proxyIdPath: string;
   logDir: string;
@@ -113,7 +115,9 @@ export function buildProxyProfilePaths(home: string, profileName: string): Proxy
     stateDir,
     sessionsPath: `${stateDir}/sessions.json`,
     historyMetadataPath: `${stateDir}/history-metadata.json`,
+    previewsPath: `${stateDir}/previews.json`,
     hookRegistryPath: `${stateDir}/hooks.json`,
+    previewRunDir: `${runDir}/previews`,
     dataDir,
     proxyIdPath: isDefaultProfile ? `${appDir}/proxy-id` : `${profileDir}/proxy-id`,
     logDir,
@@ -161,7 +165,9 @@ export const AUTO_UPDATE_LOCK_PATH = `${APP_DIR}/run/auto-update.lock`;
 const STATE_DIR = PROFILE_PATHS.stateDir;
 export const SESSIONS_PATH = PROFILE_PATHS.sessionsPath;
 export const HISTORY_METADATA_PATH = PROFILE_PATHS.historyMetadataPath;
+export const PREVIEWS_PATH = PROFILE_PATHS.previewsPath;
 export const HOOK_REGISTRY_PATH = PROFILE_PATHS.hookRegistryPath;
+export const PREVIEW_RUN_DIR = PROFILE_PATHS.previewRunDir;
 
 // 会话数据
 export const DATA_DIR = PROFILE_PATHS.dataDir;

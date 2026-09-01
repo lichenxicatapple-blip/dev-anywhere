@@ -19,6 +19,12 @@ import { startRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
 import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js";
 import type { SessionHistoryRouteRegistry } from "../session-history-route-registry.js";
+import {
+  isWebPreviewRequestMessage,
+  webPreviewResponseByRequest,
+  type WebPreviewRequestMessage,
+  type WebPreviewRouteRegistry,
+} from "../web-preview-route-registry.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -192,6 +198,7 @@ function handleProxyRemove(
   logger: Logger,
   ptySnapshotRoutes: PtySnapshotRouteRegistry,
   sessionHistoryRoutes: SessionHistoryRouteRegistry,
+  webPreviewRoutes: WebPreviewRouteRegistry,
   remoteFileBridge: RemoteFileBridge | undefined,
   requestId: string,
   proxyId: string,
@@ -229,6 +236,7 @@ function handleProxyRemove(
 
   ptySnapshotRoutes.clearProxy(proxyId);
   sessionHistoryRoutes.clearProxy(proxyId);
+  webPreviewRoutes.clearProxy(proxyId);
   try {
     remoteFileBridge?.revokeProxy(proxyId);
   } catch (err) {
@@ -313,10 +321,11 @@ function handleRelayClientKick(
   );
 }
 
-function rejectNotBound(ws: ClientSocket): void {
+function rejectNotBound(ws: ClientSocket, requestId?: string): void {
   ws.send(
     JSON.stringify({
       type: "relay_error",
+      ...(requestId !== undefined ? { requestId } : {}),
       code: RelayErrorCode.NOT_BOUND,
       message: "Client is not bound to any proxy",
     }),
@@ -417,6 +426,7 @@ export function handleClientConnection(
   logger: Logger,
   ptySnapshotRoutes: PtySnapshotRouteRegistry,
   sessionHistoryRoutes: SessionHistoryRouteRegistry,
+  webPreviewRoutes: WebPreviewRouteRegistry,
   chaos?: RelayChaos,
   voiceConfigStore?: VoiceConfigStore,
   voiceProviders?: VoiceProviderRegistry,
@@ -482,6 +492,7 @@ export function handleClientConnection(
           logger,
           ptySnapshotRoutes,
           sessionHistoryRoutes,
+          webPreviewRoutes,
           remoteFileBridge,
           msg.requestId,
           msg.proxyId,
@@ -696,6 +707,63 @@ export function handleClientConnection(
         return;
       }
 
+      if (isWebPreviewRequestMessage(msg)) {
+        const targetProxyId = clientWs.boundProxyId;
+        if (!targetProxyId) {
+          rejectNotBound(clientWs, msg.requestId);
+          return;
+        }
+        const proxyWs = registry.getProxy(targetProxyId);
+        if (!proxyWs || proxyWs.readyState !== WebSocket.OPEN) {
+          clientWs.send(
+            JSON.stringify({
+              type: "relay_error",
+              requestId: msg.requestId,
+              code: RelayErrorCode.PROXY_OFFLINE,
+              message: `Proxy ${targetProxyId} is not available`,
+            }),
+          );
+          return;
+        }
+
+        const registration = webPreviewRoutes.register(
+          targetProxyId,
+          msg.requestId,
+          webPreviewResponseByRequest[msg.type],
+          clientWs,
+          proxyWs,
+        );
+        if (registration.kind !== "registered") {
+          clientWs.send(
+            JSON.stringify({
+              type: "relay_error",
+              requestId: msg.requestId,
+              code: RelayErrorCode.INVALID_MESSAGE,
+              message:
+                registration.kind === "client_capacity_exceeded"
+                  ? "Too many pending Web Preview requests for this client"
+                  : "Too many pending Web Preview requests",
+            }),
+          );
+          return;
+        }
+
+        const upstreamRequest = {
+          ...msg,
+          requestId: registration.upstreamRequestId,
+        } as WebPreviewRequestMessage;
+        const upstreamRaw = serializeControl(upstreamRequest);
+        if (chaos) {
+          chaos.send(proxyWs, upstreamRaw, {
+            direction: "client_to_proxy",
+            type: msg.type,
+          });
+        } else {
+          proxyWs.send(upstreamRaw);
+        }
+        return;
+      }
+
       // client → proxy 透传：relay 不处理内容，直接转发给绑定的 proxy。
       // 路由 key 永远是 clientWs.boundProxyId, 不能被消息字段里 client 自填的 proxyId 覆盖
       // (那条路径让绑到 p1 的 client 通过 dir_list_request{proxyId:"p2"} 读到别的 proxy 的目录)。
@@ -838,6 +906,12 @@ export function handleClientConnection(
           rejectProxySelect(clientWs, msg.requestId, msg.proxyId);
           return;
         }
+        if (clientWs.boundProxyId !== msg.proxyId) {
+          // A response from the previously bound Proxy must not mutate the newly selected
+          // machine's Preview store. Keep tombstones so late responses cannot fall through to
+          // the generic broadcast path.
+          webPreviewRoutes.abandonSocket(clientWs);
+        }
         clientWs.boundProxyId = msg.proxyId;
         const response = JSON.stringify({
           type: "proxy_select_response",
@@ -892,6 +966,7 @@ export function handleClientConnection(
   clientWs.on("close", (code: number, reason: Buffer) => {
     ptySnapshotRoutes.abandonSocket(clientWs);
     sessionHistoryRoutes.abandonSocket(clientWs);
+    webPreviewRoutes.abandonSocket(clientWs);
     registry.removeClientWs(clientWs);
     // 清掉 binding.ws 引用：保留绑定关系（重连时还能恢复 proxyId 关联），但释放对已关闭 ws 对象的强引用，
     // 避免高频重连下 clientBindings Map 长期持有死 ws 对象阻止 GC，同时让 countClients 数字不再虚高。

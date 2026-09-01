@@ -18,6 +18,14 @@ import {
   sessionModeValues,
 } from "../constants/enums.js";
 import { PTY_INITIAL_MAX_COLS, PTY_INITIAL_MAX_ROWS } from "../constants/pty.js";
+import {
+  PreviewHtmlEntriesSchema,
+  PreviewSummarySchema,
+  TunnelProviderSchema,
+  WebPreviewCapabilitySchema,
+  WebPreviewPathSchema,
+  WebPreviewSourceInputSchema,
+} from "./web-preview.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -373,6 +381,115 @@ const relayControlDefinitions = [
     "proxy_to_client",
   ),
 
+  // Web preview is independent from Agent/terminal sessions. Relay rewrites requestId and routes
+  // every response to the exact requesting WebSocket; only the two push messages are broadcast.
+  control(
+    "preview_static_inspect_request",
+    {
+      ...RequiredRequestIdShape,
+      path: WebPreviewPathSchema,
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "preview_static_inspect_response",
+    {
+      ...RequiredRequestIdShape,
+      success: z.boolean(),
+      rootPath: WebPreviewPathSchema.optional(),
+      entryPath: WebPreviewPathSchema.optional(),
+      htmlEntries: PreviewHtmlEntriesSchema.optional(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "preview_create_request",
+    {
+      ...RequiredRequestIdShape,
+      operationId: IdSchema,
+      source: WebPreviewSourceInputSchema,
+      tunnelProvider: TunnelProviderSchema,
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "preview_create_response",
+    {
+      ...RequiredRequestIdShape,
+      operationId: IdSchema,
+      accepted: z.boolean(),
+      previewId: IdSchema.optional(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
+  control("preview_list_request", RequiredRequestIdShape, "client_to_proxy"),
+  control(
+    "preview_list_response",
+    {
+      ...RequiredRequestIdShape,
+      epoch: IdSchema,
+      revision: z.number().int().nonnegative(),
+      previews: z.array(PreviewSummarySchema),
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "preview_reconnect_request",
+    {
+      ...RequiredRequestIdShape,
+      previewId: IdSchema,
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "preview_reconnect_response",
+    {
+      ...RequiredRequestIdShape,
+      previewId: IdSchema,
+      success: z.boolean(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "preview_close_request",
+    {
+      ...RequiredRequestIdShape,
+      previewId: IdSchema,
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "preview_close_response",
+    {
+      ...RequiredRequestIdShape,
+      previewId: IdSchema,
+      success: z.boolean(),
+      ...RequestErrorShape,
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "preview_state_push",
+    {
+      epoch: IdSchema,
+      revision: z.number().int().nonnegative(),
+      preview: PreviewSummarySchema,
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "preview_removed_push",
+    {
+      epoch: IdSchema,
+      revision: z.number().int().nonnegative(),
+      previewId: IdSchema,
+    },
+    "proxy_to_client",
+  ),
+
   // 客户端注册协议
   control("client_register", {
     clientId: IdSchema,
@@ -553,10 +670,19 @@ const relayControlDefinitions = [
   ),
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
-  control("proxy_info_request", RequestIdShape, "client_to_proxy"),
+  control(
+    "proxy_info_request",
+    { ...RequestIdShape, refreshPath: z.boolean().optional() },
+    "client_to_proxy",
+  ),
   control(
     "proxy_info",
-    { ...RequestIdShape, homePath: z.string(), agentCli: AgentCliStatusSchema },
+    {
+      ...RequestIdShape,
+      homePath: z.string(),
+      agentCli: AgentCliStatusSchema,
+      webPreview: WebPreviewCapabilitySchema.optional(),
+    },
     "proxy_to_client",
   ),
   control(

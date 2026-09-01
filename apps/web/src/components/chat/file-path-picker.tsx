@@ -27,8 +27,10 @@ interface FilePathPickerProps {
   mode?: PickerMode;
   placement?: "floating" | "inline";
   onSelect: (path: string) => void;
+  onSelectCurrentDirectory?: (path: string) => void;
   onCreateDirectory?: (path: string) => Promise<string | null>;
   dirsOnly?: boolean;
+  fileExtensions?: readonly string[];
   title?: string;
 }
 
@@ -60,10 +62,12 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   {
     filter,
     onSelect,
+    onSelectCurrentDirectory,
     onCreateDirectory,
     mode = "insert",
     placement = "floating",
     dirsOnly = false,
+    fileExtensions,
     title,
   },
   ref,
@@ -86,6 +90,8 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   const [createOpen, setCreateOpen] = useState(false);
   const [newDirName, setNewDirName] = useState("");
   const [creatingDir, setCreatingDir] = useState(false);
+  const [loadFailure, setLoadFailure] = useState<{ path: string; message: string } | null>(null);
+  const [retryGeneration, setRetryGeneration] = useState(0);
 
   useEffect(() => {
     if (!absolutePath) return;
@@ -93,16 +99,21 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     const relay = relayClientRef;
     if (!relay) return;
     let cancelled = false;
+    setLoadFailure((failure) => (failure?.path === absolutePath ? null : failure));
     pendingDirRequestsRef.current.add(absolutePath);
     void relay
       .requestDirectoryList(absolutePath)
       .then((result) => {
         if (cancelled) return;
+        if (result.error) throw new Error(result.error);
         useFileStore.getState().setDirEntries(result.path, result.entries);
       })
-      .catch(() => {
+      .catch((error: unknown) => {
         if (cancelled) return;
-        useFileStore.getState().setDirEntries(absolutePath, []);
+        setLoadFailure({
+          path: absolutePath,
+          message: error instanceof Error ? error.message : "读取失败",
+        });
       })
       .finally(() => {
         pendingDirRequestsRef.current.delete(absolutePath);
@@ -110,18 +121,35 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     return () => {
       cancelled = true;
     };
-  }, [absolutePath, tree]);
+  }, [absolutePath, tree, retryGeneration]);
 
   // tree.has vs tree.get 分两档:
   // - 没 key: 目录请求飞行中, 显示 "加载中" 别误导成 "没有匹配"
   // - 有 key 但过滤后空: 才是 "没有匹配的路径"
-  const isLoading = !tree.has(absolutePath);
+  const activeLoadFailure = loadFailure?.path === absolutePath ? loadFailure : null;
+  const isLoading = !tree.has(absolutePath) && !activeLoadFailure;
+  const normalizedFileExtensions = useMemo(
+    () =>
+      fileExtensions?.map((extension) =>
+        extension.startsWith(".") ? extension.toLowerCase() : `.${extension.toLowerCase()}`,
+      ),
+    [fileExtensions],
+  );
   const filteredEntries = useMemo(() => {
     let entries = tree.get(absolutePath) ?? [];
     if (dirsOnly) entries = entries.filter((e) => e.isDir);
+    else if (normalizedFileExtensions?.length) {
+      entries = entries.filter(
+        (entry) =>
+          entry.isDir ||
+          normalizedFileExtensions.some((extension) =>
+            entry.name.toLowerCase().endsWith(extension),
+          ),
+      );
+    }
     if (query) entries = entries.filter((e) => e.name.toLowerCase().includes(query));
     return entries;
-  }, [tree, absolutePath, query, dirsOnly]);
+  }, [tree, absolutePath, query, dirsOnly, normalizedFileExtensions]);
 
   const [index, setIndex] = useState(0);
   // filter 或所在目录变化时重置高亮到首项
@@ -217,25 +245,44 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
       data-mode={mode}
       data-placement={placement}
     >
-      {mode === "select" && title ? (
+      {mode === "select" && (title || onSelectCurrentDirectory || onCreateDirectory) ? (
         <div className="border-b border-border/70 px-3 py-2">
           <div className="flex items-center justify-between gap-3">
-            <span className="text-xs text-muted-foreground">{title}</span>
-            {onCreateDirectory ? (
-              <button
-                type="button"
-                className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
-                disabled={!absolutePath || creatingDir}
-                onClick={() => setCreateOpen((value) => !value)}
-              >
-                新建目录
-              </button>
-            ) : null}
+            {title ? (
+              <span className="min-w-0 truncate text-xs text-muted-foreground">{title}</span>
+            ) : (
+              <span />
+            )}
+            <span className="flex shrink-0 items-center gap-1">
+              {onSelectCurrentDirectory ? (
+                <button
+                  type="button"
+                  data-slot="select-current-directory"
+                  className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!absolutePath}
+                  onClick={() => onSelectCurrentDirectory(withTrailingSlash(absolutePath))}
+                >
+                  选择当前文件夹
+                </button>
+              ) : null}
+              {onCreateDirectory ? (
+                <button
+                  type="button"
+                  data-slot="file-path-picker-create-directory-toggle"
+                  className="rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-50"
+                  disabled={!absolutePath || creatingDir}
+                  onClick={() => setCreateOpen((value) => !value)}
+                >
+                  新建目录
+                </button>
+              ) : null}
+            </span>
           </div>
           {createOpen ? (
             <div className="mt-2 flex items-center gap-2">
               <input
                 type="text"
+                data-slot="file-path-picker-create-directory-name"
                 value={newDirName}
                 onChange={(e) => setNewDirName(e.target.value)}
                 onKeyDown={(e) => {
@@ -256,6 +303,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
               />
               <button
                 type="button"
+                data-slot="file-path-picker-create-directory-submit"
                 className="min-h-11 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50 md:h-8 md:min-h-0"
                 disabled={!joinChildDirectory(absolutePath, newDirName) || creatingDir}
                 onClick={() => void handleCreateDirectory()}
@@ -267,7 +315,25 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
         </div>
       ) : null}
       <div className={listClass}>
-        {filteredEntries.length === 0 ? (
+        {activeLoadFailure ? (
+          <div
+            data-slot="file-path-picker-error"
+            className="flex items-center justify-between gap-3 px-3 py-2"
+            role="alert"
+          >
+            <span className="min-w-0 text-xs text-destructive" title={activeLoadFailure.message}>
+              无法读取这个文件夹
+            </span>
+            <button
+              type="button"
+              data-slot="file-path-picker-retry"
+              className="shrink-0 rounded px-2 py-1 text-xs text-primary hover:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+              onClick={() => setRetryGeneration((generation) => generation + 1)}
+            >
+              重试
+            </button>
+          </div>
+        ) : filteredEntries.length === 0 ? (
           <div className="px-3 py-2 text-xs text-muted-foreground">
             {isLoading ? "加载中..." : "没有匹配的路径"}
           </div>
@@ -288,6 +354,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
                   )}
                   data-slot="file-entry"
                   data-entry-type={e.isDir ? "dir" : "file"}
+                  data-entry-name={e.name}
                   data-entry-index={i}
                 >
                   <span className="font-mono text-[13px]">

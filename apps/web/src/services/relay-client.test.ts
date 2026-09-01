@@ -1111,4 +1111,193 @@ describe("RelayClient request handling", () => {
       rttMs: expect.any(Number),
     });
   });
+
+  it("refreshes the login-shell PATH through proxy_info when rechecking preview support", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestWebPreviewCapabilities(true);
+    const requestId = sentRequestId(ws);
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "proxy_info_request",
+      requestId,
+      refreshPath: true,
+    });
+
+    ws.emit({
+      type: "proxy_info",
+      requestId,
+      homePath: "/home/dev",
+      agentCli: {
+        claude: { available: true },
+        codex: { available: true },
+      },
+      webPreview: {
+        supported: true,
+        cloudflared: { available: true, command: "/opt/homebrew/bin/cloudflared" },
+      },
+    });
+
+    await expect(promise).resolves.toMatchObject({
+      homePath: "/home/dev",
+      webPreview: { supported: true, cloudflared: { available: true } },
+    });
+  });
+
+  it("inspects static previews with request correlation", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.inspectStaticWebPreview("/home/dev/site");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "preview_static_inspect_response",
+      requestId: "other-request",
+      success: true,
+      rootPath: "/wrong",
+      entryPath: "wrong.html",
+      htmlEntries: ["wrong.html"],
+    });
+    ws.emit({
+      type: "preview_static_inspect_response",
+      requestId,
+      success: true,
+      rootPath: "/home/dev/site",
+      htmlEntries: ["home.html", "pages/docs.html"],
+    });
+
+    await expect(promise).resolves.toEqual({
+      success: true,
+      rootPath: "/home/dev/site",
+      entryPath: undefined,
+      htmlEntries: ["home.html", "pages/docs.html"],
+      error: undefined,
+      errorCode: undefined,
+    });
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "preview_static_inspect_request",
+      path: "/home/dev/site",
+    });
+  });
+
+  it("creates a preview with an idempotency operation and returns the fast ACK", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.createWebPreview(
+      { kind: "local", url: "http://localhost:5173/admin" },
+      { tunnelProvider: "cloudflare" },
+    );
+    const requestId = sentRequestId(ws);
+    const sent = JSON.parse(ws.sent[0] ?? "{}") as {
+      operationId?: string;
+      source?: unknown;
+      tunnelProvider?: string;
+    };
+
+    expect(sent.operationId).toMatch(/^preview-operation-cloudflare-/);
+    expect(sent.source).toEqual({ kind: "local", url: "http://localhost:5173/admin" });
+    expect(sent.tunnelProvider).toBe("cloudflare");
+
+    ws.emit({
+      type: "preview_create_response",
+      requestId,
+      operationId: "wrong-operation",
+      accepted: true,
+      previewId: "wrong-preview",
+    });
+    ws.emit({
+      type: "preview_create_response",
+      requestId,
+      operationId: sent.operationId,
+      accepted: true,
+      previewId: "preview-1",
+    });
+
+    await expect(promise).resolves.toEqual({
+      operationId: sent.operationId,
+      accepted: true,
+      previewId: "preview-1",
+      error: undefined,
+      errorCode: undefined,
+    });
+  });
+
+  it("uses a caller-provided preview operation id for safe request retries", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.createWebPreview(
+      { kind: "local", url: "http://localhost:4173" },
+      { tunnelProvider: "cpolar", operationId: "preview-operation-cpolar-stable" },
+    );
+    const requestId = sentRequestId(ws);
+    const sent = JSON.parse(ws.sent[0] ?? "{}") as { operationId?: string };
+
+    expect(sent.operationId).toBe("preview-operation-cpolar-stable");
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({ tunnelProvider: "cpolar" });
+    ws.emit({
+      type: "preview_create_response",
+      requestId,
+      operationId: "preview-operation-cpolar-stable",
+      accepted: true,
+      previewId: "preview-stable",
+    });
+
+    await expect(promise).resolves.toMatchObject({
+      operationId: "preview-operation-cpolar-stable",
+      accepted: true,
+      previewId: "preview-stable",
+    });
+  });
+
+  it("loads, reconnects, and closes previews through request-scoped messages", async () => {
+    const { relay, ws } = createClient();
+    const listPromise = relay.requestWebPreviewList();
+    const listRequestId = sentRequestId(ws);
+    ws.emit({
+      type: "preview_list_response",
+      requestId: listRequestId,
+      epoch: "epoch-a",
+      revision: 3,
+      previews: [],
+    });
+    await expect(listPromise).resolves.toEqual({
+      epoch: "epoch-a",
+      revision: 3,
+      previews: [],
+    });
+
+    const reconnectPromise = relay.reconnectWebPreview("preview-1");
+    const reconnectRequestId = sentRequestId(ws, 1);
+    ws.emit({
+      type: "preview_reconnect_response",
+      requestId: reconnectRequestId,
+      previewId: "wrong-preview",
+      success: true,
+    });
+    ws.emit({
+      type: "preview_reconnect_response",
+      requestId: reconnectRequestId,
+      previewId: "preview-1",
+      success: true,
+    });
+    await expect(reconnectPromise).resolves.toMatchObject({
+      previewId: "preview-1",
+      success: true,
+    });
+
+    const closePromise = relay.closeWebPreview("preview-1");
+    const closeRequestId = sentRequestId(ws, 2);
+    ws.emit({
+      type: "preview_close_response",
+      requestId: closeRequestId,
+      previewId: "wrong-preview",
+      success: true,
+    });
+    ws.emit({
+      type: "preview_close_response",
+      requestId: closeRequestId,
+      previewId: "preview-1",
+      success: true,
+    });
+    await expect(closePromise).resolves.toMatchObject({
+      previewId: "preview-1",
+      success: true,
+    });
+  });
 });

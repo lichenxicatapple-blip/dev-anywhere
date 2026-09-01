@@ -14,6 +14,11 @@ import { completeRelayProxyLatencyProbe } from "../latency-probes.js";
 import type { RemoteFileBridge } from "../remote-file-bridge.js";
 import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js";
 import type { SessionHistoryRouteRegistry } from "../session-history-route-registry.js";
+import {
+  isWebPreviewResponseMessage,
+  type WebPreviewResponseMessage,
+  type WebPreviewRouteRegistry,
+} from "../web-preview-route-registry.js";
 import { RELAY_VERSION } from "../version.js";
 
 // 扩展 WebSocket 实例存储代理元数据
@@ -86,6 +91,7 @@ export function handleProxyConnection(
   logger: Logger,
   ptySnapshotRoutes: PtySnapshotRouteRegistry,
   sessionHistoryRoutes: SessionHistoryRouteRegistry,
+  webPreviewRoutes: WebPreviewRouteRegistry,
   chaos?: RelayChaos,
   remoteFileBridge?: RemoteFileBridge,
 ): void {
@@ -147,6 +153,7 @@ export function handleProxyConnection(
       if (status === "reconnected") {
         ptySnapshotRoutes.clearProxy(proxyId);
         sessionHistoryRoutes.clearProxy(proxyId);
+        webPreviewRoutes.clearProxy(proxyId);
       }
       logger.info({ proxyId, proxyVersion, status }, "Proxy registered");
 
@@ -170,6 +177,7 @@ export function handleProxyConnection(
       if (proxyWs.proxyId) {
         ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
         sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
+        webPreviewRoutes.clearProxy(proxyWs.proxyId);
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info(
@@ -312,6 +320,49 @@ export function handleProxyConnection(
         );
         return;
       }
+      if (isWebPreviewResponseMessage(result.message)) {
+        if (!proxyWs.proxyId) {
+          rejectNotRegistered(proxyWs);
+          return;
+        }
+        const route = webPreviewRoutes.resolve(
+          proxyWs.proxyId,
+          result.message.requestId,
+          result.message.type,
+          proxyWs,
+        );
+        if (route.kind === "matched") {
+          if (route.clientWs.readyState !== WebSocket.OPEN) return;
+          const response = {
+            ...result.message,
+            requestId: route.clientRequestId,
+          } as WebPreviewResponseMessage;
+          const responseRaw = serializeControl(response);
+          if (chaos) {
+            chaos.send(route.clientWs, responseRaw, {
+              direction: "proxy_to_client",
+              type: result.message.type,
+            });
+          } else {
+            route.clientWs.send(responseRaw);
+          }
+          return;
+        }
+
+        logger.debug(
+          {
+            proxyId: proxyWs.proxyId,
+            requestId: result.message.requestId,
+            type: result.message.type,
+            route: route.kind,
+            ...(route.kind === "response_type_mismatch"
+              ? { expectedResponseType: route.expectedResponseType }
+              : {}),
+          },
+          "Unmatched Web Preview response dropped",
+        );
+        return;
+      }
       if (isProxyToClientRelayControlType(result.message.type)) {
         if (!proxyWs.proxyId) {
           rejectNotRegistered(proxyWs);
@@ -380,6 +431,7 @@ export function handleProxyConnection(
     }
     ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
     sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
+    webPreviewRoutes.clearProxy(proxyWs.proxyId);
     notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
     try {
       registry.transitionProxy(proxyWs.proxyId, "online", "offline");
