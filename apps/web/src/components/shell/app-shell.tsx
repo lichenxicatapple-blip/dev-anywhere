@@ -33,6 +33,8 @@ export function AppShell() {
   const location = useLocation();
   const navigate = useNavigate();
   const isChatRoute = location.pathname.startsWith("/chat/");
+  const isDevicePreviewRoute = location.pathname.startsWith("/preview/device/");
+  const isFocusRoute = isChatRoute || isDevicePreviewRoute;
   const isTopLevelRoute = location.pathname === "/" || location.pathname === "/sessions";
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [standaloneDisplay, setStandaloneDisplay] = useState(() => isStandaloneDisplayMode());
@@ -145,7 +147,7 @@ export function AppShell() {
       data-slot="app-shell"
       data-standalone-display={standaloneDisplay ? "true" : undefined}
     >
-      {!isChatRoute && (
+      {!isFocusRoute && (
         <Button
           variant="ghost"
           size="icon"
@@ -163,7 +165,7 @@ export function AppShell() {
         </Button>
       )}
 
-      {!isChatRoute && <MobileBrandHero subtitle={mobileSubtitle} action={mobileHeroAction} />}
+      {!isFocusRoute && <MobileBrandHero subtitle={mobileSubtitle} action={mobileHeroAction} />}
 
       <PtyAutoYesController />
 

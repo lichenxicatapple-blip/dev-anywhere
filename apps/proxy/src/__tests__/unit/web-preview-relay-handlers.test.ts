@@ -58,6 +58,11 @@ describe("web preview relay handlers", () => {
         version: "cpolar version test",
       },
     }));
+    const getDevicePreviewCapability = vi.fn(async () => ({
+      supported: true,
+      ios: { supported: true, available: true, interactive: true },
+      android: { supported: true, available: true, interactive: true },
+    }));
     const handlers = new RelayResourceHandlers({
       relaySend: (raw) => sent.push(JSON.parse(raw) as Record<string, unknown>),
       controlHandlers: {} as never,
@@ -66,6 +71,7 @@ describe("web preview relay handlers", () => {
       getAgentCliSuggestions: () => ({}),
       setAgentCliPath: vi.fn(),
       getWebPreviewCapability,
+      getDevicePreviewCapability,
     });
 
     await handlers.onProxyInfoRequest({
@@ -75,6 +81,7 @@ describe("web preview relay handlers", () => {
     } as ControlMessage<"proxy_info_request">);
 
     expect(getWebPreviewCapability).toHaveBeenCalledWith(true);
+    expect(getDevicePreviewCapability).toHaveBeenCalledWith(true);
     expect(sent[0]).toMatchObject({
       type: "proxy_info",
       requestId: "request-info",
@@ -89,6 +96,11 @@ describe("web preview relay handlers", () => {
           available: true,
           command: "/opt/homebrew/bin/cpolar",
         },
+      },
+      devicePreview: {
+        supported: true,
+        ios: { supported: true, available: true, interactive: true },
+        android: { supported: true, available: true, interactive: true },
       },
     });
   });

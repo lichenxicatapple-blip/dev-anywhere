@@ -5,6 +5,11 @@ import type {
   AgentCliStatus,
   CommandEntry,
   ControlErrorCodeType,
+  DevicePreviewCapability,
+  DevicePreviewInput,
+  DevicePreviewStreamProfile,
+  DevicePreviewSummary,
+  DevicePreviewTarget,
   DirEntry,
   FileTreeGroup,
   HistorySession,
@@ -142,6 +147,7 @@ type ProxyEnvironmentInfo = {
   homePath: string;
   agentCli: AgentCliStatus;
   webPreview?: WebPreviewCapability;
+  devicePreview?: DevicePreviewCapability;
 };
 type PreviewStaticInspectResponse = Extract<
   RelayControlMessage,
@@ -173,6 +179,38 @@ interface PreviewListResult {
   revision: number;
   previews: PreviewSummary[];
 }
+type DevicePreviewCapabilityResult = { capability?: DevicePreviewCapability } & RequestError;
+type DevicePreviewTargetsResult = {
+  success: boolean;
+  targets: DevicePreviewTarget[];
+} & RequestError;
+type DevicePreviewCreateResult = {
+  operationId: string;
+  accepted: boolean;
+  previewId?: string;
+} & RequestError;
+type DevicePreviewMutationResult = {
+  previewId: string;
+  success: boolean;
+} & RequestError;
+interface DevicePreviewListResult {
+  epoch: string;
+  revision: number;
+  previews: DevicePreviewSummary[];
+}
+export type DevicePreviewStreamAccess = {
+  previewId: string;
+  success: boolean;
+  url?: string;
+  leaseId?: string;
+  expiresAt?: number;
+  controlMode?: "controller" | "view_only";
+} & RequestError;
+export type DevicePreviewInputResult = {
+  leaseId: string;
+  inputSeq: number;
+  success: boolean;
+} & RequestError;
 
 let requestSeq = 0;
 
@@ -187,6 +225,7 @@ export class RelayClient {
   private boundProxyId: string | null = null;
   private messageHandlers = new Set<(msg: InboundMessage) => void>();
   private pendingMessages: InboundMessage[] = [];
+  private devicePreviewInputSequence = 0;
 
   constructor(ws: RelayTransport, clientId: string) {
     this.ws = ws;
@@ -524,6 +563,7 @@ export class RelayClient {
       homePath: resp.homePath,
       agentCli: resp.agentCli,
       webPreview: resp.webPreview,
+      devicePreview: resp.devicePreview,
     }));
   }
 
@@ -656,6 +696,242 @@ export class RelayClient {
     ).then((resp) => ({
       previewId: resp.previewId,
       success: resp.success,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestDevicePreviewCapability(
+    refreshPath = false,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<DevicePreviewCapabilityResult> {
+    const requestId = nextRequestId("device-preview-capability");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_capability_response" }> =>
+        msg.type === "device_preview_capability_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "device_preview_capability_request",
+            requestId,
+            ...(refreshPath ? { refreshPath: true } : {}),
+          }),
+        ),
+      "检查模拟器支持情况超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      capability: resp.capability,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestDevicePreviewTargets(
+    refresh = false,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<DevicePreviewTargetsResult> {
+    const requestId = nextRequestId("device-preview-targets");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_targets_response" }> =>
+        msg.type === "device_preview_targets_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "device_preview_targets_request",
+            requestId,
+            ...(refresh ? { refresh: true } : {}),
+          }),
+        ),
+      "读取模拟器列表超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      success: resp.success,
+      targets: resp.targets,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  createDevicePreview(
+    targetId: string,
+    options: { operationId?: string; timeoutMs?: number } = {},
+  ): Promise<DevicePreviewCreateResult> {
+    const requestId = nextRequestId("device-preview-create");
+    const operationId = options.operationId ?? nextRequestId("device-preview-operation");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_create_response" }> =>
+        msg.type === "device_preview_create_response" &&
+        msg.requestId === requestId &&
+        msg.operationId === operationId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "device_preview_create_request",
+            requestId,
+            operationId,
+            targetId,
+          }),
+        ),
+      "创建模拟器预览超时",
+      options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
+      requestId,
+    ).then((resp) => ({
+      operationId: resp.operationId,
+      accepted: resp.accepted,
+      previewId: resp.previewId,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestDevicePreviewList(
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<DevicePreviewListResult> {
+    const requestId = nextRequestId("device-preview-list");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_list_response" }> =>
+        msg.type === "device_preview_list_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "device_preview_list_request", requestId })),
+      "读取模拟器预览列表超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({ epoch: resp.epoch, revision: resp.revision, previews: resp.previews }));
+  }
+
+  reconnectDevicePreview(
+    previewId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<DevicePreviewMutationResult> {
+    const requestId = nextRequestId("device-preview-reconnect");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_reconnect_response" }> =>
+        msg.type === "device_preview_reconnect_response" &&
+        msg.requestId === requestId &&
+        msg.previewId === previewId,
+      () =>
+        this.ws.send(
+          JSON.stringify({ type: "device_preview_reconnect_request", requestId, previewId }),
+        ),
+      "重新连接模拟器预览超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      previewId: resp.previewId,
+      success: resp.success,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  closeDevicePreview(
+    previewId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<DevicePreviewMutationResult> {
+    const requestId = nextRequestId("device-preview-close");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_close_response" }> =>
+        msg.type === "device_preview_close_response" &&
+        msg.requestId === requestId &&
+        msg.previewId === previewId,
+      () =>
+        this.ws.send(
+          JSON.stringify({ type: "device_preview_close_request", requestId, previewId }),
+        ),
+      "关闭模拟器预览超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      previewId: resp.previewId,
+      success: resp.success,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestDevicePreviewStream(
+    previewId: string,
+    profile: DevicePreviewStreamProfile = {},
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<DevicePreviewStreamAccess> {
+    const requestId = nextRequestId("device-preview-stream");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_stream_url_response" }> =>
+        msg.type === "device_preview_stream_url_response" &&
+        msg.requestId === requestId &&
+        msg.previewId === previewId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "device_preview_stream_url_request",
+            requestId,
+            previewId,
+            ...(Object.keys(profile).length > 0 ? { profile } : {}),
+          }),
+        ),
+      "打开模拟器画面超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      previewId: resp.previewId,
+      success: resp.success,
+      url: resp.url,
+      leaseId: resp.leaseId,
+      expiresAt: resp.expiresAt,
+      controlMode: resp.controlMode,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  sendDevicePreviewInput(
+    leaseId: string,
+    input: DevicePreviewInput,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<DevicePreviewInputResult> {
+    this.devicePreviewInputSequence = (this.devicePreviewInputSequence + 1) >>> 0;
+    const inputSeq = this.devicePreviewInputSequence;
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "device_preview_input_ack" }> =>
+        msg.type === "device_preview_input_ack" &&
+        msg.leaseId === leaseId &&
+        msg.inputSeq === inputSeq,
+      () =>
+        this.ws.send(JSON.stringify({ type: "device_preview_input", leaseId, inputSeq, input })),
+      "模拟器操作超时",
+      timeoutMs,
+    ).then((resp) => ({
+      leaseId: resp.leaseId,
+      inputSeq: resp.inputSeq,
+      success: resp.success,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  claimDevicePreviewControl(
+    leaseId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<{ success: boolean; controlMode: "controller" | "view_only" } & RequestError> {
+    const requestId = nextRequestId("device-preview-control");
+    return this.waitForMessage(
+      (
+        msg,
+      ): msg is Extract<RelayControlMessage, { type: "device_preview_control_claim_response" }> =>
+        msg.type === "device_preview_control_claim_response" &&
+        msg.requestId === requestId &&
+        msg.leaseId === leaseId,
+      () =>
+        this.ws.send(
+          JSON.stringify({ type: "device_preview_control_claim_request", requestId, leaseId }),
+        ),
+      "获取模拟器控制权超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      success: resp.success,
+      controlMode: resp.controlMode,
       error: resp.error,
       errorCode: resp.errorCode,
     }));

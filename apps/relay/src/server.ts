@@ -5,6 +5,7 @@ import { homedir } from "node:os";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer } from "ws";
+import { DEVICE_PREVIEW_FRAME_MAX_BYTES } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
 import { RelayRegistry } from "./registry.js";
 import { healthRouter } from "./health.js";
@@ -24,6 +25,7 @@ import { mountWebApp } from "./web-app.js";
 import { PtySnapshotRouteRegistry } from "./pty-snapshot-route-registry.js";
 import { SessionHistoryRouteRegistry } from "./session-history-route-registry.js";
 import { WebPreviewRouteRegistry } from "./web-preview-route-registry.js";
+import { DevicePreviewBridge } from "./device-preview-bridge.js";
 
 export interface RelayServerOptions {
   port?: number;
@@ -130,6 +132,13 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       }),
     ]);
   const relayChaos = chaos?.enabled ? createRelayChaos(chaos, logger) : undefined;
+  const devicePreviewBridge = new DevicePreviewBridge({
+    registry,
+    logger,
+    chaos: relayChaos,
+    clientTokenRequired,
+    validateClientToken: (token) => token === clientToken,
+  });
   if (chaos?.enabled) {
     logger.warn(
       {
@@ -183,6 +192,9 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   app.put("/api/remote-uploads/:token", (req, res) => {
     remoteFileBridge.handleUploadHttpRequest(req, res);
   });
+  app.get("/api/device-preview-streams/:token", (req, res) => {
+    devicePreviewBridge.handleHttpRequest(req, res);
+  });
   const webAssetDir =
     options.webAssetDir === false ? undefined : (options.webAssetDir ?? PACKAGED_WEB_DIR);
   if (webAssetDir) {
@@ -201,6 +213,13 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
     noServer: true,
     maxPayload: DATA_CHANNEL_MAX_PAYLOAD_BYTES,
     perMessageDeflate: DATA_CHANNEL_COMPRESSION,
+  });
+  // JPEG frames use a dedicated, non-compressed socket so large bursts cannot head-of-line block
+  // PTY/control traffic on the Proxy's main WebSocket.
+  const devicePreviewStreamWss = new WebSocketServer({
+    noServer: true,
+    maxPayload: DEVICE_PREVIEW_FRAME_MAX_BYTES + 260,
+    perMessageDeflate: false,
   });
   // Voice sockets intentionally do not negotiate permessage-deflate: audio is already compressed
   // or latency-sensitive, so deflating it only adds CPU and head-of-line delay.
@@ -222,21 +241,22 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       return;
     }
 
-    if (pathname === "/proxy") {
+    if (pathname === "/proxy" || pathname === "/proxy-stream") {
       if (proxyTokenRequired) {
         const token = url.searchParams.get("token");
         if (token !== proxyToken) {
           logger.warn(
-            { ip: request.socket.remoteAddress },
-            "rejected /proxy upgrade: invalid token",
+            { ip: request.socket.remoteAddress, pathname },
+            "rejected Proxy-side upgrade: invalid token",
           );
           socket.write("HTTP/1.1 401 Unauthorized\r\n\r\n");
           socket.destroy();
           return;
         }
       }
-      proxyWss.handleUpgrade(request, socket, head, (ws) => {
-        proxyWss.emit("connection", ws, request);
+      const targetWss = pathname === "/proxy" ? proxyWss : devicePreviewStreamWss;
+      targetWss.handleUpgrade(request, socket, head, (ws) => {
+        targetWss.emit("connection", ws, request);
       });
       return;
     }
@@ -283,7 +303,12 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       webPreviewRoutes,
       relayChaos,
       remoteFileBridge,
+      devicePreviewBridge,
     );
+  });
+
+  devicePreviewStreamWss.on("connection", (ws) => {
+    devicePreviewBridge.handleStreamTransportConnection(ws);
   });
 
   clientWss.on("connection", (ws, request) => {
@@ -302,6 +327,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
         userAgent: firstHeaderValue(request.headers["user-agent"]),
         remoteAddress: requestRemoteAddress(request),
       },
+      devicePreviewBridge,
     );
   });
 
@@ -326,6 +352,13 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       boundProxyId: (ws as { boundProxyId?: string }).boundProxyId,
     }),
   });
+  const devicePreviewStreamHeartbeat = setupHeartbeat(devicePreviewStreamWss, heartbeatInterval, {
+    logger,
+    peerType: "device-preview-stream",
+    describePeer: (ws) => ({
+      proxyId: (ws as { devicePreviewProxyId?: string }).devicePreviewProxyId,
+    }),
+  });
   const voiceAsrHeartbeat = setupHeartbeat(voiceAsrWss, heartbeatInterval, {
     logger,
     peerType: "voice-asr",
@@ -338,14 +371,19 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   async function close(): Promise<void> {
     clearInterval(proxyHeartbeat);
     clearInterval(clientHeartbeat);
+    clearInterval(devicePreviewStreamHeartbeat);
     clearInterval(voiceAsrHeartbeat);
     clearInterval(voiceTtsHeartbeat);
     webPreviewRoutes.dispose();
+    devicePreviewBridge.dispose();
 
     for (const ws of proxyWss.clients) {
       ws.terminate();
     }
     for (const ws of clientWss.clients) {
+      ws.terminate();
+    }
+    for (const ws of devicePreviewStreamWss.clients) {
       ws.terminate();
     }
     for (const ws of voiceAsrWss.clients) {
@@ -364,6 +402,12 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       }),
       new Promise<void>((resolve, reject) => {
         clientWss.close((err) => {
+          if (err) reject(err);
+          else resolve();
+        });
+      }),
+      new Promise<void>((resolve, reject) => {
+        devicePreviewStreamWss.close((err) => {
           if (err) reject(err);
           else resolve();
         });

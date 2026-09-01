@@ -6,6 +6,7 @@ import { ChatPage } from "@/pages/chat";
 import { PtyTest } from "@/pages/pty-test";
 import { TokenShowcase } from "@/pages/token-showcase";
 import { MarkdownTest } from "@/pages/markdown-test";
+import { DevicePreviewPage } from "@/pages/device-preview";
 
 // AppShell 承载三个业务路由的统一 chrome（header / sidebar / Toaster / CommandPalette）
 // /pty-test 与 /tokens 是调试/校验页，不进入 shell，避免被 master-detail 布局干扰。
@@ -17,6 +18,7 @@ export const router = createHashRouter([
       { index: true, element: <ProxySelectPage /> },
       { path: "sessions", element: <SessionListPage /> },
       { path: "chat/:id", element: <ChatPage /> },
+      { path: "preview/device/:id", element: <DevicePreviewPage /> },
     ],
   },
   { path: "/pty-test", element: <PtyTest /> },

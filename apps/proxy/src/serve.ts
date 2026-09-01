@@ -44,6 +44,9 @@ import { createRelayAutoUpdater } from "./auto-update.js";
 import { PROXY_VERSION } from "./version.js";
 import { PreviewManager } from "./serve/preview/preview-manager.js";
 import { cleanupStalePreviewRuntimes } from "./serve/preview/stale-preview-runtime.js";
+import { DefaultDevicePreviewBackend } from "./serve/device-preview/default-device-preview-backend.js";
+import { DevicePreviewManager } from "./serve/device-preview/device-preview-manager.js";
+import { DevicePreviewStreamConnection } from "./serve/device-preview/device-preview-stream-connection.js";
 
 const AGENT_CLI_PATH_FIELDS: Record<ProviderId, "claudeBin" | "codexBin" | "kimiBin"> = {
   claude: "claudeBin",
@@ -246,6 +249,46 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       );
     },
   });
+  const devicePreviewStream = new DevicePreviewStreamConnection({
+    relayUrl,
+    proxyId: relayConnection.getProxyId(),
+    token: relayToken,
+    onFlow: (streamId, paused) => devicePreviewManager.setFlowPaused(streamId, paused),
+  });
+  const devicePreviewManager = new DevicePreviewManager({
+    backend: new DefaultDevicePreviewBackend(),
+    streamTransport: {
+      sendFrame: (streamId, frameSequence, jpeg) =>
+        devicePreviewStream.sendFrame(streamId, frameSequence, jpeg),
+      sendComplete: (payload) => {
+        relaySend(
+          serializeControl({
+            type: "device_preview_stream_complete",
+            ...payload,
+          }),
+        );
+      },
+    },
+    onEvent: (event) => {
+      relaySend(
+        serializeControl(
+          event.type === "state"
+            ? {
+                type: "device_preview_state_push",
+                epoch: event.epoch,
+                revision: event.revision,
+                preview: event.preview,
+              }
+            : {
+                type: "device_preview_removed_push",
+                epoch: event.epoch,
+                revision: event.revision,
+                previewId: event.previewId,
+              },
+        ),
+      );
+    },
+  });
   const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
 
   const eventBridge = createEventBridge({
@@ -314,6 +357,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     sessionManager,
   });
 
+  relayConnection.on("stream_connection", (connectionId: string) => {
+    devicePreviewStream.register(connectionId);
+  });
+
   relayConnection.connect();
   serviceLogger.info(
     {
@@ -351,6 +398,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     remoteFileUploadManager,
     terminalSubscriptionBacklog,
     previewManager,
+    devicePreviewManager,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
@@ -376,6 +424,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     broadcastBridgeStatus(true);
   });
   relayConnection.on("disconnected", () => {
+    devicePreviewStream.disconnectMain();
+    devicePreviewManager.disconnectTransport();
     broadcastBridgeStatus(false);
   });
 
@@ -427,6 +477,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     sessionManagerStopReaper: () => sessionManager.stopReaper(),
     relayRouterDestroy: () => relayRouter.destroy(),
     previewManagerShutdown: () => previewManager.shutdown(),
+    devicePreviewManagerShutdown: () => devicePreviewManager.shutdown(),
+    devicePreviewStreamClose: () => devicePreviewStream.close(),
     hookServerClose: () => hookRuntime.hookServer.close(),
     relayConnectionClose: () => relayConnection.close(),
     workerRegistryDestroyAll: () => workerRegistry.destroyAll(),

@@ -8,7 +8,15 @@
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useMatch } from "react-router";
-import { Bot, ChevronRight, Globe2, Info, Loader2, PlusCircle, Terminal } from "lucide-react";
+import {
+  Bot,
+  ChevronRight,
+  Info,
+  Loader2,
+  MonitorSmartphone,
+  PlusCircle,
+  Terminal,
+} from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
@@ -35,10 +43,10 @@ import { SessionTerminationDialog } from "./session-termination-dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { resolveSessionRowState } from "@/lib/session-row-state";
-import { CreateWebPreviewDialog } from "@/components/preview/create-web-preview-dialog";
+import { CreateFrontendPreviewDialog } from "@/components/preview/create-frontend-preview-dialog";
 import { PreviewList } from "@/components/preview/preview-list";
 
-const WEB_PREVIEW_INFO = "需要安装 Cloudflare Tunnel 或 Cpolar。关闭预览后链接失效。";
+const FRONTEND_PREVIEW_INFO = "网页可生成分享链接；模拟器需已在开发机上启动。";
 
 interface SessionListProps {
   layout: "page" | "sidebar";
@@ -322,7 +330,7 @@ export function SessionList({ layout }: SessionListProps) {
           }}
         />
         <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
-        <CreateWebPreviewDialog open={createPreviewOpen} onOpenChange={setCreatePreviewOpen} />
+        <CreateFrontendPreviewDialog open={createPreviewOpen} onOpenChange={setCreatePreviewOpen} />
         <SessionTerminationDialog
           open={pendingTermination !== null}
           session={pendingTermination}
@@ -525,19 +533,19 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
         <DropdownMenuSeparator />
         <DropdownMenuItem
           className="min-h-[3.75rem] items-start gap-2.5 py-2"
-          data-slot="create-web-preview-item"
+          data-slot="create-frontend-preview-item"
           onSelect={handleCreatePreview}
         >
-          <Globe2 className="mt-0.5 size-4 text-muted-foreground" aria-hidden="true" />
+          <MonitorSmartphone className="mt-0.5 size-4 text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0 flex-1">
             <span className="flex items-center gap-1.5 font-medium">
-              网页预览
+              前端预览
               <Tooltip delayDuration={250}>
                 <TooltipTrigger asChild>
                   <span
-                    data-slot="web-preview-info-trigger"
+                    data-slot="frontend-preview-info-trigger"
                     className="inline-flex size-5 items-center justify-center rounded text-muted-foreground"
-                    aria-label="网页预览说明"
+                    aria-label="前端预览说明"
                     onClick={(event) => event.stopPropagation()}
                     onPointerDown={(event) => event.stopPropagation()}
                   >
@@ -547,14 +555,14 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
                 <TooltipContent
                   side="right"
                   className="max-w-[min(16rem,calc(100vw-1rem))] text-left text-wrap"
-                  data-slot="web-preview-info-tooltip"
+                  data-slot="frontend-preview-info-tooltip"
                 >
-                  {WEB_PREVIEW_INFO}
+                  {FRONTEND_PREVIEW_INFO}
                 </TooltipContent>
               </Tooltip>
             </span>
             <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
-              通过临时链接访问或分享本地网页
+              打开网页或设备模拟器
             </span>
           </span>
         </DropdownMenuItem>
@@ -580,7 +588,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
         </Tooltip>
       )}
       <CreateSessionDialog open={open} onOpenChange={setOpen} />
-      <CreateWebPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} />
+      <CreateFrontendPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} />
     </>
   );
 }
@@ -651,17 +659,20 @@ function CreateSessionTypeSheet({
             type="button"
             variant="ghost"
             className="min-h-20 justify-start gap-3 rounded-md px-3 text-left"
-            data-slot="create-web-preview-sheet-item"
+            data-slot="create-frontend-preview-sheet-item"
             onClick={() => chooseSessionType(onCreatePreview)}
           >
-            <Globe2 className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
+            <MonitorSmartphone
+              className="size-4 shrink-0 text-muted-foreground"
+              aria-hidden="true"
+            />
             <span className="min-w-0">
-              <span className="flex items-center gap-1.5 font-medium">网页预览</span>
+              <span className="flex items-center gap-1.5 font-medium">前端预览</span>
               <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
-                通过临时链接访问或分享本地网页
+                打开网页或设备模拟器
               </span>
               <span className="mt-0.5 block text-xs leading-4 text-muted-foreground/80">
-                {WEB_PREVIEW_INFO}
+                {FRONTEND_PREVIEW_INFO}
               </span>
             </span>
           </Button>

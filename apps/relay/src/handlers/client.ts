@@ -25,6 +25,7 @@ import {
   type WebPreviewRequestMessage,
   type WebPreviewRouteRegistry,
 } from "../web-preview-route-registry.js";
+import type { DevicePreviewBridge } from "../device-preview-bridge.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
@@ -64,8 +65,12 @@ function handleClientRegister(
   clientWs: ClientSocket,
   registry: RelayRegistry,
   logger: Logger,
+  devicePreviewBridge?: DevicePreviewBridge,
 ): void {
   const { clientId } = registration;
+  if (clientWs.clientId && clientWs.clientId !== clientId) {
+    devicePreviewBridge?.abandonClientSocket(clientWs);
+  }
   clientWs.clientId = clientId;
   registry.updateConnectedClientMetadata(clientWs, {
     clientId,
@@ -93,6 +98,12 @@ function handleClientRegister(
   }
 
   const { proxyId } = binding;
+  if (binding.ws && binding.ws !== clientWs) {
+    // A clientId has one authoritative socket in RelayRegistry. Revoke any private stream bound
+    // to the superseded socket before moving the binding, otherwise its HTTP response could keep
+    // receiving frames even though control/input has moved to the new tab or reconnect.
+    devicePreviewBridge?.abandonClientSocket(binding.ws);
+  }
   registry.updateClientSocket(clientId, clientWs);
   clientWs.boundProxyId = proxyId;
 
@@ -200,6 +211,7 @@ function handleProxyRemove(
   sessionHistoryRoutes: SessionHistoryRouteRegistry,
   webPreviewRoutes: WebPreviewRouteRegistry,
   remoteFileBridge: RemoteFileBridge | undefined,
+  devicePreviewBridge: DevicePreviewBridge | undefined,
   requestId: string,
   proxyId: string,
   chaos?: RelayChaos,
@@ -244,6 +256,11 @@ function handleProxyRemove(
     // strand the request without an ACK; revokeProxy deletes persistent tokens before touching
     // active HTTP responses, so old URLs remain unusable even on this exceptional path.
     logger.error({ err, proxyId }, "Failed to finish remote file cleanup for removed proxy");
+  }
+  try {
+    devicePreviewBridge?.revokeProxy(proxyId);
+  } catch (err) {
+    logger.error({ err, proxyId }, "Failed to finish Device Preview cleanup for removed proxy");
   }
 
   // cleanupProxy 会清掉发起者原有的 proxy binding；因此 ACK 必须直接写回当前
@@ -432,6 +449,7 @@ export function handleClientConnection(
   voiceProviders?: VoiceProviderRegistry,
   remoteFileBridge?: RemoteFileBridge,
   connectionInfo: ClientConnectionInfo = {},
+  devicePreviewBridge?: DevicePreviewBridge,
 ): void {
   const clientWs = ws as ClientSocket;
   clientWs.isAlive = true;
@@ -466,7 +484,7 @@ export function handleClientConnection(
       );
 
       if (msg.type === "client_register") {
-        handleClientRegister(msg, clientWs, registry, logger);
+        handleClientRegister(msg, clientWs, registry, logger, devicePreviewBridge);
         return;
       }
 
@@ -494,10 +512,15 @@ export function handleClientConnection(
           sessionHistoryRoutes,
           webPreviewRoutes,
           remoteFileBridge,
+          devicePreviewBridge,
           msg.requestId,
           msg.proxyId,
           chaos,
         );
+        return;
+      }
+
+      if (devicePreviewBridge?.handleClientControl(clientWs, msg)) {
         return;
       }
 
@@ -911,6 +934,7 @@ export function handleClientConnection(
           // machine's Preview store. Keep tombstones so late responses cannot fall through to
           // the generic broadcast path.
           webPreviewRoutes.abandonSocket(clientWs);
+          devicePreviewBridge?.abandonClientSocket(clientWs);
         }
         clientWs.boundProxyId = msg.proxyId;
         const response = JSON.stringify({
@@ -967,6 +991,7 @@ export function handleClientConnection(
     ptySnapshotRoutes.abandonSocket(clientWs);
     sessionHistoryRoutes.abandonSocket(clientWs);
     webPreviewRoutes.abandonSocket(clientWs);
+    devicePreviewBridge?.abandonClientSocket(clientWs);
     registry.removeClientWs(clientWs);
     // 清掉 binding.ws 引用：保留绑定关系（重连时还能恢复 proxyId 关联），但释放对已关闭 ws 对象的强引用，
     // 避免高频重连下 clientBindings Map 长期持有死 ws 对象阻止 GC，同时让 countClients 数字不再虚高。

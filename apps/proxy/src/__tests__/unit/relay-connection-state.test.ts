@@ -155,6 +155,26 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.REGISTERING);
   });
 
+  it("emits the dedicated stream connection nonce from a successful registration", async () => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    const nonces: string[] = [];
+    conn.on("stream_connection", (connectionId: string) => nonces.push(connectionId));
+    fakeWs.readyState = 1;
+    fakeWs.emit("open");
+    fakeWs.emit(
+      "message",
+      Buffer.from(
+        JSON.stringify({
+          type: "proxy_register_response",
+          status: "new",
+          connectionId: "connection-1",
+        }),
+      ),
+    );
+
+    expect(nonces).toEqual(["connection-1"]);
+  });
+
   it("does not throw when ws 'open' fires after close() (race A)", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
     conn.close();

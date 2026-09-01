@@ -8,6 +8,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
 import { usePreviewStore } from "@/stores/preview-store";
+import { useDevicePreviewStore } from "@/stores/device-preview-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -23,6 +24,7 @@ import { cn } from "@/lib/utils";
 import { STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { loadSessionHistory } from "@/services/session-history-loader";
 import { syncWebPreviewSnapshot } from "@/services/preview-snapshot-loader";
+import { syncDevicePreviewSnapshot } from "@/services/device-preview-snapshot-loader";
 import {
   applyExplicitProxyRemovalState,
   clearPendingProxyRemoval,
@@ -70,6 +72,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
         useSessionStore.getState().prepareForProxySwitch(displayName);
         useFileStore.getState().prepareForProxySwitch();
         usePreviewStore.getState().prepareForProxySwitch();
+        useDevicePreviewStore.getState().prepareForProxySwitch();
       }
       writeStorageValue("local", STORAGE_KEYS.proxyId, proxyId);
       useAppStore.getState().setProxy(proxyId, proxyName ?? null);
@@ -85,6 +88,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
           fileStore.setHomePath(info.homePath);
           fileStore.setAgentCli(info.agentCli);
           syncWebPreviewSnapshot(relay, proxyId, info.webPreview, "proxy-switcher");
+          syncDevicePreviewSnapshot(relay, proxyId, info.devicePreview, "proxy-switcher");
         })
         .catch((err: unknown) => {
           console.error("[proxy-switcher] post-bind proxy info fetch failed", err);
@@ -109,7 +113,10 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
       setDropdownOpen(false);
       if (layout === "page") {
         navigate("/sessions");
-      } else if (location.pathname.startsWith("/chat/")) {
+      } else if (
+        location.pathname.startsWith("/chat/") ||
+        location.pathname.startsWith("/preview/device/")
+      ) {
         navigate("/sessions");
       }
     } catch (err) {

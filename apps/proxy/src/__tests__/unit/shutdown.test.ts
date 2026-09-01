@@ -29,6 +29,8 @@ describe("createServeShutdown reentry guard", () => {
       stopReaper: ReturnType<typeof vi.fn>;
       relayRouterDestroy: ReturnType<typeof vi.fn>;
       hookServerClose: ReturnType<typeof vi.fn>;
+      devicePreviewManagerShutdown: ReturnType<typeof vi.fn>;
+      devicePreviewStreamClose: ReturnType<typeof vi.fn>;
       relayConnectionClose: ReturnType<typeof vi.fn>;
       workerRegistryDestroyAll: ReturnType<typeof vi.fn>;
       hostedPtyRegistryDestroyAll: ReturnType<typeof vi.fn>;
@@ -51,6 +53,8 @@ describe("createServeShutdown reentry guard", () => {
           releaseHookClose = resolve;
         }),
     );
+    const devicePreviewManagerShutdown = vi.fn(async () => undefined);
+    const devicePreviewStreamClose = vi.fn();
     const deps: ServeShutdownDeps = {
       logger: {
         info: vi.fn(),
@@ -64,6 +68,8 @@ describe("createServeShutdown reentry guard", () => {
       sessionManagerStopReaper: stopReaper,
       relayRouterDestroy,
       hookServerClose,
+      devicePreviewManagerShutdown,
+      devicePreviewStreamClose,
       relayConnectionClose,
       workerRegistryDestroyAll,
       hostedPtyRegistryDestroyAll,
@@ -79,6 +85,8 @@ describe("createServeShutdown reentry guard", () => {
         stopReaper,
         relayRouterDestroy,
         hookServerClose,
+        devicePreviewManagerShutdown,
+        devicePreviewStreamClose,
         relayConnectionClose,
         workerRegistryDestroyAll,
         hostedPtyRegistryDestroyAll,
@@ -97,6 +105,8 @@ describe("createServeShutdown reentry guard", () => {
     const first = shutdown();
     expect(spies.stopReaper).toHaveBeenCalledTimes(1);
     expect(spies.hookServerClose).toHaveBeenCalledTimes(1);
+    expect(spies.devicePreviewManagerShutdown).toHaveBeenCalledTimes(1);
+    expect(spies.devicePreviewStreamClose).toHaveBeenCalledTimes(1);
 
     // 第二路在第一路 await 期间到达：守卫应让其立即返回，不再触碰任何资源
     const second = shutdown();

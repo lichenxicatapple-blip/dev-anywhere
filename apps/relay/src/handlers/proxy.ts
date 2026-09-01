@@ -20,6 +20,7 @@ import {
   type WebPreviewRouteRegistry,
 } from "../web-preview-route-registry.js";
 import { RELAY_VERSION } from "../version.js";
+import type { DevicePreviewBridge } from "../device-preview-bridge.js";
 
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
@@ -94,6 +95,7 @@ export function handleProxyConnection(
   webPreviewRoutes: WebPreviewRouteRegistry,
   chaos?: RelayChaos,
   remoteFileBridge?: RemoteFileBridge,
+  devicePreviewBridge?: DevicePreviewBridge,
 ): void {
   const proxyWs = ws as ProxySocket;
   proxyWs.isAlive = true;
@@ -150,6 +152,7 @@ export function handleProxyConnection(
       const { proxyId, name, proxyVersion } = result.message;
       const status = registry.registerProxy(proxyId, proxyWs, name, proxyVersion);
       proxyWs.proxyId = proxyId;
+      const connectionId = devicePreviewBridge?.registerProxyConnection(proxyId, proxyWs);
       if (status === "reconnected") {
         ptySnapshotRoutes.clearProxy(proxyId);
         sessionHistoryRoutes.clearProxy(proxyId);
@@ -162,6 +165,7 @@ export function handleProxyConnection(
           type: "proxy_register_response",
           status,
           relayVersion: RELAY_VERSION,
+          ...(connectionId ? { connectionId } : {}),
         }),
       );
 
@@ -178,6 +182,7 @@ export function handleProxyConnection(
         ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
         sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
         webPreviewRoutes.clearProxy(proxyWs.proxyId);
+        devicePreviewBridge?.clearProxy(proxyWs.proxyId);
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info(
@@ -223,6 +228,12 @@ export function handleProxyConnection(
 
     // proxy 发给 client 的控制消息：直接转发给绑定的客户端，不进 session buffer
     if (result.kind === "control") {
+      if (
+        proxyWs.proxyId &&
+        devicePreviewBridge?.handleProxyControl(proxyWs.proxyId, proxyWs, result.message)
+      ) {
+        return;
+      }
       if (proxyWs.proxyId && result.message.type === "remote_file_stream_response") {
         remoteFileBridge?.handleProxyControl(proxyWs.proxyId, result.message);
         return;
@@ -432,6 +443,7 @@ export function handleProxyConnection(
     ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
     sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
     webPreviewRoutes.clearProxy(proxyWs.proxyId);
+    devicePreviewBridge?.clearProxy(proxyWs.proxyId);
     notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
     try {
       registry.transitionProxy(proxyWs.proxyId, "online", "offline");

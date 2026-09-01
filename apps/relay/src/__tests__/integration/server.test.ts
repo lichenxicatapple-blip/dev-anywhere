@@ -862,12 +862,14 @@ describe("Relay Server Integration", () => {
   });
 
   it("does not route unknown Relay endpoints to the Web SPA", async () => {
-    const res = await fetch(`http://127.0.0.1:${port}/api/does-not-exist`, {
-      headers: { accept: "text/html" },
-    });
-    expect(res.status).toBe(404);
-    expect(res.headers.get("content-type")).toContain("application/json");
-    await expect(res.json()).resolves.toEqual({ error: "not_found" });
+    for (const path of ["/api/does-not-exist", "/proxy-stream"]) {
+      const res = await fetch(`http://127.0.0.1:${port}${path}`, {
+        headers: { accept: "text/html" },
+      });
+      expect(res.status).toBe(404);
+      expect(res.headers.get("content-type")).toContain("application/json");
+      await expect(res.json()).resolves.toEqual({ error: "not_found" });
+    }
   });
 
   it("GET /status returns proxy and client counts", async () => {

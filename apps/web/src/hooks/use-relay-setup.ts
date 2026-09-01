@@ -15,6 +15,8 @@ import { registerSessionDispatcher } from "@/services/session-dispatcher";
 import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 import { registerPreviewDispatcher } from "@/services/preview-dispatcher";
 import { usePreviewStore } from "@/stores/preview-store";
+import { registerDevicePreviewDispatcher } from "@/services/device-preview-dispatcher";
+import { useDevicePreviewStore } from "@/stores/device-preview-store";
 import { loadFontCSS } from "@/lib/font-assets";
 import { checkRelayClientAuth } from "@/lib/relay-client-auth";
 import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
@@ -60,6 +62,7 @@ function applyRelayClientAuthIssue(authIssue: RelayClientAuthIssue): void {
   store.setProxies([]);
   store.setPhase("proxy_selecting");
   usePreviewStore.getState().clear();
+  useDevicePreviewStore.getState().clear();
 }
 
 function prepareRelayReconnect(): void {
@@ -70,6 +73,7 @@ function prepareRelayReconnect(): void {
   store.setProxies([]);
   store.resetProxyListLoaded();
   usePreviewStore.getState().markListLoading();
+  useDevicePreviewStore.getState().markListLoading();
 
   if (hasSelectedProxy) {
     if (store.phase !== "reconnecting") store.setPhase("reconnecting");
@@ -146,6 +150,7 @@ export function useRelaySetup(): void {
     const unregisterResource = registerResourceDispatcher();
     // 网页预览拥有独立于 Session 的生命周期与 store；只消费 state/removed 广播。
     const unregisterPreview = registerPreviewDispatcher();
+    const unregisterDevicePreview = registerDevicePreviewDispatcher();
 
     void reconnectRelayClient(abort.signal).finally(() => {
       if (disposed) ws.close();
@@ -160,6 +165,7 @@ export function useRelaySetup(): void {
       unregisterSession();
       unregisterResource();
       unregisterPreview();
+      unregisterDevicePreview();
       disposePhaseMachineTimers(timers);
       ws.close();
       setRuntimeRefs({ wsManagerRef: null, relayClientRef: null });

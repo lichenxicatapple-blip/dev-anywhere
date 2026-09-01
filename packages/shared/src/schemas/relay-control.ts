@@ -26,6 +26,14 @@ import {
   WebPreviewPathSchema,
   WebPreviewSourceInputSchema,
 } from "./web-preview.js";
+import {
+  DevicePreviewCapabilitySchema,
+  DevicePreviewInputSchema,
+  DevicePreviewStreamProfileSchema,
+  DevicePreviewStreamStopReasonSchema,
+  DevicePreviewSummarySchema,
+  DevicePreviewTargetSchema,
+} from "./device-preview.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -175,6 +183,10 @@ const relayControlDefinitions = [
     status: z.enum(["new", "reconnected"]),
     // optional 只用于滚动升级：新 Proxy 连接旧 Relay 时继续工作，但不会自动更新。
     relayVersion: z.string().min(1).max(64).optional(),
+    // New Relays rotate this nonce for every main Proxy connection. The dedicated image stream
+    // socket must present it before Relay accepts frames, so a superseded Proxy connection cannot
+    // keep publishing into a newly registered Proxy with the same persistent proxyId.
+    connectionId: IdSchema.optional(),
   }),
   control("proxy_list_request", RequestIdShape),
   control("proxy_list_response", {
@@ -490,6 +502,207 @@ const relayControlDefinitions = [
     "proxy_to_client",
   ),
 
+  // Device previews are a sibling of Web previews under the product-level Preview entry, but
+  // their data plane is private. Management and input use the authenticated main sockets; JPEG
+  // frames use `/proxy-stream` plus a one-use HTTP stream URL issued by Relay.
+  control(
+    "device_preview_capability_request",
+    {
+      ...RequiredRequestIdShape,
+      refreshPath: z.boolean().optional(),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "device_preview_capability_response",
+    {
+      ...RequiredRequestIdShape,
+      ...RequestErrorShape,
+      capability: DevicePreviewCapabilitySchema.optional(),
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "device_preview_targets_request",
+    {
+      ...RequiredRequestIdShape,
+      refresh: z.boolean().optional(),
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "device_preview_targets_response",
+    {
+      ...RequiredRequestIdShape,
+      ...RequestErrorShape,
+      success: z.boolean(),
+      targets: z.array(DevicePreviewTargetSchema).max(1_024),
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "device_preview_create_request",
+    {
+      ...RequiredRequestIdShape,
+      operationId: IdSchema,
+      targetId: IdSchema,
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "device_preview_create_response",
+    {
+      ...RequiredRequestIdShape,
+      ...RequestErrorShape,
+      operationId: IdSchema,
+      accepted: z.boolean(),
+      previewId: IdSchema.optional(),
+    },
+    "proxy_to_client",
+  ),
+  control("device_preview_list_request", RequiredRequestIdShape, "client_to_proxy"),
+  control(
+    "device_preview_list_response",
+    {
+      ...RequiredRequestIdShape,
+      epoch: IdSchema,
+      revision: z.number().int().nonnegative(),
+      previews: z.array(DevicePreviewSummarySchema).max(1_024),
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "device_preview_reconnect_request",
+    { ...RequiredRequestIdShape, previewId: IdSchema },
+    "client_to_proxy",
+  ),
+  control(
+    "device_preview_reconnect_response",
+    {
+      ...RequiredRequestIdShape,
+      ...RequestErrorShape,
+      previewId: IdSchema,
+      success: z.boolean(),
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "device_preview_close_request",
+    { ...RequiredRequestIdShape, previewId: IdSchema },
+    "client_to_proxy",
+  ),
+  control(
+    "device_preview_close_response",
+    {
+      ...RequiredRequestIdShape,
+      ...RequestErrorShape,
+      previewId: IdSchema,
+      success: z.boolean(),
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "device_preview_state_push",
+    {
+      epoch: IdSchema,
+      revision: z.number().int().nonnegative(),
+      preview: DevicePreviewSummarySchema,
+    },
+    "proxy_to_client",
+  ),
+  control(
+    "device_preview_removed_push",
+    {
+      epoch: IdSchema,
+      revision: z.number().int().nonnegative(),
+      previewId: IdSchema,
+    },
+    "proxy_to_client",
+  ),
+  control("device_preview_stream_url_request", {
+    ...RequiredRequestIdShape,
+    previewId: IdSchema,
+    profile: DevicePreviewStreamProfileSchema.optional(),
+  }),
+  control("device_preview_stream_url_response", {
+    ...RequiredRequestIdShape,
+    ...RequestErrorShape,
+    previewId: IdSchema,
+    success: z.boolean(),
+    url: z.string().min(1).max(4_096).optional(),
+    leaseId: IdSchema.optional(),
+    expiresAt: z.number().int().nonnegative().optional(),
+    controlMode: z.enum(["controller", "view_only"]).optional(),
+  }),
+  control("device_preview_stream_start", {
+    streamId: IdSchema,
+    leaseId: IdSchema,
+    previewId: IdSchema,
+    maxFps: DevicePreviewStreamProfileSchema.shape.maxFps,
+    maxWidth: DevicePreviewStreamProfileSchema.shape.maxWidth,
+    jpegQuality: DevicePreviewStreamProfileSchema.shape.jpegQuality,
+  }),
+  control("device_preview_stream_start_response", {
+    ...RequestErrorShape,
+    streamId: IdSchema,
+    leaseId: IdSchema,
+    previewId: IdSchema,
+    success: z.boolean(),
+    width: z.number().int().positive().max(16_384).optional(),
+    height: z.number().int().positive().max(16_384).optional(),
+  }),
+  control("device_preview_stream_stop", {
+    streamId: IdSchema,
+    reason: DevicePreviewStreamStopReasonSchema,
+  }),
+  control("device_preview_stream_complete", {
+    ...RequestErrorShape,
+    streamId: IdSchema,
+    leaseId: IdSchema,
+    previewId: IdSchema,
+    success: z.boolean(),
+  }),
+  control(
+    "device_preview_input",
+    {
+      leaseId: IdSchema,
+      inputSeq: z.number().int().min(0).max(0xffffffff),
+      input: DevicePreviewInputSchema,
+    },
+    "client_to_proxy",
+  ),
+  control(
+    "device_preview_input_ack",
+    {
+      ...RequestErrorShape,
+      leaseId: IdSchema,
+      inputSeq: z.number().int().min(0).max(0xffffffff),
+      success: z.boolean(),
+    },
+    "proxy_to_client",
+  ),
+  // Relay-internal ordering barrier. It is deliberately absent from both public direction sets:
+  // browsers cannot abort another viewer's queued input, and Proxy never sends it to browsers.
+  control("device_preview_input_revoke", {
+    leaseId: IdSchema,
+    reason: z.literal("control_taken_over"),
+  }),
+  control("device_preview_control_claim_request", {
+    ...RequiredRequestIdShape,
+    leaseId: IdSchema,
+  }),
+  control("device_preview_control_claim_response", {
+    ...RequiredRequestIdShape,
+    ...RequestErrorShape,
+    leaseId: IdSchema,
+    success: z.boolean(),
+    controlMode: z.enum(["controller", "view_only"]),
+  }),
+  control("device_preview_control_revoked_push", {
+    leaseId: IdSchema,
+    reason: z.enum(["taken_over", "stream_closed", "proxy_offline", "lease_expired"]),
+  }),
+
   // 客户端注册协议
   control("client_register", {
     clientId: IdSchema,
@@ -682,6 +895,8 @@ const relayControlDefinitions = [
       homePath: z.string(),
       agentCli: AgentCliStatusSchema,
       webPreview: WebPreviewCapabilitySchema.optional(),
+      // Optional for rolling upgrades: older Proxy builds only report Web preview support.
+      devicePreview: DevicePreviewCapabilitySchema.optional(),
     },
     "proxy_to_client",
   ),

@@ -5,6 +5,7 @@ import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
 import { usePreviewStore } from "@/stores/preview-store";
+import { useDevicePreviewStore } from "@/stores/device-preview-store";
 import { readStorageValue, removeStorageValue, STORAGE_KEYS } from "@/lib/storage-keys";
 import { clearLastChatRoute } from "@/lib/route-restore";
 
@@ -76,6 +77,7 @@ export function applyExplicitProxyRemovalState(proxyId: string, relay: RelayClie
   useSessionStore.getState().clearForProxyRemoval(proxyId);
   useFileStore.getState().prepareForProxySwitch();
   usePreviewStore.getState().clear();
+  useDevicePreviewStore.getState().clear();
   useChatStore.getState().clearAllSessions();
   useCommandStore.getState().clear();
   clearLastChatRoute();

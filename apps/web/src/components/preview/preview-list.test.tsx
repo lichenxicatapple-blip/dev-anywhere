@@ -1,4 +1,5 @@
 import { cleanup, fireEvent, render, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { PreviewSummary } from "@dev-anywhere/shared";
 
@@ -36,6 +37,14 @@ function openPreviewMenu(): void {
   fireEvent.keyDown(trigger, { key: "Enter" });
 }
 
+function renderList() {
+  return render(
+    <MemoryRouter initialEntries={["/sessions"]}>
+      <PreviewList />
+    </MemoryRouter>,
+  );
+}
+
 describe("PreviewList", () => {
   beforeEach(() => {
     usePreviewStore.getState().clear();
@@ -46,14 +55,14 @@ describe("PreviewList", () => {
   afterEach(() => cleanup());
 
   it("is absent when the selected Proxy has no previews", () => {
-    render(<PreviewList />);
+    renderList();
     expect(document.querySelector('[data-slot="preview-section"]')).not.toBeInTheDocument();
   });
 
   it("keeps a stopping row until the authoritative removed push arrives", async () => {
     usePreviewStore.getState().addStartingPreview(preview("ready"));
     closeWebPreview.mockResolvedValue({ previewId: "preview-1", success: true });
-    render(<PreviewList />);
+    renderList();
 
     openPreviewMenu();
     await waitFor(() =>
@@ -80,7 +89,7 @@ describe("PreviewList", () => {
   it("marks a disconnected preview starting after reconnect is accepted", async () => {
     usePreviewStore.getState().addStartingPreview(preview("disconnected"));
     reconnectWebPreview.mockResolvedValue({ previewId: "preview-1", success: true });
-    render(<PreviewList />);
+    renderList();
 
     openPreviewMenu();
     await waitFor(() =>

@@ -87,6 +87,39 @@ export {
   previewStateValues,
   tunnelProviderValues,
 } from "./schemas/web-preview.js";
+export {
+  DevicePreviewCapabilitySchema,
+  DevicePreviewInputSchema,
+  DevicePreviewOrientationSchema,
+  DevicePreviewPlatformSchema,
+  DevicePreviewStreamFlowSchema,
+  DevicePreviewStreamProfileSchema,
+  DevicePreviewStreamRegisterResponseSchema,
+  DevicePreviewStreamRegisterSchema,
+  DevicePreviewStreamServerMessageSchema,
+  DevicePreviewStreamStopReasonSchema,
+  DevicePreviewSummarySchema,
+  DevicePreviewTargetSchema,
+  DevicePreviewToolStatusSchema,
+  devicePreviewOrientationValues,
+  devicePreviewPlatformValues,
+  devicePreviewStreamStopReasonValues,
+} from "./schemas/device-preview.js";
+export type {
+  DevicePreviewCapability,
+  DevicePreviewInput,
+  DevicePreviewOrientation,
+  DevicePreviewPlatform,
+  DevicePreviewStreamFlow,
+  DevicePreviewStreamProfile,
+  DevicePreviewStreamRegister,
+  DevicePreviewStreamRegisterResponse,
+  DevicePreviewStreamServerMessage,
+  DevicePreviewStreamStopReason,
+  DevicePreviewSummary,
+  DevicePreviewTarget,
+  DevicePreviewToolStatus,
+} from "./schemas/device-preview.js";
 export type {
   PreviewSource,
   PreviewState,
@@ -205,6 +238,19 @@ export {
   fileStreamFrameHeaderLength,
 } from "./binary-frame.js";
 export type { DecodedBinaryFrame, DecodedFileStreamFrame } from "./binary-frame.js";
+
+export {
+  DEVICE_PREVIEW_FRAME_MAX_BYTES,
+  DEVICE_PREVIEW_HTTP_FRAME_HEADER_BYTES,
+  decodeDevicePreviewFrame,
+  decodeDevicePreviewHttpFrameHeader,
+  encodeDevicePreviewFrame,
+  encodeDevicePreviewHttpFrame,
+} from "./device-preview-frame.js";
+export type {
+  DecodedDevicePreviewFrame,
+  DecodedDevicePreviewHttpFrameHeader,
+} from "./device-preview-frame.js";
 
 export { decodeMuLawToPcm16, encodePcm16ToMuLaw } from "./voice-audio-codec.js";
 

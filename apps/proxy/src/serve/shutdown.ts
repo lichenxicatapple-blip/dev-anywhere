@@ -9,6 +9,8 @@ export interface ServeShutdownDeps {
   sessionManagerStopReaper: () => void;
   relayRouterDestroy: () => void;
   previewManagerShutdown?: () => Promise<void>;
+  devicePreviewManagerShutdown?: () => Promise<void>;
+  devicePreviewStreamClose?: () => void;
   hookServerClose: () => Promise<void>;
   relayConnectionClose: () => void;
   workerRegistryDestroyAll: () => void;
@@ -35,7 +37,12 @@ export function createServeShutdown(deps: ServeShutdownDeps): () => Promise<void
     // 把已 spawn 但还未 connect 的 worker 子进程收掉，否则进入 destroyAll 时这批子进程
     // 会在 timer 命中后失去 parent 引用变孤儿（只有 sock destroy，没人发 SIGTERM 给 worker）。
     deps.relayRouterDestroy();
-    await Promise.all([deps.hookServerClose(), deps.previewManagerShutdown?.()]);
+    deps.devicePreviewStreamClose?.();
+    await Promise.all([
+      deps.hookServerClose(),
+      deps.previewManagerShutdown?.(),
+      deps.devicePreviewManagerShutdown?.(),
+    ]);
     deps.relayConnectionClose();
     deps.workerRegistryDestroyAll();
     deps.hostedPtyRegistryDestroyAll();

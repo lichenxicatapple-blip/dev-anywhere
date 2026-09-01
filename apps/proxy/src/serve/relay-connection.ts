@@ -211,6 +211,13 @@ export class RelayConnection extends EventEmitter {
           this.startHeartbeat();
           this.flushQueue();
           if (relayVersion) this.emit("relay_version", relayVersion);
+          const connectionId =
+            typeof msg.connectionId === "string" &&
+            msg.connectionId.length > 0 &&
+            msg.connectionId.length <= 256
+              ? msg.connectionId
+              : undefined;
+          if (connectionId) this.emit("stream_connection", connectionId);
           this.emit("connected");
           return;
         }

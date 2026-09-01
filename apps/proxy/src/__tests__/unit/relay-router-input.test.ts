@@ -11,6 +11,7 @@ import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { RemoteFileUploadManager } from "#src/serve/remote-file-upload.js";
+import type { DevicePreviewManager } from "#src/serve/device-preview/device-preview-manager.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
 import type { HookProviderId, ProviderHookContext } from "#src/providers/index.js";
@@ -75,6 +76,7 @@ function createRouter(options: {
   remoteFileUploadManager?: ReturnType<typeof createRemoteFileUploadManagerFake>;
   findCodexActiveWriter?: (threadId: string) => { pid: number } | null;
   findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
+  devicePreviewManager?: DevicePreviewManager;
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
@@ -159,6 +161,7 @@ function createRouter(options: {
     voiceSummaryRunner: options.voiceSummaryRunner,
     findCodexActiveWriter: options.findCodexActiveWriter,
     findClosestAncestorPid: options.findClosestAncestorPid,
+    devicePreviewManager: options.devicePreviewManager,
   });
 }
 
@@ -166,6 +169,70 @@ describe("RelayRouter input routing", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+  });
+
+  it("routes device preview management messages to the isolated manager", () => {
+    const relaySend = vi.fn();
+    const list = vi.fn(() => ({ epoch: "device-epoch", revision: 0, previews: [] }));
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      devicePreviewManager: { list } as unknown as DevicePreviewManager,
+    });
+
+    router.handle({ type: "device_preview_list_request", requestId: "device-list-1" });
+
+    expect(list).toHaveBeenCalledOnce();
+    expect(JSON.parse(String(relaySend.mock.calls[0]?.[0]))).toMatchObject({
+      type: "device_preview_list_response",
+      requestId: "device-list-1",
+      epoch: "device-epoch",
+      previews: [],
+    });
+  });
+
+  it("routes Relay-owned device input revocation to the manager", () => {
+    const revokeInput = vi.fn();
+    const router = createRouter({
+      mode: "json",
+      devicePreviewManager: { revokeInput } as unknown as DevicePreviewManager,
+    });
+
+    router.handle({
+      type: "device_preview_input_revoke",
+      leaseId: "device-lease-1",
+      reason: "control_taken_over",
+    });
+
+    expect(revokeInput).toHaveBeenCalledWith("device-lease-1");
+  });
+
+  it("includes device preview capability in proxy_info through the manager", async () => {
+    const relaySend = vi.fn();
+    const inspectCapabilities = vi.fn(async () => ({
+      supported: true,
+      ios: { supported: true, available: true, interactive: true },
+      android: { supported: true, available: false, interactive: false, error: "missing" },
+    }));
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      devicePreviewManager: { inspectCapabilities } as unknown as DevicePreviewManager,
+    });
+
+    router.handle({ type: "proxy_info_request", requestId: "proxy-info-1", refreshPath: true });
+
+    await vi.waitFor(() => expect(relaySend).toHaveBeenCalledOnce());
+    expect(inspectCapabilities).toHaveBeenCalledWith(true);
+    expect(JSON.parse(String(relaySend.mock.calls[0]?.[0]))).toMatchObject({
+      type: "proxy_info",
+      requestId: "proxy-info-1",
+      devicePreview: {
+        supported: true,
+        ios: { available: true },
+        android: { available: false },
+      },
+    });
   });
 
   it("echoes accepted JSON user_input back through relay for other clients", () => {

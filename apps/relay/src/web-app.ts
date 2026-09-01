@@ -13,6 +13,7 @@ const RELAY_ROUTE_ROOTS = new Set([
   "/fonts",
   "/health",
   "/proxy",
+  "/proxy-stream",
   "/status",
   "/voice",
 ]);
