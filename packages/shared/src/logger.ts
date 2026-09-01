@@ -104,6 +104,7 @@ function pruneOldLogs(
 // 接口，没有 fd / flushSync / once，所以这里手写一个结构类型用于 flushLogger）。
 interface SonicLikeDestination {
   fd?: number;
+  _writing?: boolean;
   flushSync?: () => void;
   once?: (event: string, cb: (...args: unknown[]) => void) => void;
 }
@@ -215,6 +216,24 @@ export async function flushLogger(logger: pino.Logger, timeoutMs = 200): Promise
       });
     });
     if (!opened) return;
+  }
+
+  // SonicBoom emits `ready` before it starts writing data queued while the file was opening.
+  // Calling flushSync during that in-flight async write only fsyncs the still-empty file. Wait
+  // for `drain` first, then synchronously flush anything that was queued behind that write.
+  if (dest._writing) {
+    const drained = await new Promise<boolean>((resolve) => {
+      const timer = setTimeout(() => resolve(false), timeoutMs);
+      dest.once?.("drain", () => {
+        clearTimeout(timer);
+        resolve(true);
+      });
+      dest.once?.("error", () => {
+        clearTimeout(timer);
+        resolve(false);
+      });
+    });
+    if (!drained) return;
   }
 
   try {
