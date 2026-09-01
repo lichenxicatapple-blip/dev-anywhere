@@ -12,6 +12,11 @@ on:
         description: Existing vX.Y.Z tag to publish
         required: true
         type: string
+      publish_npm:
+        description: Publish npm packages (disable when recovering images for an existing release)
+        required: true
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -48,6 +53,24 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: ${{ needs.resolve-release.outputs.tag }}
+
+      - name: Normalize legacy Docker font asset path
+        run: |
+          node <<'NODE'
+          const fs = require("node:fs");
+          const dockerfile = "apps/relay/Dockerfile";
+          const legacy = "COPY apps/proxy/assets/fonts/ apps/relay/assets/fonts/";
+          const corrected = "COPY apps/proxy/assets/fonts/ apps/proxy/assets/fonts/";
+          let contents = fs.readFileSync(dockerfile, "utf8");
+          if (contents.includes(legacy)) {
+            contents = contents.replace(legacy, corrected);
+            fs.writeFileSync(dockerfile, contents);
+            console.log("Normalized legacy Relay Dockerfile font asset path");
+          }
+          if (!contents.includes(corrected)) {
+            throw new Error("Relay Dockerfile does not copy the font source directory");
+          }
+          NODE
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
@@ -112,24 +135,30 @@ jobs:
       NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
     steps:
       - uses: actions/checkout@v4
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
         with:
           ref: ${{ needs.resolve-release.outputs.tag }}
 
       - uses: pnpm/action-setup@v4
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
         with:
           version: 9
 
       - uses: actions/setup-node@v4
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
         with:
           node-version: "22.22.2"
           cache: pnpm
           registry-url: "https://registry.npmjs.org"
 
-      - run: pnpm install --frozen-lockfile
+      - if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
+        run: pnpm install --frozen-lockfile
 
-      - run: pnpm build
+      - if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
+        run: pnpm build
 
       - name: Verify package versions
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
         env:
           RELEASE_VERSION: ${{ needs.resolve-release.outputs.version }}
         run: |
@@ -151,12 +180,14 @@ jobs:
           NODE
 
       - name: Verify npm auth
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
         run: |
           npm whoami
           npm owner ls @dev-anywhere/proxy
           npm owner ls @dev-anywhere/relay
 
       - name: Publish @dev-anywhere/relay
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
         run: |
           VERSION="${{ needs.resolve-release.outputs.version }}"
           if npm view "@dev-anywhere/relay@$VERSION" version >/dev/null 2>&1; then
@@ -166,6 +197,7 @@ jobs:
           fi
 
       - name: Publish @dev-anywhere/proxy
+        if: ${{ github.event_name != 'workflow_dispatch' || inputs.publish_npm }}
         run: |
           VERSION="${{ needs.resolve-release.outputs.version }}"
           if npm view "@dev-anywhere/proxy@$VERSION" version >/dev/null 2>&1; then
@@ -178,13 +210,13 @@ jobs:
         run: |
           VERSION="${{ needs.resolve-release.outputs.version }}"
           for pkg in @dev-anywhere/proxy @dev-anywhere/relay; do
-            for attempt in $(seq 1 12); do
+            for attempt in $(seq 1 36); do
               published="$(npm view "$pkg@$VERSION" version 2>/dev/null || true)"
               if [ "$published" = "$VERSION" ]; then
                 echo "$pkg@$VERSION is available on npm"
                 break
               fi
-              if [ "$attempt" = "12" ]; then
+              if [ "$attempt" = "36" ]; then
                 echo "ERROR: $pkg@$VERSION is not available on npm" >&2
                 exit 1
               fi
