@@ -13,6 +13,7 @@ import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
 import type { RemoteFileUploadManager } from "#src/serve/remote-file-upload.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
+import type { HookProviderId, ProviderHookContext } from "#src/providers/index.js";
 import { sessionPaths, tildify } from "#src/common/paths.js";
 import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
 import { WorkerStartupError } from "#src/serve/worker-registry.js";
@@ -57,10 +58,14 @@ function createRouter(options: {
   workerTerminateProcess?: (sessionId: string) => boolean;
   workerTakePendingNativeSession?: (
     sessionId: string,
-  ) => { provider: "claude" | "codex"; sessionId: string } | undefined;
+  ) => { provider: "claude" | "codex" | "kimi"; sessionId: string } | undefined;
   permissionBroker?: PermissionBroker;
   agentStatusRegistry?: AgentStatusRegistry;
   cleanupHookContext?: (sessionId: string) => void;
+  createHookContext?: (sessionId: string, provider: HookProviderId) => ProviderHookContext;
+  pushCommandList?: ReturnType<typeof vi.fn>;
+  handleSessionResourcesRequest?: ReturnType<typeof vi.fn>;
+  controlCleanup?: ReturnType<typeof vi.fn>;
   hostedStart?: (options: unknown) => number;
   hostedAbortStartup?: (sessionId: string) => boolean;
   terminalWorkerStart?: (options: unknown) => number;
@@ -108,8 +113,10 @@ function createRouter(options: {
         : undefined,
     }),
     controlHandlers: {
-      pushCommandList: vi.fn(),
+      pushCommandList: options.pushCommandList ?? vi.fn(),
       pushFileTree: vi.fn(),
+      handleSessionResourcesRequest: options.handleSessionResourcesRequest ?? vi.fn(),
+      cleanup: options.controlCleanup ?? vi.fn(),
     } as never,
     relayConnection: (options.relayConnection ?? createRelayConnectionFake()).relayConnection,
     relaySend: options.relaySend ?? vi.fn(),
@@ -130,13 +137,15 @@ function createRouter(options: {
     jsonObserver: {
       onTurnStart: options.jsonTurnStart ?? vi.fn(),
     } as never,
-    createHookContext: () => ({
-      provider: "claude",
-      sessionId: "pending",
-      hookUrl: "http://127.0.0.1:1/hook",
-      marker: "marker",
-      token: "token",
-    }),
+    createHookContext:
+      options.createHookContext ??
+      (() => ({
+        provider: "claude" as const,
+        sessionId: "pending",
+        hookUrl: "http://127.0.0.1:1/hook",
+        marker: "marker",
+        token: "token",
+      })),
     cleanupHookContext: options.cleanupHookContext ?? vi.fn(),
     permissionBroker: options.permissionBroker ?? new PermissionBroker(),
     hookEventRouter: {} as never,
@@ -365,6 +374,7 @@ describe("RelayRouter input routing", () => {
     const relaySend = vi.fn();
     const workerTerminateProcess = vi.fn(() => true);
     const cleanupHookContext = vi.fn();
+    const controlCleanup = vi.fn();
     const permissionBroker = new PermissionBroker();
     const agentStatusRegistry = new AgentStatusRegistry();
     let pendingId = "";
@@ -395,6 +405,7 @@ describe("RelayRouter input routing", () => {
       workerConnect: vi.fn(async () => null),
       workerTerminateProcess,
       cleanupHookContext,
+      controlCleanup,
       permissionBroker,
       agentStatusRegistry,
     });
@@ -417,6 +428,7 @@ describe("RelayRouter input routing", () => {
     }
     expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
     expect(cleanupHookContext).toHaveBeenCalledTimes(1);
+    expect(controlCleanup).toHaveBeenCalledTimes(1);
     expect(permissionBroker.listSession(pendingId)).toEqual([]);
     expect(agentStatusRegistry.get(pendingId)).toBeNull();
     expect(existsSync(sessionPaths(pendingId).dir)).toBe(false);
@@ -613,7 +625,6 @@ describe("RelayRouter input routing", () => {
         listSessions: () => [managed],
       } as unknown as SessionManager,
     });
-
     router.handle({
       type: "session_create",
       requestId: "codex-managed",
@@ -665,7 +676,6 @@ describe("RelayRouter input routing", () => {
         listSessions: () => [managed],
       } as unknown as SessionManager,
     });
-
     router.handle({
       type: "session_create",
       requestId: "codex-managed-by-process-tree",
@@ -891,6 +901,212 @@ describe("RelayRouter input routing", () => {
       provider: "codex",
       cwd: "/tmp",
       permissionMode: "bypassPermissions",
+    });
+  });
+
+  it("creates Kimi as a hookless hosted PTY", () => {
+    const relaySend = vi.fn();
+    const hostedStart = vi.fn((_options: unknown) => 1234);
+    const createHookContext = vi.fn();
+    const pushCommandList = vi.fn();
+    const router = createRouter({
+      mode: "pty",
+      relaySend,
+      hostedStart,
+      createHookContext,
+      pushCommandList,
+      sessionManager: {
+        listSessions: () => [],
+        createSession: vi.fn(
+          (
+            _mode: unknown,
+            cwd: string,
+            pid: number,
+            name: string | undefined,
+            id: string,
+            provider: "kimi",
+          ) => ({
+            id,
+            mode: "pty",
+            provider,
+            ptyOwner: "proxy-hosted",
+            state: SessionState.IDLE,
+            cwd,
+            pid,
+            createdAt: 1,
+            updatedAt: 1,
+            name,
+          }),
+        ),
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-kimi-pty",
+      cwd: "/tmp",
+      provider: "kimi",
+      mode: "pty",
+      permissionMode: "plan",
+    });
+
+    expect(createHookContext).not.toHaveBeenCalled();
+    expect(pushCommandList).not.toHaveBeenCalled();
+    expect(hostedStart).toHaveBeenCalledWith(
+      expect.objectContaining({ provider: "kimi", permissionMode: "plan", hook: undefined }),
+    );
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-kimi-pty",
+      provider: "kimi",
+      mode: "pty",
+    });
+  });
+
+  it("creates Kimi as a hookless ACP JSON session", async () => {
+    const relaySend = vi.fn();
+    const workerSpawn = vi.fn(() => 1234);
+    const createHookContext = vi.fn();
+    const pushCommandList = vi.fn();
+    const controlCleanup = vi.fn();
+    const setHistorySessionId = vi.fn();
+    const createSession = vi.fn(
+      (
+        _mode: unknown,
+        cwd: string,
+        pid: number,
+        name: string | undefined,
+        id: string,
+        provider: "kimi",
+      ) => ({
+        id,
+        mode: "json" as const,
+        provider,
+        state: SessionState.IDLE,
+        cwd,
+        pid,
+        createdAt: 1,
+        updatedAt: 1,
+        name,
+        nameLocked: false,
+      }),
+    );
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerSpawn,
+      workerConnect: async () => createWritableSocketFake().socket,
+      workerWaitForReady: async () => {},
+      workerTakePendingNativeSession: () => ({
+        provider: "kimi",
+        sessionId: "session_kimi_native",
+      }),
+      createHookContext,
+      pushCommandList,
+      controlCleanup,
+      sessionManager: {
+        listSessions: () => [],
+        createSession,
+        setHistorySessionId,
+      } as unknown as SessionManager,
+    });
+    const pushHistoryMessages = vi
+      .spyOn(
+        (
+          router as unknown as {
+            sessionCreateHandler: {
+              pushHistoryMessages: (sessionId: string, resumeSessionId: string) => void;
+            };
+          }
+        ).sessionCreateHandler,
+        "pushHistoryMessages",
+      )
+      .mockImplementation(() => {});
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-kimi-json",
+      cwd: "/tmp",
+      provider: "kimi",
+      mode: "json",
+      resumeSessionId: "session_kimi_native",
+    });
+
+    await vi.waitFor(() => expect(relaySend).toHaveBeenCalled());
+
+    expect(workerSpawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        provider: "kimi",
+        hook: undefined,
+        resumeSessionId: "session_kimi_native",
+      }),
+    );
+    expect(createHookContext).not.toHaveBeenCalled();
+    expect(pushCommandList).not.toHaveBeenCalled();
+    expect(controlCleanup).not.toHaveBeenCalled();
+    expect(setHistorySessionId).toHaveBeenCalledWith(expect.any(String), "session_kimi_native");
+    expect(pushHistoryMessages).toHaveBeenCalledWith(expect.any(String), "session_kimi_native");
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-kimi-json",
+      provider: "kimi",
+      mode: "json",
+    });
+  });
+
+  it("rejects Claude-only permission modes for Kimi before spawning a PTY", () => {
+    const relaySend = vi.fn();
+    const hostedStart = vi.fn((_options: unknown) => 1234);
+    const router = createRouter({ mode: "pty", relaySend, hostedStart });
+
+    router.handle({
+      type: "session_create",
+      requestId: "create-kimi-invalid-permission",
+      cwd: "/tmp",
+      provider: "kimi",
+      mode: "pty",
+      permissionMode: "acceptEdits",
+    });
+
+    expect(hostedStart).not.toHaveBeenCalled();
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-kimi-invalid-permission",
+      errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+    });
+  });
+
+  it("requests Kimi file resources without Claude command discovery", () => {
+    const handleSessionResourcesRequest = vi.fn();
+    const router = createRouter({
+      mode: "pty",
+      handleSessionResourcesRequest,
+      sessionManager: {
+        getSession: vi.fn(() => ({
+          id: "kimi-1",
+          mode: "pty",
+          provider: "kimi",
+          state: SessionState.IDLE,
+          cwd: "/tmp/project",
+          pid: 1234,
+          createdAt: 1,
+          updatedAt: 1,
+        })),
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_resources_request",
+      requestId: "resources-kimi-1",
+      sessionId: "kimi-1",
+    });
+
+    expect(handleSessionResourcesRequest).toHaveBeenCalledWith({
+      sessionId: "kimi-1",
+      requestId: "resources-kimi-1",
+      workDir: "/tmp/project",
+      includeCommands: false,
     });
   });
 

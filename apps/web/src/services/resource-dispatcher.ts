@@ -5,11 +5,17 @@ import type { RelayControlMessage } from "@dev-anywhere/shared";
 import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";
 import { registerDispatcher } from "./dispatcher-registry";
+import type { InboundMessage } from "./relay-client";
 
 function handleCommandListPush(
   msg: Extract<RelayControlMessage, { type: "command_list_push" }>,
 ): void {
-  useCommandStore.getState().setCommands(msg.commands);
+  const store = useCommandStore.getState();
+  if (msg.sessionId !== undefined) {
+    store.setSessionCommands(msg.sessionId, msg.commands);
+    return;
+  }
+  store.setCommands(msg.commands);
 }
 
 function handleDirListResponse(
@@ -37,33 +43,35 @@ function applyFileTreeGroups(
 function handleSessionResourcesResponse(
   msg: Extract<RelayControlMessage, { type: "session_resources_response" }>,
 ): void {
-  useCommandStore.getState().setCommands(msg.commands);
+  useCommandStore.getState().setSessionCommands(msg.sessionId, msg.commands);
   useFileStore.getState().clearTree();
   applyFileTreeGroups(msg.groups);
 }
 
+export function dispatchResourceMessage(msg: InboundMessage): void {
+  switch (msg.type) {
+    case "command_list_push":
+      handleCommandListPush(msg);
+      break;
+    case "dir_list_response":
+      handleDirListResponse(msg);
+      break;
+    case "file_tree_push":
+      handleFileTreePush(msg);
+      break;
+    case "session_resources_response":
+      if (msg.requestId) break;
+      handleSessionResourcesResponse(msg);
+      break;
+    case "proxy_info":
+      useFileStore.getState().setHomePath(msg.homePath);
+      useFileStore.getState().setAgentCli(msg.agentCli);
+      break;
+    default:
+      break;
+  }
+}
+
 export function registerResourceDispatcher(): () => void {
-  return registerDispatcher("registerResourceDispatcher", () => (msg) => {
-    switch (msg.type) {
-      case "command_list_push":
-        handleCommandListPush(msg);
-        break;
-      case "dir_list_response":
-        handleDirListResponse(msg);
-        break;
-      case "file_tree_push":
-        handleFileTreePush(msg);
-        break;
-      case "session_resources_response":
-        if (msg.requestId) break;
-        handleSessionResourcesResponse(msg);
-        break;
-      case "proxy_info":
-        useFileStore.getState().setHomePath(msg.homePath);
-        useFileStore.getState().setAgentCli(msg.agentCli);
-        break;
-      default:
-        break;
-    }
-  });
+  return registerDispatcher("registerResourceDispatcher", () => dispatchResourceMessage);
 }

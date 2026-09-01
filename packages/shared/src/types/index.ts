@@ -6,6 +6,8 @@ export type {
   ThinkingPayload,
 } from "../schemas/chat.js";
 export type {
+  ApprovalOptionKind,
+  ApprovalOption,
   ToolUseRequestPayload,
   ToolApprovePayload,
   ToolDenyPayload,

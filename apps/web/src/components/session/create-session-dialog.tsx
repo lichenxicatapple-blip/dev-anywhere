@@ -29,6 +29,7 @@ import { AgentCliPicker } from "./agent-cli-picker";
 import { BypassPermissionWarning } from "./bypass-permission-warning";
 import {
   CODEX_PERMISSION_MODE_OPTIONS,
+  KIMI_PERMISSION_MODE_OPTIONS,
   normalizePermissionModeForProvider,
   PERMISSION_MODE_OPTIONS,
   type PermissionMode,
@@ -131,7 +132,11 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   }
 
   const permissionOptions =
-    provider === "codex" ? CODEX_PERMISSION_MODE_OPTIONS : PERMISSION_MODE_OPTIONS;
+    provider === "codex"
+      ? CODEX_PERMISSION_MODE_OPTIONS
+      : provider === "kimi"
+        ? KIMI_PERMISSION_MODE_OPTIONS
+        : PERMISSION_MODE_OPTIONS;
   const selectedStatus = providerStatus(provider, agentCli);
   const createDisabled = submitting || savingCliPath || selectedStatus.disabled;
 

@@ -1,11 +1,29 @@
 import { z } from "zod";
 import { IdSchema } from "./id.js";
 
+export const ApprovalOptionKindSchema = z.enum([
+  "allow_once",
+  "allow_always",
+  "reject_once",
+  "reject_always",
+]);
+
+export type ApprovalOptionKind = z.infer<typeof ApprovalOptionKindSchema>;
+
+export const ApprovalOptionSchema = z.object({
+  optionId: IdSchema,
+  name: z.string().min(1),
+  kind: ApprovalOptionKindSchema,
+});
+
+export type ApprovalOption = z.infer<typeof ApprovalOptionSchema>;
+
 // 工具调用请求
 export const ToolUseRequestPayloadSchema = z.object({
   toolName: z.string(),
   toolId: IdSchema,
   parameters: z.record(z.string(), z.unknown()),
+  options: z.array(ApprovalOptionSchema).optional(),
 });
 
 export type ToolUseRequestPayload = z.infer<typeof ToolUseRequestPayloadSchema>;
@@ -14,6 +32,7 @@ export type ToolUseRequestPayload = z.infer<typeof ToolUseRequestPayloadSchema>;
 export const ToolApprovePayloadSchema = z.object({
   toolId: IdSchema,
   whitelistTool: z.boolean().optional(),
+  optionId: IdSchema.optional(),
 });
 
 export type ToolApprovePayload = z.infer<typeof ToolApprovePayloadSchema>;
@@ -22,6 +41,7 @@ export type ToolApprovePayload = z.infer<typeof ToolApprovePayloadSchema>;
 export const ToolDenyPayloadSchema = z.object({
   toolId: IdSchema,
   reason: z.string().optional(),
+  optionId: IdSchema.optional(),
 });
 
 export type ToolDenyPayload = z.infer<typeof ToolDenyPayloadSchema>;

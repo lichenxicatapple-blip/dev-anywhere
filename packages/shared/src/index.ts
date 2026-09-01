@@ -8,12 +8,16 @@ export {
 } from "./schemas/chat.js";
 export type { UserInputPayload, AssistantMessagePayload, ThinkingPayload } from "./schemas/chat.js";
 export {
+  ApprovalOptionKindSchema,
+  ApprovalOptionSchema,
   ToolUseRequestPayloadSchema,
   ToolApprovePayloadSchema,
   ToolDenyPayloadSchema,
   ToolResultPayloadSchema,
 } from "./schemas/tool.js";
 export type {
+  ApprovalOptionKind,
+  ApprovalOption,
   ToolUseRequestPayload,
   ToolApprovePayload,
   ToolDenyPayload,

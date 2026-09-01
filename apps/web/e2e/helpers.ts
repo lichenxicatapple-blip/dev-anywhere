@@ -137,7 +137,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
       name?: string;
       state: "idle" | "working" | "waiting_approval" | "error" | "terminated";
       mode: "pty" | "json";
-      provider: "claude" | "codex";
+      provider: "claude" | "codex" | "kimi";
       ptyOwner?: "local-terminal" | "proxy-hosted";
       lastActive: number;
       cwd?: string;
@@ -232,6 +232,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
     const events: string[] = [];
     let holdConnections = false;
     let proxyOnlineState = true;
+    let proxyRemovedState = false;
     let proxySelectDelayMs = 0;
     let sessionListDelayMs = 0;
     let sessionHistoryDelayMs = 0;
@@ -488,6 +489,39 @@ export async function installFakeRelay(page: Page): Promise<void> {
           case "proxy_list_request":
             this.emitProxyList(String(msg.requestId ?? ""));
             break;
+          case "proxy_remove":
+            if (proxyOnlineState && !proxyRemovedState) {
+              this.emitJson({
+                type: "proxy_remove_response",
+                requestId: msg.requestId,
+                proxyId: String(msg.proxyId),
+                success: false,
+                errorCode: "PROXY_ONLINE",
+                error: "开发机仍在线",
+              });
+              break;
+            }
+            if (proxyRemovedState) {
+              this.emitJson({
+                type: "proxy_remove_response",
+                requestId: msg.requestId,
+                proxyId: String(msg.proxyId),
+                success: false,
+                errorCode: "PROXY_NOT_FOUND",
+                error: "开发机不存在",
+              });
+              break;
+            }
+            proxyRemovedState = true;
+            this.emitJson({
+              type: "proxy_remove_response",
+              requestId: msg.requestId,
+              proxyId: String(msg.proxyId),
+              success: true,
+            });
+            this.emitJson({ type: "proxy_removed", proxyId: String(msg.proxyId) });
+            this.emitProxyList();
+            break;
           case "proxy_select":
             setTimeout(() => {
               this.emitJson({
@@ -561,6 +595,10 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 codex: {
                   available: true,
                   command: "/home/dev/.local/bin/codex",
+                },
+                kimi: {
+                  available: true,
+                  command: "/home/dev/.local/bin/kimi",
                 },
               },
             });
@@ -728,7 +766,8 @@ export async function installFakeRelay(page: Page): Promise<void> {
               this.emitJson(envelope("session_list", "system", { sessions }));
               break;
             }
-            const provider = msg.provider === "codex" ? "codex" : "claude";
+            const provider =
+              msg.provider === "codex" || msg.provider === "kimi" ? msg.provider : "claude";
             const mode = msg.mode === "json" ? "json" : "pty";
             const cwd = String(msg.cwd ?? "");
             const cwdKey = cwd.replace(/\/+$/, "") || "/";
@@ -923,14 +962,16 @@ export async function installFakeRelay(page: Page): Promise<void> {
         this.emitJson({
           type: "proxy_list_response",
           requestId,
-          proxies: [
-            {
-              proxyId: "proxy-1",
-              name: "Local Mac",
-              online: proxyOnlineState,
-              sessions: sessions.map((s) => s.sessionId),
-            },
-          ],
+          proxies: proxyRemovedState
+            ? []
+            : [
+                {
+                  proxyId: "proxy-1",
+                  name: "Local Mac",
+                  online: proxyOnlineState,
+                  sessions: sessions.map((s) => s.sessionId),
+                },
+              ],
         });
       }
 
@@ -1039,8 +1080,9 @@ export async function installFakeRelay(page: Page): Promise<void> {
         relayLivenessPongEnabled = enabled;
       },
       setProxyOnline(online: boolean) {
-        if (proxyOnlineState === online) return;
+        if (proxyOnlineState === online && !proxyRemovedState) return;
         proxyOnlineState = online;
+        if (online) proxyRemovedState = false;
         const socket = window.__devAnywhereE2E!.socket as FakeRelayWebSocket | null;
         if (!socket) return;
         socket.emitJson({

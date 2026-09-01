@@ -40,6 +40,50 @@ describe("RelayControlSchema", () => {
     expect(ClientToProxyRelayControlTypes.has("dir_list_response")).toBe(false);
   });
 
+  it("preserves dynamic approval options and exact decisions", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "pending_approvals_push",
+        sessionId: "session-1",
+        approvals: [
+          {
+            requestId: "request-1",
+            toolName: "AskUserQuestion",
+            input: { question: "Choose an action" },
+            options: [
+              { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+              { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+            ],
+          },
+        ],
+      }),
+    ).toMatchObject({
+      approvals: [
+        {
+          options: [
+            { optionId: "allow-once", name: "Allow once", kind: "allow_once" },
+            { optionId: "reject-once", name: "Reject", kind: "reject_once" },
+          ],
+        },
+      ],
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "tool_approve",
+        sessionId: "session-1",
+        payload: { toolId: "request-1", optionId: "allow-once" },
+      }),
+    ).toMatchObject({ payload: { optionId: "allow-once" } });
+    expect(
+      RelayControlSchema.parse({
+        type: "tool_deny",
+        sessionId: "session-1",
+        payload: { toolId: "request-1", optionId: "reject-once" },
+      }),
+    ).toMatchObject({ payload: { optionId: "reject-once" } });
+  });
+
   it("parses relay-local voice config controls without routing them to proxy", () => {
     expect(
       RelayControlSchema.parse({
@@ -461,6 +505,68 @@ describe("RelayControlSchema", () => {
     expect(() => RelayControlSchema.parse({ type: "proxy_select", proxyId: "" })).toThrow();
   });
 
+  it("parses proxy_remove request and success/error responses", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_remove",
+        requestId: "remove-1",
+        proxyId: "proxy-1",
+      }),
+    ).toEqual({
+      type: "proxy_remove",
+      requestId: "remove-1",
+      proxyId: "proxy-1",
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_remove_response",
+        requestId: "remove-1",
+        proxyId: "proxy-1",
+        success: true,
+      }),
+    ).toMatchObject({ success: true, proxyId: "proxy-1" });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_remove_response",
+        requestId: "remove-2",
+        proxyId: "proxy-2",
+        success: false,
+        errorCode: "PROXY_ONLINE",
+        error: "开发机仍在线",
+      }),
+    ).toMatchObject({
+      success: false,
+      errorCode: "PROXY_ONLINE",
+      error: "开发机仍在线",
+    });
+
+    expect(RelayControlSchema.parse({ type: "proxy_removed", proxyId: "proxy-1" })).toEqual({
+      type: "proxy_removed",
+      proxyId: "proxy-1",
+    });
+    expect(isProxyToClientRelayControlType("proxy_removed")).toBe(false);
+    expect(isProxyToClientRelayControlType("proxy_remove_response")).toBe(false);
+    expect(isClientToProxyRelayControlType("proxy_remove")).toBe(false);
+    expect(isClientToProxyRelayControlType("proxy_remove_response")).toBe(false);
+    expect(isClientToProxyRelayControlType("proxy_removed")).toBe(false);
+  });
+
+  it("requires requestId and proxyId when removing a proxy", () => {
+    expect(() => RelayControlSchema.parse({ type: "proxy_remove", proxyId: "proxy-1" })).toThrow();
+    expect(() =>
+      RelayControlSchema.parse({ type: "proxy_remove", requestId: "remove-1" }),
+    ).toThrow();
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "proxy_remove",
+        requestId: "remove-1",
+        proxyId: "",
+      }),
+    ).toThrow();
+  });
+
   it("rejects client_register with empty clientId", () => {
     expect(() => RelayControlSchema.parse({ type: "client_register", clientId: "" })).toThrow();
   });
@@ -665,7 +771,22 @@ describe("RelayControlSchema", () => {
       expect(result.commands).toHaveLength(2);
       expect(result.commands[0].argumentHint).toBeUndefined();
       expect(result.commands[1].argumentHint).toBe("[topic]");
+      expect(result.sessionId).toBeUndefined();
     }
+  });
+
+  it("parses a session-scoped command_list_push", () => {
+    const result = RelayControlSchema.parse({
+      type: "command_list_push",
+      sessionId: "session-kimi-1",
+      commands: [{ name: "/init", description: "Initialize", source: "kimi" }],
+    });
+
+    expect(result).toMatchObject({
+      type: "command_list_push",
+      sessionId: "session-kimi-1",
+      commands: [{ name: "/init" }],
+    });
   });
 
   it("parses dir_list_response with entries and path", () => {
@@ -714,6 +835,24 @@ describe("RelayControlSchema", () => {
         codex: { available: false, error: "codex not found" },
       },
     });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_info",
+        requestId: "info-kimi",
+        homePath: "/home/dev",
+        agentCli: {
+          claude: { available: true, command: "/usr/local/bin/claude" },
+          codex: { available: true, command: "/usr/local/bin/codex" },
+          kimi: { available: true, command: "/home/dev/.kimi-code/bin/kimi" },
+        },
+      }),
+    ).toMatchObject({
+      type: "proxy_info",
+      agentCli: {
+        kimi: { available: true, command: "/home/dev/.kimi-code/bin/kimi" },
+      },
+    });
   });
 
   it("parses agent CLI path update request/response", () => {
@@ -749,6 +888,20 @@ describe("RelayControlSchema", () => {
         claude: { available: true, command: "/home/dev/.local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
       },
+    });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "agent_cli_config_update",
+        requestId: "agent-cli-kimi",
+        provider: "kimi",
+        path: "/home/dev/.kimi-code/bin/kimi",
+      }),
+    ).toEqual({
+      type: "agent_cli_config_update",
+      requestId: "agent-cli-kimi",
+      provider: "kimi",
+      path: "/home/dev/.kimi-code/bin/kimi",
     });
   });
 

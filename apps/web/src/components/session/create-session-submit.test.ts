@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from "vitest";
 import {
   CODEX_PERMISSION_MODE_OPTIONS,
   extractMissingCwd,
+  KIMI_PERMISSION_MODE_OPTIONS,
   normalizePermissionModeForProvider,
   PERMISSION_MODE_OPTIONS,
   providerStatus,
@@ -14,20 +15,31 @@ import {
 const agentCli = {
   claude: { available: true, command: "/usr/local/bin/claude" },
   codex: { available: true, command: "/usr/local/bin/codex" },
+  kimi: { available: true, command: "/usr/local/bin/kimi" },
 };
 
 describe("create-session submit model", () => {
   it("keeps provider labels and permission options centralized for the dialog", () => {
     expect(PROVIDER_LABEL.claude).toBe("Claude Code");
+    expect(PROVIDER_LABEL.kimi).toBe("Kimi Code");
     expect(PERMISSION_MODE_OPTIONS.map((option) => option.value)).toContain("acceptEdits");
     expect(CODEX_PERMISSION_MODE_OPTIONS.map((option) => option.value)).not.toContain(
       "acceptEdits",
     );
+    expect(KIMI_PERMISSION_MODE_OPTIONS).toEqual([
+      { value: "default", label: "手工审批" },
+      { value: "auto", label: "自动审批" },
+      { value: "plan", label: "只读规划" },
+      { value: "bypassPermissions", label: "全自动" },
+    ]);
   });
 
   it("normalizes unsupported Codex permission modes to on-request approval", () => {
     expect(normalizePermissionModeForProvider("codex", "acceptEdits")).toBe("auto");
     expect(normalizePermissionModeForProvider("claude", "acceptEdits")).toBe("acceptEdits");
+    expect(normalizePermissionModeForProvider("kimi", "acceptEdits")).toBe("default");
+    expect(normalizePermissionModeForProvider("kimi", "auto")).toBe("auto");
+    expect(normalizePermissionModeForProvider("kimi", "plan")).toBe("plan");
   });
 
   it("reports provider availability without requiring component render", () => {
@@ -38,6 +50,12 @@ describe("create-session submit model", () => {
         codex: { available: true, command: "/usr/local/bin/codex" },
       }),
     ).toEqual({ label: "未找到", disabled: true, title: "claude not found" });
+    expect(
+      providerStatus("kimi", {
+        claude: { available: true, command: "/usr/local/bin/claude" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+      }),
+    ).toEqual({ label: "未检测", disabled: true });
   });
 
   it("extracts missing cwd only from the structured path error", () => {
@@ -83,6 +101,44 @@ describe("create-session submit model", () => {
         },
       }),
     ).resolves.toEqual({ type: "relay_missing", message: "请先连接开发机" });
+  });
+
+  it("creates a Kimi ACP chat session", async () => {
+    const relay = {
+      createSession: vi.fn().mockResolvedValue({
+        type: "session_create_response",
+        sessionId: "kimi-json-1",
+        mode: "json",
+        provider: "kimi",
+      }),
+    };
+
+    await expect(
+      submitSessionCreate({
+        relay,
+        agentCli,
+        form: {
+          cwd: "/home/dev",
+          name: "",
+          mode: "json",
+          provider: "kimi",
+          permissionMode: "default",
+        },
+      }),
+    ).resolves.toEqual({
+      type: "success",
+      session: {
+        sessionId: "kimi-json-1",
+        state: "idle",
+        mode: "json",
+        provider: "kimi",
+      },
+      route: "/chat/kimi-json-1?mode=json",
+    });
+    expect(relay.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "json", provider: "kimi" }),
+      SESSION_CREATE_CLIENT_TIMEOUT_MS,
+    );
   });
 
   it("returns provider unavailable with the provider error", async () => {

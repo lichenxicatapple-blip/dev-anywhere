@@ -1,17 +1,20 @@
 import { serviceLogger } from "../common/logger.js";
-import type { HookProviderId } from "./hook-registry.js";
+import type { ApprovalOption, ProviderId } from "@dev-anywhere/shared";
 
 interface PermissionRequest {
   requestId: string;
   sessionId: string;
-  provider: HookProviderId;
+  provider: ProviderId;
   toolName: string;
   input: Record<string, unknown>;
+  options?: ApprovalOption[];
 }
 
 export interface PermissionDecision {
   behavior: "allow" | "deny";
   message?: string;
+  remember?: boolean;
+  optionId?: string;
 }
 
 interface PendingPermission extends PermissionRequest {
@@ -36,6 +39,7 @@ function snapshot(pending: PendingPermission): PendingPermissionView {
     source: pending.source,
     toolName: pending.toolName,
     input: pending.input,
+    ...(pending.options ? { options: pending.options } : {}),
     createdAt: pending.createdAt,
     ...(pending.deliveredAt !== undefined ? { deliveredAt: pending.deliveredAt } : {}),
   };

@@ -181,11 +181,69 @@ describe("control-messages: command list push", () => {
 
     const response = JSON.parse(sent[0]);
     expect(response.type).toBe("command_list_push");
+    expect(response.sessionId).toBe("sess-1");
     expect(Array.isArray(response.commands)).toBe(true);
     expect(response.commands.length).toBeGreaterThan(0);
     expect(response.commands[0]).toHaveProperty("name");
     expect(response.commands[0]).toHaveProperty("description");
     expect(response.commands[0]).toHaveProperty("source");
+  });
+});
+
+describe("control-messages: provider-aware session resources", () => {
+  it("returns files but no Claude commands when command discovery is disabled", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-kimi-resources-"));
+    await writeFile(join(tmpDir, "app.ts"), "");
+    const sent: string[] = [];
+    const handlers = createControlMessageHandlers(
+      (data) => sent.push(data),
+      createMockSessionManager(),
+    );
+
+    await handlers.handleSessionResourcesRequest({
+      sessionId: "kimi-1",
+      workDir: tmpDir,
+      includeCommands: false,
+    });
+
+    const response = JSON.parse(sent[0]);
+    expect(response.type).toBe("session_resources_response");
+    expect(response.commands).toEqual([]);
+    expect(response.groups[0]).toMatchObject({ path: tmpDir });
+    handlers.cleanup("kimi-1");
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns cached ACP commands when provider command discovery is disabled", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-kimi-commands-"));
+    const sent: string[] = [];
+    const handlers = createControlMessageHandlers(
+      (data) => sent.push(data),
+      createMockSessionManager(),
+    );
+    const commands = [
+      {
+        name: "/compact",
+        description: "Compact context",
+        argumentHint: "[instructions]",
+        source: "kimi",
+      },
+    ];
+    handlers.setProviderCommands("kimi-1", commands);
+
+    await handlers.handleSessionResourcesRequest({
+      sessionId: "kimi-1",
+      workDir: tmpDir,
+      includeCommands: false,
+    });
+
+    expect(JSON.parse(sent[0])).toMatchObject({
+      type: "session_resources_response",
+      sessionId: "kimi-1",
+      commands,
+    });
+    handlers.cleanup("kimi-1");
+    await rm(tmpDir, { recursive: true, force: true });
   });
 });
 
@@ -306,6 +364,35 @@ describe("control-messages: reinitializeOnReconnect", () => {
 
     // cleanup 定时器
     handlers.cleanup("active-1");
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("reconnects Kimi resources with cached ACP commands, not Claude commands", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-kimi-reinit-"));
+    await writeFile(join(tmpDir, "app.ts"), "");
+    const sent: string[] = [];
+    const handlers = createControlMessageHandlers(
+      (data) => sent.push(data),
+      createMockSessionManager([
+        { id: "kimi-1", provider: "kimi", state: SessionState.IDLE, cwd: tmpDir },
+      ]),
+    );
+
+    await handlers.pushFileTree("kimi-1", tmpDir);
+    handlers.setProviderCommands("kimi-1", [
+      { name: "/help", description: "Show Kimi help", source: "kimi" },
+    ]);
+    sent.length = 0;
+    await handlers.reinitializeOnReconnect();
+
+    const messages = sent.map((data) => JSON.parse(data));
+    expect(messages).toContainEqual({
+      type: "command_list_push",
+      sessionId: "kimi-1",
+      commands: [{ name: "/help", description: "Show Kimi help", source: "kimi" }],
+    });
+    expect(messages.some((message) => message.type === "file_tree_push")).toBe(true);
+    handlers.cleanup("kimi-1");
     await rm(tmpDir, { recursive: true, force: true });
   });
 });

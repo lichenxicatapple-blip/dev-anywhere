@@ -9,7 +9,7 @@
 - Node.js 20 或更高版本；CI 使用 Node.js 20；
 - pnpm 9，与 CI 保持一致；
 - macOS 或 Linux；
-- 可选：已经登录的 Claude Code、Codex，用于验证真实 coding agent 链路；
+- 可选：已经登录的 Claude Code、Codex、Kimi Code，用于验证真实 coding agent 链路；
 - 可选：`cloudflared`，用于验证 Quick Tunnel。
 
 安装 pnpm 和项目依赖：
@@ -81,6 +81,16 @@ pnpm --filter @dev-anywhere/proxy run dev -- \
   codex
 ```
 
+Kimi Code：
+
+```bash
+pnpm --filter @dev-anywhere/proxy run dev -- \
+  --profile local \
+  kimi
+```
+
+Kimi Code 同时接入 PTY 终端与 ACP 聊天链路：可以用上面的命令启动并接管终端，也可以在 Web 中新建终端或聊天会话。ACP 聊天测试应覆盖流式输出、工具调用与审批、取消当前回合，以及从历史会话恢复。
+
 测试 coding agent 创建流程时，不要让它修改当前仓库。可以在 Web 中选择临时目录，或者为终端命令指定一次性工作目录：
 
 ```bash
@@ -124,7 +134,7 @@ docs/       长期维护的中文文档和 README 媒体资源
 - `agentCli`
 - `logLevel`
 
-`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以指定 Claude Code、Codex 的绝对路径。
+`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin` 和 `kimiBin` 指定 Claude Code、Codex、Kimi Code 的绝对路径；`KIMI_BIN` 可以临时覆盖 `agentCli.kimiBin`。
 
 配置由 Zod schema 校验。新增字段时应同时修改 schema、默认配置、相关测试和用户文档。
 

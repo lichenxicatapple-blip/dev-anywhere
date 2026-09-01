@@ -1,4 +1,5 @@
-export type ProviderId = "claude" | "codex";
+export type ProviderId = "claude" | "codex" | "kimi";
+export type HookProviderId = "claude" | "codex";
 
 export interface ProviderCapabilities {
   readonly supportsHooks: boolean;
@@ -14,7 +15,7 @@ export interface ProviderCommand {
 }
 
 export interface ProviderHookContext {
-  readonly provider: ProviderId;
+  readonly provider: HookProviderId;
   readonly sessionId: string;
   readonly hookUrl: string;
   readonly marker: string;

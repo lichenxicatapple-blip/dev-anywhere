@@ -31,7 +31,7 @@ export function findExecutableCandidates(name: string, env: NodeJS.ProcessEnv): 
 export function resolveExecutable(
   name: string,
   env: NodeJS.ProcessEnv,
-  envVarName: "CLAUDE_BIN" | "CODEX_BIN",
+  envVarName: "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN",
   errorMessage: string,
 ): string {
   const custom = env[envVarName]?.trim();

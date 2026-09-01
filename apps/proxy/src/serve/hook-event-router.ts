@@ -3,21 +3,22 @@ import {
   serializeControl,
   SessionState,
   type AgentStatusPayload,
+  type ProviderId,
 } from "@dev-anywhere/shared";
 import { createScopedApprovalRequestIdFactory } from "../common/approval-request-id.js";
 import { getSeqCounterFor } from "../common/seq-counter.js";
 import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { AuthenticatedHookEvent } from "./hook-server.js";
-import type { HookProviderId } from "./hook-registry.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
+
+type AgentStatusEvent = Omit<AuthenticatedHookEvent, "provider"> & { provider: ProviderId };
 
 interface HookEventRouterDeps {
   relayConnection: RelayConnection;
   agentStatusRegistry: AgentStatusRegistry;
   changeSessionState: (sessionId: string, next: SessionState) => boolean;
-  // session.mode 决定审批解除后的转换目标：allow 后 PTY/JSON 都应回到 WORKING,
-  // deny 则直接回 IDLE。
+  // Retained for callers that also use the router for PTY hook providers.
   getSessionMode?: (sessionId: string) => "json" | "pty" | undefined;
   nextSeq?: (sessionId: string) => number;
 }
@@ -65,19 +66,28 @@ export class HookEventRouter {
 
   onPermissionResolved(
     sessionId: string,
-    provider: HookProviderId,
+    provider: ProviderId,
     requestId: string,
     outcome: "allow" | "deny",
-    context?: { toolName?: string; toolInput?: Record<string, unknown> },
+    context?: {
+      toolName?: string;
+      toolInput?: Record<string, unknown>;
+      hasPendingApprovals?: boolean;
+    },
   ): void {
-    // 状态机走向按 outcome 分两档（详见 session-manager.ts 的 JSON_TRANSITIONS / PTY_TRANSITIONS 边表）：
-    //  - deny：双通道都直接回 IDLE，本轮终结
-    //  - allow：CLI/worker 已收到 control_response，agent 会继续跑，先 → WORKING
-    if (outcome === "deny") {
-      this.deps.changeSessionState(sessionId, SessionState.IDLE);
-    } else {
-      this.deps.changeSessionState(sessionId, SessionState.WORKING);
-    }
+    // Hook providers end a denied turn, while ACP uses reject options for both a tool denial and
+    // interactive answers such as "Skip". Kimi continues the same prompt after either outcome;
+    // prompt result/error/interruption is the only authority that returns it to IDLE.
+    const waitsForApproval = context?.hasPendingApprovals === true;
+    const continuesPrompt = outcome === "allow" || provider === "kimi";
+    this.deps.changeSessionState(
+      sessionId,
+      waitsForApproval
+        ? SessionState.WAITING_APPROVAL
+        : continuesPrompt
+          ? SessionState.WORKING
+          : SessionState.IDLE,
+    );
     this.forwardAgentStatus(
       {
         sessionId,
@@ -86,7 +96,13 @@ export class HookEventRouter {
         requestId,
         payload: {},
       },
-      outcome === "allow" ? "tool_use" : "idle",
+      waitsForApproval
+        ? "waiting_permission"
+        : outcome === "allow"
+          ? "tool_use"
+          : provider === "kimi"
+            ? "thinking"
+            : "idle",
       {
         toolName: context?.toolName,
         toolInput: context?.toolInput,
@@ -137,7 +153,7 @@ export class HookEventRouter {
   }
 
   private forwardAgentStatus(
-    event: AuthenticatedHookEvent,
+    event: AgentStatusEvent,
     phase: AgentStatusPayload["phase"],
     extra?: Partial<AgentStatusPayload>,
   ): void {

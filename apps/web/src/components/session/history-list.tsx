@@ -2,7 +2,7 @@
 // 外层: section 整体默认折叠, 点 "历史会话" header 整体展开; 活跃会话优先占主视野
 // 内层: 展开后每个 projectDir group 默认再折叠, 点 chevron 才看到 HistoryRow
 // 点击行 → session_create + resumeSessionId; 同一时刻只允许 1 个 resume 在飞。
-// 刷新按钮: 通过 RelayClient 请求历史会话, proxy 会重新扫 ~/.claude/projects/
+// 刷新按钮: 通过 RelayClient 请求历史会话，proxy 会重新扫描各 Provider 的原生历史记录。
 // group 顺序沿用 historySessions 的 updatedAt 降序 (proxy 保证), 最近活跃的 project 在最上
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { useNavigate } from "react-router";
@@ -52,7 +52,7 @@ interface HistoryListProps {
 }
 
 type RestoreMode = "pty" | "json";
-type RestorePermissionMode = "default" | "auto" | "bypassPermissions";
+type RestorePermissionMode = "default" | "auto" | "plan" | "bypassPermissions";
 
 export function HistoryList({ now }: HistoryListProps) {
   const historySessions = useSessionStore((s) => s.historySessions);
@@ -455,7 +455,9 @@ function HistoryRestoreDialog({
   const [confirmingBypass, setConfirmingBypass] = useState(false);
   const destructiveConfirm = permissionMode === "bypassPermissions";
   const isDesktop = useMediaQuery("(min-width: 768px)");
-  const isCodex = session ? historySessionProvider(session) === "codex" : false;
+  const provider = session ? historySessionProvider(session) : null;
+  const isCodex = provider === "codex";
+  const isKimi = provider === "kimi";
 
   useEffect(() => {
     if (!open) setConfirmingBypass(false);
@@ -496,23 +498,44 @@ function HistoryRestoreDialog({
           {!isCodex && (
             <PermissionChoiceButton
               checked={permissionMode === "default"}
-              label="严格审批"
-              description="所有需要权限的操作都要确认。"
+              label={isKimi ? "手工审批" : "严格审批"}
+              description={
+                isKimi ? "工具调用会在 Web 中请求确认。" : "所有需要权限的操作都要确认。"
+              }
               disabled={submitting}
               onClick={() => onPermissionModeChange("default")}
             />
           )}
           <PermissionChoiceButton
             checked={permissionMode === "auto"}
-            label={isCodex ? "按需审批" : "自动判定"}
-            description={isCodex ? "Codex 在需要时请求确认。" : "交给 Agent CLI 的原生策略判断。"}
+            label={isCodex ? "按需审批" : isKimi ? "自动审批" : "自动判定"}
+            description={
+              isCodex
+                ? "Codex 在需要时请求确认。"
+                : isKimi
+                  ? "Kimi Code 使用原生 yolo 模式自动审批。"
+                  : "交给 Agent CLI 的原生策略判断。"
+            }
             disabled={submitting}
             onClick={() => onPermissionModeChange("auto")}
           />
+          {isKimi && (
+            <PermissionChoiceButton
+              checked={permissionMode === "plan"}
+              label="只读规划"
+              description="Kimi Code 使用只读规划模式。"
+              disabled={submitting}
+              onClick={() => onPermissionModeChange("plan")}
+            />
+          )}
           <PermissionChoiceButton
             checked={permissionMode === "bypassPermissions"}
-            label="跳过全部审批"
-            description="危险模式，会跳过工具审批和部分沙箱保护。"
+            label={isKimi ? "全自动" : "跳过全部审批"}
+            description={
+              isKimi
+                ? "危险模式，Kimi Code 将全自动执行。"
+                : "危险模式，会跳过工具审批和部分沙箱保护。"
+            }
             destructive
             disabled={submitting}
             onClick={() => onPermissionModeChange("bypassPermissions")}

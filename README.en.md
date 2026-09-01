@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./apps/web/public/brand-icon.svg" width="96" alt="DEV Anywhere logo">
   <h1>DEV Anywhere</h1>
-  <p>Create, control, and manage Claude Code, Codex, and Shell sessions on your development machine from a browser.</p>
+  <p>Create, control, and manage Claude Code, Codex, Kimi Code, and Shell sessions on your development machine from a browser.</p>
   <p>
     <a href="./README.md">中文</a>
     ·
@@ -22,9 +22,11 @@
 
 ## What it is
 
-DEV Anywhere is a self-hosted remote AI coding workspace. From a browser on any device, you can continue using Claude Code or Codex already running in a terminal on your remote development machine, resume a previous session, start a new coding agent remotely, or use a Shell directly.
+DEV Anywhere is a self-hosted remote AI coding workspace. From a browser on any device, you can continue using Claude Code, Codex, or Kimi Code already running in a terminal on your remote development machine, resume their previous sessions, start a new coding agent remotely, or use a Shell directly.
 
-To continue a locally started Claude Code or Codex session from the browser, add `dev-anywhere` before the original command. Apart from the prefix, the development experience stays exactly the same. The session also appears in the DEV Anywhere Web interface, so you can continue working anytime and anywhere. You can also create a new coding agent session directly from the Web.
+To continue a locally started Claude Code, Codex, or Kimi Code session from the browser, add `dev-anywhere` before the original command. Apart from the prefix, the development experience stays exactly the same. The session also appears in the DEV Anywhere Web interface, so you can continue working anytime and anywhere. You can also create a new coding agent session directly from the Web.
+
+Kimi Code supports both its native terminal interface and ACP chat sessions. ACP chat streams responses and tool calls, lets you allow once, always allow, or reject tool approvals in the Web, and supports cancelling the current turn and resuming historical sessions.
 
 DEV Anywhere is designed around remote coding agent workflows. In addition to reading coding agent output, you can track running state, handle tool approvals, upload or download files, search previous output, and receive browser notifications when work finishes. Your repositories, coding agent CLIs, and model credentials remain on the development machine.
 
@@ -43,7 +45,7 @@ node --version
 npm --version
 ```
 
-To create coding agent sessions, install and authenticate Claude Code or Codex first. You can skip this step if you only need Shell sessions.
+To create coding agent sessions, install and authenticate Claude Code, Codex, or Kimi Code first. You can skip this step if you only need Shell sessions.
 
 ### 1. Install the local Proxy
 
@@ -117,6 +119,8 @@ Edit `~/.dev-anywhere/config.json` with the Relay URL and the `RELAY_PROXY_TOKEN
 
 When using a domain, replace `url` with `wss://your-domain`. The deployment script prints a configuration example matching the selected public entry point.
 
+If `kimi` is not on the regular `PATH`, set `KIMI_BIN` for a temporary override or add `agentCli.kimiBin` with its absolute path to the top-level configuration.
+
 Connect the development machine to the Relay:
 
 ```bash
@@ -134,7 +138,7 @@ Once connected, use the browser to take over a coding agent session started in a
 
 #### Take over a development-machine terminal session from the browser
 
-When starting Claude Code or Codex, add `dev-anywhere` before the original command:
+When starting Claude Code, Codex, or Kimi Code, add `dev-anywhere` before the original command:
 
 For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. Apart from the `dev-anywhere` prefix, CLI arguments and the local terminal experience remain unchanged, and you can continue the same session later from the Web.
 
@@ -145,6 +149,7 @@ Locally started DEV Anywhere sessions connect to the Proxy automatically, so you
 ```bash
 dev-anywhere claude
 dev-anywhere codex
+dev-anywhere kimi
 ```
 
 **With Quick Tunnel**
@@ -154,11 +159,12 @@ Keep `dev-anywhere tunnel` running and use another terminal:
 ```bash
 dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
+dev-anywhere --profile quick-tunnel kimi
 ```
 
 #### Start a new session from the browser
 
-Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, or Shell in a directory on that machine.
+Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, Kimi Code, or Shell in a directory on that machine. Claude Code, Codex, and Kimi Code all offer terminal and chat modes; Kimi Code chat runs over ACP.
 
 ## Upgrading
 
@@ -197,17 +203,17 @@ For pinned versions or VPS container checks, see the [VPS deployment guide](./do
 
 ### Session management
 
-- Create Claude Code, Codex, and Shell sessions directly from the browser.
-- When creating a coding agent session, choose the working directory, terminal or chat interaction, and permission mode.
-- Attach sessions started from a local terminal, or resume historical sessions.
+- Create terminal or chat sessions for Claude Code, Codex, and Kimi Code, plus Shell sessions, directly from the browser.
+- Choose the working directory, terminal or chat interaction, and permission mode for Claude Code, Codex, or Kimi Code sessions.
+- Attach sessions started from a local terminal, or resume Claude Code, Codex, and Kimi Code historical sessions.
 - Rename, terminate, or detach sessions; hosted terminals can reconnect after a Proxy restart.
-- Switch between development machines, and inspect or disconnect clients currently connected to the Relay.
+- Switch between development machines, and inspect or disconnect clients currently connected to the Relay. Remove an unused offline machine by swiping left on mobile or using its desktop overflow menu; it will appear again if it reconnects.
 
 ![Creating a real coding agent session from the browser](./docs/assets/readme-create-session.gif)
 
 ### Terminal and chat views
 
-The **terminal view** presents the original CLI interface and preserves colors, cursor behavior, keyboard interaction, and full-screen programs. The **chat view** organizes coding agent output, tool calls, approvals, and final responses into messages that are easier to read and operate by touch.
+The **terminal view** presents the original CLI interface and preserves colors, cursor behavior, keyboard interaction, and full-screen programs. The **chat view** organizes coding agent output, tool calls, approvals, and final responses into messages that are easier to read and operate by touch. Kimi Code chat uses ACP and supports streaming output, tool calls and approvals, cancelling the current turn, and resuming historical sessions.
 
 ![DEV Anywhere terminal and chat views](./docs/assets/readme-session-modes.gif)
 
@@ -260,7 +266,7 @@ flowchart LR
   subgraph machine["Development machine"]
     direction TB
     proxy["Proxy<br/>sessions · terminals · files"]
-    agent["Claude Code / Codex"]
+    agent["Claude Code / Codex / Kimi Code"]
     shell["Shell"]
     local["Repositories · CLI configuration · local permissions"]
 
@@ -297,6 +303,7 @@ Repositories and coding agent processes remain on the development machine. The R
 
 - Coding agents and Shells run with the current development-machine user's permissions. DEV Anywhere does not provide sandboxing.
 - `RELAY_PROXY_TOKEN` authenticates a development machine and goes in the matching Relay's `proxyToken` field in `~/.dev-anywhere/config.json`; `RELAY_CLIENT_TOKEN` authenticates a browser and is entered under Settings → Relay Token on first access. The VPS deployment script generates both; see the [deployment guide](./docs/DEPLOYMENT.md#连接开发机).
+- Removing a machine from the list only clears its offline Relay record; it does not revoke `RELAY_PROXY_TOKEN`. If a machine is lost or sold with its configuration possibly intact, rotate that Relay's Proxy Token and update every development machine you still trust.
 - A public Relay server must use HTTPS/WSS. Tokens are bearer credentials and must be rotated immediately after a leak.
 - The Relay server forwards terminal, message, file, and voice data, so deploy it on infrastructure you trust.
 - Tool approvals remain an important security boundary. `Always Yes` and bypass-approval modes reduce prompts and increase the impact of mistakes.

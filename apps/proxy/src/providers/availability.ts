@@ -1,6 +1,7 @@
 import type { AgentCliAvailability, AgentCliStatus } from "@dev-anywhere/shared";
 import { resolveClaudePtyCommand } from "./claude.js";
 import { resolveCodexCommand } from "./codex.js";
+import { resolveKimiCommand } from "./kimi.js";
 import { findExecutableCandidates } from "./path-resolver.js";
 import type { ProviderId } from "./types.js";
 
@@ -8,13 +9,17 @@ interface AgentCliStatusOptions {
   suggestions?: Partial<Record<ProviderId, string[]>>;
 }
 
+type DetectedAgentCliStatus = AgentCliStatus & { kimi: AgentCliAvailability };
+
 const PROVIDER_BIN_NAME: Record<ProviderId, string> = {
   claude: "claude",
   codex: "codex",
+  kimi: "kimi",
 };
-const PROVIDER_ENV_NAME: Record<ProviderId, "CLAUDE_BIN" | "CODEX_BIN"> = {
+const PROVIDER_ENV_NAME: Record<ProviderId, "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN"> = {
   claude: "CLAUDE_BIN",
   codex: "CODEX_BIN",
+  kimi: "KIMI_BIN",
 };
 
 function errorMessage(err: unknown): string {
@@ -66,7 +71,7 @@ function detect(resolve: () => string, suggestions: string[] = []): AgentCliAvai
 export function detectAgentCliStatus(
   env: NodeJS.ProcessEnv = process.env,
   options: AgentCliStatusOptions = {},
-): AgentCliStatus {
+): DetectedAgentCliStatus {
   return {
     claude: detect(
       () => resolveClaudePtyCommand(env),
@@ -75,6 +80,11 @@ export function detectAgentCliStatus(
     codex: detect(
       () => resolveCodexCommand(env),
       [...discoverProviderCandidates("codex", env), ...(options.suggestions?.codex ?? [])],
+    ),
+    // Shared 为滚动升级把该字段保持 optional；当前 Proxy 的探测结果始终完整上报 Kimi。
+    kimi: detect(
+      () => resolveKimiCommand(env),
+      [...discoverProviderCandidates("kimi", env), ...(options.suggestions?.kimi ?? [])],
     ),
   };
 }

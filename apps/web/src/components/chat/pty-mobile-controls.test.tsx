@@ -54,28 +54,31 @@ describe("PtyMobileControls", () => {
     expect(onInput).toHaveBeenCalledWith("\x1b\x1b");
   });
 
-  it("clears Codex's whole agent input area through a guarded Ctrl+C draft clear path", () => {
-    vi.useFakeTimers();
-    const onInput = vi.fn();
-    const onPaste = vi.fn();
+  it.each(["codex", "kimi"] as const)(
+    "clears %s's whole agent input area through a guarded Ctrl+C draft clear path",
+    (provider) => {
+      vi.useFakeTimers();
+      const onInput = vi.fn();
+      const onPaste = vi.fn();
 
-    render(<PtyMobileControls provider="codex" onInput={onInput} onPaste={onPaste} />);
+      render(<PtyMobileControls provider={provider} onInput={onInput} onPaste={onPaste} />);
 
-    const clearButton = document.querySelector('[data-slot="pty-mobile-key-clear"]')!;
-    fireEvent.click(clearButton);
-    fireEvent.click(clearButton);
+      const clearButton = document.querySelector('[data-slot="pty-mobile-key-clear"]')!;
+      fireEvent.click(clearButton);
+      fireEvent.click(clearButton);
 
-    expect(onInput).toHaveBeenCalledTimes(1);
-    expect(onInput).toHaveBeenCalledWith("\x03");
-    expect(clearButton.getAttribute("data-guarded")).toBe("true");
+      expect(onInput).toHaveBeenCalledTimes(1);
+      expect(onInput).toHaveBeenCalledWith("\x03");
+      expect(clearButton.getAttribute("data-guarded")).toBe("true");
 
-    act(() => {
-      vi.advanceTimersByTime(1200);
-    });
-    fireEvent.click(clearButton);
+      act(() => {
+        vi.advanceTimersByTime(1200);
+      });
+      fireEvent.click(clearButton);
 
-    expect(onInput).toHaveBeenCalledTimes(2);
-  });
+      expect(onInput).toHaveBeenCalledTimes(2);
+    },
+  );
 
   it("repeats arrow input immediately after the long-press threshold", () => {
     vi.useFakeTimers();

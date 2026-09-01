@@ -10,6 +10,7 @@ describe("loadProxyRuntimeEnv", () => {
       hookPort: undefined,
       claudeBin: undefined,
       codexBin: undefined,
+      kimiBin: undefined,
       logLevel: undefined,
       isVitest: false,
     });
@@ -19,9 +20,17 @@ describe("loadProxyRuntimeEnv", () => {
     const env = loadProxyRuntimeEnv({
       RELAY_URL: "",
       CLAUDE_BIN: "",
+      KIMI_BIN: "",
     });
     expect(env.relayUrl).toBeUndefined();
     expect(env.claudeBin).toBeUndefined();
+    expect(env.kimiBin).toBeUndefined();
+  });
+
+  it("reads KIMI_BIN", () => {
+    expect(loadProxyRuntimeEnv({ KIMI_BIN: "/home/dev/.kimi-code/bin/kimi" }).kimiBin).toBe(
+      "/home/dev/.kimi-code/bin/kimi",
+    );
   });
 
   it("parses HOOK_PORT and rejects out-of-range values", () => {

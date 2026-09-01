@@ -43,6 +43,7 @@ describe("proxy config relay selection", () => {
     delete process.env.DEV_ANYWHERE_HOOK_PORT;
     delete process.env.CLAUDE_BIN;
     delete process.env.CODEX_BIN;
+    delete process.env.KIMI_BIN;
     process.argv = ["node", "dev-anywhere"];
   });
 
@@ -93,6 +94,20 @@ describe("proxy config relay selection", () => {
       ...currentConfig,
       defaultProfile: "local",
     });
+
+    const { loadConfig } = await importConfig();
+    const config = loadConfig();
+
+    expect(config.profileName).toBe("local");
+    expect(config.relayName).toBe("local");
+  });
+
+  it("does not parse Kimi pass-through flags as the Proxy profile", async () => {
+    writeConfig({
+      ...currentConfig,
+      defaultProfile: "local",
+    });
+    process.argv = ["node", "dev-anywhere", "kimi", "--profile", "kimi-session"];
 
     const { loadConfig } = await importConfig();
     const config = loadConfig();
@@ -152,9 +167,11 @@ describe("proxy config relay selection", () => {
       agentCli: {
         claudeBin: "/file/bin/claude",
         codexBin: "/file/bin/codex",
+        kimiBin: "/file/bin/kimi",
       },
     });
     process.env.CLAUDE_BIN = "/env/bin/claude";
+    process.env.KIMI_BIN = "/env/bin/kimi";
 
     const { buildProviderEnv, loadConfig } = await importConfig();
     const config = loadConfig();
@@ -162,12 +179,35 @@ describe("proxy config relay selection", () => {
 
     expect(config.claudeBin).toBe("/env/bin/claude");
     expect(config.codexBin).toBe("/file/bin/codex");
+    expect(config.kimiBin).toBe("/env/bin/kimi");
     expect(config.sources.claudeBin).toBe("env");
     expect(config.sources.codexBin).toBe("file");
+    expect(config.sources.kimiBin).toBe("env");
     expect(providerEnv.CLAUDE_BIN).toBe("/env/bin/claude");
     expect(providerEnv.CODEX_BIN).toBe("/file/bin/codex");
+    expect(providerEnv.KIMI_BIN).toBe("/env/bin/kimi");
     expect(config.agentCliSuggestions.claude).toEqual(["/env/bin/claude", "/file/bin/claude"]);
     expect(config.agentCliSuggestions.codex).toEqual(["/file/bin/codex"]);
+    expect(config.agentCliSuggestions.kimi).toEqual(["/env/bin/kimi", "/file/bin/kimi"]);
+  });
+
+  it("persists Kimi CLI paths and history into top-level agentCli config", async () => {
+    writeConfig(currentConfig);
+
+    const { loadConfig, saveAgentCliPath } = await importConfig();
+    saveAgentCliPath("kimi", "/opt/kimi/v1/kimi");
+    saveAgentCliPath("kimi", "/opt/kimi/v2/kimi");
+
+    const configFile = JSON.parse(
+      readFileSync(join(homeDir, ".dev-anywhere", "config.json"), "utf8"),
+    );
+    expect(configFile.agentCli.kimiBin).toBe("/opt/kimi/v2/kimi");
+    expect(configFile.agentCli.kimiBinHistory).toEqual(["/opt/kimi/v2/kimi", "/opt/kimi/v1/kimi"]);
+
+    const config = loadConfig();
+    expect(config.kimiBin).toBe("/opt/kimi/v2/kimi");
+    expect(config.sources.kimiBin).toBe("file");
+    expect(config.agentCliSuggestions.kimi).toEqual(["/opt/kimi/v2/kimi", "/opt/kimi/v1/kimi"]);
   });
 
   it("persists Agent CLI paths into top-level agentCli config", async () => {

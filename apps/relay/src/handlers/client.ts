@@ -128,6 +128,124 @@ function handleRelayClientListRequest(
   );
 }
 
+function proxyListResponse(registry: RelayRegistry): string {
+  const proxies = registry.listProxiesWithName().map((proxy) => ({
+    ...proxy,
+    sessions: registry.getSessionsForProxy(proxy.proxyId),
+  }));
+  return serializeControl({ type: "proxy_list_response", proxies });
+}
+
+function broadcastProxyList(registry: RelayRegistry, chaos?: RelayChaos): void {
+  const response = proxyListResponse(registry);
+  for (const target of registry.getAllClientWs()) {
+    if (chaos) {
+      chaos.send(target, response, {
+        direction: "proxy_to_client",
+        type: "proxy_list_response",
+      });
+    } else {
+      target.send(response);
+    }
+  }
+}
+
+function broadcastProxyRemoved(proxyId: string, registry: RelayRegistry, chaos?: RelayChaos): void {
+  const notification = serializeControl({ type: "proxy_removed", proxyId });
+  for (const target of registry.getAllClientWs()) {
+    if (chaos) {
+      chaos.send(target, notification, {
+        direction: "proxy_to_client",
+        type: "proxy_removed",
+      });
+    } else {
+      target.send(notification);
+    }
+  }
+}
+
+function sendProxyRemoveResponse(
+  clientWs: ClientSocket,
+  response: {
+    requestId: string;
+    proxyId: string;
+    success: boolean;
+    errorCode?: ControlErrorCodeType;
+    error?: string;
+  },
+  chaos?: RelayChaos,
+): void {
+  const raw = serializeControl({ type: "proxy_remove_response", ...response });
+  if (chaos) {
+    chaos.send(clientWs, raw, {
+      direction: "proxy_to_client",
+      type: "proxy_remove_response",
+    });
+  } else {
+    clientWs.send(raw);
+  }
+}
+
+function handleProxyRemove(
+  clientWs: ClientSocket,
+  registry: RelayRegistry,
+  logger: Logger,
+  ptySnapshotRoutes: PtySnapshotRouteRegistry,
+  sessionHistoryRoutes: SessionHistoryRouteRegistry,
+  remoteFileBridge: RemoteFileBridge | undefined,
+  requestId: string,
+  proxyId: string,
+  chaos?: RelayChaos,
+): void {
+  const result = registry.removeOfflineProxy(proxyId);
+  if (result === "not_found") {
+    sendProxyRemoveResponse(
+      clientWs,
+      {
+        requestId,
+        proxyId,
+        success: false,
+        errorCode: ControlErrorCode.PROXY_NOT_FOUND,
+        error: `开发机 ${proxyId} 不存在`,
+      },
+      chaos,
+    );
+    return;
+  }
+  if (result === "online") {
+    sendProxyRemoveResponse(
+      clientWs,
+      {
+        requestId,
+        proxyId,
+        success: false,
+        errorCode: ControlErrorCode.PROXY_ONLINE,
+        error: `开发机 ${proxyId} 仍在线，无法删除`,
+      },
+      chaos,
+    );
+    return;
+  }
+
+  ptySnapshotRoutes.clearProxy(proxyId);
+  sessionHistoryRoutes.clearProxy(proxyId);
+  try {
+    remoteFileBridge?.revokeProxy(proxyId);
+  } catch (err) {
+    // Proxy record and its routing bindings are already gone. A cleanup-side failure must not
+    // strand the request without an ACK; revokeProxy deletes persistent tokens before touching
+    // active HTTP responses, so old URLs remain unusable even on this exceptional path.
+    logger.error({ err, proxyId }, "Failed to finish remote file cleanup for removed proxy");
+  }
+
+  // cleanupProxy 会清掉发起者原有的 proxy binding；因此 ACK 必须直接写回当前
+  // client WebSocket，不能再通过 binding 反查目标，否则删除自己的离线绑定时会丢响应。
+  sendProxyRemoveResponse(clientWs, { requestId, proxyId, success: true }, chaos);
+  broadcastProxyRemoved(proxyId, registry, chaos);
+  broadcastProxyList(registry, chaos);
+  logger.info({ proxyId, clientId: clientWs.clientId }, "Offline proxy removed by client");
+}
+
 function handleRelayClientKick(
   clientWs: ClientSocket,
   registry: RelayRegistry,
@@ -211,7 +329,7 @@ function rejectNotRegistered(ws: ClientSocket, requestId: string | undefined): v
       type: "relay_error",
       requestId,
       code: RelayErrorCode.NOT_REGISTERED,
-      message: "Client must register before selecting a proxy",
+      message: "Client must register first",
     }),
   );
 }
@@ -352,6 +470,26 @@ export function handleClientConnection(
         return;
       }
 
+      if (msg.type === "proxy_remove") {
+        if (!clientWs.clientId) {
+          rejectNotRegistered(clientWs, msg.requestId);
+          closeRejectedClientProtocol(clientWs);
+          return;
+        }
+        handleProxyRemove(
+          clientWs,
+          registry,
+          logger,
+          ptySnapshotRoutes,
+          sessionHistoryRoutes,
+          remoteFileBridge,
+          msg.requestId,
+          msg.proxyId,
+          chaos,
+        );
+        return;
+      }
+
       if (msg.type === "remote_file_url_request") {
         if (!remoteFileBridge) {
           sendRemoteFileUrlFailure(clientWs, msg.requestId, msg.sessionId, "文件流服务不可用");
@@ -487,13 +625,13 @@ export function handleClientConnection(
       }
 
       if (msg.type === "proxy_list_request") {
-        const proxies = registry.listProxiesWithName().map((p) => ({
-          ...p,
-          sessions: registry.getSessionsForProxy(p.proxyId),
+        const proxies = registry.listProxiesWithName().map((proxy) => ({
+          ...proxy,
+          sessions: registry.getSessionsForProxy(proxy.proxyId),
         }));
-        const response = JSON.stringify({
+        const response = serializeControl({
           type: "proxy_list_response",
-          requestId: msg.requestId,
+          ...(msg.requestId !== undefined ? { requestId: msg.requestId } : {}),
           proxies,
         });
         if (chaos) {

@@ -66,6 +66,19 @@ describe("IPC Protocol", () => {
       expect(result.success).toBe(true);
     });
 
+    it("accepts a Kimi PTY session create request", async () => {
+      const { IpcMessageSchema } = await importIpc();
+      const result = IpcMessageSchema.safeParse({
+        type: "session_create_request",
+        mode: "pty",
+        provider: "kimi",
+        cwd: "/tmp/test",
+        pid: 12345,
+      });
+
+      expect(result.success).toBe(true);
+    });
+
     it("requires PTY subscribe and snapshot requestId round-trip fields", async () => {
       const { IpcMessageSchema } = await importIpc();
 
@@ -699,9 +712,16 @@ describe("Worker Protocol", () => {
     const WORKER_MESSAGE_SAMPLES: Array<{ type: string; payload: Record<string, unknown> }> = [
       { type: "worker_input", payload: { type: "worker_input", content: "test" } },
       { type: "worker_stop", payload: { type: "worker_stop" } },
+      { type: "worker_turn_started", payload: { type: "worker_turn_started" } },
       {
         type: "worker_approval_response",
-        payload: { type: "worker_approval_response", requestId: "r1", behavior: "allow" },
+        payload: {
+          type: "worker_approval_response",
+          requestId: "r1",
+          behavior: "allow",
+          remember: true,
+          optionId: "choice-a",
+        },
       },
       {
         type: "worker_event",
@@ -718,6 +738,10 @@ describe("Worker Protocol", () => {
           requestId: "r2",
           toolName: "bash",
           input: { cmd: "ls", args: ["-la"] },
+          options: [
+            { optionId: "choice-a", name: "A", kind: "allow_once" },
+            { optionId: "skip", name: "Skip", kind: "reject_once" },
+          ],
         },
       },
       { type: "worker_ready", payload: { type: "worker_ready", pid: 999 } },
@@ -727,6 +751,14 @@ describe("Worker Protocol", () => {
           type: "worker_ready",
           pid: 999,
           nativeSession: { provider: "codex", sessionId: "cx-ready-123" },
+        },
+      },
+      {
+        type: "worker_ready_with_kimi_session",
+        payload: {
+          type: "worker_ready",
+          pid: 1000,
+          nativeSession: { provider: "kimi", sessionId: "kimi-ready-123" },
         },
       },
       {

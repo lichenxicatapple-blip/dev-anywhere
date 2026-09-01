@@ -21,7 +21,7 @@ interface HistorySessionLike {
 }
 
 function isProviderId(value: unknown): value is ProviderId {
-  return value === "claude" || value === "codex";
+  return value === "claude" || value === "codex" || value === "kimi";
 }
 
 function isSessionMode(value: unknown): value is "pty" | "json" {

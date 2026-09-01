@@ -119,6 +119,42 @@ describe("RelayRegistry", () => {
       expect(registry.getProxy("p1")).toBe(ws2);
       expect(registry.isProxyOnline("p1")).toBe(true);
     });
+
+    it("atomically removes only an offline proxy and its client bindings", () => {
+      const currentClient = createMockWs() as WebSocket & { boundProxyId?: string };
+      const staleTab = createMockWs() as WebSocket & { boundProxyId?: string };
+      currentClient.boundProxyId = "p1";
+      staleTab.boundProxyId = "p1";
+      registry.registerProxy("p1", createMockWs());
+      registry.addSessionToProxy("p1", "s1");
+      registry.addClientWs(currentClient, { clientId: "c1" });
+      registry.addClientWs(staleTab, { clientId: "c1" });
+      registry.bindClientById("c1", "p1", currentClient);
+      registry.transitionProxy("p1", "online", "offline");
+
+      expect(registry.removeOfflineProxy("p1")).toBe("removed");
+      expect(registry.hasProxy("p1")).toBe(false);
+      expect(registry.getSessionsForProxy("p1")).toEqual([]);
+      expect(registry.getClientBinding("c1")).toBeUndefined();
+      expect(currentClient.boundProxyId).toBeUndefined();
+      expect(staleTab.boundProxyId).toBeUndefined();
+    });
+
+    it("refuses to remove an online-state proxy even when its socket is already unavailable", () => {
+      registry.registerProxy("p1", createMockWs(WebSocket.CLOSING));
+
+      expect(registry.isProxyOnline("p1")).toBe(false);
+      expect(registry.removeOfflineProxy("p1")).toBe("online");
+      expect(registry.hasProxy("p1")).toBe(true);
+      expect(registry.getProxyConnectionState("p1")).toBe("online");
+    });
+
+    it("reports an unknown proxy without mutating the registry", () => {
+      registry.registerProxy("p1", createMockWs());
+
+      expect(registry.removeOfflineProxy("missing")).toBe("not_found");
+      expect(registry.listProxies()).toEqual(["p1"]);
+    });
   });
 
   describe("session tracking", () => {

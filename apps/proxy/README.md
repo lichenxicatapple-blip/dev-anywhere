@@ -10,7 +10,7 @@ npm install -g @dev-anywhere/proxy
 
 This installs the `dev-anywhere` command globally.
 
-Requires Node.js >= 20 and at least one supported local AI coding CLI installed locally: Claude Code or Codex.
+Requires Node.js >= 20 and at least one supported local AI coding CLI installed locally: Claude Code, Codex, or Kimi Code.
 
 ## Quick start
 
@@ -30,6 +30,7 @@ dev-anywhere serve restart --relay cloud
 # 4. Start or attach a terminal session from any directory
 dev-anywhere claude
 dev-anywhere codex
+dev-anywhere kimi
 
 # 5. Open the web SPA served by your relay, pick your computer, create or resume a session
 ```
@@ -46,17 +47,23 @@ dev-anywhere init             # create default config at ~/.dev-anywhere/config.
 dev-anywhere tunnel           # temporary account-free Cloudflare Quick Tunnel
 dev-anywhere claude [...args] # start/attach a Claude Code terminal session
 dev-anywhere codex [...args]  # start/attach a Codex terminal session
+dev-anywhere kimi [...args]   # start/attach a Kimi Code terminal session
 dev-anywhere --help
 ```
 
 The daemon connects to the relay server over WebSocket and manages local AI CLI sessions. A mobile/web client connected to the same relay can then see and drive those sessions.
 
-Arguments after `claude` or `codex` are passed through to the real CLI:
+Arguments after `claude`, `codex`, or `kimi` are passed through to the real CLI:
 
 ```bash
 dev-anywhere claude -c
 dev-anywhere codex --model gpt-5.5
+dev-anywhere kimi --auto
 ```
+
+Kimi Code supports both terminal sessions and structured ACP chat. You can start
+a terminal with `dev-anywhere kimi ...`, create either mode from the Web UI, and
+resume Kimi sessions from the historical session list.
 
 ## Relay server
 
@@ -115,16 +122,28 @@ that value in Settings -> Relay Token so the browser client can authenticate.
 
 `autoUpdate` defaults to `true`. Set it to `false` and restart the service to pin a machine.
 
+If `kimi` is not on the normal `PATH`, set its persistent path under the
+top-level `agentCli` object:
+
+```json
+{
+  "agentCli": {
+    "kimiBin": "/absolute/path/to/kimi"
+  }
+}
+```
+
 Environment variables are reserved for temporary overrides:
 
 - `RELAY_URL` — relay WebSocket URL
 - `RELAY_PROXY_TOKEN` — auth token
 - `CLAUDE_BIN` — Claude Code CLI path
 - `CODEX_BIN` — Codex CLI path
+- `KIMI_BIN` — Kimi Code CLI path; overrides `agentCli.kimiBin`
 
 ## How it works
 
-- Local daemon wraps Claude Code and Codex CLI sessions with `node-pty` for transparent terminal control. Claude Code also supports a structured chat-message mode.
+- Local daemon wraps Claude Code, Codex, and Kimi Code CLI sessions with `node-pty` for transparent terminal control. Claude Code and Codex also support structured chat-message mode; Kimi Code supports ACP chat with streaming output, tool calls and interactive approvals, turn cancellation, and history resume.
 - IPC socket at `~/.dev-anywhere/run/dev-anywhere.sock` for terminal attachment.
 - Terminal bytes + structured control messages are forwarded to relay over WebSocket.
 - Relay serves the Web client and routes live traffic; session state remains on the proxy side.

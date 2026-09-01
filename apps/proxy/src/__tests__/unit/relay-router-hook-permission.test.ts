@@ -161,11 +161,148 @@ describe("RelayRouter hook permission decisions", () => {
       payload: { toolId: "worker-req-whitelist", whitelistTool: true },
     });
 
-    expect(decisions).toEqual([{ behavior: "allow" }]);
+    expect(decisions).toEqual([{ behavior: "allow", remember: true }]);
     expect(workerSend).toHaveBeenCalledWith("s1", {
       type: "worker_whitelist_add",
       toolName: "Write",
     });
+  });
+
+  it("preserves an exact Kimi ACP option id in the worker decision", () => {
+    const permissionBroker = new PermissionBroker();
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const decisions: unknown[] = [];
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "kimi-question-1",
+        sessionId: "s1",
+        provider: "kimi",
+        toolName: "AskUserQuestion",
+        input: { question: "Choose one" },
+        options: [
+          { optionId: "answer-a", name: "A", kind: "allow_once" },
+          { optionId: "skip", name: "Skip", kind: "reject_once" },
+        ],
+      },
+      (decision) => decisions.push(decision),
+    );
+    const router = createRouter({ permissionBroker, workerSend, hookResolved });
+
+    router.handle({
+      type: "tool_approve",
+      sessionId: "s1",
+      payload: { toolId: "kimi-question-1", optionId: "answer-a" },
+    });
+
+    expect(decisions).toEqual([{ behavior: "allow", optionId: "answer-a" }]);
+    expect(hookResolved).toHaveBeenCalledWith("s1", "kimi", "kimi-question-1", "allow", {
+      toolName: "AskUserQuestion",
+      toolInput: { question: "Choose one" },
+    });
+  });
+
+  it("preserves an exact Kimi ACP reject option and reports a deny resolution", () => {
+    const permissionBroker = new PermissionBroker();
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const decisions: unknown[] = [];
+    permissionBroker.registerWorkerRequest(
+      {
+        requestId: "kimi-question-skip",
+        sessionId: "s1",
+        provider: "kimi",
+        toolName: "AskUserQuestion",
+        input: { question: "Choose one" },
+        options: [
+          { optionId: "answer-a", name: "A", kind: "allow_once" },
+          { optionId: "skip", name: "Skip", kind: "reject_once" },
+        ],
+      },
+      (decision) => decisions.push(decision),
+    );
+    const router = createRouter({ permissionBroker, workerSend, hookResolved });
+
+    router.handle({
+      type: "tool_deny",
+      sessionId: "s1",
+      payload: { toolId: "kimi-question-skip", optionId: "skip", reason: "Skipped" },
+    });
+
+    expect(decisions).toEqual([{ behavior: "deny", message: "Skipped", optionId: "skip" }]);
+    expect(hookResolved).toHaveBeenCalledWith("s1", "kimi", "kimi-question-skip", "deny", {
+      toolName: "AskUserQuestion",
+      toolInput: { question: "Choose one" },
+    });
+  });
+
+  it("fails Kimi approval closed when an option is missing, unknown, or has the wrong kind", () => {
+    const permissionBroker = new PermissionBroker();
+    const workerSend = vi.fn();
+    const hookResolved = vi.fn();
+    const decisions: unknown[] = [];
+    const options = [
+      { optionId: "answer-a", name: "A", kind: "allow_once" as const },
+      { optionId: "skip", name: "Skip", kind: "reject_once" as const },
+    ];
+    for (const requestId of ["missing", "unknown", "wrong-approve", "wrong-deny"]) {
+      permissionBroker.registerWorkerRequest(
+        {
+          requestId,
+          sessionId: "s1",
+          provider: "kimi",
+          toolName: "AskUserQuestion",
+          input: { question: "Choose one" },
+          options,
+        },
+        (decision) => decisions.push(decision),
+      );
+    }
+    const sent: string[] = [];
+    const router = createRouter({ permissionBroker, workerSend, hookResolved, sent });
+
+    router.handle({
+      type: "tool_approve",
+      sessionId: "s1",
+      payload: { toolId: "missing" },
+    });
+    router.handle({
+      type: "tool_approve",
+      sessionId: "s1",
+      payload: { toolId: "unknown", optionId: "not-an-option" },
+    });
+    router.handle({
+      type: "tool_approve",
+      sessionId: "s1",
+      payload: { toolId: "wrong-approve", optionId: "skip" },
+    });
+    router.handle({
+      type: "tool_deny",
+      sessionId: "s1",
+      payload: { toolId: "wrong-deny", optionId: "answer-a" },
+    });
+
+    expect(decisions).toEqual([
+      expect.objectContaining({ behavior: "deny", message: expect.any(String) }),
+      expect.objectContaining({ behavior: "deny", message: expect.any(String) }),
+      expect.objectContaining({ behavior: "deny", message: expect.any(String) }),
+      expect.objectContaining({ behavior: "deny", message: expect.any(String) }),
+    ]);
+    expect(permissionBroker.listSession("s1")).toHaveLength(0);
+    expect(hookResolved).toHaveBeenCalledTimes(4);
+    expect(hookResolved).toHaveBeenCalledWith(
+      "s1",
+      "kimi",
+      "wrong-approve",
+      "deny",
+      expect.objectContaining({ toolName: "AskUserQuestion", hasPendingApprovals: true }),
+    );
+    expect(sent.map((raw) => JSON.parse(raw))).toEqual([
+      expect.objectContaining({ requestId: "missing", outcome: "deny", delivered: true }),
+      expect.objectContaining({ requestId: "unknown", outcome: "deny", delivered: true }),
+      expect.objectContaining({ requestId: "wrong-approve", outcome: "deny", delivered: true }),
+      expect.objectContaining({ requestId: "wrong-deny", outcome: "deny", delivered: true }),
+    ]);
   });
 
   it("records permission request delivery acknowledgements", async () => {

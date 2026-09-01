@@ -20,6 +20,7 @@ export interface ProxyConfig {
   hookPort?: number;
   claudeBin?: string;
   codexBin?: string;
+  kimiBin?: string;
   agentCliSuggestions: Record<ProviderId, string[]>;
   sources: {
     relayName: "cli" | "profile" | "env";
@@ -28,6 +29,7 @@ export interface ProxyConfig {
     hookPort: "env" | "default";
     claudeBin: "env" | "file" | "none";
     codexBin: "env" | "file" | "none";
+    kimiBin: "env" | "file" | "none";
   };
 }
 
@@ -51,8 +53,10 @@ const AgentCliSchema = z
   .object({
     claudeBin: z.string().optional(),
     codexBin: z.string().optional(),
+    kimiBin: z.string().optional(),
     claudeBinHistory: z.array(z.string()).optional(),
     codexBinHistory: z.array(z.string()).optional(),
+    kimiBinHistory: z.array(z.string()).optional(),
   })
   .strict();
 
@@ -98,12 +102,27 @@ function readConfigFile(): ProxyConfigFile {
   return parsed.data;
 }
 
-function agentCliField(provider: ProviderId): "claudeBin" | "codexBin" {
-  return provider === "claude" ? "claudeBin" : "codexBin";
+type AgentCliField = "claudeBin" | "codexBin" | "kimiBin";
+type AgentCliHistoryField = "claudeBinHistory" | "codexBinHistory" | "kimiBinHistory";
+
+const AGENT_CLI_FIELDS: Record<ProviderId, AgentCliField> = {
+  claude: "claudeBin",
+  codex: "codexBin",
+  kimi: "kimiBin",
+};
+
+const AGENT_CLI_HISTORY_FIELDS: Record<ProviderId, AgentCliHistoryField> = {
+  claude: "claudeBinHistory",
+  codex: "codexBinHistory",
+  kimi: "kimiBinHistory",
+};
+
+function agentCliField(provider: ProviderId): AgentCliField {
+  return AGENT_CLI_FIELDS[provider];
 }
 
-function agentCliHistoryField(provider: ProviderId): "claudeBinHistory" | "codexBinHistory" {
-  return provider === "claude" ? "claudeBinHistory" : "codexBinHistory";
+function agentCliHistoryField(provider: ProviderId): AgentCliHistoryField {
+  return AGENT_CLI_HISTORY_FIELDS[provider];
 }
 
 function validateAgentCliPath(path: string): string {
@@ -176,6 +195,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
   const resolved = resolveRelayConfig(fromFile, options?.relayName, env.relayUrl);
   const claudeBin = env.claudeBin ?? agentCli.claudeBin;
   const codexBin = env.codexBin ?? agentCli.codexBin;
+  const kimiBin = env.kimiBin ?? agentCli.kimiBin;
   const config: ProxyConfig = {
     profileName: PROFILE_NAME,
     // 自动升级是 daemon 的默认维护策略；用户可在 config.json 显式设 false 关闭。
@@ -186,6 +206,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
     hookPort: env.hookPort ?? defaultHookPortForProfile(PROFILE_NAME),
     claudeBin,
     codexBin,
+    kimiBin,
     agentCliSuggestions: {
       claude: uniqueAbsolutePaths([
         env.claudeBin,
@@ -197,6 +218,11 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
         agentCli.codexBin,
         ...(agentCli.codexBinHistory ?? []),
       ]),
+      kimi: uniqueAbsolutePaths([
+        env.kimiBin,
+        agentCli.kimiBin,
+        ...(agentCli.kimiBinHistory ?? []),
+      ]),
     },
     sources: {
       relayName: resolved.relayNameSource,
@@ -205,6 +231,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
       hookPort: env.hookPort !== undefined ? "env" : "default",
       claudeBin: env.claudeBin ? "env" : agentCli.claudeBin ? "file" : "none",
       codexBin: env.codexBin ? "env" : agentCli.codexBin ? "file" : "none",
+      kimiBin: env.kimiBin ? "env" : agentCli.kimiBin ? "file" : "none",
     },
   };
 
@@ -221,6 +248,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
       hookPortSource: config.sources.hookPort,
       claudeBinSource: config.sources.claudeBin,
       codexBinSource: config.sources.codexBin,
+      kimiBinSource: config.sources.kimiBin,
     },
     "Config loaded",
   );
@@ -236,6 +264,7 @@ export function buildProviderEnv(
     ...baseEnv,
     ...(config.claudeBin ? { CLAUDE_BIN: config.claudeBin } : {}),
     ...(config.codexBin ? { CODEX_BIN: config.codexBin } : {}),
+    ...(config.kimiBin ? { KIMI_BIN: config.kimiBin } : {}),
   };
 }
 

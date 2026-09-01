@@ -24,9 +24,10 @@ interface ProxyRuntimeEnv {
   relayProxyToken: string | undefined;
   // DEV_ANYWHERE_HOOK_PORT —— 覆盖按 profile 推导的 hook server 端口。
   hookPort: number | undefined;
-  // CLAUDE_BIN / CODEX_BIN —— 覆盖 config.agentCli 里的 CLI 可执行文件路径。
+  // CLAUDE_BIN / CODEX_BIN / KIMI_BIN —— 覆盖 config.agentCli 里的 CLI 可执行文件路径。
   claudeBin: string | undefined;
   codexBin: string | undefined;
+  kimiBin: string | undefined;
   // LOG_LEVEL —— 用户最高优先级；config.logLevel 是次优先；都缺则各 logger 自己 default。
   logLevel: LogLevel | undefined;
   // VITEST —— 测试运行器存在则把 logger 静默，避免污染 vitest 输出。
@@ -63,6 +64,7 @@ export function loadProxyRuntimeEnv(env: NodeJS.ProcessEnv = process.env): Proxy
     hookPort: parsePort(env.DEV_ANYWHERE_HOOK_PORT, "DEV_ANYWHERE_HOOK_PORT"),
     claudeBin: nonEmpty(env.CLAUDE_BIN),
     codexBin: nonEmpty(env.CODEX_BIN),
+    kimiBin: nonEmpty(env.KIMI_BIN),
     logLevel: parseLogLevel(env.LOG_LEVEL),
     isVitest: !!env.VITEST,
   };

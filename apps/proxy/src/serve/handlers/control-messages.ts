@@ -1,6 +1,6 @@
 import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
-import { ControlErrorCode, serializeControl } from "@dev-anywhere/shared";
+import { ControlErrorCode, serializeControl, type CommandEntry } from "@dev-anywhere/shared";
 import type { SessionManager } from "../session-manager.js";
 import { scanSessionHistory } from "../session-history.js";
 import { discoverCommands } from "../command-discovery.js";
@@ -16,8 +16,10 @@ export interface ControlMessageHandlers {
     sessionId: string;
     requestId?: string;
     workDir: string;
+    includeCommands?: boolean;
   }): Promise<void>;
   pushCommandList(sessionId: string, workDir: string): Promise<void>;
+  setProviderCommands(sessionId: string, commands: CommandEntry[]): void;
   pushFileTree(sessionId: string, workDir: string): Promise<void>;
   reinitializeOnReconnect(): Promise<void>;
   cleanup(sessionId: string): void;
@@ -27,6 +29,7 @@ export interface ControlMessageHandlers {
 interface SessionResources {
   commandRefreshTimer?: NodeJS.Timeout;
   fileTreeWorkDir?: string;
+  providerCommands?: CommandEntry[];
 }
 
 // 命令刷新间隔 6 小时
@@ -136,6 +139,7 @@ export function createControlMessageHandlers(
         send(
           serializeControl({
             type: "command_list_push",
+            sessionId,
             commands,
           }),
         );
@@ -262,12 +266,21 @@ export function createControlMessageHandlers(
       sessionId: string;
       requestId?: string;
       workDir: string;
+      includeCommands?: boolean;
     }): Promise<void> {
-      getResources(msg.sessionId).fileTreeWorkDir = msg.workDir;
-      scheduleCommandRefresh(msg.sessionId, msg.workDir);
+      const resources = getResources(msg.sessionId);
+      resources.fileTreeWorkDir = msg.workDir;
+      if (msg.includeCommands === false) {
+        if (resources.commandRefreshTimer) clearInterval(resources.commandRefreshTimer);
+        resources.commandRefreshTimer = undefined;
+      } else {
+        scheduleCommandRefresh(msg.sessionId, msg.workDir);
+      }
 
       const [commandsResult, groupsResult] = await Promise.allSettled([
-        discoverCommands(msg.workDir),
+        msg.includeCommands === false
+          ? Promise.resolve(resources.providerCommands ?? [])
+          : discoverCommands(msg.workDir),
         getFileTree(msg.workDir),
       ]);
       const commands = commandsResult.status === "fulfilled" ? commandsResult.value : [];
@@ -306,6 +319,7 @@ export function createControlMessageHandlers(
         send(
           serializeControl({
             type: "command_list_push",
+            sessionId,
             commands,
           }),
         );
@@ -316,6 +330,13 @@ export function createControlMessageHandlers(
 
       // 6 小时定时刷新
       scheduleCommandRefresh(sessionId, workDir);
+    },
+
+    setProviderCommands(sessionId: string, commands: CommandEntry[]): void {
+      const resources = getResources(sessionId);
+      resources.providerCommands = commands.map((command) => ({ ...command }));
+      if (resources.commandRefreshTimer) clearInterval(resources.commandRefreshTimer);
+      resources.commandRefreshTimer = undefined;
     },
 
     async pushFileTree(sessionId: string, workDir: string): Promise<void> {
@@ -362,15 +383,27 @@ export function createControlMessageHandlers(
       for (const session of activeSessions) {
         const resources = sessionResources.get(session.id);
         const workDir = resources?.fileTreeWorkDir;
+        if (session.provider === "kimi" && resources?.providerCommands) {
+          send(
+            serializeControl({
+              type: "command_list_push",
+              sessionId: session.id,
+              commands: resources.providerCommands,
+            }),
+          );
+        }
         if (workDir) {
           try {
-            const commands = await discoverCommands(workDir);
-            send(
-              serializeControl({
-                type: "command_list_push",
-                commands,
-              }),
-            );
+            if (session.provider !== "kimi") {
+              const commands = await discoverCommands(workDir);
+              send(
+                serializeControl({
+                  type: "command_list_push",
+                  sessionId: session.id,
+                  commands,
+                }),
+              );
+            }
             const groups = await getFileTree(workDir);
             send(
               serializeControl({

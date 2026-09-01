@@ -138,7 +138,7 @@ function fsmForMode(mode: "pty" | "json"): ReturnType<typeof defineFSM<SessionSt
 }
 
 function isProviderId(value: unknown): value is ProviderId {
-  return value === "claude" || value === "codex";
+  return value === "claude" || value === "codex" || value === "kimi";
 }
 
 export class SessionManager {

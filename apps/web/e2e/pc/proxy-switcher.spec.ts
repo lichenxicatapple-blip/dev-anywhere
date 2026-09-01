@@ -58,6 +58,24 @@ test.describe("ProxySwitcher — dropdown layout (desktop)", () => {
     await expect(oldSession).toBeVisible({ timeout: 3_000 });
     await expect(sidebarLoading).toHaveCount(0);
   });
+
+  test("removes an offline proxy from its desktop overflow menu", async ({ page }) => {
+    await page.goto(`${BASE_URL}/#/`);
+    await page.evaluate(() => window.__devAnywhereE2E?.setProxyOnline(false));
+
+    await page.locator('button[data-slot="proxy-switcher-trigger"]').click();
+    const offlineRow = page.locator(
+      '[data-slot="proxy-item"][data-proxy-id="proxy-1"][data-online="false"]:visible',
+    );
+    await expect(offlineRow).toBeVisible();
+    await page.locator('[data-slot="proxy-row-menu-trigger"]:visible').click();
+    await page.locator('[data-slot="proxy-row-remove-item"]:visible').click();
+
+    const dialog = page.locator('[data-slot="proxy-removal-dialog"]');
+    await expect(dialog).toContainText("以后重新运行时，它会重新出现在列表中");
+    await dialog.locator('[data-slot="proxy-removal-confirm"]').click();
+    await expect(page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]')).toHaveCount(0);
+  });
 });
 
 test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
@@ -82,6 +100,61 @@ test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
     await expect(page).not.toHaveURL(/\/sessions$/);
 
     await expect(page).toHaveURL(/\/sessions$/, { timeout: 5_000 });
+  });
+
+  test("left-swipes to remove only an offline proxy and allows it to reconnect later", async ({
+    page,
+  }) => {
+    await page.goto(`${BASE_URL}/#/`);
+    await page.evaluate(() => window.__devAnywhereE2E?.setProxyOnline(false));
+
+    const row = page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]');
+    await expect(row).toHaveAttribute("data-online", "false");
+    const foreground = row.locator('[data-slot="proxy-swipe-foreground"]');
+    await foreground.evaluate((node) => {
+      const rect = node.getBoundingClientRect();
+      const init = {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 7,
+        pointerType: "touch",
+        isPrimary: true,
+      };
+      node.dispatchEvent(
+        new PointerEvent("pointerdown", {
+          ...init,
+          clientX: rect.right - 16,
+          clientY: rect.top + rect.height / 2,
+        }),
+      );
+      node.dispatchEvent(
+        new PointerEvent("pointermove", {
+          ...init,
+          clientX: rect.right - 96,
+          clientY: rect.top + rect.height / 2 + 1,
+        }),
+      );
+      node.dispatchEvent(
+        new PointerEvent("pointerup", {
+          ...init,
+          clientX: rect.right - 96,
+          clientY: rect.top + rect.height / 2 + 1,
+        }),
+      );
+    });
+
+    await expect(row).toHaveAttribute("data-revealed", "true");
+    await row.locator('[data-slot="proxy-mobile-remove"]').click();
+    const dialog = page.locator('[data-slot="proxy-removal-dialog"]');
+    await expect(dialog).toContainText("不会阻止它再次连接");
+    await dialog.locator('[data-slot="proxy-removal-confirm"]').click();
+    await expect(row).toHaveCount(0);
+
+    await page.evaluate(() => window.__devAnywhereE2E?.setProxyOnline(true));
+    const reconnected = page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]');
+    await expect(reconnected).toHaveAttribute("data-online", "true");
+    await reconnected.click();
+    await expect(page).toHaveURL(/\/sessions$/);
   });
 
   test("does not show the previous session list after a slow mobile proxy switch", async ({

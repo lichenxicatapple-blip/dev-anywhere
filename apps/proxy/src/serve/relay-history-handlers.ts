@@ -85,6 +85,7 @@ export class RelayHistoryHandlers {
       requestId: approval.requestId,
       toolName: approval.toolName,
       input: approval.input,
+      ...(approval.options ? { options: approval.options } : {}),
     }));
     this.deps.relaySend(
       serializeControl({ type: "pending_approvals_push", sessionId: sid, approvals }),

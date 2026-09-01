@@ -33,9 +33,13 @@ describe("RelayHistoryHandlers pending approval replay", () => {
       {
         requestId: "req-2",
         sessionId: "s1",
-        provider: "claude",
-        toolName: "Read",
-        input: { file_path: "/tmp/a" },
+        provider: "kimi",
+        toolName: "AskUserQuestion",
+        input: { question: "Choose one" },
+        options: [
+          { optionId: "answer-a", name: "A", kind: "allow_once" },
+          { optionId: "skip", name: "Skip", kind: "reject_once" },
+        ],
       },
       (decision) => decisions.push(decision),
     );
@@ -70,7 +74,15 @@ describe("RelayHistoryHandlers pending approval replay", () => {
       .find((msg) => msg.type === "pending_approvals_push");
 
     expect(pendingPush?.approvals).toEqual([
-      { requestId: "req-2", toolName: "Read", input: { file_path: "/tmp/a" } },
+      {
+        requestId: "req-2",
+        toolName: "AskUserQuestion",
+        input: { question: "Choose one" },
+        options: [
+          { optionId: "answer-a", name: "A", kind: "allow_once" },
+          { optionId: "skip", name: "Skip", kind: "reject_once" },
+        ],
+      },
       { requestId: "req-3", toolName: "Write", input: { file_path: "/tmp/b" } },
     ]);
     expect(decisions).toEqual([{ behavior: "allow" }]);

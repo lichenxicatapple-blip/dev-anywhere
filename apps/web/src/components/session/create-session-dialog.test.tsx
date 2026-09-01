@@ -66,6 +66,11 @@ const availableAgentCli = {
     suggestions: ["/usr/local/bin/claude", "/home/dev/.local/bin/claude"],
   },
   codex: { available: true, command: "/usr/local/bin/codex" },
+  kimi: {
+    available: true,
+    command: "/usr/local/bin/kimi",
+    suggestions: ["/usr/local/bin/kimi", "/home/dev/.local/bin/kimi"],
+  },
 };
 
 const sessionCreatePermissionCases = [
@@ -83,6 +88,14 @@ const sessionCreatePermissionCases = [
   ["Codex", "pty", "codex", "跳过全部审批", "bypassPermissions"],
   ["Codex", "json", "codex", "按需审批", "auto"],
   ["Codex", "json", "codex", "跳过全部审批", "bypassPermissions"],
+  ["Kimi Code", "pty", "kimi", "手工审批", "default"],
+  ["Kimi Code", "pty", "kimi", "自动审批", "auto"],
+  ["Kimi Code", "pty", "kimi", "只读规划", "plan"],
+  ["Kimi Code", "pty", "kimi", "全自动", "bypassPermissions"],
+  ["Kimi Code", "json", "kimi", "手工审批", "default"],
+  ["Kimi Code", "json", "kimi", "自动审批", "auto"],
+  ["Kimi Code", "json", "kimi", "只读规划", "plan"],
+  ["Kimi Code", "json", "kimi", "全自动", "bypassPermissions"],
 ] as const;
 
 function renderDialog() {
@@ -212,6 +225,47 @@ describe("CreateSessionDialog", () => {
     });
   });
 
+  it("keeps chat mode selected when switching to Kimi", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "kimi-json-1",
+      mode: "json",
+      provider: "kimi",
+    });
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole, getByText } = renderDialog();
+
+    fireEvent.click(getByRole("button", { name: /聊天模式/ }));
+    fireEvent.click(getByRole("button", { name: "Kimi Code" }));
+
+    const chatMode = getByRole("button", { name: /聊天模式/ }) as HTMLButtonElement;
+    expect(chatMode.disabled).toBe(false);
+    expect(chatMode).toHaveAttribute("aria-pressed", "true");
+    expect(getByRole("button", { name: /^终端模式/ })).toHaveAttribute("aria-pressed", "false");
+    getByText("气泡式对话，支持 Voice Pilot");
+    expect(getByRole("combobox", { name: "权限模式" })).toHaveTextContent("手工审批");
+
+    fireEvent.click(getByRole("button", { name: "创建" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: "/home/dev",
+          mode: "json",
+          provider: "kimi",
+          permissionMode: "default",
+        }),
+        expect.any(Number),
+      );
+    });
+  });
+
   it("creates a PTY session without overriding the provider terminal theme", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
@@ -272,8 +326,10 @@ describe("CreateSessionDialog", () => {
       if (mode === "json") {
         fireEvent.click(getByRole("button", { name: /聊天模式/ }));
       }
-      if (provider === "codex") {
-        fireEvent.click(getByRole("button", { name: "Codex" }));
+      if (provider !== "claude") {
+        fireEvent.click(
+          getByRole("button", { name: provider === "codex" ? "Codex" : "Kimi Code" }),
+        );
       }
       fireEvent.click(getByRole("combobox", { name: "权限模式" }));
       fireEvent.click(getByRole("option", { name: permissionLabel }));
@@ -461,6 +517,27 @@ describe("CreateSessionDialog", () => {
     expect(claudeButton.disabled).toBe(false);
     expect(claudeButton).not.toHaveAttribute("aria-disabled");
     expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("keeps working with an older AgentCliStatus that does not contain Kimi", () => {
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: {
+        claude: { available: true, command: "/usr/local/bin/claude" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+      },
+    });
+
+    const { getByPlaceholderText, getByRole, getByText } = renderDialog();
+
+    fireEvent.click(getByRole("button", { name: "Kimi Code" }));
+    getByText("未检测");
+    expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
+
+    fireEvent.click(getByRole("button", { name: "指定路径" }));
+    getByPlaceholderText("/path/to/kimi");
   });
 
   it("lets the user set a missing Agent CLI path from the dialog", async () => {

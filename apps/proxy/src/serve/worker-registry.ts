@@ -6,6 +6,7 @@ import {
   serializeControl,
   SessionState,
   type ControlErrorCode as ControlErrorCodeType,
+  type CommandEntry,
 } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
@@ -19,6 +20,7 @@ import { getSeqCounterFor } from "../common/seq-counter.js";
 import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../ipc/ipc-protocol.js";
 import { mapClaudeStreamEvent } from "./claude-stream-event-mapper.js";
 import { mapCodexAppServerEvent } from "./codex-app-server-event-mapper.js";
+import { KimiAcpEventMapper } from "./kimi-acp-event-mapper.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
@@ -38,6 +40,7 @@ interface WorkerRegistryDeps {
   jsonObserver: JsonObserver;
   touchSessionActivity?: (sessionId: string) => boolean;
   getProviderEnv: () => NodeJS.ProcessEnv;
+  setProviderCommands?: (sessionId: string, commands: CommandEntry[]) => void;
   nextSeq?: (sessionId: string) => number;
 }
 
@@ -124,6 +127,7 @@ export class WorkerRegistry {
   private readyWaiters = new Map<string, Set<ReadyWaiter>>();
   private pendingNativeSessions = new Map<string, NativeSessionRef>();
   private assistantSnapshots = new Map<string, AssistantSnapshotState>();
+  private readonly kimiAcpEventMapper = new KimiAcpEventMapper();
   private startupFailures = new Map<string, WorkerStartupError>();
   private assistantTurnCounter = 0;
 
@@ -361,6 +365,7 @@ export class WorkerRegistry {
     this.readySessions.delete(sessionId);
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
+    this.kimiAcpEventMapper.clearSession(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker session deleted before ready: ${sessionId}`),
       sessionId,
@@ -375,6 +380,7 @@ export class WorkerRegistry {
     this.readySessions.delete(sessionId);
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
+    this.kimiAcpEventMapper.clearSession(sessionId);
     this.startupFailures.delete(sessionId);
     this.children.delete(sessionId);
     this.rejectReadyWaiters(
@@ -401,6 +407,7 @@ export class WorkerRegistry {
     this.readySessions.clear();
     this.pendingNativeSessions.clear();
     this.assistantSnapshots.clear();
+    this.kimiAcpEventMapper.clear();
     this.startupFailures.clear();
     this.rejectReadyWaiters(new Error("Worker registry destroyed"));
   }
@@ -458,6 +465,7 @@ export class WorkerRegistry {
         break;
 
       case "worker_interrupted":
+        this.kimiAcpEventMapper.finishTurn(sessionId);
         this.deps.permissionBroker.cleanupSession(sessionId, "Turn interrupted");
         this.deps.relayConnection.sendRaw(
           serializeControl({
@@ -476,6 +484,11 @@ export class WorkerRegistry {
         );
         this.deps.jsonObserver.onTurnResult(sessionId);
         serviceLogger.info({ sessionId }, "JSON turn interrupted");
+        break;
+
+      case "worker_turn_started":
+        this.deps.jsonObserver.onTurnStart(sessionId);
+        serviceLogger.debug({ sessionId }, "Queued JSON turn started");
         break;
 
       case "worker_approval_request":
@@ -576,6 +589,10 @@ export class WorkerRegistry {
   // schema 未识别的 event/block 以 warn 暴露，作为 Claude CLI 协议变化的 runtime canary。
   private forwardEvent(sessionId: string, seq: number, event: Record<string, unknown>): void {
     const relay = this.deps.relayConnection;
+    if (event.type === "kimi_acp") {
+      this.forwardKimiAcpEvent(sessionId, seq, event);
+      return;
+    }
     if (event.type === "codex_app_server") {
       this.forwardCodexAppServerEvent(sessionId, seq, event);
       return;
@@ -659,6 +676,40 @@ export class WorkerRegistry {
         this.completeAssistantSnapshot(sessionId, seq);
         relay.sendRaw(mapped.raw);
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
+      }
+    }
+  }
+
+  private forwardKimiAcpEvent(
+    sessionId: string,
+    seq: number,
+    event: Record<string, unknown>,
+  ): void {
+    const relay = this.deps.relayConnection;
+    this.deps.touchSessionActivity?.(sessionId);
+    for (const mapped of this.kimiAcpEventMapper.map(sessionId, seq, event)) {
+      if (mapped.kind === "assistant_text") {
+        this.appendAssistantSnapshot(sessionId, seq, mapped.text);
+      } else if (mapped.kind === "envelope") {
+        if (
+          mapped.envelope.type === "assistant_tool_use" ||
+          mapped.envelope.type === "user_input"
+        ) {
+          this.completeAssistantSnapshot(sessionId, seq);
+        }
+        relay.sendEnvelope(mapped.envelope);
+      } else if (mapped.kind === "control") {
+        if (mapped.providerCommands) {
+          this.deps.setProviderCommands?.(sessionId, mapped.providerCommands);
+        }
+        if (mapped.completeAssistant !== false) this.completeAssistantSnapshot(sessionId, seq);
+        relay.sendRaw(mapped.raw);
+        if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
+      } else {
+        serviceLogger.warn(
+          { sessionId, seq, updateType: mapped.updateType },
+          "Unknown Kimi ACP session update; protocol may have changed",
+        );
       }
     }
   }
@@ -799,6 +850,7 @@ export class WorkerRegistry {
           toolName: msg.toolName,
           toolId: msg.requestId,
           parameters: msg.input,
+          ...(msg.options ? { options: msg.options } : {}),
         },
         "proxy",
       );
@@ -810,6 +862,7 @@ export class WorkerRegistry {
           sessionId,
           toolName: msg.toolName,
           input: msg.input,
+          ...(msg.options ? { options: msg.options } : {}),
         },
         (decision: PermissionDecision) => {
           this.send(sessionId, {
@@ -817,6 +870,8 @@ export class WorkerRegistry {
             requestId: msg.requestId,
             behavior: decision.behavior,
             ...(decision.message ? { message: decision.message } : {}),
+            ...(decision.remember ? { remember: true } : {}),
+            ...(decision.optionId ? { optionId: decision.optionId } : {}),
           });
         },
       );

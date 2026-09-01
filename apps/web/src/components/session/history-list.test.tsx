@@ -312,6 +312,49 @@ describe("HistoryList", () => {
     expect(navigateMock).toHaveBeenCalledWith("/chat/codex-json-session?mode=json");
   });
 
+  it("restores Kimi ACP history in chat mode with Kimi permission choices", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "kimi-json-session",
+      mode: "json",
+      provider: "kimi",
+    });
+    const { container } = renderHistoryList([
+      {
+        id: "kimi-history-json",
+        title: "Kimi ACP 会话",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "kimi",
+        preferredMode: "json",
+      },
+    ]);
+    expandHistory(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：Kimi ACP 会话" }));
+    expect(screen.getByRole("radio", { name: "聊天" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "手工审批" }).getAttribute("aria-checked")).toBe(
+      "true",
+    );
+    expect(screen.getByRole("radio", { name: "自动审批" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "只读规划" })).toBeTruthy();
+    expect(screen.getByRole("radio", { name: "全自动" })).toBeTruthy();
+
+    fireEvent.click(screen.getByRole("radio", { name: "只读规划" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith({
+        cwd: "/Users/dev/project",
+        mode: "json",
+        provider: "kimi",
+        resumeSessionId: "kimi-history-json",
+        permissionMode: "plan",
+      });
+    });
+    expect(navigateMock).toHaveBeenCalledWith("/chat/kimi-json-session?mode=json");
+  });
+
   it("shows a blocking PID-aware explanation when an external Codex writer owns the session", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",

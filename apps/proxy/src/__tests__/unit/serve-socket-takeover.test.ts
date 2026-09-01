@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Socket } from "node:net";
-import { takeoverServeSocket } from "../../worker/serve-socket-takeover.js";
+import { releaseServeSocket, takeoverServeSocket } from "../../worker/serve-socket-takeover.js";
 
 function fakeSocket(): Socket & { destroyCalls: number } {
   const sock = {
@@ -45,5 +45,24 @@ describe("takeoverServeSocket", () => {
     const next = fakeSocket();
     expect(() => takeoverServeSocket(prev, next)).not.toThrow();
     expect(prev.destroy).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("releaseServeSocket", () => {
+  it("ignores a late close from the socket replaced during takeover", () => {
+    const previous = fakeSocket();
+    const current = fakeSocket();
+    const onCurrentClosed = vi.fn();
+
+    expect(releaseServeSocket(current, previous, onCurrentClosed)).toBe(current);
+    expect(onCurrentClosed).not.toHaveBeenCalled();
+  });
+
+  it("clears state and runs cleanup when the current socket closes", () => {
+    const current = fakeSocket();
+    const onCurrentClosed = vi.fn();
+
+    expect(releaseServeSocket(current, current, onCurrentClosed)).toBeNull();
+    expect(onCurrentClosed).toHaveBeenCalledTimes(1);
   });
 });

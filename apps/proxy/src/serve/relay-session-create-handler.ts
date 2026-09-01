@@ -25,6 +25,11 @@ import {
   CodexApprovalPolicyUnsupportedError,
   resolveCodexPermissionPolicy,
 } from "../providers/codex.js";
+import {
+  buildKimiTerminalArgs,
+  KimiPermissionModeUnsupportedError,
+  resolveKimiAcpMode,
+} from "../providers/kimi.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import { buildHostedPtyArgs, type HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { PermissionBroker } from "./permission-broker.js";
@@ -96,6 +101,10 @@ function normalizeSessionName(name: string | undefined): string | undefined {
   return trimmed ? trimmed : undefined;
 }
 
+function supportsProviderHooks(provider: ProviderId): provider is ProviderHookContext["provider"] {
+  return provider === "claude" || provider === "codex";
+}
+
 function resolveTerminalCwd(): string {
   const home = homedir();
   if (home) {
@@ -148,6 +157,18 @@ export class RelaySessionCreateHandler {
     const mode = msg.mode ?? "json";
     const permissionMode = msg.permissionMode;
     const resumeSessionId = msg.resumeSessionId;
+
+    if (provider === "kimi" && resumeSessionId) {
+      const existing = this.deps.sessionManager
+        .listSessions()
+        .find(
+          (session) => session.provider === "kimi" && session.historySessionId === resumeSessionId,
+        );
+      if (existing) {
+        this.respondWithExistingSession(requestId, existing);
+        return;
+      }
+    }
 
     if (provider === "codex") {
       if (resumeSessionId) {
@@ -218,6 +239,28 @@ export class RelaySessionCreateHandler {
       }
     }
 
+    if (provider === "kimi") {
+      try {
+        if (mode === "pty") buildKimiTerminalArgs([], permissionMode);
+        else resolveKimiAcpMode(permissionMode);
+      } catch (err) {
+        if (!(err instanceof KimiPermissionModeUnsupportedError)) throw err;
+        this.deps.relaySend(
+          serializeControl({
+            type: "session_create_response",
+            requestId,
+            errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+            error: err.message,
+          }),
+        );
+        serviceLogger.warn(
+          { provider, permissionMode },
+          "Kimi session create rejected: unsupported approval policy",
+        );
+        return;
+      }
+    }
+
     const cwdError = validateSessionCwd(cwd);
     if (cwdError) {
       this.deps.relaySend(
@@ -238,7 +281,7 @@ export class RelaySessionCreateHandler {
       return;
     }
 
-    if (provider !== "claude" && provider !== "codex") {
+    if (provider !== "claude" && provider !== "codex" && provider !== "kimi") {
       this.deps.relaySend(
         serializeControl({
           type: "session_create_response",
@@ -261,7 +304,9 @@ export class RelaySessionCreateHandler {
     const deadlineAt = Date.now() + SESSION_CREATE_SERVER_DEADLINE_MS;
     let workerPid: number;
     try {
-      const hook = this.deps.createHookContext(pendingId, provider);
+      const hook = supportsProviderHooks(provider)
+        ? this.deps.createHookContext(pendingId, provider)
+        : undefined;
       workerPid = this.deps.workerRegistry.spawn(pendingId, {
         cwd: sessionCwd,
         resumeSessionId,
@@ -324,8 +369,12 @@ export class RelaySessionCreateHandler {
       }),
     );
     serviceLogger.info(
-      { sessionId: session.id, nativeSessionId: session.historySessionId },
-      "Codex resume reused an existing DEV Anywhere session",
+      {
+        sessionId: session.id,
+        provider: session.provider,
+        nativeSessionId: session.historySessionId,
+      },
+      "Provider resume reused an existing DEV Anywhere session",
     );
   }
 
@@ -396,7 +445,9 @@ export class RelaySessionCreateHandler {
       { sessionId: session.id, cwd: options.sessionCwd },
       "JSON session created via relay",
     );
-    this.deps.controlHandlers.pushCommandList(session.id, options.sessionCwd);
+    if (options.provider !== "kimi") {
+      this.deps.controlHandlers.pushCommandList(session.id, options.sessionCwd);
+    }
     this.deps.broadcastSessionSync(session);
     this.deps.broadcastSessionList();
   }
@@ -446,6 +497,7 @@ export class RelaySessionCreateHandler {
 
   private cleanupPendingJsonSession(sessionId: string): void {
     const killed = this.deps.workerRegistry.terminateProcess(sessionId);
+    this.deps.controlHandlers.cleanup(sessionId);
     const paths = sessionPaths(sessionId);
     rmSync(paths.dir, { recursive: true, force: true });
     this.deps.cleanupHookContext(sessionId);
@@ -463,7 +515,7 @@ export class RelaySessionCreateHandler {
     provider: ProviderId,
     permissionMode?: string,
   ): void {
-    if (provider !== "claude" && provider !== "codex") {
+    if (provider !== "claude" && provider !== "codex" && provider !== "kimi") {
       this.deps.relaySend(
         serializeControl({
           type: "session_create_response",
@@ -483,7 +535,9 @@ export class RelaySessionCreateHandler {
     const geometry = resolveInitialPtyGeometry(msg);
     let session: SessionInfo;
     try {
-      const hook = this.deps.createHookContext(pendingId, provider);
+      const hook = supportsProviderHooks(provider)
+        ? this.deps.createHookContext(pendingId, provider)
+        : undefined;
       const pid = this.deps.hostedPtyRegistry.start({
         sessionId: pendingId,
         provider,
@@ -523,6 +577,7 @@ export class RelaySessionCreateHandler {
           error,
           claudeBin: providerEnv.CLAUDE_BIN,
           codexBin: providerEnv.CODEX_BIN,
+          kimiBin: providerEnv.KIMI_BIN,
           path: providerEnv.PATH,
         },
         "Hosted PTY session create failed",
@@ -549,7 +604,11 @@ export class RelaySessionCreateHandler {
         ptyOwner: "proxy-hosted",
       }),
     );
-    this.deps.controlHandlers.pushCommandList(session.id, cwd);
+    // Command discovery currently reads Claude's built-ins and ~/.claude commands.
+    // Do not present that provider-specific list inside a Kimi terminal.
+    if (provider !== "kimi") {
+      this.deps.controlHandlers.pushCommandList(session.id, cwd);
+    }
     this.deps.controlHandlers.pushFileTree(session.id, cwd);
     this.deps.broadcastSessionSync(session);
     this.deps.broadcastSessionList();

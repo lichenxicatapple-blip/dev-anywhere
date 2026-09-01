@@ -39,6 +39,7 @@ export function AgentCliPicker({
 }: AgentCliPickerProps) {
   const claudeStatus = providerStatus("claude", agentCli);
   const codexStatus = providerStatus("codex", agentCli);
+  const kimiStatus = providerStatus("kimi", agentCli);
   const selectedCli = agentCli?.[provider];
 
   return (
@@ -47,7 +48,7 @@ export function AgentCliPicker({
         <span className="text-sm">Agent CLI</span>
         <span className="text-xs text-muted-foreground">选择要启动的 CLI</span>
       </div>
-      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
         <ProviderButton
           provider="claude"
           selected={provider === "claude"}
@@ -61,6 +62,13 @@ export function AgentCliPicker({
           status={codexStatus}
           agentCliLoaded={Boolean(agentCli)}
           onClick={() => onProviderChange("codex")}
+        />
+        <ProviderButton
+          provider="kimi"
+          selected={provider === "kimi"}
+          status={kimiStatus}
+          agentCliLoaded={Boolean(agentCli)}
+          onClick={() => onProviderChange("kimi")}
         />
       </div>
       <div
@@ -172,11 +180,11 @@ function AgentCliPathEditor({
                 onCancel();
               }
             }}
-            placeholder={provider === "claude" ? "/path/to/claude" : "/path/to/codex"}
+            placeholder={`/path/to/${provider === "kimi" ? "kimi" : provider}`}
             className="min-h-11 w-full rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-10 md:min-h-0 md:text-sm"
           />
           <datalist id={`agent-cli-path-${provider}`}>
-            {(agentCli?.[provider].suggestions ?? []).map((path) => (
+            {(agentCli?.[provider]?.suggestions ?? []).map((path) => (
               <option key={path} value={path} />
             ))}
           </datalist>

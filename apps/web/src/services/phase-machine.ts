@@ -9,6 +9,11 @@ import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { loadSessionHistory } from "@/services/session-history-loader";
+import {
+  applyExplicitProxyRemovalState,
+  clearPendingProxyRemoval,
+  getPendingProxyRemovals,
+} from "@/services/proxy-removal-state";
 
 const RECONNECT_GRACE_PERIOD_MS = 30_000;
 // 本机 650+ 个历史文件约 2.2s 扫完；给移动弱网留充足余量，但不要让失败请求锁住刷新整整 30s。
@@ -123,6 +128,14 @@ function invalidateBindingRecovery(timers: Timers): void {
 function clearReconnectRecovery(timers: Timers): void {
   clearReconnectFallback(timers);
   invalidateBindingRecovery(timers);
+}
+
+function handleExplicitProxyRemoval(proxyId: string, timers: Timers, relay: RelayClient): void {
+  // ACK 负责请求标签页、proxy_removed 负责其他标签页；两条消息都会走这里，因此清理必须幂等。
+  const clearedSelection = applyExplicitProxyRemovalState(proxyId, relay);
+  if (!clearedSelection) return;
+  clearReconnectRecovery(timers);
+  router.navigate("/");
 }
 
 function ensureReconnectFallback(timers: Timers): void {
@@ -292,6 +305,23 @@ export async function handleRelayMessage(
     return;
   }
 
+  // 显式移除和 Relay 重启造成的临时空列表语义不同，必须由独立事件驱动清理。
+  // 所有已打开的客户端都会收到该事件，避免其他标签页继续持有已删除 proxy 的绑定。
+  if (msg.type === "proxy_removed" && typeof msg.proxyId === "string") {
+    handleExplicitProxyRemoval(msg.proxyId, timers, relay);
+    return;
+  }
+
+  // 成功 ACK 也代表权威删除：若紧接着断线导致广播丢失，请求标签页仍能完整清理。
+  if (
+    msg.type === "proxy_remove_response" &&
+    (msg.success === true || msg.errorCode === ControlErrorCode.PROXY_NOT_FOUND) &&
+    typeof msg.proxyId === "string"
+  ) {
+    handleExplicitProxyRemoval(msg.proxyId, timers, relay);
+    return;
+  }
+
   // proxy_offline: 更新标记并刷新列表
   if (msg.type === "proxy_offline") {
     relay.listProxies();
@@ -332,6 +362,22 @@ export async function handleRelayMessage(
   if (msg.type === "proxy_list_response") {
     const proxies = msg.proxies as ProxyInfo[];
     useAppStore.getState().setProxies(proxies);
+
+    // If a remove request lost every response during a socket drop, its session-scoped intent
+    // survives the reconnect. The first authoritative list resolves the ambiguity without ever
+    // treating an ordinary Relay restart as a deletion.
+    for (const pendingProxyId of getPendingProxyRemovals()) {
+      if (proxies.some((proxy) => proxy.proxyId === pendingProxyId)) {
+        clearPendingProxyRemoval(pendingProxyId);
+        continue;
+      }
+      const clearedSelection = applyExplicitProxyRemovalState(pendingProxyId, relay);
+      if (clearedSelection) {
+        clearReconnectRecovery(timers);
+        router.navigate("/");
+        return;
+      }
+    }
 
     // 冷启动：首次 proxy_list_response 时在 proxy_selecting 阶段执行
     if (!timers.coldStartDone && s.phase === "proxy_selecting") {

@@ -12,7 +12,7 @@ export function stripProxyProfileArgs(args: string[]): string[] {
   const result: string[] = [];
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "claude" || arg === "codex") {
+    if (arg === "claude" || arg === "codex" || arg === "kimi") {
       result.push(...args.slice(i));
       break;
     }
@@ -30,9 +30,9 @@ export function stripProxyProfileArgs(args: string[]): string[] {
 
 export function extractAgentInvocation(args: string[]): { provider: ProviderId; args: string[] } {
   const [agent, ...providerArgs] = args;
-  if (agent !== "claude" && agent !== "codex") {
+  if (agent !== "claude" && agent !== "codex" && agent !== "kimi") {
     throw new Error(
-      'Missing Agent CLI. Use "dev-anywhere claude ..." or "dev-anywhere codex ...".',
+      'Missing Agent CLI. Use "dev-anywhere claude ...", "dev-anywhere codex ...", or "dev-anywhere kimi ...".',
     );
   }
   return { provider: agent, args: providerArgs };

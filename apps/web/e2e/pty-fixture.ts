@@ -7,7 +7,7 @@ import { installVisualViewportMock } from "./mobile-helpers";
 
 export type PtyFakeRelayOptions = {
   sessionId: string;
-  provider?: "claude" | "codex";
+  provider?: "claude" | "codex" | "kimi";
   sessionKind?: "agent" | "terminal";
   ptyOwner?: "local-terminal" | "proxy-hosted";
   snapshotData?: string;
@@ -64,7 +64,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
         try {
           return JSON.parse(sessionStorage.getItem(activeKey) ?? "null") as {
             sessionId?: string;
-            provider?: "claude" | "codex";
+            provider?: "claude" | "codex" | "kimi";
           } | null;
         } catch {
           return null;
@@ -164,6 +164,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
               agentCli: {
                 claude: { available: true, command: "claude" },
                 codex: { available: true, command: "codex" },
+                kimi: { available: true, command: "kimi" },
               },
             });
             return;
@@ -396,7 +397,7 @@ export async function readRawPtyInput(page: Page): Promise<string> {
 
 export type SetupPtyChatOptions = {
   sessionId: string;
-  provider?: "claude" | "codex";
+  provider?: "claude" | "codex" | "kimi";
   sessionKind?: "agent" | "terminal";
   ptyOwner?: "local-terminal" | "proxy-hosted";
   query?: string;

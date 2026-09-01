@@ -20,6 +20,13 @@ describe("CLI args", () => {
     });
   });
 
+  it("extracts Kimi without passing the provider name through", () => {
+    expect(extractAgentInvocation(["kimi", "--model", "kimi-code/k3"])).toEqual({
+      provider: "kimi",
+      args: ["--model", "kimi-code/k3"],
+    });
+  });
+
   it("rejects missing agent command", () => {
     expect(() => extractAgentInvocation(["-c"])).toThrow(/Missing Agent CLI/);
   });
@@ -33,6 +40,10 @@ describe("CLI args", () => {
     expect(stripProxyProfileArgs(["serve", "status", "--profile=local"])).toEqual([
       "serve",
       "status",
+    ]);
+    expect(stripProxyProfileArgs(["--profile", "local", "kimi", "--plan"])).toEqual([
+      "kimi",
+      "--plan",
     ]);
   });
 

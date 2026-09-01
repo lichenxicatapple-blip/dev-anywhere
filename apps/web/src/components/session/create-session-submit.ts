@@ -8,7 +8,7 @@ import {
 } from "@dev-anywhere/shared";
 
 export type SessionMode = "pty" | "json";
-export type ProviderId = "claude" | "codex";
+export type ProviderId = "claude" | "codex" | "kimi";
 export type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
@@ -26,9 +26,17 @@ export const CODEX_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label
   { value: "bypassPermissions", label: "跳过全部审批" },
 ];
 
+export const KIMI_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
+  { value: "default", label: "手工审批" },
+  { value: "auto", label: "自动审批" },
+  { value: "plan", label: "只读规划" },
+  { value: "bypassPermissions", label: "全自动" },
+];
+
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
+  kimi: "Kimi Code",
 };
 
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
@@ -97,6 +105,9 @@ export function providerStatus(
     return { label: "检测中", disabled: true };
   }
   const status = agentCli[provider];
+  if (!status) {
+    return { label: "未检测", disabled: true };
+  }
   if (status.available) {
     return { label: "可用", disabled: false, title: status.command };
   }
@@ -119,10 +130,17 @@ export function normalizePermissionModeForProvider(
   provider: ProviderId,
   permissionMode: PermissionMode,
 ): PermissionMode {
-  if (provider !== "codex") return permissionMode;
-  return CODEX_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
-    ? permissionMode
-    : "auto";
+  if (provider === "codex") {
+    return CODEX_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
+      ? permissionMode
+      : "auto";
+  }
+  if (provider === "kimi") {
+    return KIMI_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
+      ? permissionMode
+      : "default";
+  }
+  return permissionMode;
 }
 
 export async function submitSessionCreate({

@@ -37,7 +37,7 @@ function withExecutable(name: string, test: (path: string) => void): void {
 }
 
 function createRegistry(
-  provider: "claude" | "codex",
+  provider: "claude" | "codex" | "kimi",
   commandPath: string,
   updateTerminalCwd = vi.fn(() => true),
 ) {
@@ -57,8 +57,11 @@ function createRegistry(
       sendRaw: vi.fn(),
       sendBinary: vi.fn(),
     } as never,
-    getProviderEnv: () =>
-      provider === "claude" ? { CLAUDE_BIN: commandPath } : { CODEX_BIN: commandPath },
+    getProviderEnv: () => {
+      if (provider === "claude") return { CLAUDE_BIN: commandPath };
+      if (provider === "codex") return { CODEX_BIN: commandPath };
+      return { KIMI_BIN: commandPath };
+    },
     touchSessionActivity: vi.fn(() => true),
     updateTerminalCwd,
     applyPtyStateToSession: vi.fn(),
@@ -73,6 +76,7 @@ describe("Hosted PTY registry", () => {
   it("builds provider-specific resume args", () => {
     expect(buildHostedPtyArgs("claude", "claude-session")).toEqual(["--resume", "claude-session"]);
     expect(buildHostedPtyArgs("codex", "codex-session")).toEqual(["resume", "codex-session"]);
+    expect(buildHostedPtyArgs("kimi", "kimi-session")).toEqual(["--session", "kimi-session"]);
     expect(buildHostedPtyArgs("claude")).toEqual([]);
   });
 
@@ -175,6 +179,28 @@ describe("Hosted PTY registry", () => {
       expect(ptySpawnMock).toHaveBeenCalledWith(
         codexBin,
         ["--dangerously-bypass-approvals-and-sandbox", "resume", "codex-session"],
+        expect.objectContaining({ cwd: "/tmp/project" }),
+      );
+    });
+  });
+
+  it("spawns Kimi PTY without a hook and maps its permission mode", () => {
+    withExecutable("kimi", (kimiBin) => {
+      const registry = createRegistry("kimi", kimiBin);
+
+      const pid = registry.start({
+        sessionId: "s1",
+        provider: "kimi",
+        cwd: "/tmp/project",
+        args: ["--session", "kimi-session"],
+        permissionMode: "auto",
+      });
+      registry.destroyAll();
+
+      expect(pid).toBe(2468);
+      expect(ptySpawnMock).toHaveBeenCalledWith(
+        kimiBin,
+        ["--yolo", "--session", "kimi-session"],
         expect.objectContaining({ cwd: "/tmp/project" }),
       );
     });

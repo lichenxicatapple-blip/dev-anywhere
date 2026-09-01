@@ -91,6 +91,73 @@ describe("RelayClient request handling", () => {
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({ type: "proxy_list_request" });
   });
 
+  it("removes an offline proxy with a request-scoped response", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.removeOfflineProxy("proxy-offline");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "proxy_remove_response",
+      requestId: "another-request",
+      proxyId: "proxy-offline",
+      success: true,
+    });
+    ws.emit({
+      type: "proxy_remove_response",
+      requestId,
+      proxyId: "proxy-offline",
+      success: true,
+    });
+
+    await expect(promise).resolves.toEqual({
+      proxyId: "proxy-offline",
+      success: true,
+      error: undefined,
+      errorCode: undefined,
+    });
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "proxy_remove",
+      requestId,
+      proxyId: "proxy-offline",
+    });
+  });
+
+  it("returns the Relay rejection when a proxy came back online before removal", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.removeOfflineProxy("proxy-1");
+    const requestId = sentRequestId(ws);
+
+    ws.emit({
+      type: "proxy_remove_response",
+      requestId,
+      proxyId: "proxy-1",
+      success: false,
+      errorCode: "PROXY_ONLINE",
+      error: "开发机 proxy-1 仍在线，无法删除",
+    });
+
+    await expect(promise).resolves.toMatchObject({
+      proxyId: "proxy-1",
+      success: false,
+      errorCode: "PROXY_ONLINE",
+    });
+  });
+
+  it("times out an unanswered offline proxy removal", async () => {
+    vi.useFakeTimers();
+    try {
+      const { relay } = createClient();
+      const promise = relay.removeOfflineProxy("proxy-1", 100);
+      const assertion = expect(promise).rejects.toThrow("移除开发机超时");
+
+      await vi.advanceTimersByTimeAsync(100);
+
+      await assertion;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("resolves relay client list requests from the matching response", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestRelayClients();
@@ -421,6 +488,32 @@ describe("RelayClient request handling", () => {
     });
 
     await expect(promise).resolves.toEqual({ provider: "claude", agentCli });
+  });
+
+  it("updates the Kimi CLI path through the selected proxy", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.updateAgentCliPath("kimi", "/home/dev/.local/bin/kimi");
+    const requestId = sentRequestId(ws);
+    const agentCli = {
+      claude: { available: true, command: "/usr/local/bin/claude" },
+      codex: { available: true, command: "/usr/local/bin/codex" },
+      kimi: { available: true, command: "/home/dev/.local/bin/kimi" },
+    };
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "agent_cli_config_update",
+      provider: "kimi",
+      path: "/home/dev/.local/bin/kimi",
+    });
+
+    ws.emit({
+      type: "agent_cli_config_update_response",
+      requestId,
+      provider: "kimi",
+      agentCli,
+    });
+
+    await expect(promise).resolves.toEqual({ provider: "kimi", agentCli });
   });
 
   it("reads the relay-local Voice Pilot config", async () => {

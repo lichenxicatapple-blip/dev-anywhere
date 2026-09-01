@@ -5,9 +5,10 @@ export type SessionProvider = SessionInfo["provider"];
 const PROVIDER_LABEL: Record<SessionProvider, string> = {
   claude: "Claude Code",
   codex: "Codex",
+  kimi: "Kimi Code",
 };
 
-const PROVIDER_ORDER: SessionProvider[] = ["claude", "codex"];
+const PROVIDER_ORDER: SessionProvider[] = ["claude", "codex", "kimi"];
 
 export function providerLabel(provider: SessionProvider): string {
   return PROVIDER_LABEL[provider];

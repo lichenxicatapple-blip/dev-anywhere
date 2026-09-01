@@ -99,7 +99,9 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
             sessionManager.setPid(session.id, msg.pid);
           }
           const hook =
-            msg.kind === "terminal" ? undefined : createHookContext(session.id, provider);
+            msg.kind === "terminal" || provider === "kimi"
+              ? undefined
+              : createHookContext(session.id, provider);
           socket.write(
             serializeIpc({
               type: "session_create_response",

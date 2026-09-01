@@ -39,6 +39,7 @@ import {
 } from "./chat-status";
 import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";
+import { useChatCommandSession } from "./use-chat-command-session";
 
 export function ChatPage() {
   const { id } = useParams<{ id: string }>();
@@ -52,6 +53,7 @@ export function ChatPage() {
 }
 
 function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
+  useChatCommandSession(id);
   const findRequestSequenceRef = useRef(0);
   const [findRequest, setFindRequest] = useState<{
     sessionId: string;
@@ -171,7 +173,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     void relay
       .requestSessionResources(id)
       .then((resources) => {
-        useCommandStore.getState().setCommands(resources.commands);
+        useCommandStore.getState().setSessionCommands(resources.sessionId, resources.commands);
         const fileStore = useFileStore.getState();
         fileStore.clearTree();
         if (resources.groups.length === 0) return;

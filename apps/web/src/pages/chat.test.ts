@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { act, renderHook } from "@testing-library/react";
+import { beforeEach, describe, expect, it } from "vitest";
 import type { AgentStatusPayload, SessionInfo } from "@dev-anywhere/shared";
 import {
   isRouteSessionEnded,
@@ -6,6 +7,8 @@ import {
   resolveChatStatusState,
   shouldShowPtyApprovalHint,
 } from "./chat-status";
+import { useChatCommandSession } from "./use-chat-command-session";
+import { useCommandStore } from "@/stores/command-store";
 
 const baseSession: SessionInfo = {
   sessionId: "s1",
@@ -169,5 +172,44 @@ describe("shouldShowPtyApprovalHint", () => {
     expect(shouldShowPtyApprovalHint({ ptyWaitingApproval: true, ptyAutoYesEnabled: true })).toBe(
       false,
     );
+  });
+});
+
+describe("ChatPage command session projection", () => {
+  beforeEach(() => {
+    useCommandStore.setState(useCommandStore.getInitialState(), true);
+    useCommandStore
+      .getState()
+      .setSessionCommands("s1", [{ name: "/one", description: "one", source: "test" }]);
+    useCommandStore
+      .getState()
+      .setSessionCommands("s2", [{ name: "/two", description: "two", source: "test" }]);
+  });
+
+  it("selects the matching command cache when the chat route changes", () => {
+    const view = renderHook(
+      ({ sessionId }: { sessionId: string }) => useChatCommandSession(sessionId),
+      { initialProps: { sessionId: "s1" } },
+    );
+
+    expect(useCommandStore.getState().activeSessionId).toBe("s1");
+    expect(useCommandStore.getState().commands[0].name).toBe("/one");
+
+    view.rerender({ sessionId: "s2" });
+    expect(useCommandStore.getState().activeSessionId).toBe("s2");
+    expect(useCommandStore.getState().commands[0].name).toBe("/two");
+
+    view.unmount();
+    expect(useCommandStore.getState().activeSessionId).toBeNull();
+  });
+
+  it("does not let a stale chat cleanup clear a newer active session", () => {
+    const view = renderHook(() => useChatCommandSession("s1"));
+
+    act(() => useCommandStore.getState().setActiveSession("s2"));
+    view.unmount();
+
+    expect(useCommandStore.getState().activeSessionId).toBe("s2");
+    expect(useCommandStore.getState().commands[0].name).toBe("/two");
   });
 });

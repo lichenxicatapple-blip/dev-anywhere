@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { IdSchema } from "./id.js";
 import { AgentStatusPayloadSchema, PtyStatePayloadSchema, sessionStateValues } from "./session.js";
-import { ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
+import { ApprovalOptionSchema, ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import {
   VoiceCapabilitiesSchema,
   VoiceConfigUpdateSchema,
@@ -55,6 +55,8 @@ export type AgentCliAvailability = z.infer<typeof AgentCliAvailabilitySchema>;
 export const AgentCliStatusSchema = z.object({
   claude: AgentCliAvailabilitySchema,
   codex: AgentCliAvailabilitySchema,
+  // 滚动升级兼容：旧 Proxy 不会上报 Kimi，新 Proxy 的探测结果始终包含它。
+  kimi: AgentCliAvailabilitySchema.optional(),
 });
 export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
 
@@ -170,6 +172,16 @@ const relayControlDefinitions = [
   control("proxy_list_response", {
     ...RequestIdShape,
     proxies: z.array(ProxyInfoSchema),
+  }),
+  control("proxy_remove", {
+    ...RequiredRequestIdShape,
+    proxyId: IdSchema,
+  }),
+  control("proxy_remove_response", {
+    ...RequiredRequestIdShape,
+    proxyId: IdSchema,
+    success: z.boolean(),
+    ...RequestErrorShape,
   }),
   control("relay_client_list_request", RequestIdShape),
   control("relay_client_list_response", {
@@ -381,6 +393,11 @@ const relayControlDefinitions = [
     proxyId: IdSchema,
   }),
 
+  // 用户明确删除了离线 Proxy。与列表暂时缺项分开建模，客户端据此永久清理选择态。
+  control("proxy_removed", {
+    proxyId: IdSchema,
+  }),
+
   // Proxy 主动断开，relay 立即清理资源
   control("proxy_disconnect", {
     proxyId: IdSchema,
@@ -421,7 +438,16 @@ const relayControlDefinitions = [
   ),
 
   // 命令列表推送，proxy 将可用命令列表推给 client
-  control("command_list_push", { commands: z.array(CommandEntrySchema) }, "proxy_to_client"),
+  control(
+    "command_list_push",
+    {
+      // New proxies scope command snapshots to their owning session. Keep this optional so
+      // rolling upgrades can still consume the legacy, proxy-wide snapshot.
+      sessionId: IdSchema.optional(),
+      commands: z.array(CommandEntrySchema),
+    },
+    "proxy_to_client",
+  ),
 
   // 文件树推送: 按目录分组, 首组 path 即为 session cwd
   // 前端直接把每组写入 tree[path], 与 dir_list_response 共享 cache slot
@@ -685,6 +711,7 @@ const relayControlDefinitions = [
           requestId: IdSchema,
           toolName: z.string(),
           input: z.record(z.string(), z.unknown()),
+          options: z.array(ApprovalOptionSchema).optional(),
         }),
       ),
     },

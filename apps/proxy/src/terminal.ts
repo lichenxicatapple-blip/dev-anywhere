@@ -41,6 +41,7 @@ import { terminalLogger as log } from "./common/logger.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
+  KIMI_PROVIDER,
   type ProviderAdapter,
   type ProviderHookContext,
   type ProviderId,
@@ -60,6 +61,7 @@ const SPAWN_FAILURE_THRESHOLD = 3;
 const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   claude: CLAUDE_PROVIDER,
   codex: CODEX_PROVIDER,
+  kimi: KIMI_PROVIDER,
 };
 
 class TerminalSession {
@@ -545,7 +547,8 @@ class TerminalSession {
 }
 
 function providerFromEnv(): ProviderId {
-  return process.env.DEV_ANYWHERE_PROVIDER === "codex" ? "codex" : "claude";
+  const provider = process.env.DEV_ANYWHERE_PROVIDER;
+  return provider === "codex" || provider === "kimi" ? provider : "claude";
 }
 
 export async function startTerminal(

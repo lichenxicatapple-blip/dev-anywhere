@@ -1548,6 +1548,69 @@ describe("VoicePilotController", () => {
     );
   });
 
+  it("keeps dynamic approval options on the card instead of mapping a voice allow command", async () => {
+    requestVoiceSummary.mockResolvedValueOnce({
+      sessionId: "s1",
+      messageId: "toolu_dynamic",
+      success: true,
+      summary: "需要选择如何继续当前操作。",
+    });
+    useVoicePilotStore.getState().enable("s1");
+    render(<VoicePilotController sessionId="s1" turnIdleMs={1} />);
+    await waitFor(() => expect(FakeWebSocket.instances).toHaveLength(2));
+    asrSocket().open();
+    ttsSocket().open();
+    await waitForListeningReady();
+    act(() => {
+      useChatStore.getState().addApprovalRequest("s1", {
+        requestId: "toolu_dynamic",
+        toolName: "AskUserQuestion",
+        input: { question: "How should this continue?" },
+        options: [
+          { optionId: "allow-once", name: "Continue once", kind: "allow_once" },
+          { optionId: "reject-once", name: "Stop now", kind: "reject_once" },
+        ],
+        status: "pending",
+      });
+    });
+
+    await waitFor(() => {
+      expect(useVoicePilotStore.getState().bySessionId.s1?.phase).toBe("approval");
+      const spoken = ttsSocket()
+        .sent.filter((item): item is string => typeof item === "string")
+        .map((item) => JSON.parse(item));
+      expect(spoken).toContainEqual(
+        expect.objectContaining({
+          type: "speak",
+          text: "需要审批：需要选择如何继续当前操作。请在页面审批卡中选择一个选项。",
+        }),
+      );
+    });
+
+    ttsSocket().emitJson({ type: "finished", requestId: "approval-prompt" });
+    await waitFor(() => expect(createSpeechCapture).toHaveBeenCalledTimes(2));
+
+    emitMicSpeechChunk();
+    asrSocket().emitJson({ type: "final", text: "允许" });
+
+    await waitFor(() => {
+      const spoken = ttsSocket()
+        .sent.filter((item): item is string => typeof item === "string")
+        .map((item) => JSON.parse(item));
+      expect(spoken).toContainEqual(
+        expect.objectContaining({
+          type: "speak",
+          text: "当前审批包含多个选项，请在页面审批卡中选择。",
+        }),
+      );
+    });
+    expect(sendControl).not.toHaveBeenCalled();
+    expect(useChatStore.getState().bySessionId.s1?.pendingApprovals[0]).toMatchObject({
+      requestId: "toolu_dynamic",
+      status: "pending",
+    });
+  });
+
   it("stops approval capture and waits for formal turn completion before listening again", async () => {
     const firstStop = vi.fn().mockResolvedValue(undefined);
     const approvalStop = vi.fn().mockResolvedValue(undefined);

@@ -7,6 +7,8 @@ type ProxyConnectionState = "online" | "offline";
 // 显式客户端连接状态，跟踪注册和绑定
 type ClientConnectionState = "registered" | "bound";
 
+type RemoveOfflineProxyResult = "removed" | "not_found" | "online";
+
 // proxy 连接 FSM: 仅 online <-> offline 双向流转。registerProxy 走 reconnect 路径直接写
 // online (相当于 offline -> online), transitionProxy 走 close 路径走 online -> offline。
 // 同状态停留 (online -> online / offline -> offline) 视为非法, 由 canTransition 拦下。
@@ -123,11 +125,31 @@ export class RelayRegistry {
       }
     }
 
+    // ClientSocket 还单独缓存了 boundProxyId 供消息热路径路由。只删 clientBindings 会让
+    // 活跃/重复 tab 残留旧 ID，并在同 ID 的 Proxy 日后重新注册时绕过重新选择直接路由。
+    for (const ws of this.connectedClients.keys()) {
+      const clientWs = ws as WebSocket & { boundProxyId?: string };
+      if (clientWs.boundProxyId === proxyId) {
+        delete clientWs.boundProxyId;
+      }
+    }
+
     this.proxyStates.delete(proxyId);
   }
 
   unregisterProxy(proxyId: string): void {
     this.cleanupProxy(proxyId);
+  }
+
+  // 检查状态与删除必须保持在同一个同步操作内，避免调用方先检查、稍后删除时误删
+  // 已经重连上线的开发机。只有显式进入 offline 状态的记录才允许被用户移除。
+  removeOfflineProxy(proxyId: string): RemoveOfflineProxyResult {
+    const state = this.proxyStates.get(proxyId);
+    if (!state) return "not_found";
+    if (state.connectionState !== "offline") return "online";
+
+    this.cleanupProxy(proxyId);
+    return "removed";
   }
 
   getProxy(proxyId: string): WebSocket | undefined {

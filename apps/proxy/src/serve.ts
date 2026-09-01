@@ -41,6 +41,12 @@ import type { ProviderId } from "./providers/types.js";
 import { createRelayAutoUpdater } from "./auto-update.js";
 import { PROXY_VERSION } from "./version.js";
 
+const AGENT_CLI_PATH_FIELDS: Record<ProviderId, "claudeBin" | "codexBin" | "kimiBin"> = {
+  claude: "claudeBin",
+  codex: "codexBin",
+  kimi: "kimiBin",
+};
+
 function resolveInterruptedApprovals(
   permissionBroker: PermissionBroker,
   hookEventRouter: HookEventRouter,
@@ -155,7 +161,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const getAgentCliSuggestions = (): Partial<Record<ProviderId, string[]>> =>
     proxyConfig.agentCliSuggestions;
   const setAgentCliPath = (provider: ProviderId, path: string): void => {
-    const field = provider === "claude" ? "claudeBin" : "codexBin";
+    const field = AGENT_CLI_PATH_FIELDS[provider];
     const existing = proxyConfig.agentCliSuggestions[provider] ?? [];
     proxyConfig = {
       ...proxyConfig,
@@ -244,6 +250,8 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     jsonObserver,
     touchSessionActivity: eventBridge.touchSessionActivity,
     getProviderEnv,
+    setProviderCommands: (sessionId, commands) =>
+      controlHandlers.setProviderCommands(sessionId, commands),
   });
   const ptyBridgeDeps: PtySessionBridgeDeps = {
     changeSessionState: eventBridge.changeSessionState,

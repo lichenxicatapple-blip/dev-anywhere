@@ -1,4 +1,4 @@
-import { providerValues, type ProviderId } from "@dev-anywhere/shared";
+import type { HookProviderId } from "./hook-registry.js";
 
 // hook 入站 payload 解析的两个零依赖工具，hook-server 和 hook-event-router 共用。
 // 都按容错语义工作：解析失败返回中性默认值（null / 空对象 / "unknown"）而非抛错，
@@ -11,11 +11,10 @@ export function asRecord(value: unknown): Record<string, unknown> {
     : {};
 }
 
-// provider 字符串收窄到 ProviderId；不在白名单返回 null。复用 shared 端的 providerValues 避免漂移。
-export function asProvider(value: unknown): ProviderId | null {
-  return (providerValues as readonly string[]).includes(value as string)
-    ? (value as ProviderId)
-    : null;
+// Hooks are implemented only by Claude/Codex. Keep this boundary narrower than the
+// shared provider list so a future provider cannot be accepted without a hook adapter.
+export function asProvider(value: unknown): HookProviderId | null {
+  return value === "claude" || value === "codex" ? value : null;
 }
 
 // 从 hook payload 提取 toolName，兼容 camelCase（toolName）和 snake_case（tool_name）。

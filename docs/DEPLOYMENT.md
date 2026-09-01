@@ -101,7 +101,7 @@ sudo bash scripts/deploy/install-relay.sh dev-anywhere.example.com
 
 ## 连接开发机
 
-在运行 Claude Code、Codex 或 Shell 的开发机上安装 Proxy：
+在运行 Claude Code、Codex、Kimi Code 或 Shell 的开发机上安装 Proxy：
 
 ```bash
 npm install -g @dev-anywhere/proxy
@@ -138,16 +138,21 @@ dev-anywhere serve status
 
 `status` 应显示 Relay 已连接。默认 profile 的服务日志位于 `~/.dev-anywhere/logs/service.log`。
 
-如果 Claude Code 或 Codex 不在普通的 `PATH` 中，将下面的字段合并到配置顶层：
+如果 Claude Code、Codex 或 Kimi Code 不在普通的 `PATH` 中，将下面的字段合并到配置顶层：
 
 ```json
 {
   "agentCli": {
     "claudeBin": "/absolute/path/to/claude",
-    "codexBin": "/absolute/path/to/codex"
+    "codexBin": "/absolute/path/to/codex",
+    "kimiBin": "/absolute/path/to/kimi"
   }
 }
 ```
+
+也可以使用 `CLAUDE_BIN`、`CODEX_BIN` 或 `KIMI_BIN` 临时覆盖这些路径；其中 `KIMI_BIN` 对应 `agentCli.kimiBin`。
+
+Kimi Code 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere kimi ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
 
 ## 连接浏览器
 

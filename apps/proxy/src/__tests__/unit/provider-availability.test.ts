@@ -10,13 +10,17 @@ describe("provider availability", () => {
     try {
       const claudeBin = join(root, "claude");
       const codexBin = join(root, "codex");
+      const kimiBin = join(root, "kimi");
       writeFileSync(claudeBin, "#!/bin/sh\n");
       writeFileSync(codexBin, "#!/bin/sh\n");
+      writeFileSync(kimiBin, "#!/bin/sh\n");
       chmodSync(claudeBin, 0o755);
       chmodSync(codexBin, 0o755);
+      chmodSync(kimiBin, 0o755);
       const status = detectAgentCliStatus({
         CLAUDE_BIN: claudeBin,
         CODEX_BIN: codexBin,
+        KIMI_BIN: kimiBin,
       });
 
       expect(status).toEqual({
@@ -26,6 +30,7 @@ describe("provider availability", () => {
           suggestions: [claudeBin],
         },
         codex: { available: true, command: codexBin, suggestions: [codexBin] },
+        kimi: { available: true, command: kimiBin, suggestions: [kimiBin] },
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -39,6 +44,21 @@ describe("provider availability", () => {
     expect(status.claude.error).toContain("claude not found");
     expect(status.codex.available).toBe(false);
     expect(status.codex.error).toContain("codex not found");
+    expect(status.kimi.available).toBe(false);
+    expect(status.kimi.error).toContain("kimi not found");
+  });
+
+  it("always includes a Kimi detection result despite the wire field being optional", () => {
+    const status = detectAgentCliStatus(
+      { PATH: "/definitely/not/a/bin" },
+      { suggestions: { kimi: ["/home/dev/.kimi-code/bin/kimi"] } },
+    );
+
+    expect(status.kimi).toEqual({
+      available: false,
+      error: expect.stringContaining("kimi not found"),
+      suggestions: ["/home/dev/.kimi-code/bin/kimi"],
+    });
   });
 
   it("returns saved path suggestions even when detection fails", () => {

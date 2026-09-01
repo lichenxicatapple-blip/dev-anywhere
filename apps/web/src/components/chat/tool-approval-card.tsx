@@ -77,7 +77,7 @@ export function ToolApprovalCard({
     );
   }
 
-  function send(decision: "allow" | "deny", whitelistTool = false) {
+  function send(decision: "allow" | "deny", whitelistTool = false, optionId?: string) {
     if (acted || isResolved) return;
     const relay = relayClientRef;
     if (!relay) return;
@@ -90,12 +90,16 @@ export function ToolApprovalCard({
         ? relay.sendControl({
             type: "tool_approve",
             sessionId,
-            payload: { toolId: approval.requestId, whitelistTool },
+            payload: {
+              toolId: approval.requestId,
+              whitelistTool,
+              ...(optionId ? { optionId } : {}),
+            },
           })
         : relay.sendControl({
             type: "tool_deny",
             sessionId,
-            payload: { toolId: approval.requestId },
+            payload: { toolId: approval.requestId, ...(optionId ? { optionId } : {}) },
           });
     if (!sent) {
       toast.warning("连接恢复后再审批");
@@ -187,39 +191,64 @@ export function ToolApprovalCard({
             {JSON.stringify(approval.input, null, 2)}
           </pre>
         ))}
-      <div className="flex items-center justify-between gap-2">
-        <Button
-          variant="ghost"
-          size="sm"
-          className="h-11 text-muted-foreground md:h-8"
-          disabled={acted || !transportReady}
-          onClick={() => send("allow", true)}
-          data-action="always"
-        >
-          始终允许
-        </Button>
-        <div className="flex gap-2">
+      {approval.options?.length ? (
+        <div className="flex flex-wrap justify-end gap-2">
+          {approval.options.map((option) => {
+            const isAllow = option.kind === "allow_once" || option.kind === "allow_always";
+            const isAlways = option.kind === "allow_always";
+            return (
+              <Button
+                key={option.optionId}
+                variant={isAllow ? "default" : "ghost"}
+                size="sm"
+                className={cn(
+                  "h-11 md:h-8",
+                  !isAllow && "text-destructive hover:bg-destructive/10 hover:text-destructive",
+                )}
+                disabled={acted || !transportReady}
+                onClick={() => send(isAllow ? "allow" : "deny", isAlways, option.optionId)}
+                data-action={option.kind}
+              >
+                {option.name}
+              </Button>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="flex items-center justify-between gap-2">
           <Button
             variant="ghost"
             size="sm"
-            className="h-11 text-destructive hover:bg-destructive/10 hover:text-destructive md:h-8"
+            className="h-11 text-muted-foreground md:h-8"
             disabled={acted || !transportReady}
-            onClick={() => send("deny")}
-            data-action="deny"
+            onClick={() => send("allow", true)}
+            data-action="always"
           >
-            拒绝
+            始终允许
           </Button>
-          <Button
-            size="sm"
-            className="h-11 md:h-8"
-            disabled={acted || !transportReady}
-            onClick={() => send("allow")}
-            data-action="allow"
-          >
-            允许
-          </Button>
+          <div className="flex gap-2">
+            <Button
+              variant="ghost"
+              size="sm"
+              className="h-11 text-destructive hover:bg-destructive/10 hover:text-destructive md:h-8"
+              disabled={acted || !transportReady}
+              onClick={() => send("deny")}
+              data-action="deny"
+            >
+              拒绝
+            </Button>
+            <Button
+              size="sm"
+              className="h-11 md:h-8"
+              disabled={acted || !transportReady}
+              onClick={() => send("allow")}
+              data-action="allow"
+            >
+              允许
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
     </div>,
   );
 }

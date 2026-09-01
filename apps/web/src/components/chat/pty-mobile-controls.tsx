@@ -29,14 +29,18 @@ interface PtyMobileControlsProps {
 // 数字参考浏览器原生 keyboard repeat 体感。
 const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
-const CODEX_CLEAR_GUARD_MS = 1200;
+const CTRL_C_CLEAR_GUARD_MS = 1200;
+
+function usesGuardedCtrlCClear(provider: SessionProvider | undefined): boolean {
+  return provider === "codex" || provider === "kimi";
+}
 
 function clearInputSequence(
   sessionKind: "agent" | "terminal" | undefined,
   provider: SessionProvider | undefined,
 ): string {
   if (sessionKind === "terminal") return "\x15";
-  return provider === "codex" ? "\x03" : "\x1b\x1b";
+  return usesGuardedCtrlCClear(provider) ? "\x03" : "\x1b\x1b";
 }
 
 // 移动端浮层按键。竖屏保持 2 行倒 T 方向键，横屏利用可用宽度压成 1 行：
@@ -257,17 +261,17 @@ function ClearInputKey({ sessionKind, provider, label, slot, onInput }: ClearInp
     [],
   );
 
-  const startCodexGuard = (): void => {
+  const startCtrlCGuard = (): void => {
     guardedRef.current = true;
     setGuarded(true);
     if (guardTimerRef.current !== null) window.clearTimeout(guardTimerRef.current);
-    guardTimerRef.current = window.setTimeout(clearGuard, CODEX_CLEAR_GUARD_MS);
+    guardTimerRef.current = window.setTimeout(clearGuard, CTRL_C_CLEAR_GUARD_MS);
   };
 
   const handlePress = (): void => {
-    if (provider === "codex" && guardedRef.current) return;
+    if (usesGuardedCtrlCClear(provider) && guardedRef.current) return;
     onInput(clearInputSequence(sessionKind, provider));
-    if (provider === "codex") startCodexGuard();
+    if (usesGuardedCtrlCClear(provider)) startCtrlCGuard();
   };
 
   return (

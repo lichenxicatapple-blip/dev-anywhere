@@ -25,7 +25,7 @@ PTY 同步同时走两条路径：
 ```mermaid
 flowchart LR
   subgraph Device["开发机"]
-    PTY["真实 PTY<br/>Shell / Claude Code / Codex"]
+    PTY["真实 PTY<br/>Shell / Claude Code / Codex / Kimi Code"]
     Producer["PTY 生产端<br/>分配 outputSeq"]
     Headless["Headless xterm<br/>权威终端状态"]
     Serve["Proxy Serve<br/>会话与连接路由"]
@@ -50,11 +50,11 @@ flowchart LR
 
 项目目前有三种 PTY 生产端：
 
-| 会话来源                                               | 生产端                                                                | 与 Proxy Serve 的关系               |
-| ------------------------------------------------------ | --------------------------------------------------------------------- | ----------------------------------- |
-| 本地执行 `dev-anywhere claude` 或 `dev-anywhere codex` | [`TerminalSession`](../apps/proxy/src/terminal.ts)                    | 独立进程，通过 Unix socket IPC 接入 |
-| 浏览器创建 Shell 会话                                  | [`ShellTerminalWorker`](../apps/proxy/src/terminal-worker.ts)         | 独立进程，通过 Unix socket IPC 接入 |
-| 浏览器创建 Claude Code 或 Codex PTY 会话               | [`HostedPtyRegistry`](../apps/proxy/src/serve/hosted-pty-registry.ts) | 由 Proxy Serve 直接托管             |
+| 会话来源                                                                    | 生产端                                                                | 与 Proxy Serve 的关系               |
+| --------------------------------------------------------------------------- | --------------------------------------------------------------------- | ----------------------------------- |
+| 本地执行 `dev-anywhere claude`、`dev-anywhere codex` 或 `dev-anywhere kimi` | [`TerminalSession`](../apps/proxy/src/terminal.ts)                    | 独立进程，通过 Unix socket IPC 接入 |
+| 浏览器创建 Shell 会话                                                       | [`ShellTerminalWorker`](../apps/proxy/src/terminal-worker.ts)         | 独立进程，通过 Unix socket IPC 接入 |
+| 浏览器创建 Claude Code、Codex 或 Kimi Code PTY 会话                         | [`HostedPtyRegistry`](../apps/proxy/src/serve/hosted-pty-registry.ts) | 由 Proxy Serve 直接托管             |
 
 三条路径都维护：
 

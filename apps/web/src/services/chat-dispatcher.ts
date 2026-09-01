@@ -83,6 +83,7 @@ function handleToolUseRequest(
     requestId: env.payload.toolId,
     toolName: env.payload.toolName,
     input: env.payload.parameters,
+    ...(env.payload.options ? { options: env.payload.options } : {}),
     status: "pending",
   });
   relay?.sendControl({
@@ -128,6 +129,7 @@ function handlePendingApprovalsPush(
     requestId: appr.requestId,
     toolName: appr.toolName,
     input: appr.input,
+    ...(appr.options ? { options: appr.options } : {}),
     status: "pending" as const,
   }));
   store.replacePendingApprovals(msg.sessionId, approvals);
@@ -184,20 +186,41 @@ function handleTurnResult(
   if (wasCompacting) {
     showCompactEndToast(msg.sessionId, msg.success && !msg.isError, resultText);
   }
-  if (resultText.trim()) {
+  const failed = !msg.success || msg.isError;
+  if (failed) {
+    // A streamed answer can precede a provider/runtime failure. Always append the terminal
+    // reason unless the proxy already emitted that exact text as the final assistant snapshot.
+    const failureText = resultText.trim() || "本轮执行失败";
     const slice = store.bySessionId[msg.sessionId];
     const last = slice?.messages[slice.messages.length - 1];
-    const lastAssistantHasText = last?.role === "assistant" && last.text.trim().length > 0;
-    if (!lastAssistantHasText) {
+    const reasonAlreadyVisible = last?.role === "assistant" && last.text.trim() === failureText;
+    if (!reasonAlreadyVisible) {
       store.upsertAssistantSnapshot(msg.sessionId, {
-        turnId: `${msg.sessionId}-result-${Date.now()}`,
+        turnId: `${msg.sessionId}-failure-${Date.now()}`,
         revision: 1,
-        text: resultText,
+        text: failureText,
         status: "completed",
       });
     }
+    store.markTurnFailed(msg.sessionId);
+  } else {
+    if (resultText.trim()) {
+      const slice = store.bySessionId[msg.sessionId];
+      const last = slice?.messages[slice.messages.length - 1];
+      const lastAssistantHasText = last?.role === "assistant" && last.text.trim().length > 0;
+      if (!lastAssistantHasText) {
+        store.upsertAssistantSnapshot(msg.sessionId, {
+          turnId: `${msg.sessionId}-result-${Date.now()}`,
+          revision: 1,
+          text: resultText,
+          status: "completed",
+        });
+      }
+    }
+    store.markTurnComplete(msg.sessionId);
   }
-  store.markTurnComplete(msg.sessionId);
+  // A failed turn is still terminal. Flush intentionally queued input as before; otherwise the
+  // queued bubbles would remain stranded after the session returns to idle.
   flushQueuedUserInputBatch(msg.sessionId, relay);
 }
 

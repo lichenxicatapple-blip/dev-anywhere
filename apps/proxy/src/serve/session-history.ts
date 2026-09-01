@@ -1,4 +1,4 @@
-import { readdir, stat, access, open } from "node:fs/promises";
+import { readdir, stat, lstat, access, open, readFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { isAbsolute, join, resolve, sep } from "node:path";
 import { homedir, tmpdir } from "node:os";
@@ -14,7 +14,7 @@ interface SessionHistoryEntry {
   title: string;
   projectDir: string;
   updatedAt: number;
-  provider: "claude" | "codex";
+  provider: "claude" | "codex" | "kimi";
   preferredMode?: "pty" | "json";
 }
 
@@ -24,6 +24,11 @@ interface ScanSessionHistoryOptions {
 
 const claudeProjectsDir = (): string => join(homedir(), ".claude", "projects");
 const codexSessionsDir = (): string => join(homedir(), ".codex", "sessions");
+const kimiCodeHome = (): string => {
+  const configured = process.env.KIMI_CODE_HOME?.trim();
+  return configured ? resolve(configured) : join(homedir(), ".kimi-code");
+};
+const kimiSessionsDir = (): string => join(kimiCodeHome(), "sessions");
 const UNTITLED_SESSION_TITLE = "未命名会话";
 const MAX_HISTORY_TITLE_LENGTH = 40;
 const IGNORED_SLASH_COMMANDS = new Set([
@@ -64,17 +69,26 @@ export async function scanSessionHistory(
   options: ScanSessionHistoryOptions = {},
 ): Promise<SessionHistoryEntry[]> {
   const entries = applySessionHistoryMetadata(
-    [...(await scanClaudeSessionHistory()), ...(await scanCodexSessionHistory())],
+    [
+      ...(await scanClaudeSessionHistory()),
+      ...(await scanCodexSessionHistory()),
+      ...(await scanKimiSessionHistory()),
+    ],
     readSessionHistoryMetadata(options.metadataPath),
   ).filter((entry) => !isTemporaryProjectDir(entry.projectDir));
   entries.sort((a, b) => b.updatedAt - a.updatedAt);
-  // 按 provider + projectDir + title 去重，resume 产生的多个 session 只保留最新的。
+  // Claude/Codex 按 provider + projectDir + title 去重，resume 产生的多个 session 只保留最新的。
+  // Kimi 的 session/resume 与 --session 会继续使用同一个原生 session id；同目录同标题的不同 id
+  // 是彼此独立的会话，必须全部保留。
   // 兜底: 标题回退为「未命名会话」时改用 session id 参与去重, 避免提取不到标题的不同会话
-  // 被错误折叠成一条 (真实标题相同仍按设计折叠)。
+  // 被错误折叠成一条 (Claude/Codex 的真实标题相同仍按设计折叠)。
   const seen = new Set<string>();
   const uniqueEntries = entries.filter((e) => {
     const titleKey = e.title === UNTITLED_SESSION_TITLE ? `id:${e.id}` : e.title;
-    const key = `${e.provider}::${e.projectDir}::${titleKey}::${e.preferredMode ?? "unknown"}`;
+    const key =
+      e.provider === "kimi"
+        ? `${e.provider}::id:${e.id}`
+        : `${e.provider}::${e.projectDir}::${titleKey}::${e.preferredMode ?? "unknown"}`;
     if (seen.has(key)) return false;
     seen.add(key);
     return true;
@@ -178,6 +192,62 @@ async function scanCodexSessionHistory(): Promise<SessionHistoryEntry[]> {
   return entries;
 }
 
+interface KimiSessionState {
+  id?: unknown;
+  cwd?: unknown;
+  title?: unknown;
+  lastPrompt?: unknown;
+  updatedAt?: unknown;
+  createdAt?: unknown;
+  archived?: unknown;
+}
+
+async function readKimiSessionState(filePath: string): Promise<KimiSessionState | null> {
+  try {
+    const parsed = JSON.parse(await readFile(filePath, "utf-8")) as unknown;
+    return asRecord(parsed) as KimiSessionState | null;
+  } catch {
+    return null;
+  }
+}
+
+async function scanKimiSessionHistory(): Promise<SessionHistoryEntry[]> {
+  const stateFiles = await collectFilesNamed(kimiSessionsDir(), "state.json");
+  const entries: SessionHistoryEntry[] = [];
+  for (const filePath of stateFiles) {
+    const state = await readKimiSessionState(filePath);
+    if (!state || state.archived === true) continue;
+    if (typeof state.id !== "string" || !SAFE_SESSION_ID_PATTERN.test(state.id)) continue;
+    if (typeof state.cwd !== "string" || !isAbsolute(state.cwd)) continue;
+    const rawTitle =
+      typeof state.title === "string"
+        ? state.title
+        : typeof state.lastPrompt === "string"
+          ? state.lastPrompt
+          : "";
+    let updatedAt: number;
+    if (typeof state.updatedAt === "number" && Number.isFinite(state.updatedAt)) {
+      updatedAt = state.updatedAt;
+    } else if (typeof state.createdAt === "number" && Number.isFinite(state.createdAt)) {
+      updatedAt = state.createdAt;
+    } else {
+      try {
+        updatedAt = (await stat(filePath)).mtimeMs;
+      } catch {
+        continue;
+      }
+    }
+    entries.push({
+      id: state.id,
+      title: normalizeHistoryTitle(rawTitle) ?? UNTITLED_SESSION_TITLE,
+      projectDir: state.cwd,
+      updatedAt,
+      provider: "kimi",
+    });
+  }
+  return entries;
+}
+
 type WithoutCursor<T> = T extends unknown ? Omit<T, "cursor"> : never;
 type SessionMessage = SessionHistoryMessage;
 type UnpositionedSessionMessage = WithoutCursor<SessionHistoryMessage>;
@@ -196,7 +266,7 @@ interface SessionMessagesPageOptions {
   before?: string;
 }
 
-type SessionHistoryProvider = "claude" | "codex";
+type SessionHistoryProvider = "claude" | "codex" | "kimi";
 
 const DEFAULT_HISTORY_PAGE_LIMIT = 50;
 const MAX_HISTORY_PAGE_LIMIT = 200;
@@ -278,10 +348,30 @@ async function findSessionFile(
 ): Promise<string | null> {
   if (provider === "claude") return findClaudeSessionFile(sessionId);
   if (provider === "codex") return findCodexSessionFile(sessionId);
+  if (provider === "kimi") return findKimiSessionFile(sessionId);
   return (await findClaudeSessionFile(sessionId)) ?? (await findCodexSessionFile(sessionId));
 }
 
+async function findKimiSessionFile(kimiSessionId: string): Promise<string | null> {
+  if (!SAFE_SESSION_ID_PATTERN.test(kimiSessionId)) return null;
+  const stateFiles = await collectFilesNamed(kimiSessionsDir(), "state.json");
+  for (const stateFile of stateFiles) {
+    const state = await readKimiSessionState(stateFile);
+    if (state?.id !== kimiSessionId) continue;
+    const wireFile = join(stateFile.slice(0, -"state.json".length), "agents", "main", "wire.jsonl");
+    try {
+      const wireStat = await lstat(wireFile);
+      if (wireStat.isSymbolicLink() || !wireStat.isFile()) continue;
+      return wireFile;
+    } catch {
+      continue;
+    }
+  }
+  return null;
+}
+
 function historyTimestamp(value: unknown): number | undefined {
+  if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value !== "string") return undefined;
   const timestamp = new Date(value).getTime();
   return Number.isFinite(timestamp) ? timestamp : undefined;
@@ -830,6 +920,54 @@ function extractConversationItemsFromJson(obj: unknown): ExtractedHistoryItem[] 
     payload?: unknown;
   };
   const timestamp = historyTimestamp(record.timestamp);
+  const kimiTimestamp = historyTimestamp((record as { time?: unknown }).time);
+  if (record.type === "turn.prompt") {
+    // `turn.prompt` is Kimi's durable user-turn record in both terminal and ACP sessions.
+    // ACP also writes an adjacent `prompt.accepted` copy, so treating that transport-level
+    // record as history would duplicate every ACP prompt while omitting terminal prompts.
+    const input = (record as { input?: unknown }).input;
+    return extractClaudeContentItems("user", input, kimiTimestamp);
+  }
+  if (record.type === "context.append_loop_event") {
+    const event = asRecord((record as { event?: unknown }).event);
+    if (!event || typeof event.type !== "string") return [];
+    if (event.type === "content.part") {
+      const part = asRecord(event.part);
+      if (part?.type !== "text" || typeof part.text !== "string") return [];
+      const text = normalizeConversationText(part.text);
+      return text
+        ? [
+            {
+              kind: "message",
+              message: {
+                role: "assistant",
+                text,
+                ...(kimiTimestamp !== undefined ? { timestamp: kimiTimestamp } : {}),
+              },
+            },
+          ]
+        : [];
+    }
+    if (
+      event.type === "tool.call" &&
+      typeof event.toolCallId === "string" &&
+      typeof event.name === "string"
+    ) {
+      const item = toolUseHistoryItem(event.toolCallId, event.name, event.args, kimiTimestamp);
+      return item ? [item] : [];
+    }
+    if (event.type === "tool.result" && typeof event.toolCallId === "string") {
+      const result = asRecord(event.result);
+      return [
+        {
+          kind: "tool-result",
+          toolId: event.toolCallId,
+          isError: Boolean(result?.error) || result?.isError === true,
+        },
+      ];
+    }
+    return [];
+  }
   if (record.type === "event_msg") {
     const payload =
       record.payload && typeof record.payload === "object"
@@ -1232,6 +1370,26 @@ async function collectJsonlFiles(root: string): Promise<string[]> {
     if (entry.isDirectory()) {
       files.push(...(await collectJsonlFiles(child)));
     } else if (entry.isFile() && entry.name.endsWith(".jsonl")) {
+      files.push(child);
+    }
+  }
+  return files;
+}
+
+async function collectFilesNamed(root: string, filename: string): Promise<string[]> {
+  let entries: Array<{ name: string; isDirectory(): boolean; isFile(): boolean }>;
+  try {
+    entries = await readdir(root, { withFileTypes: true });
+  } catch {
+    return [];
+  }
+
+  const files: string[] = [];
+  for (const entry of entries) {
+    const child = join(root, entry.name);
+    if (entry.isDirectory()) {
+      files.push(...(await collectFilesNamed(child, filename)));
+    } else if (entry.isFile() && entry.name === filename) {
       files.push(child);
     }
   }

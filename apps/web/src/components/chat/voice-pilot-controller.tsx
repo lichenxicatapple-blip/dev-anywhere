@@ -63,6 +63,7 @@ const WAVEFORM_BINS_PER_PCM_CHUNK = 8;
 const SPEECH_PRE_ROLL_MS = 1200;
 const MU_LAW_BYTES_PER_SECOND = ASR_SAMPLE_RATE;
 const APPROVAL_DECISION_HINT = "当前正在等待审批，请说允许、始终允许或拒绝。";
+const DYNAMIC_APPROVAL_DECISION_HINT = "当前审批包含多个选项，请在页面审批卡中选择。";
 
 declare global {
   interface Window {
@@ -161,6 +162,10 @@ function firstPendingApproval(approvals: ToolApprovalRequest[]): ToolApprovalReq
   return approvals.find((approval) => approval.status === "pending") ?? null;
 }
 
+function hasDynamicApprovalOptions(approval: ToolApprovalRequest | null): boolean {
+  return Boolean(approval?.options?.length);
+}
+
 function pendingApprovalQueue(approvals: ToolApprovalRequest[]): ToolApprovalRequest[] {
   return approvals.filter((approval) => approval.status === "pending");
 }
@@ -202,13 +207,20 @@ function approvalSummarySource(approval: ToolApprovalRequest): string {
   ].join("\n");
 }
 
-function approvalPromptText(summary: string, queue?: { position: number; total: number }): string {
+function approvalPromptText(
+  summary: string,
+  queue?: { position: number; total: number },
+  useApprovalCard = false,
+): string {
   const trimmed = summary.trim().replace(/[。.!?！？\s]+$/u, "");
   const body = `需要审批：${trimmed || "有一个工具操作正在等待审批"}`;
+  const decisionHint = useApprovalCard
+    ? "请在页面审批卡中选择一个选项。"
+    : "请说允许、始终允许或拒绝。";
   if (queue && queue.total > 1) {
-    return `有 ${queue.total} 个工具审批待处理。第 ${queue.position} 个，共 ${queue.total} 个。${body}。请说允许、始终允许或拒绝。`;
+    return `有 ${queue.total} 个工具审批待处理。第 ${queue.position} 个，共 ${queue.total} 个。${body}。${decisionHint}`;
   }
-  return `${body}。请说允许、始终允许或拒绝。`;
+  return `${body}。${decisionHint}`;
 }
 
 function speechTextFingerprint(text: string): string {
@@ -532,6 +544,7 @@ export function VoicePilotController({
           approvalPromptText(
             summary,
             approvalQueueContext(approvalsRef.current, approval.requestId),
+            hasDynamicApprovalOptions(approval),
           ),
         );
       } catch (err) {
@@ -1178,6 +1191,10 @@ export function VoicePilotController({
           command.type === "approve_always" ||
           command.type === "deny_once")
       ) {
+        if (hasDynamicApprovalOptions(approval)) {
+          speak(DYNAMIC_APPROVAL_DECISION_HINT);
+          return true;
+        }
         void sendMachineEvent({
           type: "approvalResolved",
           action:
@@ -1223,7 +1240,11 @@ export function VoicePilotController({
           details: { chars: route.text.length },
         });
         discardVoicePartialBubble();
-        speak(APPROVAL_DECISION_HINT);
+        speak(
+          hasDynamicApprovalOptions(approval)
+            ? DYNAMIC_APPROVAL_DECISION_HINT
+            : APPROVAL_DECISION_HINT,
+        );
         return;
       }
       const messageId = commitRecognizedInput(route.text);

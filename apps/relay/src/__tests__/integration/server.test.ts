@@ -7,7 +7,13 @@ import {
   encodeFileStreamFrame,
   serializeControl,
 } from "@dev-anywhere/shared";
-import { waitForOpen, waitForMessage, waitForMessageType, getPort } from "../helpers.js";
+import {
+  collectMessages,
+  waitForOpen,
+  waitForMessage,
+  waitForMessageType,
+  getPort,
+} from "../helpers.js";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -110,6 +116,302 @@ describe("Relay Server Integration", () => {
 
     expect(response.type).toBe("proxy_list_response");
     expect(response.proxies).toEqual([{ proxyId: "p1", online: true, sessions: [] }]);
+  });
+
+  it("removes an offline proxy, ACKs its formerly bound client, then broadcasts removal and list", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "retired-proxy" }));
+    await waitForMessageType(proxy, "proxy_register_response");
+
+    const requester = connectClient();
+    const observer = connectClient();
+    await Promise.all([waitForOpen(requester), waitForOpen(observer)]);
+    requester.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "remove-requester",
+        browserName: "Safari",
+        osName: "iOS",
+        deviceKind: "phone",
+      }),
+    );
+    observer.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "remove-observer",
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await Promise.all([
+      waitForMessageType(requester, "client_register_response"),
+      waitForMessageType(observer, "client_register_response"),
+    ]);
+    requester.send(JSON.stringify({ type: "proxy_select", proxyId: "retired-proxy" }));
+    await waitForMessageType(requester, "proxy_select_response");
+
+    const requesterOffline = waitForMessageType(requester, "proxy_offline");
+    const requesterOfflineList = waitForMessageType(requester, "proxy_list_response");
+    const observerOfflineList = waitForMessageType(observer, "proxy_list_response");
+    proxy.close();
+    await Promise.all([requesterOffline, requesterOfflineList, observerOfflineList]);
+    await waitForCondition(
+      () => relay.registry.getProxyConnectionState("retired-proxy") === "offline",
+      "proxy did not transition offline",
+    );
+
+    const requesterMessagesPromise = collectMessages(requester, 3);
+    const observerMessagesPromise = collectMessages(observer, 2);
+    requester.send(
+      JSON.stringify({
+        type: "proxy_remove",
+        requestId: "remove-retired-proxy",
+        proxyId: "retired-proxy",
+      }),
+    );
+
+    const requesterMessages = (await requesterMessagesPromise).map((raw) => JSON.parse(raw));
+    const observerMessages = (await observerMessagesPromise).map((raw) => JSON.parse(raw));
+    expect(requesterMessages.map((message) => message.type)).toEqual([
+      "proxy_remove_response",
+      "proxy_removed",
+      "proxy_list_response",
+    ]);
+    expect(requesterMessages[0]).toEqual({
+      type: "proxy_remove_response",
+      requestId: "remove-retired-proxy",
+      proxyId: "retired-proxy",
+      success: true,
+    });
+    expect(requesterMessages[1]).toEqual({
+      type: "proxy_removed",
+      proxyId: "retired-proxy",
+    });
+    expect(requesterMessages[2]).toMatchObject({ type: "proxy_list_response", proxies: [] });
+    expect(observerMessages).toEqual([
+      { type: "proxy_removed", proxyId: "retired-proxy" },
+      { type: "proxy_list_response", proxies: [] },
+    ]);
+    expect(relay.registry.hasProxy("retired-proxy")).toBe(false);
+    expect(relay.registry.getClientBinding("remove-requester")).toBeUndefined();
+    expect(requester.readyState).toBe(WebSocket.OPEN);
+
+    // A new machine may later reuse the same configured ID. The old socket must not regain
+    // routing implicitly after the registry entry is recreated.
+    const replacement = connectProxy();
+    await waitForOpen(replacement);
+    replacement.send(JSON.stringify({ type: "proxy_register", proxyId: "retired-proxy" }));
+    await waitForMessageType(replacement, "proxy_register_response");
+    const notBoundPromise = waitForMessageType(requester, "relay_error");
+    requester.send(
+      JSON.stringify({
+        seq: 1,
+        sessionId: "old-session",
+        timestamp: Date.now(),
+        source: "client",
+        version: "1.0",
+        type: "user_input",
+        payload: { text: "must not route" },
+      }),
+    );
+    expect(JSON.parse(await notBoundPromise)).toMatchObject({ code: "NOT_BOUND" });
+  });
+
+  it("rejects online and unknown proxy removal with explicit errors", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "online-proxy" }));
+    await waitForMessageType(proxy, "proxy_register_response");
+
+    const unregisteredClient = connectClient();
+    await waitForOpen(unregisteredClient);
+    const notRegisteredPromise = waitForMessageType(unregisteredClient, "relay_error");
+    unregisteredClient.send(
+      JSON.stringify({
+        type: "proxy_remove",
+        requestId: "remove-before-register",
+        proxyId: "online-proxy",
+      }),
+    );
+    expect(JSON.parse(await notRegisteredPromise)).toMatchObject({
+      requestId: "remove-before-register",
+      code: "NOT_REGISTERED",
+    });
+    expect(relay.registry.isProxyOnline("online-proxy")).toBe(true);
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "remove-errors-client",
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await waitForMessageType(client, "client_register_response");
+
+    const onlineResponsePromise = waitForMessageType(client, "proxy_remove_response");
+    client.send(
+      JSON.stringify({
+        type: "proxy_remove",
+        requestId: "remove-online",
+        proxyId: "online-proxy",
+      }),
+    );
+    expect(JSON.parse(await onlineResponsePromise)).toMatchObject({
+      requestId: "remove-online",
+      proxyId: "online-proxy",
+      success: false,
+      errorCode: "PROXY_ONLINE",
+      error: expect.stringContaining("仍在线"),
+    });
+    expect(relay.registry.isProxyOnline("online-proxy")).toBe(true);
+
+    const unknownResponsePromise = waitForMessageType(client, "proxy_remove_response");
+    client.send(
+      JSON.stringify({
+        type: "proxy_remove",
+        requestId: "remove-missing",
+        proxyId: "missing-proxy",
+      }),
+    );
+    expect(JSON.parse(await unknownResponsePromise)).toMatchObject({
+      requestId: "remove-missing",
+      proxyId: "missing-proxy",
+      success: false,
+      errorCode: "PROXY_NOT_FOUND",
+      error: expect.stringContaining("不存在"),
+    });
+    expect(relay.registry.hasProxy("online-proxy")).toBe(true);
+  });
+
+  it("revokes remote file tokens and pending metadata when an offline proxy is removed", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "file-proxy" }));
+    await waitForMessageType(proxy, "proxy_register_response");
+    proxy.send(
+      JSON.stringify({
+        type: "session_sync",
+        sessions: [{ id: "file-session", mode: "pty", provider: "claude", state: "idle" }],
+      }),
+    );
+    await waitForCondition(
+      () => relay.registry.getProxyForSession("file-session") === "file-proxy",
+      "file session not indexed",
+    );
+
+    const client = connectClient();
+    await waitForOpen(client);
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        clientId: "file-client",
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await waitForMessageType(client, "client_register_response");
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "file-proxy" }));
+    await waitForMessageType(client, "proxy_select_response");
+
+    const metadataRequestPromise = waitForMessageType(proxy, "remote_file_metadata_request");
+    client.send(
+      JSON.stringify({
+        type: "remote_file_url_request",
+        requestId: "issued-download",
+        sessionId: "file-session",
+        path: "build/result.txt",
+        disposition: "download",
+      }),
+    );
+    const metadataRequest = JSON.parse(await metadataRequestPromise) as { requestId: string };
+    const issuedDownloadPromise = waitForMessageType(client, "remote_file_url_response");
+    proxy.send(
+      serializeControl({
+        type: "remote_file_metadata_response",
+        requestId: metadataRequest.requestId,
+        sessionId: "file-session",
+        success: true,
+        path: "build/result.txt",
+        mimeType: "text/plain",
+        size: 6,
+        fileName: "result.txt",
+      }),
+    );
+    const issuedDownload = JSON.parse(await issuedDownloadPromise) as { url: string };
+
+    const issuedUploadPromise = waitForMessageType(client, "remote_file_upload_url_response");
+    client.send(
+      JSON.stringify({
+        type: "remote_file_upload_url_request",
+        requestId: "issued-upload",
+        sessionId: "file-session",
+        kind: "file",
+        fileName: "upload.txt",
+        mimeType: "text/plain",
+        size: 6,
+      }),
+    );
+    const issuedUpload = JSON.parse(await issuedUploadPromise) as { uploadUrl: string };
+
+    const pendingMetadataRequestPromise = waitForMessageType(proxy, "remote_file_metadata_request");
+    client.send(
+      JSON.stringify({
+        type: "remote_file_url_request",
+        requestId: "pending-download",
+        sessionId: "file-session",
+        path: "build/pending.txt",
+        disposition: "inline",
+      }),
+    );
+    await pendingMetadataRequestPromise;
+
+    const offlinePromise = waitForMessageType(client, "proxy_offline");
+    const offlineListPromise = waitForMessageType(client, "proxy_list_response");
+    proxy.close();
+    await Promise.all([offlinePromise, offlineListPromise]);
+    await waitForCondition(
+      () => relay.registry.getProxyConnectionState("file-proxy") === "offline",
+      "file proxy did not transition offline",
+    );
+
+    const removeResponsePromise = waitForMessageType(client, "proxy_remove_response");
+    const removedPromise = waitForMessageType(client, "proxy_removed");
+    const updatedListPromise = waitForMessageType(client, "proxy_list_response");
+    const pendingFailurePromise = waitForMessageType(client, "remote_file_url_response");
+    client.send(
+      JSON.stringify({
+        type: "proxy_remove",
+        requestId: "remove-file-proxy",
+        proxyId: "file-proxy",
+      }),
+    );
+    expect(JSON.parse(await removeResponsePromise)).toMatchObject({ success: true });
+    await Promise.all([removedPromise, updatedListPromise]);
+    expect(JSON.parse(await pendingFailurePromise)).toMatchObject({
+      type: "remote_file_url_response",
+      requestId: "pending-download",
+      success: false,
+      errorCode: "PROXY_NOT_FOUND",
+    });
+
+    const downloadResponse = await fetch(`http://127.0.0.1:${port}${issuedDownload.url}`);
+    expect(downloadResponse.status).toBe(404);
+    expect(await downloadResponse.json()).toEqual({ error: "remote_file_url_expired" });
+
+    const uploadResponse = await fetch(`http://127.0.0.1:${port}${issuedUpload.uploadUrl}`, {
+      method: "PUT",
+      headers: { "content-type": "text/plain" },
+      body: "denied",
+    });
+    expect(uploadResponse.status).toBe(404);
+    expect(await uploadResponse.json()).toEqual({ error: "remote_file_upload_url_expired" });
   });
 
   it("client selects proxy and messages route bidirectionally", async () => {

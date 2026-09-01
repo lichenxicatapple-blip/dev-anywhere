@@ -110,13 +110,13 @@ export type SpawnSessionOptions =
       kind?: "agent";
       mode: "pty" | "json";
       cwd: string;
-      provider: "claude" | "codex";
+      provider: "claude" | "codex" | "kimi";
     }
   | {
       kind: "terminal";
       mode: "pty";
       cwd?: string;
-      provider?: "claude" | "codex";
+      provider?: "claude" | "codex" | "kimi";
       cols?: number;
       rows?: number;
     };

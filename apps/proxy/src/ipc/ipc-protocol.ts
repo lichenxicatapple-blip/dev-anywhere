@@ -2,8 +2,10 @@ import { z } from "zod";
 import {
   SessionState,
   ControlErrorCode,
+  ApprovalOptionSchema,
   encodeBinaryFrame,
   decodeBinaryFrame,
+  providerValues,
   ptySemanticStateValues,
 } from "@dev-anywhere/shared";
 import { LineBuffer } from "./line-buffer.js";
@@ -40,7 +42,8 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("session_create_request"),
     name: z.string().optional(),
     mode: z.enum(["pty", "json"]),
-    provider: z.enum(["claude", "codex"]),
+    // Local terminal and JSON sessions support every provider advertised by the shared protocol.
+    provider: z.enum(providerValues),
     cwd: z.string(),
     pid: z.number(),
     sessionId: z.string().optional(),
@@ -236,7 +239,7 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("worker_stop"),
   }),
 
-  // serve → worker: 只中断当前 Claude turn，worker 进程必须保活并重建 Claude 子进程。
+  // serve → worker: 只中断当前 provider turn，worker 进程保持可复用。
   z.object({
     type: z.literal("worker_interrupt"),
   }),
@@ -247,16 +250,18 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     requestId: z.string(),
     behavior: z.enum(["allow", "deny"]),
     message: z.string().optional(),
+    remember: z.boolean().optional(),
+    optionId: z.string().optional(),
   }),
 
-  // worker → serve: claude 输出事件（带序列号）
+  // worker → serve: provider 输出事件（带序列号）
   z.object({
     type: z.literal("worker_event"),
     seq: z.number(),
     event: z.record(z.string(), z.unknown()),
   }),
 
-  // worker → serve: claude 进程退出
+  // worker → serve: provider 进程退出
   z.object({
     type: z.literal("worker_exit"),
     code: z.number(),
@@ -268,22 +273,28 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("worker_interrupted"),
   }),
 
+  // worker → serve: provider 真正开始执行一个排队中的 turn（区别于仅接收输入）。
+  z.object({
+    type: z.literal("worker_turn_started"),
+  }),
+
   // worker → serve: 工具审批请求
   z.object({
     type: z.literal("worker_approval_request"),
     requestId: z.string(),
     toolName: z.string(),
     input: z.record(z.string(), z.unknown()),
+    options: z.array(ApprovalOptionSchema).optional(),
   }),
 
-  // worker → serve: worker 就绪。Claude 在进程启动后发送；Codex 在 app-server
-  // initialize + thread/start|resume 完成后发送，避免 session_create 早于 provider ready。
+  // worker → serve: worker 就绪。Claude 在进程启动后发送；Codex/Kimi 分别在
+  // app-server/ACP initialize + native session start|resume 完成后发送。
   z.object({
     type: z.literal("worker_ready"),
     pid: z.number(),
     nativeSession: z
       .object({
-        provider: z.enum(["claude", "codex"]),
+        provider: z.enum(providerValues),
         sessionId: z.string(),
       })
       .optional(),
@@ -293,7 +304,7 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
   // 结构化 code，serve 不再只能把它降级成笼统的 WORKER_START_FAILED。
   z.object({
     type: z.literal("worker_startup_error"),
-    provider: z.enum(["claude", "codex"]),
+    provider: z.enum(providerValues),
     message: z.string().max(2048),
     errorCode: z.literal(ControlErrorCode.SESSION_ALREADY_ACTIVE).optional(),
     nativeSessionId: z.string().optional(),
@@ -306,11 +317,11 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
   }),
 
-  // worker → serve: provider 原生会话 ID。Codex app-server 用 thread id 作为
-  // historySessionId，Claude 仍保留 worker_claude_session_id 的兼容路径。
+  // worker → serve: provider 原生会话 ID。Codex thread id 与 Kimi ACP session id 都作为
+  // historySessionId；Claude 仍保留 worker_claude_session_id 的兼容路径。
   z.object({
     type: z.literal("worker_native_session_id"),
-    provider: z.enum(["claude", "codex"]),
+    provider: z.enum(providerValues),
     sessionId: z.string(),
   }),
 

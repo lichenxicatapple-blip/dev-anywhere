@@ -13,3 +13,15 @@ export function takeoverServeSocket(prev: Socket | null, next: Socket): Socket {
   }
   return next;
 }
+
+// A close/error event from the socket destroyed during takeover may arrive after the replacement
+// became current. Only the current socket is allowed to clear connection state or reject work.
+export function releaseServeSocket(
+  current: Socket | null,
+  closed: Socket,
+  onCurrentClosed: () => void,
+): Socket | null {
+  if (current !== closed) return current;
+  onCurrentClosed();
+  return null;
+}

@@ -9,6 +9,7 @@ import type {
   FileTreeGroup,
   HistorySession,
   MessageEnvelope,
+  ProviderId,
   RelayClientInfo,
   RelayControlMessage,
   VoiceConfigUpdate,
@@ -36,6 +37,10 @@ type RelayClientListResult = RelayClientInfo[];
 type RelayClientKickResponse = Extract<RelayControlMessage, { type: "relay_client_kick_response" }>;
 type RelayClientKickResult = {
   clientId: string;
+  success: boolean;
+} & RequestError;
+type ProxyRemoveResult = {
+  proxyId: string;
   success: boolean;
 } & RequestError;
 type SessionHistoryMessage = Extract<
@@ -206,6 +211,36 @@ export class RelayClient {
       timeoutMs,
       requestId,
     ).then((msg) => msg.proxies as ProxyInfoResult);
+  }
+
+  removeOfflineProxy(
+    proxyId: string,
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<ProxyRemoveResult> {
+    const requestId = nextRequestId("proxy-remove");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "proxy_remove_response" }> =>
+        msg.type === "proxy_remove_response" && msg.requestId === requestId,
+      () =>
+        this.ws.send(
+          JSON.stringify({
+            type: "proxy_remove",
+            requestId,
+            proxyId,
+          }),
+        ),
+      "移除开发机超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => {
+      if (resp.success) this.clearBoundProxy(proxyId);
+      return {
+        proxyId: resp.proxyId,
+        success: resp.success,
+        error: resp.error,
+        errorCode: resp.errorCode,
+      };
+    });
   }
 
   requestRelayClients(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<RelayClientListResult> {
@@ -442,10 +477,10 @@ export class RelayClient {
   }
 
   updateAgentCliPath(
-    provider: "claude" | "codex",
+    provider: ProviderId,
     path: string,
     timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  ): Promise<{ provider: "claude" | "codex"; agentCli?: AgentCliStatus } & RequestError> {
+  ): Promise<{ provider: ProviderId; agentCli?: AgentCliStatus } & RequestError> {
     const requestId = nextRequestId("agent-cli-config");
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "agent_cli_config_update_response" }> =>

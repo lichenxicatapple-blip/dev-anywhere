@@ -119,6 +119,51 @@ export class RemoteFileBridge {
 
   constructor(private readonly deps: RemoteFileBridgeDeps) {}
 
+  revokeProxy(proxyId: string): void {
+    let revokedTokens = 0;
+    let rejectedMetadata = 0;
+    let failedStreams = 0;
+    let failedUploads = 0;
+
+    for (const [token, metadata] of this.tokens) {
+      if (metadata.proxyId !== proxyId) continue;
+      this.tokens.delete(token);
+      revokedTokens += 1;
+    }
+    for (const [token, metadata] of this.uploadTokens) {
+      if (metadata.proxyId !== proxyId) continue;
+      this.uploadTokens.delete(token);
+      revokedTokens += 1;
+    }
+    for (const [requestId, pending] of this.pendingUrlMetadata) {
+      if (pending.proxyId !== proxyId) continue;
+      this.pendingUrlMetadata.delete(requestId);
+      clearTimeout(pending.timer);
+      pending.resolve({
+        success: false,
+        path: pending.path,
+        error: "开发机已删除",
+        errorCode: ControlErrorCode.PROXY_NOT_FOUND,
+      });
+      rejectedMetadata += 1;
+    }
+    for (const [streamId, pending] of this.pendingStreams) {
+      if (pending.token.proxyId !== proxyId) continue;
+      this.failStream(streamId, 410, "开发机已删除", ControlErrorCode.PROXY_NOT_FOUND);
+      failedStreams += 1;
+    }
+    for (const [uploadId, pending] of this.pendingUploads) {
+      if (pending.token.proxyId !== proxyId) continue;
+      this.failUpload(uploadId, 410, "开发机已删除", ControlErrorCode.PROXY_NOT_FOUND);
+      failedUploads += 1;
+    }
+
+    this.deps.logger.info(
+      { proxyId, revokedTokens, rejectedMetadata, failedStreams, failedUploads },
+      "Remote file access revoked for removed proxy",
+    );
+  }
+
   createUrl(input: {
     clientId: string;
     proxyId: string;

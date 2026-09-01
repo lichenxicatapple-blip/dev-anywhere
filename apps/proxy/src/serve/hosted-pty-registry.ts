@@ -39,6 +39,7 @@ import {
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
+  KIMI_PROVIDER,
   type ProviderAdapter,
   type ProviderHookContext,
   type ProviderId,
@@ -53,6 +54,7 @@ const STARTUP_OUTPUT_PREVIEW_LIMIT = 8_192;
 const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   claude: CLAUDE_PROVIDER,
   codex: CODEX_PROVIDER,
+  kimi: KIMI_PROVIDER,
 };
 
 const HOSTED_PTY_TERM = "xterm-256color";
@@ -76,7 +78,7 @@ interface HostedPtyStartOptions {
   args: string[];
   permissionMode?: string;
   nativeSessionId?: string;
-  hook: ProviderHookContext;
+  hook?: ProviderHookContext;
   cols?: number;
   rows?: number;
 }
@@ -112,7 +114,9 @@ interface HostedPtySession {
 
 export function buildHostedPtyArgs(provider: ProviderId, resumeSessionId?: string): string[] {
   if (!resumeSessionId) return [];
-  return provider === "codex" ? ["resume", resumeSessionId] : ["--resume", resumeSessionId];
+  if (provider === "codex") return ["resume", resumeSessionId];
+  if (provider === "kimi") return ["--session", resumeSessionId];
+  return ["--resume", resumeSessionId];
 }
 
 export function normalizeHostedPtyEnv(env: NodeJS.ProcessEnv): Record<string, string> {

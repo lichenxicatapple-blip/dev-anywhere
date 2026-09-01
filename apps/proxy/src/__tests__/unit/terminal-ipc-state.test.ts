@@ -7,6 +7,52 @@ import { handleTerminalConnection } from "#src/serve/terminal-ipc.js";
 import type { SessionInfo } from "#src/serve/session-manager.js";
 
 describe("local terminal IPC state ownership", () => {
+  it("registers Kimi local PTY sessions without creating a provider hook", async () => {
+    const socket = new PassThrough() as unknown as Socket;
+    const createHookContext = vi.fn();
+    const createSession = vi.fn(() => ({
+      id: "kimi-session",
+      mode: "pty" as const,
+      provider: "kimi" as const,
+      ptyOwner: "local-terminal" as const,
+      state: SessionState.IDLE,
+      createdAt: 1,
+      updatedAt: 1,
+      cwd: "/tmp",
+      pid: process.pid,
+    }));
+
+    handleTerminalConnection(socket, {
+      sessionManager: { getSession: vi.fn(), createSession } as never,
+      workerRegistry: {},
+      terminalSockets: new Map(),
+      terminalSubscriptionBacklog: {},
+      hostedPtyRegistry: {},
+      relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn() },
+      permissionBroker: { listSession: vi.fn(() => []) },
+      hookEventRouter: {},
+      createHookContext,
+      emitAgentStatus: vi.fn(),
+      updateTerminalCwd: vi.fn(),
+      resolveInterruptedApprovals: vi.fn(),
+      config: {},
+    } as never);
+
+    socket.write(
+      serializeIpc({
+        type: "session_create_request",
+        mode: "pty",
+        provider: "kimi",
+        cwd: "/tmp",
+        pid: process.pid,
+      }),
+    );
+
+    await vi.waitFor(() => expect(createSession).toHaveBeenCalled());
+    expect(createHookContext).not.toHaveBeenCalled();
+    socket.destroy();
+  });
+
   it("keeps a completed turn idle when the terminal emits a redraw frame", async () => {
     const session: SessionInfo = {
       id: "session-1",

@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./apps/web/public/brand-icon.svg" width="96" alt="DEV Anywhere 标志">
   <h1>DEV Anywhere</h1>
-  <p>在浏览器中创建、接管和管理开发机上的 Claude Code、Codex 与 Shell 会话。</p>
+  <p>在浏览器中创建、接管和管理开发机上的 Claude Code、Codex、Kimi Code 与 Shell 会话。</p>
   <p>
     <a href="./README.en.md">English</a>
     ·
@@ -22,9 +22,11 @@
 
 ## 这是什么
 
-DEV Anywhere 是一个自托管的远程 AI coding 工作台。你可以在任意设备的浏览器中，继续操作远程开发机终端里正在运行的 Claude Code 或 Codex，也可以恢复历史会话、远程启动新的 coding agent，或者直接使用 Shell。
+DEV Anywhere 是一个自托管的远程 AI coding 工作台。你可以在任意设备的浏览器中，继续操作远程开发机终端里正在运行的 Claude Code、Codex 或 Kimi Code，也可以恢复它们的历史会话、远程启动新的 coding agent，或者直接使用 Shell。
 
-想让本地启动的 Claude Code 或 Codex 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。除了多了这个前缀，其他都和你原来的开发体验完全一致；但启动后，对应会话会出现在 DEV Anywhere 的 Web 界面里，方便你随时随地继续开发。你也可以直接从 Web 创建新的 coding agent 会话。
+想让本地启动的 Claude Code、Codex 或 Kimi Code 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。除了多了这个前缀，其他都和你原来的开发体验完全一致；但启动后，对应会话会出现在 DEV Anywhere 的 Web 界面里，方便你随时随地继续开发。你也可以直接从 Web 创建新的 coding agent 会话。
+
+Kimi Code 同时支持原生终端与 ACP 聊天会话。ACP 聊天会流式显示回复和工具调用，支持在 Web 中允许、始终允许或拒绝工具审批，也可以取消当前回合并从历史会话恢复。
 
 DEV Anywhere 直接围绕远程 coding agent 工作流设计。除了查看 coding agent 的输出，你还可以跟踪运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。代码仓库、coding agent CLI 和模型凭据仍然留在开发机上。
 
@@ -43,7 +45,7 @@ node --version
 npm --version
 ```
 
-如果要创建 coding agent 会话，还需要提前安装并登录 Claude Code 或 Codex。只使用 Shell 时可以跳过这一步。
+如果要创建 coding agent 会话，还需要提前安装并登录 Claude Code、Codex 或 Kimi Code。只使用 Shell 时可以跳过这一步。
 
 ### 1. 安装本地 Proxy
 
@@ -117,6 +119,16 @@ dev-anywhere init
 
 使用域名时，将 `url` 换成 `wss://你的域名`。部署脚本会输出与当前入口匹配的配置示例。
 
+如果 `kimi` 不在普通的 `PATH` 中，可以临时设置 `KIMI_BIN`，也可以将下面的 `agentCli` 字段合并到配置顶层：
+
+```json
+{
+  "agentCli": {
+    "kimiBin": "/absolute/path/to/kimi"
+  }
+}
+```
+
 让开发机连接 Relay：
 
 ```bash
@@ -134,7 +146,7 @@ dev-anywhere serve status
 
 #### 从浏览器接管开发机终端中的会话
 
-启动 Claude Code 或 Codex 时，只需在原命令前加上 `dev-anywhere`：
+启动 Claude Code、Codex 或 Kimi Code 时，只需在原命令前加上 `dev-anywhere`：
 
 例如，原来运行 `claude --permission-mode plan`，接入后只需改为 `dev-anywhere claude --permission-mode plan`。除了增加 `dev-anywhere` 前缀，CLI 参数和本地终端的使用体验保持不变，之后还可以在 Web 中继续同一个会话。
 
@@ -145,6 +157,7 @@ dev-anywhere serve status
 ```bash
 dev-anywhere claude
 dev-anywhere codex
+dev-anywhere kimi
 ```
 
 **使用 Quick Tunnel 时**
@@ -154,11 +167,12 @@ dev-anywhere codex
 ```bash
 dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
+dev-anywhere --profile quick-tunnel kimi
 ```
 
 #### 从浏览器启动新会话
 
-打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex 或 Shell。
+打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex、Kimi Code 或 Shell。Claude Code、Codex 和 Kimi Code 都可以选择终端或聊天模式；Kimi Code 的聊天模式通过 ACP 工作。
 
 ## 升级
 
@@ -197,17 +211,17 @@ dev-anywhere serve status
 
 ### 会话管理
 
-- 直接从浏览器创建 Claude Code、Codex 和 Shell 会话。
-- 创建 coding agent 会话时，可以选择工作目录、终端或聊天交互方式，以及权限模式。
-- 接入从本地终端启动的会话，也可以恢复历史会话。
+- 直接从浏览器创建 Claude Code、Codex、Kimi Code 的终端或聊天会话，以及 Shell 会话。
+- 创建 Claude Code、Codex 或 Kimi Code 会话时，可以选择工作目录、终端或聊天交互方式，以及权限模式。
+- 接入从本地终端启动的会话，也可以恢复 Claude Code、Codex 与 Kimi Code 的历史会话。
 - 重命名、终止或分离会话；托管终端在 Proxy 重启后可以重新连接。
-- 在多台开发机之间切换，并查看、断开当前连接到 Relay 的客户端。
+- 在多台开发机之间切换，并查看、断开当前连接到 Relay 的客户端；不再使用的离线开发机可在手机上左滑移除，或从桌面端的更多菜单移除，重新连接后会再次出现。
 
 ![从浏览器创建真实 coding agent 会话](./docs/assets/readme-create-session.gif)
 
 ### 终端与聊天视图
 
-**终端视图**直接呈现 CLI 的原始界面，保留颜色、光标、键盘交互和全屏程序。**聊天视图**将 coding agent 输出、工具调用、审批和最终回复整理为更易阅读和触摸操作的消息。
+**终端视图**直接呈现 CLI 的原始界面，保留颜色、光标、键盘交互和全屏程序。**聊天视图**将 coding agent 输出、工具调用、审批和最终回复整理为更易阅读和触摸操作的消息。Kimi Code 的聊天视图使用 ACP，支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
 
 ![DEV Anywhere 的终端与聊天视图](./docs/assets/readme-session-modes.gif)
 
@@ -260,7 +274,7 @@ flowchart LR
   subgraph machine["开发机"]
     direction TB
     proxy["Proxy<br/>会话 · 终端 · 文件"]
-    agent["Claude Code / Codex"]
+    agent["Claude Code / Codex / Kimi Code"]
     shell["Shell"]
     local["代码仓库 · CLI 配置 · 本地权限"]
 
@@ -297,6 +311,7 @@ flowchart LR
 
 - Coding agent 与 Shell 以开发机当前用户的权限运行。DEV Anywhere 不提供沙箱隔离。
 - `RELAY_PROXY_TOKEN` 用于认证开发机，写入 `~/.dev-anywhere/config.json` 中对应 Relay 的 `proxyToken`；`RELAY_CLIENT_TOKEN` 用于认证浏览器，首次访问时填入“设置 → Relay Token”。VPS 部署脚本会生成两者，具体见 [部署指南](./docs/DEPLOYMENT.md#连接开发机)。
+- 从开发机列表“移除”只会清理 Relay 中的离线记录，不会吊销 `RELAY_PROXY_TOKEN`。如果开发机丢失、出售且可能保留配置，必须轮换该 Relay 的 Proxy Token，并同步更新仍受信任的开发机。
 - 公网 Relay 服务器必须使用 HTTPS/WSS。Token 是持有者凭据，泄露后应立即轮换。
 - Relay 服务器会转发终端、消息、文件和语音数据，应部署在你信任的服务器上。
 - 工具审批仍然是重要的安全边界。`Always Yes` 和跳过审批模式会减少确认，也会扩大误操作的影响范围。

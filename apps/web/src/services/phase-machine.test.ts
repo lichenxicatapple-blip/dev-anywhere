@@ -8,8 +8,12 @@ import {
   type Timers,
 } from "./phase-machine";
 import { useAppStore } from "@/stores/app-store";
-import { useSessionStore } from "@/stores/session-store";
+import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
+import { useFileStore } from "@/stores/file-store";
+import { useChatStore } from "@/stores/chat-store";
+import { useCommandStore } from "@/stores/command-store";
 import { router } from "@/lib/router";
+import { getPendingProxyRemovals, markPendingProxyRemoval } from "@/services/proxy-removal-state";
 
 vi.mock("@/lib/router", () => ({
   router: { navigate: vi.fn() },
@@ -635,5 +639,256 @@ describe("phase-machine proxy_offline preserves session list for cold-start rout
     const session = useSessionStore.getState();
     expect(session.sessions).toHaveLength(1);
     expect(session.sessionListLoaded).toBe(true);
+  });
+});
+
+describe("phase-machine explicit proxy removal", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    resetAppStore();
+    localStorage.setItem("dev_anywhere_proxyId", "proxy-1");
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessionListLoaded: true,
+      loadingProxyName: null,
+    });
+    useFileStore.setState({
+      tree: new Map([["/repo", [{ name: "src", isDir: true }]]]),
+      cwd: "/repo",
+      homePath: "/home/dev",
+      agentCli: null,
+    });
+    useChatStore.setState({
+      bySessionId: {
+        s1: {
+          messages: [],
+          followLatestRequest: 0,
+          turnCompletionVersion: 0,
+          historyInitialized: false,
+          historyHasMore: false,
+          historyNextBefore: null,
+          historyLoading: false,
+          workingToolName: "",
+          pendingApprovals: [],
+          quotedMessage: null,
+          inputDraft: "draft",
+          draftAttachments: [],
+        },
+      },
+    });
+    useCommandStore.setState({
+      commands: [{ name: "review", description: "Review", source: "test" }],
+      lastUpdated: 1,
+      activeSessionId: "s1",
+      commandsBySessionId: {
+        s1: [{ name: "review", description: "Review", source: "test" }],
+      },
+      legacyCommands: [],
+    });
+    vi.mocked(router.navigate).mockClear();
+  });
+
+  afterEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    useChatStore.getState().clearAllSessions();
+  });
+
+  it("clears every selected-proxy snapshot and returns all tabs to proxy selection", async () => {
+    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+    const timers = reconnectTimers();
+
+    await handleRelayMessage({ type: "proxy_removed", proxyId: "proxy-1" }, timers, relay);
+
+    expect(relay.clearBoundProxy).toHaveBeenCalledWith("proxy-1");
+    expect(useAppStore.getState()).toMatchObject({
+      phase: "proxy_selecting",
+      selectedProxyId: null,
+      selectedProxyName: null,
+      proxyOnline: false,
+      proxies: [],
+    });
+    expect(useSessionStore.getState()).toMatchObject({
+      sessions: [],
+      sessionListLoaded: false,
+      loadingProxyName: null,
+    });
+    expect(useFileStore.getState()).toMatchObject({ cwd: "", homePath: "" });
+    expect(useFileStore.getState().tree.size).toBe(0);
+    expect(useChatStore.getState().bySessionId).toEqual({});
+    expect(useCommandStore.getState()).toMatchObject({
+      commands: [],
+      activeSessionId: null,
+      commandsBySessionId: {},
+    });
+    expect(localStorage.getItem("dev_anywhere_proxyId")).toBeNull();
+    expect(router.navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("only removes an unrelated proxy row without disturbing the current binding", async () => {
+    const currentGrant = ptyAutoYesSessionKey("proxy-1", "s1");
+    const removedGrant = ptyAutoYesSessionKey("proxy-2", "s2");
+    if (!currentGrant || !removedGrant) throw new Error("missing PTY grant key");
+    useAppStore.setState({
+      proxies: [
+        { proxyId: "proxy-1", name: "Current", online: true, sessions: ["s1"] },
+        { proxyId: "proxy-2", name: "Old Mac", online: false, sessions: [] },
+      ],
+    });
+    useSessionStore.setState({
+      ptyAutoYesBySessionKey: { [currentGrant]: true, [removedGrant]: true },
+    });
+    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+
+    await handleRelayMessage(
+      { type: "proxy_removed", proxyId: "proxy-2" },
+      reconnectTimers(),
+      relay,
+    );
+
+    expect(useAppStore.getState()).toMatchObject({
+      phase: "chatting",
+      selectedProxyId: "proxy-1",
+      proxyOnline: true,
+    });
+    expect(useAppStore.getState().proxies.map((proxy) => proxy.proxyId)).toEqual(["proxy-1"]);
+    expect(useSessionStore.getState()).toMatchObject({
+      sessionListLoaded: true,
+      ptyAutoYesBySessionKey: { [currentGrant]: true },
+    });
+    expect(useSessionStore.getState().sessions.map((session) => session.sessionId)).toEqual(["s1"]);
+    expect(relay.clearBoundProxy).toHaveBeenCalledWith("proxy-2");
+    expect(router.navigate).not.toHaveBeenCalled();
+  });
+
+  it("treats a successful ACK as authoritative if the following broadcast is lost", async () => {
+    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+
+    await handleRelayMessage(
+      {
+        type: "proxy_remove_response",
+        requestId: "remove-1",
+        proxyId: "proxy-1",
+        success: true,
+      },
+      reconnectTimers(),
+      relay,
+    );
+
+    expect(useAppStore.getState()).toMatchObject({
+      selectedProxyId: null,
+      proxyOnline: false,
+      phase: "proxy_selecting",
+    });
+    expect(localStorage.getItem("dev_anywhere_proxyId")).toBeNull();
+    expect(relay.clearBoundProxy).toHaveBeenCalledWith("proxy-1");
+    expect(router.navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("keeps cleanup idempotent when the success ACK is followed by the broadcast", async () => {
+    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+    const timers = reconnectTimers();
+
+    await handleRelayMessage(
+      {
+        type: "proxy_remove_response",
+        requestId: "remove-1",
+        proxyId: "proxy-1",
+        success: true,
+      },
+      timers,
+      relay,
+    );
+    await handleRelayMessage({ type: "proxy_removed", proxyId: "proxy-1" }, timers, relay);
+
+    expect(useAppStore.getState()).toMatchObject({
+      selectedProxyId: null,
+      phase: "proxy_selecting",
+      proxies: [],
+    });
+    expect(router.navigate).toHaveBeenCalledTimes(1);
+  });
+
+  it("clears a remembered cold-start selection even before selectedProxyId is restored", async () => {
+    useAppStore.setState({
+      phase: "proxy_selecting",
+      selectedProxyId: null,
+      selectedProxyName: null,
+      proxyOnline: false,
+    });
+    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+
+    await handleRelayMessage(
+      { type: "proxy_removed", proxyId: "proxy-1" },
+      reconnectTimers(),
+      relay,
+    );
+
+    expect(localStorage.getItem("dev_anywhere_proxyId")).toBeNull();
+    expect(useSessionStore.getState().sessions).toEqual([]);
+    expect(router.navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("treats PROXY_NOT_FOUND as idempotent completion after an earlier lost ACK", async () => {
+    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+
+    await handleRelayMessage(
+      {
+        type: "proxy_remove_response",
+        requestId: "remove-retry",
+        proxyId: "proxy-1",
+        success: false,
+        errorCode: "PROXY_NOT_FOUND",
+      },
+      reconnectTimers(),
+      relay,
+    );
+
+    expect(useAppStore.getState()).toMatchObject({
+      selectedProxyId: null,
+      phase: "proxy_selecting",
+    });
+    expect(localStorage.getItem("dev_anywhere_proxyId")).toBeNull();
+  });
+
+  it("finishes a removal from the first authoritative list after every direct response was lost", async () => {
+    markPendingProxyRemoval("proxy-1");
+    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+
+    await handleRelayMessage(
+      { type: "proxy_list_response", proxies: [] },
+      reconnectTimers(),
+      relay,
+    );
+
+    expect(getPendingProxyRemovals()).toEqual([]);
+    expect(useAppStore.getState()).toMatchObject({
+      selectedProxyId: null,
+      phase: "proxy_selecting",
+      proxies: [],
+    });
+    expect(localStorage.getItem("dev_anywhere_proxyId")).toBeNull();
+    expect(router.navigate).toHaveBeenCalledWith("/");
+  });
+
+  it("keeps the current selection when the fresh list proves the remove request did not land", async () => {
+    markPendingProxyRemoval("proxy-1");
+    const relay = { getBoundProxyId: vi.fn(() => "proxy-1") } as unknown as RelayClient;
+
+    await handleRelayMessage(
+      {
+        type: "proxy_list_response",
+        proxies: [{ proxyId: "proxy-1", name: "DEV Mac", online: false, sessions: ["s1"] }],
+      },
+      reconnectTimers(),
+      relay,
+    );
+
+    expect(getPendingProxyRemovals()).toEqual([]);
+    expect(useAppStore.getState()).toMatchObject({
+      selectedProxyId: "proxy-1",
+      phase: "chatting",
+    });
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 });

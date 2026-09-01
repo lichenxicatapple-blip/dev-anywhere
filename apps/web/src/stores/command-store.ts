@@ -6,8 +6,14 @@ import type { CommandEntry } from "@dev-anywhere/shared";
 interface CommandStoreState {
   commands: CommandEntry[];
   lastUpdated: number;
+  activeSessionId: string | null;
+  commandsBySessionId: Record<string, CommandEntry[]>;
+  legacyCommands: CommandEntry[];
 
+  setActiveSession: (sessionId: string | null) => void;
   setCommands: (commands: CommandEntry[]) => void;
+  setSessionCommands: (sessionId: string, commands: CommandEntry[]) => void;
+  clear: () => void;
 }
 
 export const useCommandStore = create<CommandStoreState>()(
@@ -15,8 +21,46 @@ export const useCommandStore = create<CommandStoreState>()(
     (set) => ({
       commands: [],
       lastUpdated: 0,
+      activeSessionId: null,
+      commandsBySessionId: {},
+      legacyCommands: [],
 
-      setCommands: (commands) => set({ commands, lastUpdated: Date.now() }),
+      setActiveSession: (sessionId) =>
+        set((state) => {
+          let commands = state.legacyCommands;
+          if (
+            sessionId !== null &&
+            Object.prototype.hasOwnProperty.call(state.commandsBySessionId, sessionId)
+          ) {
+            commands = state.commandsBySessionId[sessionId];
+          }
+          return {
+            activeSessionId: sessionId,
+            commands,
+            lastUpdated: Date.now(),
+          };
+        }),
+
+      // Compatibility path for proxies that still publish one unscoped command snapshot.
+      setCommands: (commands) =>
+        set({ commands, legacyCommands: commands, lastUpdated: Date.now() }),
+
+      setSessionCommands: (sessionId, commands) =>
+        set((state) => ({
+          commandsBySessionId: {
+            ...state.commandsBySessionId,
+            [sessionId]: commands,
+          },
+          ...(state.activeSessionId === sessionId ? { commands, lastUpdated: Date.now() } : {}),
+        })),
+      clear: () =>
+        set({
+          commands: [],
+          lastUpdated: 0,
+          activeSessionId: null,
+          commandsBySessionId: {},
+          legacyCommands: [],
+        }),
     }),
     { name: "command-store" },
   ),

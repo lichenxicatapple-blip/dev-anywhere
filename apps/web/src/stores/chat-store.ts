@@ -1,7 +1,7 @@
 // 聊天状态管理: 按 sessionId 切片, 每个 slice 含消息/审批/引用/输入草稿
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { SessionHistoryMessage } from "@dev-anywhere/shared";
+import type { ApprovalOption, SessionHistoryMessage } from "@dev-anywhere/shared";
 import type { ChatActivityDetail } from "@/lib/chat-activity-detail";
 import { getClaudeToolActivityDetails } from "@/lib/claude-activity-summary";
 
@@ -16,6 +16,7 @@ export interface ToolApprovalRequest {
   requestId: string;
   toolName: string;
   input: Record<string, unknown>;
+  options?: ApprovalOption[];
   status: "pending" | "approved" | "denied";
 }
 

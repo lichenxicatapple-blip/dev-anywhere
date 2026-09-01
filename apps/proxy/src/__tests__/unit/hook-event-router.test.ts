@@ -248,4 +248,67 @@ describe("HookEventRouter", () => {
     expect(states).toEqual([["s1", SessionState.IDLE]]);
     expect(agentStatusRegistry.get("s1")?.phase).toBe("idle");
   });
+
+  it("Kimi ACP reject keeps the prompt WORKING until its terminal event", () => {
+    const relay = createRelayConnectionFake();
+    const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
+    const router = new HookEventRouter({
+      relayConnection: relay.relayConnection,
+      agentStatusRegistry,
+      changeSessionState: (sessionId, state) => {
+        states.push([sessionId, state]);
+        return true;
+      },
+      nextSeq: () => 13,
+    });
+
+    router.onPermissionResolved("s1", "kimi", "question-1", "deny", {
+      toolName: "AskUserQuestion",
+      toolInput: { question: "Choose one" },
+    });
+
+    expect(states).toEqual([["s1", SessionState.WORKING]]);
+    const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
+    expect(status).toMatchObject({
+      type: "agent_status",
+      sessionId: "s1",
+      payload: {
+        provider: "kimi",
+        phase: "thinking",
+        permissionResolution: { requestId: "question-1", outcome: "deny" },
+      },
+    });
+    expect(agentStatusRegistry.get("s1")?.phase).toBe("thinking");
+  });
+
+  it("keeps the session WAITING_APPROVAL while another permission remains", () => {
+    const relay = createRelayConnectionFake();
+    const states: Array<[string, SessionState]> = [];
+    const agentStatusRegistry = new AgentStatusRegistry();
+    const router = new HookEventRouter({
+      relayConnection: relay.relayConnection,
+      agentStatusRegistry,
+      changeSessionState: (sessionId, state) => {
+        states.push([sessionId, state]);
+        return true;
+      },
+      nextSeq: () => 14,
+    });
+
+    router.onPermissionResolved("s1", "kimi", "question-1", "allow", {
+      toolName: "AskUserQuestion",
+      hasPendingApprovals: true,
+    });
+
+    expect(states).toEqual([["s1", SessionState.WAITING_APPROVAL]]);
+    const status = RelayControlSchema.parse(JSON.parse(relay.raw[0]));
+    expect(status).toMatchObject({
+      type: "agent_status",
+      payload: {
+        phase: "waiting_permission",
+        permissionResolution: { requestId: "question-1", outcome: "allow" },
+      },
+    });
+  });
 });

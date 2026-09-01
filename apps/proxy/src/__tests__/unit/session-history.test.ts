@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { existsSync, mkdirSync, readdirSync, writeFileSync, rmSync, utimesSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  rmSync,
+  symlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -17,16 +25,21 @@ import {
 describe("scanSessionHistory", () => {
   let testDir: string;
   let originalHome: string | undefined;
+  let originalKimiCodeHome: string | undefined;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `session-history-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     originalHome = process.env.HOME;
+    originalKimiCodeHome = process.env.KIMI_CODE_HOME;
     process.env.HOME = testDir;
+    delete process.env.KIMI_CODE_HOME;
   });
 
   afterEach(() => {
     process.env.HOME = originalHome;
+    if (originalKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = originalKimiCodeHome;
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -49,6 +62,19 @@ describe("scanSessionHistory", () => {
       join(sessionDir, `rollout-2026-05-06T12-00-00-${sessionId}.jsonl`),
       lines.join("\n") + "\n",
     );
+  }
+
+  function writeKimiSession(
+    sessionId: string,
+    state: { cwd: string; title?: string; lastPrompt?: string; updatedAt?: number },
+  ): void {
+    const sessionDir = join(testDir, ".kimi-code", "sessions", "wd-test", sessionId);
+    mkdirSync(join(sessionDir, "agents", "main"), { recursive: true });
+    writeFileSync(
+      join(sessionDir, "state.json"),
+      JSON.stringify({ id: sessionId, createdAt: 1, ...state }),
+    );
+    writeFileSync(join(sessionDir, "agents", "main", "wire.jsonl"), "");
   }
 
   function countOpenFileDescriptors(): number | null {
@@ -665,6 +691,76 @@ describe("scanSessionHistory", () => {
     expect(result).toHaveLength(2);
     expect(result.map((r) => r.provider).sort()).toEqual(["claude", "codex"]);
   });
+
+  it("lists Kimi sessions from the native session store", async () => {
+    writeKimiSession("session_kimi_1", {
+      cwd: "/workspace/kimi",
+      title: "修复 Kimi ACP 接入",
+      updatedAt: 1_788_200_000_000,
+    });
+
+    const result = await scanSessionHistory();
+
+    expect(result).toEqual([
+      {
+        id: "session_kimi_1",
+        title: "修复 Kimi ACP 接入",
+        projectDir: "/workspace/kimi",
+        updatedAt: 1_788_200_000_000,
+        provider: "kimi",
+      },
+    ]);
+  });
+
+  it("keeps distinct Kimi session ids with the same title and cwd", async () => {
+    writeKimiSession("session_kimi_same_title_1", {
+      cwd: "/workspace/kimi",
+      title: "重复的问题",
+      updatedAt: 1_788_200_000_000,
+    });
+    writeKimiSession("session_kimi_same_title_2", {
+      cwd: "/workspace/kimi",
+      title: "重复的问题",
+      updatedAt: 1_788_200_000_001,
+    });
+
+    const result = await scanSessionHistory();
+
+    expect(result.map((entry) => entry.id)).toEqual([
+      "session_kimi_same_title_2",
+      "session_kimi_same_title_1",
+    ]);
+  });
+
+  it("honors KIMI_CODE_HOME when listing Kimi sessions", async () => {
+    process.env.KIMI_CODE_HOME = join(testDir, "custom-kimi-home");
+    const sessionDir = join(
+      process.env.KIMI_CODE_HOME,
+      "sessions",
+      "wd-custom",
+      "session_kimi_custom",
+    );
+    mkdirSync(join(sessionDir, "agents", "main"), { recursive: true });
+    writeFileSync(
+      join(sessionDir, "state.json"),
+      JSON.stringify({
+        id: "session_kimi_custom",
+        cwd: "/workspace/custom",
+        title: "自定义数据目录",
+        updatedAt: 123,
+      }),
+    );
+
+    const result = await scanSessionHistory();
+
+    expect(result).toEqual([
+      expect.objectContaining({
+        id: "session_kimi_custom",
+        provider: "kimi",
+        projectDir: "/workspace/custom",
+      }),
+    ]);
+  });
 });
 
 describe("normalizeHistoryTitle", () => {
@@ -690,16 +786,21 @@ describe("normalizeHistoryTitle", () => {
 describe("readSessionMessages", () => {
   let testDir: string;
   let originalHome: string | undefined;
+  let originalKimiCodeHome: string | undefined;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `session-messages-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     originalHome = process.env.HOME;
+    originalKimiCodeHome = process.env.KIMI_CODE_HOME;
     process.env.HOME = testDir;
+    delete process.env.KIMI_CODE_HOME;
   });
 
   afterEach(() => {
     process.env.HOME = originalHome;
+    if (originalKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
+    else process.env.KIMI_CODE_HOME = originalKimiCodeHome;
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -715,6 +816,180 @@ describe("readSessionMessages", () => {
       lines.join("\n") + "\n",
     );
   }
+
+  function writeKimiConversation(sessionId: string, lines: string[]): void {
+    const kimiHome = process.env.KIMI_CODE_HOME ?? join(testDir, ".kimi-code");
+    const sessionDir = join(kimiHome, "sessions", "wd-test", sessionId);
+    mkdirSync(join(sessionDir, "agents", "main"), { recursive: true });
+    writeFileSync(
+      join(sessionDir, "state.json"),
+      JSON.stringify({ id: sessionId, cwd: "/workspace/kimi", createdAt: 1, updatedAt: 2 }),
+    );
+    writeFileSync(join(sessionDir, "agents", "main", "wire.jsonl"), `${lines.join("\n")}\n`);
+  }
+
+  it("restores each Kimi ACP prompt once alongside assistant chunks and tool calls", async () => {
+    writeKimiConversation("session_kimi_history", [
+      JSON.stringify({
+        type: "prompt.accepted",
+        promptId: "prompt_kimi_1",
+        content: [{ type: "text", text: "检查测试" }],
+        time: 100,
+      }),
+      JSON.stringify({
+        type: "turn.prompt",
+        agentId: "main",
+        input: [{ type: "text", text: "检查测试" }],
+        origin: { kind: "user" },
+        time: 101,
+      }),
+      JSON.stringify({
+        type: "context.append_message",
+        agentId: "main",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "检查测试" }],
+          origin: { kind: "user" },
+        },
+        time: 102,
+      }),
+      JSON.stringify({
+        type: "context.append_loop_event",
+        event: {
+          type: "content.part",
+          part: { type: "think", think: "internal" },
+        },
+        time: 110,
+      }),
+      JSON.stringify({
+        type: "context.append_loop_event",
+        event: {
+          type: "tool.call",
+          toolCallId: "tool_kimi_1",
+          name: "Bash",
+          args: { command: "pnpm test" },
+        },
+        time: 120,
+      }),
+      JSON.stringify({
+        type: "context.append_loop_event",
+        event: {
+          type: "tool.result",
+          toolCallId: "tool_kimi_1",
+          result: { output: "passed" },
+        },
+        time: 130,
+      }),
+      JSON.stringify({
+        type: "context.append_loop_event",
+        event: {
+          type: "content.part",
+          part: { type: "text", text: "测试通过。" },
+        },
+        time: 140,
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage("session_kimi_history", { limit: 10 }, "kimi");
+
+    expect(page.messages).toMatchObject([
+      { role: "user", text: "检查测试", timestamp: 101 },
+      {
+        role: "activity",
+        toolId: "tool_kimi_1",
+        toolName: "Bash",
+        parameters: { command: "pnpm test" },
+        status: "done",
+      },
+      { role: "assistant", text: "测试通过。", timestamp: 140 },
+    ]);
+    expect(page.messages.filter((message) => message.role === "user")).toHaveLength(1);
+  });
+
+  it("restores terminal Kimi prompts from turn.prompt records", async () => {
+    writeKimiConversation("session_kimi_terminal_history", [
+      JSON.stringify({
+        type: "turn.prompt",
+        agentId: "main",
+        input: [{ type: "text", text: "终端模式的问题" }],
+        origin: { kind: "user" },
+        time: 200,
+      }),
+      JSON.stringify({
+        type: "context.append_message",
+        agentId: "main",
+        message: {
+          role: "user",
+          content: [{ type: "text", text: "终端模式的问题" }],
+          origin: { kind: "user" },
+        },
+        time: 201,
+      }),
+      JSON.stringify({
+        type: "context.append_loop_event",
+        event: {
+          type: "content.part",
+          part: { type: "text", text: "终端模式的回答" },
+        },
+        time: 210,
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage(
+      "session_kimi_terminal_history",
+      { limit: 10 },
+      "kimi",
+    );
+
+    expect(page.messages).toMatchObject([
+      { role: "user", text: "终端模式的问题", timestamp: 200 },
+      { role: "assistant", text: "终端模式的回答", timestamp: 210 },
+    ]);
+  });
+
+  it("honors KIMI_CODE_HOME when reading Kimi messages", async () => {
+    process.env.KIMI_CODE_HOME = join(testDir, "custom-kimi-message-home");
+    writeKimiConversation("session_kimi_custom_home", [
+      JSON.stringify({
+        type: "turn.prompt",
+        input: [{ type: "text", text: "自定义目录中的问题" }],
+        time: 250,
+      }),
+    ]);
+
+    const page = await readSessionMessagesPage("session_kimi_custom_home", { limit: 10 }, "kimi");
+
+    expect(page.messages).toMatchObject([
+      { role: "user", text: "自定义目录中的问题", timestamp: 250 },
+    ]);
+  });
+
+  it("rejects a Kimi wire.jsonl symlink outside the native session directory", async () => {
+    const sessionId = "session_kimi_symlink";
+    const sessionDir = join(testDir, ".kimi-code", "sessions", "wd-test", sessionId);
+    const agentDir = join(sessionDir, "agents", "main");
+    const outsideWire = join(testDir, "outside-wire.jsonl");
+    mkdirSync(agentDir, { recursive: true });
+    writeFileSync(
+      join(sessionDir, "state.json"),
+      JSON.stringify({ id: sessionId, cwd: "/workspace/kimi", updatedAt: 2 }),
+    );
+    writeFileSync(
+      outsideWire,
+      `${JSON.stringify({
+        type: "turn.prompt",
+        input: [{ type: "text", text: "不应读取" }],
+        time: 300,
+      })}\n`,
+    );
+    symlinkSync(outsideWire, join(agentDir, "wire.jsonl"));
+
+    await expect(readSessionMessages(sessionId, "kimi")).resolves.toEqual([]);
+    await expect(readSessionMessagesPage(sessionId, { limit: 10 }, "kimi")).resolves.toEqual({
+      messages: [],
+      hasMore: false,
+    });
+  });
 
   it("preserves markdown newlines when restoring conversation messages", async () => {
     const projectDir = join(testDir, ".claude", "projects", "-test-proj");

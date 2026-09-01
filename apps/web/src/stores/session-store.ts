@@ -94,6 +94,8 @@ interface SessionStoreState {
   rejectHistoryLoad: (generation: number) => boolean;
   cancelHistoryLoad: (generation: number) => boolean;
   prepareForProxySwitch: (proxyName: string) => void;
+  revokeProxyAuthorizations: (proxyId: string) => void;
+  clearForProxyRemoval: (proxyId: string) => void;
   setCodexActiveWriterConflict: (conflict: CodexActiveWriterConflict | null) => void;
 }
 
@@ -259,6 +261,36 @@ export const useSessionStore = create<SessionStoreState>()(
           agentStatusBySessionId: {},
           codexActiveWriterConflict: null,
         })),
+      revokeProxyAuthorizations: (proxyId) =>
+        set((state) => {
+          const prefix = `${encodeURIComponent(proxyId)}:`;
+          const ptyAutoYesBySessionKey = Object.fromEntries(
+            Object.entries(state.ptyAutoYesBySessionKey).filter(([key]) => !key.startsWith(prefix)),
+          );
+          writePtyAutoYesBySessionKey(ptyAutoYesBySessionKey);
+          return { ptyAutoYesBySessionKey };
+        }),
+      clearForProxyRemoval: (proxyId) =>
+        set((state) => {
+          const prefix = `${encodeURIComponent(proxyId)}:`;
+          const ptyAutoYesBySessionKey = Object.fromEntries(
+            Object.entries(state.ptyAutoYesBySessionKey).filter(([key]) => !key.startsWith(prefix)),
+          );
+          writePtyAutoYesBySessionKey(ptyAutoYesBySessionKey);
+          return {
+            sessions: [],
+            sessionListLoaded: false,
+            loadingProxyName: null,
+            historySessions: [],
+            historyLoadStatus: "idle",
+            historyLoadGeneration: state.historyLoadGeneration + 1,
+            ptyTitles: {},
+            ptyStateBySessionId: {},
+            agentStatusBySessionId: {},
+            ptyAutoYesBySessionKey,
+            codexActiveWriterConflict: null,
+          };
+        }),
       setCodexActiveWriterConflict: (codexActiveWriterConflict) =>
         set({ codexActiveWriterConflict }),
     }),

@@ -72,6 +72,31 @@ describe("chat-dispatcher permission flow", () => {
     expect(useChatStore.getState().bySessionId.s1.pendingApprovals[0].status).toBe("approved");
   });
 
+  it("preserves provider-defined options from live permission requests", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+    const options = [
+      { optionId: "allow-1", name: "Allow this time", kind: "allow_once" as const },
+      { optionId: "reject-1", name: "Do not continue", kind: "reject_once" as const },
+    ];
+
+    handle(
+      envelope({
+        payload: {
+          toolId: "req-dynamic",
+          toolName: "AskUserQuestion",
+          parameters: { question: "Continue?" },
+          options,
+        },
+      }),
+    );
+
+    expect(useChatStore.getState().bySessionId.s1.pendingApprovals[0]).toMatchObject({
+      requestId: "req-dynamic",
+      options,
+      status: "pending",
+    });
+  });
+
   it("removes a stale approval when the proxy can no longer deliver the decision", () => {
     const handle = createChatMessageHandler({ sendControl: vi.fn() });
     handle(envelope({}));
@@ -108,7 +133,15 @@ describe("chat-dispatcher permission flow", () => {
       type: "pending_approvals_push",
       sessionId: "s1",
       approvals: [
-        { requestId: "req-2", toolName: "Read", input: { file_path: "/tmp/a" } },
+        {
+          requestId: "req-2",
+          toolName: "Read",
+          input: { file_path: "/tmp/a" },
+          options: [
+            { optionId: "allow-2", name: "Allow read", kind: "allow_once" },
+            { optionId: "deny-2", name: "Skip read", kind: "reject_once" },
+          ],
+        },
         { requestId: "req-3", toolName: "Write", input: { file_path: "/tmp/b" } },
       ],
     } as RelayControlMessage);
@@ -118,6 +151,10 @@ describe("chat-dispatcher permission flow", () => {
         requestId: "req-2",
         toolName: "Read",
         input: { file_path: "/tmp/a" },
+        options: [
+          { optionId: "allow-2", name: "Allow read", kind: "allow_once" },
+          { optionId: "deny-2", name: "Skip read", kind: "reject_once" },
+        ],
         status: "pending",
       },
       {
@@ -218,6 +255,95 @@ describe("chat-dispatcher permission flow", () => {
     });
   });
 
+  it.each([
+    { success: false, isError: false, result: "provider stopped unexpectedly" },
+    { success: true, isError: true, result: "runtime reported an error" },
+  ])(
+    "shows the failure reason and fails running tools for $success/$isError turn_result",
+    ({ success, isError, result }) => {
+      const handle = createChatMessageHandler({ sendControl: vi.fn() });
+
+      handle(
+        envelope({
+          type: "assistant_tool_use",
+          payload: {
+            toolId: "tool-running",
+            toolName: "Bash",
+            parameters: { command: "pnpm test" },
+          },
+        }),
+      );
+      handle(
+        envelope({
+          type: "assistant_message",
+          payload: {
+            turnId: "turn-streaming",
+            revision: 1,
+            text: "partial streamed answer",
+            status: "streaming",
+          },
+        }),
+      );
+
+      handle({ type: "turn_result", sessionId: "s1", success, isError, result });
+
+      const slice = useChatStore.getState().bySessionId.s1;
+      expect(
+        slice.messages
+          .filter((message) => message.role === "assistant")
+          .map((message) => message.text),
+      ).toEqual(["partial streamed answer", result]);
+      expect(slice.messages.find((message) => message.role === "activity")?.activity?.status).toBe(
+        "error",
+      );
+      expect(slice.messages.every((message) => !message.isPartial)).toBe(true);
+      expect(slice.turnCompletionVersion).toBe(1);
+    },
+  );
+
+  it("shows a generic failure reason when turn_result has no result text", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+
+    handle({
+      type: "turn_result",
+      sessionId: "s1",
+      success: false,
+      isError: true,
+      result: "  ",
+    });
+
+    expect(useChatStore.getState().bySessionId.s1.messages.at(-1)).toMatchObject({
+      role: "assistant",
+      text: "本轮执行失败",
+      isPartial: false,
+    });
+  });
+
+  it("does not duplicate a failure reason already emitted as the final assistant snapshot", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+
+    handle(
+      envelope({
+        type: "assistant_message",
+        payload: {
+          turnId: "turn-failed",
+          revision: 1,
+          text: "compaction failed",
+          status: "completed",
+        },
+      }),
+    );
+    handle({
+      type: "turn_result",
+      sessionId: "s1",
+      success: false,
+      isError: true,
+      result: "compaction failed",
+    });
+
+    expect(useChatStore.getState().bySessionId.s1.messages).toHaveLength(1);
+  });
+
   it("flushes the queued user input batch as one prompt after a JSON turn completes", () => {
     const relay = { sendControl: vi.fn(), sendEnvelope: vi.fn() };
     const handler = createChatMessageHandler(relay);
@@ -270,6 +396,57 @@ describe("chat-dispatcher permission flow", () => {
     );
     expect(useChatStore.getState().bySessionId.s1.messages[0].deliveryStatus).toBeUndefined();
     expect(useChatStore.getState().bySessionId.s1.messages[1].deliveryStatus).toBeUndefined();
+    expect(useSessionStore.getState().sessions.find((s) => s.sessionId === "s1")?.state).toBe(
+      "working",
+    );
+  });
+
+  it("also flushes queued input after a failed turn instead of stranding it", () => {
+    const relay = { sendControl: vi.fn(), sendEnvelope: vi.fn() };
+    const handler = createChatMessageHandler(relay);
+    useChatStore.setState({
+      bySessionId: {
+        s1: {
+          ...EMPTY_SLICE,
+          messages: [
+            {
+              id: "queued-after-failure",
+              role: "user",
+              text: "continue with this",
+              isPartial: false,
+              timestamp: 1,
+              toolCalls: [],
+              deliveryStatus: "queued",
+            },
+          ],
+        },
+      },
+    });
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", state: "idle", provider: "claude", mode: "json" }],
+    });
+
+    handler({
+      type: "turn_result",
+      sessionId: "s1",
+      success: false,
+      isError: true,
+      result: "previous turn failed",
+    });
+
+    expect(relay.sendEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "user_input",
+        sessionId: "s1",
+        payload: { text: "continue with this", messageId: "queued-after-failure" },
+      }),
+    );
+    expect(
+      useChatStore
+        .getState()
+        .bySessionId.s1.messages.find((message) => message.id === "queued-after-failure")
+        ?.deliveryStatus,
+    ).toBeUndefined();
     expect(useSessionStore.getState().sessions.find((s) => s.sessionId === "s1")?.state).toBe(
       "working",
     );

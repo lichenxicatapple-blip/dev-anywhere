@@ -90,6 +90,21 @@ describe("SessionManager", () => {
       expect(info.provider).toBe("codex");
     });
 
+    it("stores Kimi as a first-class PTY provider", () => {
+      const info = manager.createSession(
+        "pty",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "kimi",
+      );
+      expect(info.provider).toBe("kimi");
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toContainEqual(
+        expect.objectContaining({ id: info.id, provider: "kimi" }),
+      );
+    });
+
     it("stores PTY owner only for PTY sessions", () => {
       const pty = manager.createSession(
         "pty",

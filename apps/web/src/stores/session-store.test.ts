@@ -194,4 +194,27 @@ describe("session-store agent status", () => {
     expect(useSessionStore.getState().loadingProxyName).toBeNull();
     expect(useSessionStore.getState().sessionListLoaded).toBe(true);
   });
+
+  it("clears only the removed proxy's temporary auto-yes grants when forgetting a device", () => {
+    const removedKey = ptyAutoYesSessionKey("proxy-a", "s1");
+    const retainedKey = ptyAutoYesSessionKey("proxy-b", "s2");
+    if (!removedKey || !retainedKey) throw new Error("missing session key");
+    useSessionStore.setState({
+      sessions: [{ sessionId: "s1", state: "idle", provider: "claude", mode: "pty" }],
+      sessionListLoaded: true,
+      loadingProxyName: "Old Mac",
+      ptyAutoYesBySessionKey: { [removedKey]: true, [retainedKey]: true },
+    });
+
+    useSessionStore.getState().clearForProxyRemoval("proxy-a");
+
+    expect(useSessionStore.getState()).toMatchObject({
+      sessions: [],
+      sessionListLoaded: false,
+      loadingProxyName: null,
+      ptyAutoYesBySessionKey: { [retainedKey]: true },
+    });
+    expect(sessionStorage.getItem(STORAGE_KEYS.ptyAutoYesSessions)).not.toContain(removedKey);
+    expect(sessionStorage.getItem(STORAGE_KEYS.ptyAutoYesSessions)).toContain(retainedKey);
+  });
 });
