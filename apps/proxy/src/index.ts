@@ -15,6 +15,7 @@ import {
   initWorkspace,
 } from "./common/paths.js";
 import { spawnScript } from "./common/env.js";
+import { prepareDaemonSpawnEnvironment } from "./common/daemon-spawn-env.js";
 import { daemonRelayArgs, setDesiredDaemonRelay } from "./common/daemon-env.js";
 import { getErrnoCode, getErrorMessage, probeProcess } from "./common/process-probe.js";
 import { unlinkIfPresent } from "./common/safe-unlink.js";
@@ -237,7 +238,10 @@ async function waitForServeReady(timeoutMs: number): Promise<boolean> {
   return false;
 }
 
-async function startDaemon(options?: { relayName?: string }): Promise<void> {
+async function startDaemon(options?: {
+  relayName?: string;
+  env?: NodeJS.ProcessEnv;
+}): Promise<void> {
   ensureProfileWorkspace();
   if (existsSync(PID_PATH)) {
     const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
@@ -265,7 +269,7 @@ async function startDaemon(options?: { relayName?: string }): Promise<void> {
     ...daemonRelayArgs(options?.relayName),
   ];
   const child = spawnScript("serve", serveArgs, {
-    env: { ...process.env },
+    env: { ...(options?.env ?? process.env) },
     stdio: ["ignore", "ignore", "pipe"],
     unref: false,
   });
@@ -386,7 +390,8 @@ serve
       process.exit(1);
     }
     setDesiredDaemonRelay(opts.relay);
-    await startDaemon({ relayName: opts.relay });
+    const daemonEnvironment = await prepareDaemonSpawnEnvironment();
+    await startDaemon({ relayName: opts.relay, env: daemonEnvironment.env });
   });
 
 serve
@@ -423,13 +428,17 @@ serve
   .option("--relay <name>", "Use a named relay from config")
   .action(async (opts) => {
     setDesiredDaemonRelay(opts.relay);
+    // Relay updater 的锁归属于当前 CLI 的父进程时，先从 login shell 刷新 PATH，再停旧
+    // daemon。这样 shell 配置较慢或失败时不会无谓延长服务中断窗口；手动 restart 则原样
+    // 继承调用它的终端环境。
+    const daemonEnvironment = await prepareDaemonSpawnEnvironment();
     const expectedSessionIds = readLiveLocalPtySessionIds(SESSIONS_PATH);
     const stopResult = await stopService();
     if (stopResult === "failed") {
       process.exitCode = 1;
       return;
     }
-    await startDaemon({ relayName: opts.relay });
+    await startDaemon({ relayName: opts.relay, env: daemonEnvironment.env });
     const missingSessionIds = await waitForSessionHandover({
       expectedSessionIds,
       loadActiveSessionIds: requestActiveSessionIds,

@@ -201,6 +201,8 @@ ssh root@your-vps \
 
 Proxy 默认跟随当前 Relay 自动升级，因此日常只需更新 VPS：
 
+自动升级触发重启时，Proxy 会在停止旧 daemon 前从开发机的 POSIX 兼容交互式 login shell 重新读取 `PATH`；之后安装并加入 shell `PATH` 的 CLI 会由新 daemon 自动识别。读取失败会回退原 `PATH` 并继续重启；手动 `serve start/restart` 仍继承调用终端的环境。
+
 ```bash
 git pull --ff-only
 bash scripts/deploy/install-relay.sh \

@@ -181,6 +181,8 @@ dev-anywhere tunnel
 
 The Proxy automatically follows its connected Relay, so routine upgrades only require updating the VPS from your local DEV Anywhere clone:
 
+Before stopping the old Proxy, an automatic-update restart reloads `PATH` from the development machine's POSIX-compatible interactive login shell. CLIs installed and added to the shell `PATH` after the daemon originally started are therefore detected after the upgrade. If the refresh fails, the restart safely keeps the inherited `PATH`; manual `serve start/restart` continues to inherit the invoking terminal environment directly.
+
 ```bash
 git pull --ff-only
 bash scripts/deploy/install-relay.sh \

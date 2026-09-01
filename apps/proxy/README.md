@@ -120,7 +120,7 @@ that value in Settings -> Relay Token so the browser client can authenticate.
 
 `dev-anywhere serve start --relay cloud` and `dev-anywhere serve restart --relay cloud` use a named relay without editing the file each time.
 
-`autoUpdate` defaults to `true`. Set it to `false` and restart the service to pin a machine.
+`autoUpdate` defaults to `true`. During a Relay-directed update, the restart refreshes `PATH` from the user's POSIX-compatible interactive login shell before stopping the old daemon. A failed refresh falls back to the inherited `PATH`; manual `serve start` and `serve restart` continue to inherit the invoking terminal environment. Set `autoUpdate` to `false` and restart the service to pin a machine.
 
 If `kimi` is not on the normal `PATH`, set its persistent path under the
 top-level `agentCli` object:

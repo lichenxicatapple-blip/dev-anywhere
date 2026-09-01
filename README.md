@@ -189,6 +189,8 @@ dev-anywhere tunnel
 
 Proxy 默认跟随当前连接的 Relay 自动升级，因此日常只需在本机克隆的 DEV Anywhere 仓库中更新 VPS：
 
+自动升级重启会在停止旧 Proxy 前，从开发机的 POSIX 兼容交互式 login shell 重新读取 `PATH`，因此后来安装并加入 shell `PATH` 的 CLI 会在升级后被新 Proxy 识别。读取失败时会继续使用原 `PATH`，不阻断重启；手动 `serve start/restart` 仍直接继承当前终端环境。
+
 ```bash
 git pull --ff-only
 bash scripts/deploy/install-relay.sh \
