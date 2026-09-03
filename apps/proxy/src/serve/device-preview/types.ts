@@ -1,17 +1,34 @@
 import type {
+  ControlMessage,
   DevicePreviewCapability,
   DevicePreviewInput,
+  DevicePreviewStreamFormat,
+  DevicePreviewStreamProfile,
   DevicePreviewSummary,
   DevicePreviewTarget,
 } from "@dev-anywhere/shared";
 
-export interface DevicePreviewFrame {
+type WithoutType<T> = T extends unknown ? Omit<T, "type"> : never;
+type DevicePreviewStreamCompletePayload = WithoutType<
+  ControlMessage<"device_preview_stream_complete">
+>;
+
+export interface DevicePreviewJpegFrame {
+  format: "jpeg";
   jpeg: Buffer;
-  width: number;
-  height: number;
 }
 
-/** Adapter boundary kept separate from the Relay wire protocol while that protocol evolves. */
+export interface DevicePreviewH264Packet {
+  format: "h264_annex_b";
+  kind: "configuration" | "frame";
+  keyframe: boolean;
+  durationMs: number;
+  data: Buffer;
+}
+
+export type DevicePreviewFrame = DevicePreviewJpegFrame | DevicePreviewH264Packet;
+
+/** Domain adapter boundary; Relay transport concerns stay outside device integrations. */
 export interface DevicePreviewBackend {
   inspectCapabilities(refreshPath?: boolean): Promise<DevicePreviewCapability>;
   discoverTargets(refresh?: boolean): Promise<DevicePreviewTarget[]>;
@@ -20,21 +37,23 @@ export interface DevicePreviewBackend {
     signal: AbortSignal,
     onFrame: (frame: DevicePreviewFrame) => void | Promise<void>,
   ): Promise<void>;
-  sendInput(targetId: string, input: DevicePreviewInput, signal?: AbortSignal): Promise<void>;
+  requestKeyframe(targetId: string): Promise<void>;
+  sendInput(targetId: string, input: DevicePreviewInput, signal: AbortSignal): Promise<void>;
+  /** Best-effort release for an active or partially completed touch gesture. */
+  releaseInput(targetId: string): void | Promise<void>;
   /** Release helper/input resources for an idle target without stopping the simulator itself. */
-  releaseTarget?(targetId: string): void;
+  releaseTarget(targetId: string): void;
   dispose(): void | Promise<void>;
 }
 
 export interface DevicePreviewStreamTransport {
   sendFrame(streamId: string, frameSequence: number, jpeg: Buffer): void | Promise<void>;
-  sendComplete(payload: {
-    streamId: string;
-    leaseId: string;
-    previewId: string;
-    success: boolean;
-    error?: string;
-  }): void;
+  sendH264Packet(
+    streamId: string,
+    packetSequence: number,
+    packet: Pick<DevicePreviewH264Packet, "kind" | "keyframe" | "durationMs" | "data">,
+  ): void | Promise<void>;
+  sendComplete(payload: DevicePreviewStreamCompletePayload): void;
 }
 
 export type DevicePreviewManagerEvent =
@@ -57,19 +76,18 @@ export interface DevicePreviewSnapshot {
   previews: DevicePreviewSummary[];
 }
 
-export interface DevicePreviewStreamStart {
+export type DevicePreviewStreamStart = {
   streamId: string;
   leaseId: string;
   previewId: string;
-  maxFps?: number;
-  maxWidth?: number;
-  jpegQuality?: number;
+} & DevicePreviewStreamProfile;
+
+interface DevicePreviewStreamStartedBase {
+  previewId: string;
+  streamId: string;
+  leaseId: string;
+  format: DevicePreviewStreamFormat;
 }
 
-export interface DevicePreviewStreamStarted {
-  previewId: string;
-  streamId: string;
-  leaseId: string;
-  width?: number;
-  height?: number;
-}
+export type DevicePreviewStreamStarted = DevicePreviewStreamStartedBase &
+  ({ width: number; height: number } | { width?: never; height?: never });

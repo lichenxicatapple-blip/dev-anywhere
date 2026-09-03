@@ -529,6 +529,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 requestId: msg.requestId,
                 success: true,
                 proxyId: String(msg.proxyId),
+                bindingId: `e2e-binding-${String(msg.requestId)}`,
               });
             }, proxySelectDelayMs);
             break;
@@ -601,6 +602,69 @@ export async function installFakeRelay(page: Page): Promise<void> {
                   command: "/home/dev/.local/bin/kimi",
                 },
               },
+            });
+            break;
+          case "preview_capability_request":
+            this.emitJson({
+              type: "preview_capability_response",
+              requestId: msg.requestId,
+              scope: msg.scope,
+              success: true,
+              capability: {
+                cloudflared: {
+                  available: true,
+                  command: "/usr/local/bin/cloudflared",
+                },
+                cpolar: { available: false, error: "Cpolar not found" },
+              },
+            });
+            break;
+          case "device_preview_capability_request":
+            this.emitJson({
+              type: "device_preview_capability_response",
+              requestId: msg.requestId,
+              scope: msg.scope,
+              success: true,
+              capability: {
+                ios: {
+                  supported: true,
+                  available: true,
+                  interactive: true,
+                  command: "/usr/local/bin/baguette",
+                },
+                android: {
+                  supported: true,
+                  available: true,
+                  interactive: true,
+                  command: "/usr/local/bin/adb",
+                },
+              },
+            });
+            break;
+          case "device_preview_targets_request":
+            this.emitJson({
+              type: "device_preview_targets_response",
+              requestId: msg.requestId,
+              scope: msg.scope,
+              success: true,
+              targets: [
+                {
+                  targetId: "device-preview-target-one",
+                  platform: "ios",
+                  name: "DEV Anywhere Device Preview Test 2 20260902",
+                  model: "iPhone 17 Pro",
+                  osVersion: "26.4",
+                  interactive: true,
+                },
+                {
+                  targetId: "device-preview-target-two",
+                  platform: "ios",
+                  name: "DEV Anywhere Device Preview Test 20260902",
+                  model: "iPhone 17 Pro",
+                  osVersion: "26.4",
+                  interactive: true,
+                },
+              ],
             });
             break;
           case "voice_config_request":

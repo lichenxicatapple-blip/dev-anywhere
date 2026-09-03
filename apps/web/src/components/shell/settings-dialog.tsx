@@ -120,11 +120,19 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
   const ptyScrollTraceEnabled = useAppStore((s) => s.ptyScrollTraceEnabled);
   const setPtyScrollTraceEnabled = useAppStore((s) => s.setPtyScrollTraceEnabled);
   const [view, setView] = useState<SettingsView>("menu");
+  const [previousOpen, setPreviousOpen] = useState(open);
   const [relayHealth, setRelayHealth] = useState<RelayHealthState>({ kind: "idle" });
   const dialogSurfaceRef = useRef<HTMLDivElement>(null);
   const voiceScrollRef = useRef<HTMLDivElement>(null);
   const relayTokenSaved = hasStoredRelayClientToken();
   const showInputModeSetting = useMemo(() => describeCurrentClientDevice().osName === "iPad", []);
+
+  // Keep the active page stable throughout Radix's exit animation, then reset before the next open
+  // commits so neither the closing page nor the newly opened dialog flashes the wrong content.
+  if (open !== previousOpen) {
+    setPreviousOpen(open);
+    if (open) setView("menu");
+  }
 
   const handleSessionIdleNotificationsChange = useCallback(
     async (enabled: boolean): Promise<void> => {
@@ -181,13 +189,6 @@ export function SettingsDialog({ open, onOpenChange }: SettingsDialogProps) {
     },
     [relayUrl],
   );
-
-  useEffect(() => {
-    if (!open) {
-      setView("menu");
-      return;
-    }
-  }, [open]);
 
   useEffect(() => {
     if (!open || view !== "version") return;

@@ -16,6 +16,7 @@ export interface RelayChaosOptions {
 export interface RelayChaosMeta {
   direction: RelayChaosDirection;
   type: string;
+  guard?: () => boolean;
 }
 
 export interface RelayChaos {
@@ -48,8 +49,8 @@ export function createRelayChaos(options: RelayChaosOptions, logger: Logger): Re
     return true;
   }
 
-  function sendNow(ws: WebSocket, data: string | Buffer): void {
-    if (ws.readyState === WebSocket.OPEN) {
+  function sendNow(ws: WebSocket, data: string | Buffer, guard?: () => boolean): void {
+    if (ws.readyState === WebSocket.OPEN && (!guard || guard())) {
       ws.send(data);
     }
   }
@@ -57,7 +58,7 @@ export function createRelayChaos(options: RelayChaosOptions, logger: Logger): Re
   return {
     send(ws, data, meta) {
       if (!shouldAffect(meta)) {
-        sendNow(ws, data);
+        sendNow(ws, data, meta.guard);
         return;
       }
 
@@ -70,10 +71,10 @@ export function createRelayChaos(options: RelayChaosOptions, logger: Logger): Re
         "Relay chaos forwarding message",
       );
 
-      setTimeout(() => sendNow(ws, data), delayMs);
+      setTimeout(() => sendNow(ws, data, meta.guard), delayMs);
 
       if (options.duplicate) {
-        setTimeout(() => sendNow(ws, data), delayMs + options.duplicateDelayMs);
+        setTimeout(() => sendNow(ws, data, meta.guard), delayMs + options.duplicateDelayMs);
       }
     },
   };

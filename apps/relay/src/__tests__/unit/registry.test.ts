@@ -12,6 +12,10 @@ function createMockWs(readyState: number = WebSocket.OPEN): WebSocket {
   } as unknown as WebSocket;
 }
 
+function bindingIdentity(ws: WebSocket): { boundProxyId?: string; bindingId?: string } {
+  return ws as WebSocket & { boundProxyId?: string; bindingId?: string };
+}
+
 describe("RelayRegistry", () => {
   let registry: RelayRegistry;
 
@@ -121,10 +125,18 @@ describe("RelayRegistry", () => {
     });
 
     it("atomically removes only an offline proxy and its client bindings", () => {
-      const currentClient = createMockWs() as WebSocket & { boundProxyId?: string };
-      const staleTab = createMockWs() as WebSocket & { boundProxyId?: string };
+      const currentClient = createMockWs() as WebSocket & {
+        boundProxyId?: string;
+        bindingId?: string;
+      };
+      const staleTab = createMockWs() as WebSocket & {
+        boundProxyId?: string;
+        bindingId?: string;
+      };
       currentClient.boundProxyId = "p1";
+      currentClient.bindingId = "current-binding";
       staleTab.boundProxyId = "p1";
+      staleTab.bindingId = "stale-binding";
       registry.registerProxy("p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
       registry.addClientWs(currentClient, { clientId: "c1" });
@@ -137,7 +149,9 @@ describe("RelayRegistry", () => {
       expect(registry.getSessionsForProxy("p1")).toEqual([]);
       expect(registry.getClientBinding("c1")).toBeUndefined();
       expect(currentClient.boundProxyId).toBeUndefined();
+      expect(currentClient.bindingId).toBeUndefined();
       expect(staleTab.boundProxyId).toBeUndefined();
+      expect(staleTab.bindingId).toBeUndefined();
     });
 
     it("refuses to remove an online-state proxy even when its socket is already unavailable", () => {
@@ -191,17 +205,19 @@ describe("RelayRegistry", () => {
     it("bindClientById and getClientBinding work correctly", () => {
       const ws = createMockWs();
       registry.registerProxy("p1", createMockWs());
-      const bound = registry.bindClientById("c1", "p1", ws);
-      expect(bound).toBe(true);
+      const bindingId = registry.bindClientById("c1", "p1", ws);
+      expect(bindingId).toEqual(expect.any(String));
 
       const binding = registry.getClientBinding("c1");
       expect(binding?.proxyId).toBe("p1");
+      expect(binding?.bindingId).toBe(bindingId);
       expect(binding?.ws).toBe(ws);
+      expect(bindingIdentity(ws)).toMatchObject({ boundProxyId: "p1", bindingId });
     });
 
-    it("bindClientById returns false for unknown proxy", () => {
+    it("bindClientById returns undefined for unknown proxy", () => {
       const ws = createMockWs();
-      expect(registry.bindClientById("c1", "unknown", ws)).toBe(false);
+      expect(registry.bindClientById("c1", "unknown", ws)).toBeUndefined();
     });
 
     it("unbindClientById clears ws but preserves binding for reconnect", () => {
@@ -213,14 +229,22 @@ describe("RelayRegistry", () => {
       expect(binding?.ws).toBeNull();
     });
 
-    it("updateClientSocket updates ws for existing binding", () => {
+    it("restoreClientBinding moves authority and rotates the binding generation", () => {
       const ws1 = createMockWs();
       const ws2 = createMockWs();
       registry.registerProxy("p1", createMockWs());
-      registry.bindClientById("c1", "p1", ws1);
+      const oldBindingId = registry.bindClientById("c1", "p1", ws1);
 
-      registry.updateClientSocket("c1", ws2);
+      const restored = registry.restoreClientBinding("c1", ws2);
+      expect(restored).toMatchObject({ proxyId: "p1" });
+      expect(restored?.bindingId).not.toBe(oldBindingId);
       expect(registry.getClientBinding("c1")?.ws).toBe(ws2);
+      expect(bindingIdentity(ws1).boundProxyId).toBeUndefined();
+      expect(bindingIdentity(ws1).bindingId).toBeUndefined();
+      expect(bindingIdentity(ws2)).toMatchObject({
+        boundProxyId: "p1",
+        bindingId: restored?.bindingId,
+      });
     });
 
     it("only lets the current client socket clear its binding", () => {
@@ -228,13 +252,52 @@ describe("RelayRegistry", () => {
       const currentWs = createMockWs();
       registry.registerProxy("p1", createMockWs());
       registry.bindClientById("c1", "p1", oldWs);
-      registry.updateClientSocket("c1", currentWs);
+      registry.restoreClientBinding("c1", currentWs);
 
       expect(registry.unbindClientSocket("c1", oldWs)).toBe(false);
       expect(registry.getClientBinding("c1")?.ws).toBe(currentWs);
 
       expect(registry.unbindClientSocket("c1", currentWs)).toBe(true);
       expect(registry.getClientBinding("c1")?.ws).toBeNull();
+      expect(bindingIdentity(currentWs).boundProxyId).toBeUndefined();
+      expect(bindingIdentity(currentWs).bindingId).toBeUndefined();
+    });
+
+    it("accepts only the exact authoritative Preview scope", () => {
+      const oldWs = createMockWs();
+      const currentWs = createMockWs();
+      registry.registerProxy("p1", createMockWs());
+      const oldBindingId = registry.bindClientById("c1", "p1", oldWs)!;
+      const restored = registry.restoreClientBinding("c1", currentWs)!;
+
+      expect(
+        registry.isCurrentClientBinding("c1", oldWs, {
+          proxyId: "p1",
+          bindingId: oldBindingId,
+        }),
+      ).toBe(false);
+      expect(
+        registry.isCurrentClientBinding("c1", currentWs, {
+          proxyId: "p1",
+          bindingId: oldBindingId,
+        }),
+      ).toBe(false);
+      expect(registry.isCurrentClientBinding("c1", currentWs, restored)).toBe(true);
+    });
+
+    it("rotates bindingId when selecting the same Proxy again", () => {
+      const ws = createMockWs();
+      registry.registerProxy("p1", createMockWs());
+      const first = registry.bindClientById("c1", "p1", ws)!;
+      const second = registry.bindClientById("c1", "p1", ws)!;
+
+      expect(second).not.toBe(first);
+      expect(registry.isCurrentClientBinding("c1", ws, { proxyId: "p1", bindingId: first })).toBe(
+        false,
+      );
+      expect(registry.isCurrentClientBinding("c1", ws, { proxyId: "p1", bindingId: second })).toBe(
+        true,
+      );
     });
 
     it("getClientsForProxy includes clientId-bound clients", () => {

@@ -3,137 +3,155 @@ import { devtools } from "zustand/middleware";
 import type {
   WebPreviewCapability,
   WebPreviewSnapshot,
-  WebPreviewState,
   WebPreviewSummary,
 } from "@/types/web-preview";
+import { samePreviewScope, type PreviewScope } from "@/services/preview-scope";
+import {
+  createVersionedPreviewState,
+  reduceVersionedPreviewState,
+  type VersionedPreviewReduceResult,
+  type VersionedPreviewState,
+} from "@/services/versioned-preview-reducer";
 
 type PreviewCapabilityStatus = "idle" | "loading" | "loaded" | "error";
+type WebPreviewReduceResult = VersionedPreviewReduceResult<WebPreviewSummary>;
 
 interface PreviewStoreState {
-  previews: WebPreviewSummary[];
+  authoritative: VersionedPreviewState<WebPreviewSummary> | null;
   listLoaded: boolean;
-  epoch: string | null;
-  revision: number;
   capability: WebPreviewCapability | null;
   capabilityStatus: PreviewCapabilityStatus;
   capabilityError: string | null;
 
-  replaceSnapshot: (snapshot: WebPreviewSnapshot) => void;
-  addStartingPreview: (preview: WebPreviewSummary) => void;
-  applyPreviewState: (preview: WebPreviewSummary, epoch?: string, revision?: number) => void;
-  applyPreviewRemoved: (previewId: string, epoch?: string, revision?: number) => void;
-  setPreviewState: (previewId: string, state: WebPreviewState) => void;
-  setCapabilityLoading: () => void;
-  setCapability: (capability: WebPreviewCapability) => void;
-  setCapabilityUnsupported: () => void;
-  setCapabilityError: (error: string) => void;
-  markListLoading: () => void;
-  clearPreviewList: () => void;
-  prepareForProxySwitch: () => void;
+  activateScope: (scope: PreviewScope) => void;
+  replaceSnapshot: (
+    scope: PreviewScope,
+    snapshot: WebPreviewSnapshot,
+  ) => WebPreviewReduceResult | null;
+  applyPreviewState: (
+    scope: PreviewScope,
+    preview: WebPreviewSummary,
+    epoch: string,
+    revision: number,
+  ) => WebPreviewReduceResult | null;
+  applyPreviewRemoved: (
+    scope: PreviewScope,
+    previewId: string,
+    epoch: string,
+    revision: number,
+  ) => WebPreviewReduceResult | null;
+  setCapabilityLoading: (scope: PreviewScope) => void;
+  setCapability: (scope: PreviewScope, capability: WebPreviewCapability) => void;
+  setCapabilityError: (scope: PreviewScope, error: string) => void;
+  markListLoading: (scope: PreviewScope) => void;
   clear: () => void;
 }
 
-function upsertPreview(
-  previews: WebPreviewSummary[],
-  preview: WebPreviewSummary,
-): WebPreviewSummary[] {
-  const index = previews.findIndex((entry) => entry.previewId === preview.previewId);
-  if (index < 0) return [...previews, preview];
-  const next = previews.slice();
-  next[index] = preview;
-  return next;
-}
-
-function shouldIgnoreRevision(
-  state: Pick<PreviewStoreState, "epoch" | "revision">,
-  epoch: string | undefined,
-  revision: number | undefined,
-): boolean {
-  if (!epoch || revision === undefined) return false;
-  return state.epoch === epoch && revision <= state.revision;
-}
-
 const emptyPreviewState = {
-  previews: [] as WebPreviewSummary[],
+  authoritative: null as VersionedPreviewState<WebPreviewSummary> | null,
   listLoaded: false,
-  epoch: null as string | null,
-  revision: -1,
   capability: null as WebPreviewCapability | null,
   capabilityStatus: "idle" as PreviewCapabilityStatus,
   capabilityError: null as string | null,
 };
 
+function reduceAuthoritative(
+  set: (partial: Partial<PreviewStoreState>) => void,
+  get: () => PreviewStoreState,
+  input:
+    | {
+        kind: "snapshot";
+        scope: PreviewScope;
+        epoch: string;
+        revision: number;
+        previews: readonly WebPreviewSummary[];
+      }
+    | {
+        kind: "state";
+        scope: PreviewScope;
+        epoch: string;
+        revision: number;
+        preview: WebPreviewSummary;
+      }
+    | {
+        kind: "removed";
+        scope: PreviewScope;
+        epoch: string;
+        revision: number;
+        previewId: string;
+      },
+): WebPreviewReduceResult | null {
+  const current = get().authoritative;
+  if (!current) return null;
+  const result = reduceVersionedPreviewState(current, input);
+  const snapshotCompleted =
+    input.kind === "snapshot" && samePreviewScope(current.scope, input.scope);
+  if (result.state !== current || (snapshotCompleted && !get().listLoaded)) {
+    set({
+      authoritative: result.state,
+      ...(snapshotCompleted ? { listLoaded: true } : {}),
+    });
+  }
+  return result;
+}
+
+export const selectWebPreviews = (state: PreviewStoreState): readonly WebPreviewSummary[] =>
+  state.authoritative?.previews ?? [];
+
 export const usePreviewStore = create<PreviewStoreState>()(
   devtools(
-    (set) => ({
+    (set, get) => ({
       ...emptyPreviewState,
 
-      replaceSnapshot: (snapshot) =>
-        set((state) => {
-          if (state.epoch === snapshot.epoch && snapshot.revision < state.revision) return state;
-          return {
-            previews: snapshot.previews,
-            listLoaded: true,
-            epoch: snapshot.epoch,
-            revision: snapshot.revision,
-          };
-        }),
-      addStartingPreview: (preview) =>
-        set((state) => {
-          // A very fast state push may beat the create ACK. Never overwrite ready/failed state
-          // with the synthetic starting row produced from that ACK.
-          if (state.previews.some((entry) => entry.previewId === preview.previewId)) return state;
-          return { previews: [...state.previews, preview] };
-        }),
-      applyPreviewState: (preview, epoch, revision) =>
-        set((state) => {
-          if (shouldIgnoreRevision(state, epoch, revision)) return state;
-          const epochChanged = !!epoch && !!state.epoch && epoch !== state.epoch;
-          return {
-            previews: upsertPreview(epochChanged ? [] : state.previews, preview),
-            ...(epoch ? { epoch } : {}),
-            ...(revision !== undefined ? { revision } : {}),
-            ...(epochChanged ? { listLoaded: false } : {}),
-          };
-        }),
-      applyPreviewRemoved: (previewId, epoch, revision) =>
-        set((state) => {
-          if (shouldIgnoreRevision(state, epoch, revision)) return state;
-          const epochChanged = !!epoch && !!state.epoch && epoch !== state.epoch;
-          return {
-            previews: epochChanged
-              ? []
-              : state.previews.filter((preview) => preview.previewId !== previewId),
-            ...(epoch ? { epoch } : {}),
-            ...(revision !== undefined ? { revision } : {}),
-            ...(epochChanged ? { listLoaded: false } : {}),
-          };
-        }),
-      setPreviewState: (previewId, previewState) =>
-        set((state) => ({
-          previews: state.previews.map((preview) =>
-            preview.previewId === previewId
-              ? { ...preview, state: previewState, updatedAt: Date.now() }
-              : preview,
-          ),
-        })),
-      setCapabilityLoading: () => set({ capabilityStatus: "loading", capabilityError: null }),
-      setCapability: (capability) =>
-        set({ capability, capabilityStatus: "loaded", capabilityError: null }),
-      setCapabilityUnsupported: () =>
+      activateScope: (scope) =>
         set({
-          capability: null,
-          capabilityStatus: "loaded",
-          capabilityError: null,
-          previews: [],
-          listLoaded: true,
-          epoch: null,
-          revision: -1,
+          ...emptyPreviewState,
+          authoritative: createVersionedPreviewState<WebPreviewSummary>(scope),
         }),
-      setCapabilityError: (capabilityError) => set({ capabilityStatus: "error", capabilityError }),
-      markListLoading: () => set({ listLoaded: false }),
-      clearPreviewList: () => set({ previews: [], listLoaded: true, epoch: null, revision: -1 }),
-      prepareForProxySwitch: () => set({ ...emptyPreviewState }),
+      replaceSnapshot: (scope, snapshot) =>
+        reduceAuthoritative(set, get, {
+          kind: "snapshot",
+          scope,
+          epoch: snapshot.epoch,
+          revision: snapshot.revision,
+          previews: snapshot.previews,
+        }),
+      applyPreviewState: (scope, preview, epoch, revision) =>
+        reduceAuthoritative(set, get, {
+          kind: "state",
+          scope,
+          epoch,
+          revision,
+          preview,
+        }),
+      applyPreviewRemoved: (scope, previewId, epoch, revision) =>
+        reduceAuthoritative(set, get, {
+          kind: "removed",
+          scope,
+          epoch,
+          revision,
+          previewId,
+        }),
+      setCapabilityLoading: (scope) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ capabilityStatus: "loading", capabilityError: null });
+      },
+      setCapability: (scope, capability) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ capability, capabilityStatus: "loaded", capabilityError: null });
+      },
+      setCapabilityError: (scope, capabilityError) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ capabilityStatus: "error", capabilityError });
+      },
+      markListLoading: (scope) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ listLoaded: false });
+      },
       clear: () => set({ ...emptyPreviewState }),
     }),
     { name: "preview-store" },

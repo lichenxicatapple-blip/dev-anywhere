@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useLayoutEffect, useRef, useState } from "react";
 import { Globe2, Smartphone } from "lucide-react";
 import type { DevicePreviewPlatform } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
@@ -25,21 +25,31 @@ interface CreateFrontendPreviewDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-type Choice = "web" | DevicePreviewPlatform | null;
+type OpenDialogState = "chooser" | "web" | DevicePreviewPlatform;
+type DialogState = "closed" | OpenDialogState;
 
 export function CreateFrontendPreviewDialog({
   open,
   onOpenChange,
 }: CreateFrontendPreviewDialogProps) {
-  const [choice, setChoice] = useState<Choice>(null);
+  const [state, setState] = useState<DialogState>(() => (open ? "chooser" : "closed"));
+  const exitingStateRef = useRef<OpenDialogState | null>(null);
   const isDesktop = useMediaQuery("(min-width: 768px)");
 
-  useEffect(() => {
-    if (open) setChoice(null);
-  }, [open]);
+  useLayoutEffect(() => {
+    if (open) {
+      if (state === "closed") setState("chooser");
+      return;
+    }
+    if (state === "closed") return;
+
+    // Keep exactly the panel that is closing mounted with open=false. Radix owns its exit animation;
+    // the snapshot is never eligible to reopen and is replaced by the chooser before the next paint.
+    exitingStateRef.current = state;
+    setState("closed");
+  }, [open, state]);
 
   function close(): void {
-    setChoice(null);
     onOpenChange(false);
   }
 
@@ -50,29 +60,32 @@ export function CreateFrontendPreviewDialog({
         title="网页"
         description="通过临时链接访问或分享本机网页"
         slot="frontend-preview-web"
-        onClick={() => setChoice("web")}
+        onClick={() => setState("web")}
       />
       <PreviewChoice
         icon={<Smartphone className="size-5" aria-hidden="true" />}
         title="iOS Simulator"
         description="查看和操控开发机上已启动的 iPhone 或 iPad 模拟器"
         slot="frontend-preview-ios"
-        onClick={() => setChoice("ios")}
+        onClick={() => setState("ios")}
       />
       <PreviewChoice
         icon={<Smartphone className="size-5" aria-hidden="true" />}
         title="Android Emulator"
         description="查看和操控开发机上已启动的 Android 模拟器"
         slot="frontend-preview-android"
-        onClick={() => setChoice("android")}
+        onClick={() => setState("android")}
       />
     </div>
   );
 
-  return (
-    <>
-      {isDesktop ? (
-        <Dialog open={open && choice === null} onOpenChange={(next) => !next && close()}>
+  const mountedState = state === "closed" ? exitingStateRef.current : state;
+  const panelOpen = open && state !== "closed";
+
+  switch (mountedState) {
+    case "chooser":
+      return isDesktop ? (
+        <Dialog key="chooser" open={panelOpen} onOpenChange={(next) => !next && close()}>
           <DialogContent className="sm:max-w-lg" data-slot="create-frontend-preview-dialog">
             <DialogHeader>
               <DialogTitle>新建前端预览</DialogTitle>
@@ -82,7 +95,7 @@ export function CreateFrontendPreviewDialog({
           </DialogContent>
         </Dialog>
       ) : (
-        <Sheet open={open && choice === null} onOpenChange={(next) => !next && close()}>
+        <Sheet key="chooser" open={panelOpen} onOpenChange={(next) => !next && close()}>
           <SheetContent
             side="bottom"
             className="inset-x-2 w-auto rounded-t-xl border bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
@@ -96,19 +109,28 @@ export function CreateFrontendPreviewDialog({
             {choices}
           </SheetContent>
         </Sheet>
-      )}
-
-      <CreateWebPreviewDialog
-        open={open && choice === "web"}
-        onOpenChange={(next) => !next && close()}
-      />
-      <CreateDevicePreviewDialog
-        open={open && (choice === "ios" || choice === "android")}
-        platform={choice === "ios" || choice === "android" ? choice : "ios"}
-        onOpenChange={(next) => !next && close()}
-      />
-    </>
-  );
+      );
+    case "web":
+      return (
+        <CreateWebPreviewDialog
+          key="web"
+          open={panelOpen}
+          onOpenChange={(next) => !next && close()}
+        />
+      );
+    case "ios":
+    case "android":
+      return (
+        <CreateDevicePreviewDialog
+          key={mountedState}
+          open={panelOpen}
+          platform={mountedState}
+          onOpenChange={(next) => !next && close()}
+        />
+      );
+    case null:
+      return null;
+  }
 }
 
 function PreviewChoice({

@@ -182,6 +182,9 @@ importers:
       highlight.js:
         specifier: ^11.11.1
         version: 11.11.1
+      jmuxer:
+        specifier: 2.1.3
+        version: 2.1.3
       lucide-react:
         specifier: ^1.8.0
         version: 1.8.0(react@19.2.5)
@@ -4189,6 +4192,9 @@ packages:
   jiti@2.6.1:
     resolution: {integrity: sha512-ekilCSN1jwRvIbgeg/57YFh8qQDNbwDb9xT/qu2DAHbFFZUicIl4ygVaAvzveMhMVr3LnpSKTNnwt8PoOfmKhQ==}
     hasBin: true
+
+  jmuxer@2.1.3:
+    resolution: {integrity: sha512-X2YJ/qlJjrBm5XOFHC3fRpXC7HY/17R4CCJiE6ALTqDtxnFO79G+nqG4M1VCd8+BYywXwE9T8KO0qbg1EJYHtw==}
 
   joycon@3.1.1:
     resolution: {integrity: sha512-34wB/Y7MW7bzjKRjUKTa46I2Z7eV62Rkhva+KkopW7Qvv/OSWBqvkSY7vusOPrNuZcUG3tApvdVgNB8POj3SPw==}
@@ -9818,6 +9824,8 @@ snapshots:
       picocolors: 1.1.1
 
   jiti@2.6.1: {}
+
+  jmuxer@2.1.3: {}
 
   joycon@3.1.1: {}
 

@@ -6,21 +6,44 @@ const {
   removeOfflineProxy,
   listProxies,
   clearBoundProxy,
+  selectProxy,
+  getPreviewScope,
+  sendControl,
+  requestProxyInfo,
+  requestAgentStatuses,
+  requestSessionHistory,
+  requestWebPreviewList,
+  requestDevicePreviewList,
+  relayState,
   navigateMock,
   toastError,
   toastInfo,
   toastSuccess,
   toastWarning,
-} = vi.hoisted(() => ({
-  removeOfflineProxy: vi.fn(),
-  listProxies: vi.fn(),
-  clearBoundProxy: vi.fn(),
-  navigateMock: vi.fn(),
-  toastError: vi.fn(),
-  toastInfo: vi.fn(),
-  toastSuccess: vi.fn(),
-  toastWarning: vi.fn(),
-}));
+} = vi.hoisted(() => {
+  const relayState = {
+    previewScope: null as { proxyId: string; bindingId: string } | null,
+  };
+  return {
+    removeOfflineProxy: vi.fn(),
+    listProxies: vi.fn(),
+    clearBoundProxy: vi.fn(),
+    selectProxy: vi.fn(),
+    getPreviewScope: vi.fn(() => relayState.previewScope),
+    sendControl: vi.fn(),
+    requestProxyInfo: vi.fn(),
+    requestAgentStatuses: vi.fn(),
+    requestSessionHistory: vi.fn(),
+    requestWebPreviewList: vi.fn(),
+    requestDevicePreviewList: vi.fn(),
+    relayState,
+    navigateMock: vi.fn(),
+    toastError: vi.fn(),
+    toastInfo: vi.fn(),
+    toastSuccess: vi.fn(),
+    toastWarning: vi.fn(),
+  };
+});
 
 vi.mock("react-router", async () => {
   const actual = await vi.importActual<typeof import("react-router")>("react-router");
@@ -35,6 +58,14 @@ vi.mock("@/hooks/use-relay-setup", () => ({
     removeOfflineProxy,
     listProxies,
     clearBoundProxy,
+    selectProxy,
+    getPreviewScope,
+    sendControl,
+    requestProxyInfo,
+    requestAgentStatuses,
+    requestSessionHistory,
+    requestWebPreviewList,
+    requestDevicePreviewList,
   },
 }));
 
@@ -48,12 +79,23 @@ vi.mock("@/components/toast", () => ({
 }));
 
 import { useAppStore } from "@/stores/app-store";
+import { previewController } from "@/services/preview-controller";
+import { useFileStore } from "@/stores/file-store";
+import { useDevicePreviewStore } from "@/stores/device-preview-store";
+import { usePreviewStore } from "@/stores/preview-store";
 import { ProxySwitcher } from "./proxy-switcher";
 
 const proxies = [
   { proxyId: "proxy-online", name: "工作站", online: true, sessions: [] },
   { proxyId: "proxy-offline", name: "旧 Mac", online: false, sessions: [] },
 ];
+
+function proxyInfo(homePath: string) {
+  return {
+    homePath,
+    agentCli: {},
+  };
+}
 
 function renderSwitcher(layout: "page" | "dropdown") {
   return render(
@@ -84,6 +126,31 @@ describe("ProxySwitcher offline removal", () => {
     });
     listProxies.mockReset();
     clearBoundProxy.mockReset();
+    selectProxy.mockReset();
+    let bindingSequence = 0;
+    selectProxy.mockImplementation(async (proxyId: string) => {
+      const bindingId = `binding-${++bindingSequence}`;
+      relayState.previewScope = { proxyId, bindingId };
+      return { success: true, proxyId, bindingId };
+    });
+    getPreviewScope.mockClear();
+    sendControl.mockReset();
+    requestProxyInfo.mockReset();
+    requestProxyInfo.mockResolvedValue(proxyInfo("/current"));
+    requestAgentStatuses.mockReset();
+    requestAgentStatuses.mockResolvedValue([]);
+    requestSessionHistory.mockReset();
+    requestSessionHistory.mockResolvedValue([]);
+    requestWebPreviewList.mockReset();
+    requestWebPreviewList.mockResolvedValue({ epoch: "web-current", revision: 0, previews: [] });
+    requestDevicePreviewList.mockReset();
+    requestDevicePreviewList.mockResolvedValue({
+      epoch: "device-current",
+      revision: 0,
+      previews: [],
+    });
+    relayState.previewScope = null;
+    previewController.dispose();
     navigateMock.mockReset();
     toastError.mockReset();
     toastInfo.mockReset();
@@ -102,6 +169,7 @@ describe("ProxySwitcher offline removal", () => {
 
   afterEach(async () => {
     cleanup();
+    previewController.dispose();
     sessionStorage.clear();
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
@@ -161,5 +229,96 @@ describe("ProxySwitcher offline removal", () => {
 
     expect(removeOfflineProxy).not.toHaveBeenCalled();
     expect(toastWarning).toHaveBeenCalledWith("这台开发机已重新上线，未移除");
+  });
+
+  it("activates each successful binding and rejects proxy info from the superseded binding", async () => {
+    let resolveFirstInfo!: (value: ReturnType<typeof proxyInfo>) => void;
+    let resolveFirstWeb!: (value: { epoch: string; revision: number; previews: never[] }) => void;
+    let resolveFirstDevice!: (value: {
+      epoch: string;
+      revision: number;
+      previews: never[];
+    }) => void;
+    requestProxyInfo
+      .mockImplementationOnce(
+        () =>
+          new Promise<ReturnType<typeof proxyInfo>>((resolve) => {
+            resolveFirstInfo = resolve;
+          }),
+      )
+      .mockResolvedValueOnce(proxyInfo("/new-binding"));
+    requestWebPreviewList
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstWeb = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ epoch: "web-new", revision: 1, previews: [] });
+    requestDevicePreviewList
+      .mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            resolveFirstDevice = resolve;
+          }),
+      )
+      .mockResolvedValueOnce({ epoch: "device-new", revision: 1, previews: [] });
+    renderSwitcher("page");
+
+    fireEvent.click(screen.getByRole("button", { name: /工作站/ }));
+    await waitFor(() => expect(selectProxy).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(useAppStore.getState().proxySwitchTarget).toBeNull());
+
+    fireEvent.click(screen.getByRole("button", { name: /工作站/ }));
+    await waitFor(() => expect(selectProxy).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(useFileStore.getState().homePath).toBe("/new-binding"));
+    await waitFor(() => {
+      expect(usePreviewStore.getState().authoritative).toMatchObject({
+        scope: { proxyId: "proxy-online", bindingId: "binding-2" },
+        epoch: "web-new",
+      });
+      expect(useDevicePreviewStore.getState().authoritative).toMatchObject({
+        scope: { proxyId: "proxy-online", bindingId: "binding-2" },
+        epoch: "device-new",
+      });
+    });
+    expect(previewController.getActiveScope()).toEqual({
+      proxyId: "proxy-online",
+      bindingId: "binding-2",
+    });
+
+    resolveFirstInfo(proxyInfo("/stale-binding"));
+    resolveFirstWeb({ epoch: "web-stale", revision: 99, previews: [] });
+    resolveFirstDevice({ epoch: "device-stale", revision: 99, previews: [] });
+    await Promise.resolve();
+    await Promise.resolve();
+    await waitFor(() => {
+      expect(useFileStore.getState().homePath).toBe("/new-binding");
+      expect(usePreviewStore.getState().authoritative?.epoch).toBe("web-new");
+      expect(useDevicePreviewStore.getState().authoritative?.epoch).toBe("device-new");
+    });
+  });
+
+  it("loads both authoritative preview lists even when proxy info fails", async () => {
+    const errorSpy = vi.spyOn(console, "error").mockImplementation(() => {});
+    requestProxyInfo.mockRejectedValue(new Error("proxy info timeout"));
+    renderSwitcher("page");
+
+    fireEvent.click(screen.getByRole("button", { name: /工作站/ }));
+
+    await waitFor(() => {
+      expect(requestWebPreviewList).toHaveBeenCalledTimes(1);
+      expect(requestDevicePreviewList).toHaveBeenCalledTimes(1);
+    });
+    expect(requestWebPreviewList).toHaveBeenCalledWith(
+      { proxyId: "proxy-online", bindingId: "binding-1" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    expect(requestDevicePreviewList).toHaveBeenCalledWith(
+      { proxyId: "proxy-online", bindingId: "binding-1" },
+      expect.objectContaining({ signal: expect.any(AbortSignal) }),
+    );
+    await waitFor(() => expect(errorSpy).toHaveBeenCalled());
+    errorSpy.mockRestore();
   });
 });

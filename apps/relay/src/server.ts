@@ -218,7 +218,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
   // PTY/control traffic on the Proxy's main WebSocket.
   const devicePreviewStreamWss = new WebSocketServer({
     noServer: true,
-    maxPayload: DEVICE_PREVIEW_FRAME_MAX_BYTES + 260,
+    maxPayload: DEVICE_PREVIEW_FRAME_MAX_BYTES + 512,
     perMessageDeflate: false,
   });
   // Voice sockets intentionally do not negotiate permessage-deflate: audio is already compressed
@@ -301,9 +301,9 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       ptySnapshotRoutes,
       sessionHistoryRoutes,
       webPreviewRoutes,
+      devicePreviewBridge,
       relayChaos,
       remoteFileBridge,
-      devicePreviewBridge,
     );
   });
 
@@ -319,6 +319,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       ptySnapshotRoutes,
       sessionHistoryRoutes,
       webPreviewRoutes,
+      devicePreviewBridge,
       relayChaos,
       voiceConfigStore,
       voiceProviders,
@@ -327,7 +328,6 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
         userAgent: firstHeaderValue(request.headers["user-agent"]),
         remoteAddress: requestRemoteAddress(request),
       },
-      devicePreviewBridge,
     );
   });
 

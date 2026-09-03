@@ -6,11 +6,19 @@ import type {
   DevicePreviewSummary,
   DevicePreviewTarget,
 } from "@/types/device-preview";
+import { samePreviewScope, type PreviewScope } from "@/services/preview-scope";
+import {
+  createVersionedPreviewState,
+  reduceVersionedPreviewState,
+  type VersionedPreviewReduceResult,
+  type VersionedPreviewState,
+} from "@/services/versioned-preview-reducer";
 
 type LoadStatus = "idle" | "loading" | "loaded" | "error";
+type DevicePreviewReduceResult = VersionedPreviewReduceResult<DevicePreviewSummary>;
 
 interface DevicePreviewStoreState {
-  previews: DevicePreviewSummary[];
+  authoritative: VersionedPreviewState<DevicePreviewSummary> | null;
   targets: DevicePreviewTarget[];
   capability: DevicePreviewCapability | null;
   capabilityStatus: LoadStatus;
@@ -18,31 +26,36 @@ interface DevicePreviewStoreState {
   targetsStatus: LoadStatus;
   targetsError: string | null;
   listLoaded: boolean;
-  epoch: string | null;
-  revision: number;
 
-  replaceSnapshot: (snapshot: DevicePreviewSnapshot) => void;
-  addStartingPreview: (preview: DevicePreviewSummary) => void;
-  applyPreviewState: (preview: DevicePreviewSummary, epoch?: string, revision?: number) => void;
-  applyPreviewRemoved: (previewId: string, epoch?: string, revision?: number) => void;
-  setPreviewState: (previewId: string, state: DevicePreviewSummary["state"]) => void;
-  setPreviewStateIf: (
+  activateScope: (scope: PreviewScope) => void;
+  replaceSnapshot: (
+    scope: PreviewScope,
+    snapshot: DevicePreviewSnapshot,
+  ) => DevicePreviewReduceResult | null;
+  applyPreviewState: (
+    scope: PreviewScope,
+    preview: DevicePreviewSummary,
+    epoch: string,
+    revision: number,
+  ) => DevicePreviewReduceResult | null;
+  applyPreviewRemoved: (
+    scope: PreviewScope,
     previewId: string,
-    expected: DevicePreviewSummary["state"],
-    state: DevicePreviewSummary["state"],
-  ) => void;
-  setCapability: (capability: DevicePreviewCapability) => void;
-  setCapabilityUnsupported: () => void;
-  setTargetsLoading: () => void;
-  setTargets: (targets: DevicePreviewTarget[]) => void;
-  setTargetsError: (error: string) => void;
-  markListLoading: () => void;
-  prepareForProxySwitch: () => void;
+    epoch: string,
+    revision: number,
+  ) => DevicePreviewReduceResult | null;
+  setCapabilityLoading: (scope: PreviewScope) => void;
+  setCapability: (scope: PreviewScope, capability: DevicePreviewCapability) => void;
+  setCapabilityError: (scope: PreviewScope, error: string) => void;
+  setTargetsLoading: (scope: PreviewScope) => void;
+  setTargets: (scope: PreviewScope, targets: DevicePreviewTarget[]) => void;
+  setTargetsError: (scope: PreviewScope, error: string) => void;
+  markListLoading: (scope: PreviewScope) => void;
   clear: () => void;
 }
 
 const emptyState = {
-  previews: [] as DevicePreviewSummary[],
+  authoritative: null as VersionedPreviewState<DevicePreviewSummary> | null,
   targets: [] as DevicePreviewTarget[],
   capability: null as DevicePreviewCapability | null,
   capabilityStatus: "idle" as LoadStatus,
@@ -50,108 +63,120 @@ const emptyState = {
   targetsStatus: "idle" as LoadStatus,
   targetsError: null as string | null,
   listLoaded: false,
-  epoch: null as string | null,
-  revision: -1,
 };
 
-function shouldIgnoreRevision(
-  state: Pick<DevicePreviewStoreState, "epoch" | "revision">,
-  epoch?: string,
-  revision?: number,
-): boolean {
-  return !!epoch && revision !== undefined && state.epoch === epoch && revision <= state.revision;
+function reduceAuthoritative(
+  set: (partial: Partial<DevicePreviewStoreState>) => void,
+  get: () => DevicePreviewStoreState,
+  input:
+    | {
+        kind: "snapshot";
+        scope: PreviewScope;
+        epoch: string;
+        revision: number;
+        previews: readonly DevicePreviewSummary[];
+      }
+    | {
+        kind: "state";
+        scope: PreviewScope;
+        epoch: string;
+        revision: number;
+        preview: DevicePreviewSummary;
+      }
+    | {
+        kind: "removed";
+        scope: PreviewScope;
+        epoch: string;
+        revision: number;
+        previewId: string;
+      },
+): DevicePreviewReduceResult | null {
+  const current = get().authoritative;
+  if (!current) return null;
+  const result = reduceVersionedPreviewState(current, input);
+  const snapshotCompleted =
+    input.kind === "snapshot" && samePreviewScope(current.scope, input.scope);
+  if (result.state !== current || (snapshotCompleted && !get().listLoaded)) {
+    set({
+      authoritative: result.state,
+      ...(snapshotCompleted ? { listLoaded: true } : {}),
+    });
+  }
+  return result;
 }
 
-function upsert(
-  previews: DevicePreviewSummary[],
-  preview: DevicePreviewSummary,
-): DevicePreviewSummary[] {
-  const index = previews.findIndex((entry) => entry.previewId === preview.previewId);
-  if (index < 0) return [...previews, preview];
-  const next = previews.slice();
-  next[index] = preview;
-  return next;
-}
+export const selectDevicePreviews = (
+  state: DevicePreviewStoreState,
+): readonly DevicePreviewSummary[] => state.authoritative?.previews ?? [];
 
 export const useDevicePreviewStore = create<DevicePreviewStoreState>()(
   devtools(
-    (set) => ({
+    (set, get) => ({
       ...emptyState,
-      replaceSnapshot: (snapshot) =>
-        set((state) => {
-          if (state.epoch === snapshot.epoch && snapshot.revision < state.revision) return state;
-          return {
-            previews: snapshot.previews,
-            listLoaded: true,
-            epoch: snapshot.epoch,
-            revision: snapshot.revision,
-          };
-        }),
-      addStartingPreview: (preview) =>
-        set((state) =>
-          state.previews.some((entry) => entry.previewId === preview.previewId)
-            ? state
-            : { previews: [...state.previews, preview] },
-        ),
-      applyPreviewState: (preview, epoch, revision) =>
-        set((state) => {
-          if (shouldIgnoreRevision(state, epoch, revision)) return state;
-          const epochChanged = !!epoch && !!state.epoch && epoch !== state.epoch;
-          return {
-            previews: upsert(epochChanged ? [] : state.previews, preview),
-            ...(epoch ? { epoch } : {}),
-            ...(revision !== undefined ? { revision } : {}),
-            ...(epochChanged ? { listLoaded: false } : {}),
-          };
-        }),
-      applyPreviewRemoved: (previewId, epoch, revision) =>
-        set((state) => {
-          if (shouldIgnoreRevision(state, epoch, revision)) return state;
-          const epochChanged = !!epoch && !!state.epoch && epoch !== state.epoch;
-          return {
-            previews: epochChanged
-              ? []
-              : state.previews.filter((preview) => preview.previewId !== previewId),
-            ...(epoch ? { epoch } : {}),
-            ...(revision !== undefined ? { revision } : {}),
-            ...(epochChanged ? { listLoaded: false } : {}),
-          };
-        }),
-      setPreviewState: (previewId, previewState) =>
-        set((state) => ({
-          previews: state.previews.map((preview) =>
-            preview.previewId === previewId
-              ? { ...preview, state: previewState, updatedAt: Date.now() }
-              : preview,
-          ),
-        })),
-      setPreviewStateIf: (previewId, expected, previewState) =>
-        set((state) => ({
-          previews: state.previews.map((preview) =>
-            preview.previewId === previewId && preview.state === expected
-              ? { ...preview, state: previewState, updatedAt: Date.now() }
-              : preview,
-          ),
-        })),
-      setCapability: (capability) =>
-        set({ capability, capabilityStatus: "loaded", capabilityError: null }),
-      setCapabilityUnsupported: () =>
+      activateScope: (scope) =>
         set({
-          capability: null,
-          capabilityStatus: "loaded",
-          capabilityError: null,
-          previews: [],
-          targets: [],
-          targetsStatus: "loaded",
-          listLoaded: true,
-          epoch: null,
-          revision: -1,
+          ...emptyState,
+          authoritative: createVersionedPreviewState<DevicePreviewSummary>(scope),
         }),
-      setTargetsLoading: () => set({ targetsStatus: "loading", targetsError: null }),
-      setTargets: (targets) => set({ targets, targetsStatus: "loaded", targetsError: null }),
-      setTargetsError: (targetsError) => set({ targetsStatus: "error", targetsError }),
-      markListLoading: () => set({ listLoaded: false }),
-      prepareForProxySwitch: () => set({ ...emptyState }),
+      replaceSnapshot: (scope, snapshot) =>
+        reduceAuthoritative(set, get, {
+          kind: "snapshot",
+          scope,
+          epoch: snapshot.epoch,
+          revision: snapshot.revision,
+          previews: snapshot.previews,
+        }),
+      applyPreviewState: (scope, preview, epoch, revision) =>
+        reduceAuthoritative(set, get, {
+          kind: "state",
+          scope,
+          epoch,
+          revision,
+          preview,
+        }),
+      applyPreviewRemoved: (scope, previewId, epoch, revision) =>
+        reduceAuthoritative(set, get, {
+          kind: "removed",
+          scope,
+          epoch,
+          revision,
+          previewId,
+        }),
+      setCapabilityLoading: (scope) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ capabilityStatus: "loading", capabilityError: null });
+      },
+      setCapability: (scope, capability) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ capability, capabilityStatus: "loaded", capabilityError: null });
+      },
+      setCapabilityError: (scope, capabilityError) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ capabilityStatus: "error", capabilityError });
+      },
+      setTargetsLoading: (scope) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ targetsStatus: "loading", targetsError: null });
+      },
+      setTargets: (scope, targets) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ targets, targetsStatus: "loaded", targetsError: null });
+      },
+      setTargetsError: (scope, targetsError) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ targetsStatus: "error", targetsError });
+      },
+      markListLoading: (scope) => {
+        const active = get().authoritative?.scope;
+        if (!active || !samePreviewScope(active, scope)) return;
+        set({ listLoaded: false });
+      },
       clear: () => set({ ...emptyState }),
     }),
     { name: "device-preview-store" },

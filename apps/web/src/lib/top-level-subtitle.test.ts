@@ -10,6 +10,18 @@ const baseInput = {
 };
 
 describe("getTopLevelSubtitle", () => {
+  it("does not render a subtitle when the selected developer machine has no sessions", () => {
+    expect(
+      getTopLevelSubtitle({
+        route: "sessions",
+        surface: "desktop",
+        proxiesLength: 1,
+        hasProxy: true,
+        sessionCount: 0,
+      }),
+    ).toBeNull();
+  });
+
   it("explains that a relay client token is required", () => {
     const copy = getTopLevelSubtitle({
       ...baseInput,

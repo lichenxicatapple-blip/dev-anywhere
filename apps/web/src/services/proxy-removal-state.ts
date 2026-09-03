@@ -4,8 +4,7 @@ import { useChatStore } from "@/stores/chat-store";
 import { useCommandStore } from "@/stores/command-store";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
-import { usePreviewStore } from "@/stores/preview-store";
-import { useDevicePreviewStore } from "@/stores/device-preview-store";
+import { previewController } from "@/services/preview-controller";
 import { readStorageValue, removeStorageValue, STORAGE_KEYS } from "@/lib/storage-keys";
 import { clearLastChatRoute } from "@/lib/route-restore";
 
@@ -63,6 +62,9 @@ export function applyExplicitProxyRemovalState(proxyId: string, relay: RelayClie
   const removesPendingColdStartSelection = app.selectedProxyId === null && savedProxyId === proxyId;
 
   app.setProxies(app.proxies.filter((proxy) => proxy.proxyId !== proxyId));
+  if (removesCurrentSelection || removesPendingColdStartSelection) {
+    previewController.dispose();
+  }
   relay.clearBoundProxy(proxyId);
   useSessionStore.getState().revokeProxyAuthorizations(proxyId);
   clearPendingProxyRemoval(proxyId);
@@ -76,8 +78,6 @@ export function applyExplicitProxyRemovalState(proxyId: string, relay: RelayClie
 
   useSessionStore.getState().clearForProxyRemoval(proxyId);
   useFileStore.getState().prepareForProxySwitch();
-  usePreviewStore.getState().clear();
-  useDevicePreviewStore.getState().clear();
   useChatStore.getState().clearAllSessions();
   useCommandStore.getState().clear();
   clearLastChatRoute();

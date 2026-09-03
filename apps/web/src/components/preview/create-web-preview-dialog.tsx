@@ -7,7 +7,7 @@ import type {
   WebPreviewTunnelStatus,
 } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { useFileStore } from "@/stores/file-store";
+import { useAppStore } from "@/stores/app-store";
 import { usePreviewStore } from "@/stores/preview-store";
 import { toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
@@ -37,10 +37,9 @@ import { FilePathPicker } from "@/components/chat/file-path-picker";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { cn } from "@/lib/utils";
-import {
-  startingPreviewFromAcceptedInput,
-  type WebPreviewStaticInspection,
-} from "@/types/web-preview";
+import { createClientOperationId } from "@/lib/client-operation-id";
+import { previewController } from "@/services/preview-controller";
+import type { WebPreviewStaticInspection } from "@/types/web-preview";
 
 interface CreateWebPreviewDialogProps {
   open: boolean;
@@ -85,10 +84,7 @@ function providerAvailable(
   capability: WebPreviewCapability | null,
   provider: TunnelProvider,
 ): boolean {
-  return (
-    capability?.supported === true &&
-    executableStatusForProvider(capability, provider)?.available === true
-  );
+  return executableStatusForProvider(capability, provider)?.available === true;
 }
 
 function validateLocalPreviewUrl(value: string): string | null {
@@ -116,6 +112,7 @@ function resetInspection(): InspectionState {
 }
 
 export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewDialogProps) {
+  const [name, setName] = useState("");
   const [tunnelProvider, setTunnelProvider] = useState<TunnelProvider>(
     loadTunnelProviderPreference,
   );
@@ -128,25 +125,32 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
   const [pathPickerOpen, setPathPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const pathFieldRef = useRef<HTMLDivElement>(null);
-  const inspectionGenerationRef = useRef(0);
+  const capabilityAbortRef = useRef<AbortController | null>(null);
+  const inspectionAbortRef = useRef<AbortController | null>(null);
   const pendingCreateRef = useRef<{ sourceKey: string; operationId: string } | null>(null);
+  const activeCreateOperationIdRef = useRef<string | null>(null);
   const tunnelProviderRef = useRef(tunnelProvider);
   tunnelProviderRef.current = tunnelProvider;
   const latestOpenRef = useRef(open);
   latestOpenRef.current = open;
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const selectedProxyId = useAppStore((state) => state.selectedProxyId);
   const capability = usePreviewStore((state) => state.capability);
   const capabilityStatus = usePreviewStore((state) => state.capabilityStatus);
   const capabilityError = usePreviewStore((state) => state.capabilityError);
+  const previewScope = usePreviewStore((state) => state.authoritative?.scope ?? null);
+  const previewScopeKey = previewScope
+    ? `${previewScope.proxyId}\0${previewScope.bindingId}`
+    : null;
 
   const selectTunnelProvider = useCallback((provider: TunnelProvider): void => {
-    pendingCreateRef.current = null;
     tunnelProviderRef.current = provider;
     setTunnelProvider(provider);
     writeStorageValue("local", STORAGE_KEYS.webPreviewTunnelProvider, provider);
   }, []);
 
   function resetForm(): void {
+    setName("");
     setSourceKind("local");
     setLocalUrl("");
     setStaticPath("");
@@ -155,43 +159,44 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
     setInspection(resetInspection());
     setPathPickerOpen(false);
     setSubmitting(false);
-    inspectionGenerationRef.current += 1;
+    capabilityAbortRef.current?.abort();
+    capabilityAbortRef.current = null;
+    inspectionAbortRef.current?.abort();
+    inspectionAbortRef.current = null;
     pendingCreateRef.current = null;
+    activeCreateOperationIdRef.current = null;
   }
 
   const detectCapability = useCallback(
     async (refreshPath: boolean): Promise<void> => {
-      const relay = relayClientRef;
-      if (!relay) {
-        usePreviewStore.getState().setCapabilityError("请先连接开发机");
+      capabilityAbortRef.current?.abort();
+      const abort = new AbortController();
+      capabilityAbortRef.current = abort;
+      const scope = previewController.getActiveScope();
+      if (!scope || scope.proxyId !== selectedProxyId) {
         return;
       }
-      usePreviewStore.getState().setCapabilityLoading();
       try {
-        const info = await relay.requestWebPreviewCapabilities(refreshPath);
-        const fileStore = useFileStore.getState();
-        fileStore.setHomePath(info.homePath);
-        fileStore.setAgentCli(info.agentCli);
-        if (!info.webPreview) {
-          usePreviewStore.getState().setCapabilityUnsupported();
+        const result = await previewController.requestWebPreviewCapability(scope, refreshPath, {
+          signal: abort.signal,
+        });
+        if (!result || abort.signal.aborted || !latestOpenRef.current) {
           return;
         }
-        usePreviewStore.getState().setCapability(info.webPreview);
+        if (!result.success) return;
         const selected = tunnelProviderRef.current;
         const fallback: TunnelProvider = selected === "cloudflare" ? "cpolar" : "cloudflare";
         if (
-          !providerAvailable(info.webPreview, selected) &&
-          providerAvailable(info.webPreview, fallback)
+          !providerAvailable(result.capability, selected) &&
+          providerAvailable(result.capability, fallback)
         ) {
           selectTunnelProvider(fallback);
         }
-      } catch (error) {
-        usePreviewStore
-          .getState()
-          .setCapabilityError(error instanceof Error ? error.message : "检测失败");
+      } catch {
+        // Capability failures are already reflected by the controller-owned store state.
       }
     },
-    [selectTunnelProvider],
+    [selectTunnelProvider, selectedProxyId],
   );
 
   function handleOpenChange(nextOpen: boolean): void {
@@ -207,7 +212,11 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
     void detectCapability(false);
     // Opening the dialog is the product-level capability probe. It intentionally reruns for every
     // open instead of trusting a possibly stale executable result from the previous attempt.
-  }, [detectCapability, open]);
+    return () => {
+      capabilityAbortRef.current?.abort();
+      capabilityAbortRef.current = null;
+    };
+  }, [detectCapability, open, previewScopeKey]);
 
   useEffect(() => {
     if (!pathPickerOpen) return;
@@ -222,6 +231,8 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
 
   useEffect(() => {
     if (!open || sourceKind !== "static") return;
+    inspectionAbortRef.current?.abort();
+    inspectionAbortRef.current = null;
     const path = staticInspectionPath.trim();
     if (!path) {
       setInspection(resetInspection());
@@ -229,35 +240,41 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
       return;
     }
 
-    const generation = ++inspectionGenerationRef.current;
+    const abort = new AbortController();
+    inspectionAbortRef.current = abort;
     setInspection({ status: "loading" });
     setSelectedEntryPath("");
     const timer = window.setTimeout(() => {
       const relay = relayClientRef;
-      if (!relay) {
-        if (generation === inspectionGenerationRef.current) {
-          setInspection({ status: "error", message: "请先连接开发机" });
-        }
+      const scope = previewController.getActiveScope();
+      if (!relay || !scope || scope.proxyId !== selectedProxyId) {
+        setInspection({ status: "error", message: "请先连接开发机" });
         return;
       }
-      void relay
-        .inspectStaticWebPreview(path)
+      void previewController
+        .inspectStaticWebPreview(scope, path, { signal: abort.signal })
         .then((result) => {
-          if (generation !== inspectionGenerationRef.current) return;
-          if (!result.success || !result.rootPath) {
+          if (
+            !result ||
+            abort.signal.aborted ||
+            !latestOpenRef.current ||
+            !previewController.isActive(relay, scope)
+          ) {
+            return;
+          }
+          if (!result.success) {
             setInspection({
               status: "error",
-              message: result.error ?? "无法在这里找到可预览的网页",
+              message: result.error,
             });
             return;
           }
-          const htmlEntries = result.htmlEntries ?? (result.entryPath ? [result.entryPath] : []);
+          const htmlEntries = result.htmlEntries;
           if (htmlEntries.length === 0 && !result.entryPath) {
             setInspection({ status: "error", message: "这里没有可以预览的网页" });
             return;
           }
           const inspected: WebPreviewStaticInspection = {
-            rootPath: result.rootPath,
             entryPath: result.entryPath,
             htmlEntries,
           };
@@ -265,15 +282,26 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
           setSelectedEntryPath(result.entryPath ?? "");
         })
         .catch((error: unknown) => {
-          if (generation !== inspectionGenerationRef.current) return;
+          if (
+            abort.signal.aborted ||
+            !latestOpenRef.current ||
+            (error instanceof Error && error.name === "AbortError") ||
+            !previewController.isActive(relay, scope)
+          ) {
+            return;
+          }
           setInspection({
             status: "error",
             message: error instanceof Error ? error.message : "检查网页失败",
           });
         });
     }, 300);
-    return () => window.clearTimeout(timer);
-  }, [open, sourceKind, staticInspectionPath]);
+    return () => {
+      window.clearTimeout(timer);
+      abort.abort();
+      if (inspectionAbortRef.current === abort) inspectionAbortRef.current = null;
+    };
+  }, [open, previewScopeKey, selectedProxyId, sourceKind, staticInspectionPath]);
 
   function handlePathFieldBlur(event: FocusEvent<HTMLDivElement>): void {
     const nextFocus = event.relatedTarget;
@@ -300,53 +328,66 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
     }
 
     let source: WebPreviewSourceInput;
-    let inspected: WebPreviewStaticInspection | null = null;
     if (sourceKind === "local") {
       source = { kind: "local", url: localUrl.trim() };
     } else {
       if (inspection.status !== "ready") return;
-      inspected = inspection.result;
       const entryPath = inspection.result.entryPath ?? selectedEntryPath;
       if (!entryPath) return;
       source = { kind: "static", path: staticInspectionPath.trim(), entryPath };
     }
 
     setSubmitting(true);
+    const scope = previewController.getActiveScope();
+    if (!scope) {
+      setSubmitting(false);
+      toast.error("请先连接开发机");
+      return;
+    }
+    let operationId: string | null = null;
     try {
-      const sourceKey = JSON.stringify({ tunnelProvider, source });
+      const customName = name.trim();
+      const sourceKey = JSON.stringify({
+        proxyId: scope.proxyId,
+        tunnelProvider,
+        source,
+        name: customName || undefined,
+      });
       if (pendingCreateRef.current?.sourceKey !== sourceKey) {
         pendingCreateRef.current = {
           sourceKey,
-          operationId: `preview-operation-${tunnelProvider}-${crypto.randomUUID()}`,
+          operationId: createClientOperationId(`preview-operation-${tunnelProvider}`),
         };
       }
-      const result = await relay.createWebPreview(source, {
+      operationId = pendingCreateRef.current.operationId;
+      activeCreateOperationIdRef.current = operationId;
+      const result = await previewController.createWebPreview(scope, source, {
         tunnelProvider,
-        operationId: pendingCreateRef.current.operationId,
+        operationId,
+        ...(customName ? { name: customName } : {}),
       });
-      if (!result.accepted || !result.previewId) {
-        pendingCreateRef.current = null;
-        toast.error(result.error ?? "无法创建网页预览");
+      if (activeCreateOperationIdRef.current !== operationId) return;
+      if (!result.accepted) {
+        if (pendingCreateRef.current?.operationId === operationId) {
+          pendingCreateRef.current = null;
+        }
+        toast.error(result.error);
         return;
       }
-      pendingCreateRef.current = null;
-      usePreviewStore
-        .getState()
-        .addStartingPreview(
-          startingPreviewFromAcceptedInput(
-            result.previewId,
-            source,
-            tunnelProvider,
-            inspected,
-            Date.now(),
-          ),
-        );
-      if (!latestOpenRef.current) return;
+      if (pendingCreateRef.current?.operationId === operationId) {
+        pendingCreateRef.current = null;
+      }
+      if (!latestOpenRef.current || !previewController.isActive(relay, scope)) return;
       onOpenChange(false);
     } catch (error) {
+      if (!operationId || activeCreateOperationIdRef.current !== operationId) return;
+      if (!latestOpenRef.current || !previewController.isActive(relay, scope)) return;
       toast.error(error instanceof Error ? error.message : "无法创建网页预览");
     } finally {
-      if (latestOpenRef.current) setSubmitting(false);
+      if (operationId && activeCreateOperationIdRef.current === operationId) {
+        activeCreateOperationIdRef.current = null;
+        if (latestOpenRef.current) setSubmitting(false);
+      }
     }
   }
 
@@ -360,6 +401,26 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
         void handleSubmit();
       }}
     >
+      <label className="flex min-w-0 flex-col gap-1">
+        <span className="text-sm">名称（可选）</span>
+        <input
+          type="text"
+          name="dev-anywhere-web-preview-name"
+          value={name}
+          maxLength={256}
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={submitting}
+          placeholder="自动生成"
+          data-slot="web-preview-name"
+          onChange={(event) => {
+            setName(event.target.value);
+          }}
+          className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 md:h-9 md:min-h-0 md:text-sm"
+        />
+      </label>
+
       <section
         className="flex min-w-0 flex-col gap-1"
         data-slot="web-preview-tunnel-provider-field"
@@ -412,8 +473,8 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
             disabled={submitting}
             aria-pressed={sourceKind === "local"}
             onClick={() => {
-              pendingCreateRef.current = null;
-              inspectionGenerationRef.current += 1;
+              inspectionAbortRef.current?.abort();
+              inspectionAbortRef.current = null;
               setInspection(resetInspection());
               setSelectedEntryPath("");
               setSourceKind("local");
@@ -434,8 +495,8 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
             disabled={submitting}
             aria-pressed={sourceKind === "static"}
             onClick={() => {
-              pendingCreateRef.current = null;
-              inspectionGenerationRef.current += 1;
+              inspectionAbortRef.current?.abort();
+              inspectionAbortRef.current = null;
               setInspection(resetInspection());
               setSelectedEntryPath("");
               setSourceKind("static");
@@ -468,7 +529,6 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
             disabled={submitting}
             value={localUrl}
             onChange={(event) => {
-              pendingCreateRef.current = null;
               setLocalUrl(event.target.value);
             }}
             placeholder="http://localhost:5173"
@@ -506,7 +566,6 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
             value={staticPath}
             onFocus={() => setPathPickerOpen(true)}
             onChange={(event) => {
-              pendingCreateRef.current = null;
               const path = event.target.value;
               setStaticPath(path);
               setStaticInspectionPath(path);
@@ -521,10 +580,10 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
               fileExtensions={[".html", ".htm"]}
               title="选择 HTML 网页文件或目录"
               onSelect={(path) => {
-                pendingCreateRef.current = null;
                 setStaticPath(path);
                 if (path.endsWith("/")) {
-                  inspectionGenerationRef.current += 1;
+                  inspectionAbortRef.current?.abort();
+                  inspectionAbortRef.current = null;
                   setStaticInspectionPath("");
                   setInspection(resetInspection());
                   setSelectedEntryPath("");
@@ -534,7 +593,6 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
                 setPathPickerOpen(false);
               }}
               onSelectCurrentDirectory={(path) => {
-                pendingCreateRef.current = null;
                 setStaticPath(path);
                 setStaticInspectionPath(path);
                 setPathPickerOpen(false);
@@ -546,7 +604,6 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
             selectedEntryPath={selectedEntryPath}
             disabled={submitting}
             onEntryPathChange={(entryPath) => {
-              pendingCreateRef.current = null;
               setSelectedEntryPath(entryPath);
             }}
           />
@@ -675,26 +732,6 @@ function CapabilityStatus({
             ) : null}
           </div>
           <RetryButton onClick={onRetry} disabled={disabled} />
-        </div>
-      </div>
-    );
-  }
-
-  if (!capability || !capability.supported) {
-    return (
-      <div
-        data-slot="web-preview-capability-status"
-        data-status="unsupported"
-        data-provider={provider}
-        className="rounded-md border border-destructive/45 bg-destructive/5 p-3"
-        role="alert"
-      >
-        <div className="flex items-start gap-2">
-          <AlertCircle className="mt-0.5 size-4 shrink-0 text-destructive" aria-hidden="true" />
-          <div>
-            <p className="text-sm font-medium">当前开发机版本不支持网页预览</p>
-            <p className="mt-1 text-xs text-muted-foreground">请升级 DEV Anywhere 后再试。</p>
-          </div>
         </div>
       </div>
     );
@@ -866,7 +903,7 @@ function StaticInspectionStatus({
     );
   }
 
-  const entryPath = inspection.result.entryPath ?? inspection.result.htmlEntries[0];
+  const entryPath = inspection.result.entryPath;
   return entryPath ? (
     <span
       data-slot="web-preview-static-inspection"

@@ -1,14 +1,25 @@
 import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
 import { serviceLogger } from "../../common/logger.js";
 import type { RelaySend } from "../relay-router-types.js";
-import { DevicePreviewManager } from "./device-preview-manager.js";
+import { DevicePreviewManager, DevicePreviewOperationError } from "./device-preview-manager.js";
+import {
+  PreviewOperationJournal,
+  PreviewOperationJournalError,
+} from "../preview/preview-operation-journal.js";
 
 interface RelayDevicePreviewHandlersOptions {
   relaySend: RelaySend;
   manager: DevicePreviewManager;
+  operationJournal: PreviewOperationJournal;
 }
 
 function requestError(error: unknown): { error: string; errorCode: ControlErrorCode } {
+  if (error instanceof PreviewOperationJournalError) {
+    return { error: error.message, errorCode: error.errorCode };
+  }
+  if (error instanceof DevicePreviewOperationError) {
+    return { error: error.message, errorCode: error.errorCode };
+  }
   return {
     error: error instanceof Error ? error.message : String(error),
     errorCode: ControlErrorCode.UNKNOWN,
@@ -20,11 +31,13 @@ export class RelayDevicePreviewHandlers {
 
   async onCapability(msg: ControlMessage<"device_preview_capability_request">): Promise<void> {
     try {
-      const capability = await this.options.manager.inspectCapabilities(msg.refreshPath ?? false);
+      const capability = await this.options.manager.inspectCapabilities(msg.refreshPath);
       this.options.relaySend(
         serializeControl({
           type: "device_preview_capability_response",
           requestId: msg.requestId,
+          scope: msg.scope,
+          success: true,
           capability,
         }),
       );
@@ -33,6 +46,8 @@ export class RelayDevicePreviewHandlers {
         serializeControl({
           type: "device_preview_capability_response",
           requestId: msg.requestId,
+          scope: msg.scope,
+          success: false,
           ...requestError(error),
         }),
       );
@@ -41,11 +56,12 @@ export class RelayDevicePreviewHandlers {
 
   async onTargets(msg: ControlMessage<"device_preview_targets_request">): Promise<void> {
     try {
-      const targets = await this.options.manager.discoverTargets(msg.refresh ?? false);
+      const targets = await this.options.manager.discoverTargets(msg.refresh);
       this.options.relaySend(
         serializeControl({
           type: "device_preview_targets_response",
           requestId: msg.requestId,
+          scope: msg.scope,
           success: true,
           targets,
         }),
@@ -55,8 +71,8 @@ export class RelayDevicePreviewHandlers {
         serializeControl({
           type: "device_preview_targets_response",
           requestId: msg.requestId,
+          scope: msg.scope,
           success: false,
-          targets: [],
           ...requestError(error),
         }),
       );
@@ -65,11 +81,17 @@ export class RelayDevicePreviewHandlers {
 
   async onCreate(msg: ControlMessage<"device_preview_create_request">): Promise<void> {
     try {
-      const preview = await this.options.manager.create(msg.operationId, msg.targetId);
+      const preview = await this.options.operationJournal.run(
+        msg.operationId,
+        "device:create",
+        { targetId: msg.targetId, name: msg.name ?? null },
+        () => this.options.manager.create(msg.targetId, msg.name),
+      );
       this.options.relaySend(
         serializeControl({
           type: "device_preview_create_response",
           requestId: msg.requestId,
+          scope: msg.scope,
           operationId: msg.operationId,
           accepted: true,
           previewId: preview.previewId,
@@ -80,6 +102,7 @@ export class RelayDevicePreviewHandlers {
         serializeControl({
           type: "device_preview_create_response",
           requestId: msg.requestId,
+          scope: msg.scope,
           operationId: msg.operationId,
           accepted: false,
           ...requestError(error),
@@ -93,18 +116,26 @@ export class RelayDevicePreviewHandlers {
       serializeControl({
         type: "device_preview_list_response",
         requestId: msg.requestId,
+        scope: msg.scope,
         ...this.options.manager.list(),
       }),
     );
   }
 
-  async onReconnect(msg: ControlMessage<"device_preview_reconnect_request">): Promise<void> {
+  async onRename(msg: ControlMessage<"device_preview_rename_request">): Promise<void> {
     try {
-      await this.options.manager.reconnect(msg.previewId);
+      await this.options.operationJournal.run(
+        msg.operationId,
+        "device:rename",
+        { previewId: msg.previewId, name: msg.name },
+        () => this.options.manager.rename(msg.previewId, msg.name),
+      );
       this.options.relaySend(
         serializeControl({
-          type: "device_preview_reconnect_response",
+          type: "device_preview_rename_response",
           requestId: msg.requestId,
+          scope: msg.scope,
+          operationId: msg.operationId,
           previewId: msg.previewId,
           success: true,
         }),
@@ -112,8 +143,10 @@ export class RelayDevicePreviewHandlers {
     } catch (error) {
       this.options.relaySend(
         serializeControl({
-          type: "device_preview_reconnect_response",
+          type: "device_preview_rename_response",
           requestId: msg.requestId,
+          scope: msg.scope,
+          operationId: msg.operationId,
           previewId: msg.previewId,
           success: false,
           ...requestError(error),
@@ -122,13 +155,53 @@ export class RelayDevicePreviewHandlers {
     }
   }
 
-  onClose(msg: ControlMessage<"device_preview_close_request">): void {
+  async onReconnect(msg: ControlMessage<"device_preview_reconnect_request">): Promise<void> {
     try {
-      this.options.manager.close(msg.previewId);
+      await this.options.operationJournal.run(
+        msg.operationId,
+        "device:reconnect",
+        { previewId: msg.previewId },
+        () => this.options.manager.reconnect(msg.previewId),
+      );
+      this.options.relaySend(
+        serializeControl({
+          type: "device_preview_reconnect_response",
+          requestId: msg.requestId,
+          scope: msg.scope,
+          operationId: msg.operationId,
+          previewId: msg.previewId,
+          success: true,
+        }),
+      );
+    } catch (error) {
+      this.options.relaySend(
+        serializeControl({
+          type: "device_preview_reconnect_response",
+          requestId: msg.requestId,
+          scope: msg.scope,
+          operationId: msg.operationId,
+          previewId: msg.previewId,
+          success: false,
+          ...requestError(error),
+        }),
+      );
+    }
+  }
+
+  async onClose(msg: ControlMessage<"device_preview_close_request">): Promise<void> {
+    try {
+      await this.options.operationJournal.run(
+        msg.operationId,
+        "device:close",
+        { previewId: msg.previewId },
+        () => this.options.manager.close(msg.previewId),
+      );
       this.options.relaySend(
         serializeControl({
           type: "device_preview_close_response",
           requestId: msg.requestId,
+          scope: msg.scope,
+          operationId: msg.operationId,
           previewId: msg.previewId,
           success: true,
         }),
@@ -138,6 +211,8 @@ export class RelayDevicePreviewHandlers {
         serializeControl({
           type: "device_preview_close_response",
           requestId: msg.requestId,
+          scope: msg.scope,
+          operationId: msg.operationId,
           previewId: msg.previewId,
           success: false,
           ...requestError(error),
@@ -188,6 +263,7 @@ export class RelayDevicePreviewHandlers {
       this.options.relaySend(
         serializeControl({
           type: "device_preview_input_ack",
+          scope: msg.scope,
           leaseId: msg.leaseId,
           inputSeq: msg.inputSeq,
           success: true,
@@ -197,6 +273,7 @@ export class RelayDevicePreviewHandlers {
       this.options.relaySend(
         serializeControl({
           type: "device_preview_input_ack",
+          scope: msg.scope,
           leaseId: msg.leaseId,
           inputSeq: msg.inputSeq,
           success: false,

@@ -1437,7 +1437,7 @@ export function usePtySelectionController(
         if (!managedCopyEventHandled) {
           const activeElement =
             document.activeElement instanceof HTMLElement ? document.activeElement : null;
-          void copyText(selected, { allowLegacyFallback: true }).finally(() => {
+          void copyText(selected, { allowUserGestureFallback: true }).finally(() => {
             if (
               activeElement?.isConnected &&
               (document.activeElement === document.body || document.activeElement === null)
@@ -1920,7 +1920,7 @@ export function usePtySelectionController(
     const selected = refreshCurrentSelection()?.text ?? "";
     if (!selected) return;
 
-    void copyText(selected, { allowLegacyFallback: true }).then((result) => {
+    void copyText(selected, { allowUserGestureFallback: true }).then((result) => {
       clearPtySelection();
       if (result === "failed") toast.error("复制失败");
       else toast.success("已复制");

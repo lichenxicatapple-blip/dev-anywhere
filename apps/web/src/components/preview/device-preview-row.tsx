@@ -1,6 +1,6 @@
 import { Loader2, MoreHorizontal, Smartphone } from "lucide-react";
 import { Link } from "react-router";
-import type { DevicePreviewSummary, PreviewState } from "@dev-anywhere/shared";
+import type { DevicePreviewState, DevicePreviewSummary } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
 import {
   DropdownMenu,
@@ -14,52 +14,55 @@ import { cn } from "@/lib/utils";
 interface DevicePreviewRowProps {
   preview: DevicePreviewSummary;
   selected: boolean;
+  pendingOperation?: "rename" | "reconnect" | "close";
+  onRename: () => void;
   onReconnect: () => void;
   onClose: () => void;
 }
 
 const STATE_STYLE: Record<
-  PreviewState,
+  DevicePreviewState,
   { dot: string; text: string; label: string; busy?: boolean }
 > = {
-  starting: {
-    dot: "bg-[var(--color-status-working)] animate-pulse",
-    text: "text-[var(--color-status-working)]",
-    label: "正在连接",
-    busy: true,
-  },
   ready: {
     dot: "bg-[var(--color-status-success)]",
     text: "text-[var(--color-status-success)]",
     label: "已连接",
-  },
-  failed: {
-    dot: "bg-[var(--color-status-error)]",
-    text: "text-[var(--color-status-error)]",
-    label: "连接失败",
   },
   disconnected: {
     dot: "bg-muted-foreground",
     text: "text-muted-foreground",
     label: "已断开",
   },
-  stopping: {
-    dot: "bg-muted-foreground animate-pulse",
-    text: "text-muted-foreground",
-    label: "正在停止",
-    busy: true,
-  },
 };
 
 export function DevicePreviewRow({
   preview,
   selected,
+  pendingOperation,
+  onRename,
   onReconnect,
   onClose,
 }: DevicePreviewRowProps) {
-  const style = STATE_STYLE[preview.state];
-  const canOpen = preview.state === "ready" || preview.state === "starting";
-  const canReconnect = preview.state === "failed" || preview.state === "disconnected";
+  const authoritativeStyle = STATE_STYLE[preview.state];
+  const style =
+    pendingOperation === "reconnect"
+      ? {
+          dot: "bg-[var(--color-status-working)] animate-pulse",
+          text: "text-[var(--color-status-working)]",
+          label: "正在重新连接",
+          busy: true,
+        }
+      : pendingOperation === "close"
+        ? {
+            dot: "bg-muted-foreground animate-pulse",
+            text: "text-muted-foreground",
+            label: "正在停止",
+            busy: true,
+          }
+        : authoritativeStyle;
+  const canOpen = preview.state === "ready";
+  const canReconnect = preview.state === "disconnected";
   const platformLabel = preview.platform === "ios" ? "iOS" : "Android";
   const contents = (
     <>
@@ -75,16 +78,16 @@ export function DevicePreviewRow({
       </span>
       <span className="flex h-5 min-w-0 items-center gap-1.5 text-xs leading-5">
         <Smartphone className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span className="min-w-0 flex-1 truncate text-muted-foreground">
-          {platformLabel} · {preview.targetName}
+        <span
+          className="min-w-0 flex-1 truncate text-muted-foreground"
+          data-slot="device-preview-row-device"
+          data-device-model={preview.model}
+          data-os-version={preview.osVersion}
+        >
+          {preview.model} · {platformLabel} {preview.osVersion}
         </span>
         <span className={cn("shrink-0", style.text)}>{style.label}</span>
       </span>
-      {preview.error && canReconnect ? (
-        <span className="truncate text-xs text-destructive/90" title={preview.error}>
-          {preview.error}
-        </span>
-      ) : null}
     </>
   );
 
@@ -97,6 +100,7 @@ export function DevicePreviewRow({
       data-slot="device-preview-row"
       data-preview-id={preview.previewId}
       data-preview-state={preview.state}
+      data-preview-operation={pendingOperation}
     >
       {canOpen ? (
         <Link
@@ -119,24 +123,31 @@ export function DevicePreviewRow({
             size="icon-xs"
             className="size-11 md:size-6"
             aria-label="模拟器预览操作"
-            disabled={preview.state === "stopping"}
+            disabled={pendingOperation !== undefined}
             data-slot="device-preview-row-menu-trigger"
           >
-            {style.busy ? (
+            {style.busy || pendingOperation === "rename" ? (
               <Loader2 className="animate-spin" aria-hidden="true" />
             ) : (
               <MoreHorizontal aria-hidden="true" />
             )}
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end">
+        <DropdownMenuContent align="end" data-slot="device-preview-row-menu">
+          <DropdownMenuItem data-slot="device-preview-row-rename-item" onSelect={onRename}>
+            重命名
+          </DropdownMenuItem>
           {canReconnect ? (
-            <>
-              <DropdownMenuItem onSelect={onReconnect}>重新连接</DropdownMenuItem>
-              <DropdownMenuSeparator />
-            </>
+            <DropdownMenuItem data-slot="device-preview-row-reconnect-item" onSelect={onReconnect}>
+              重新连接
+            </DropdownMenuItem>
           ) : null}
-          <DropdownMenuItem variant="destructive" onSelect={onClose}>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            variant="destructive"
+            data-slot="device-preview-row-close-item"
+            onSelect={onClose}
+          >
             停止预览
           </DropdownMenuItem>
         </DropdownMenuContent>

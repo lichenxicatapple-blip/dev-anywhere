@@ -8,15 +8,7 @@
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useMatch } from "react-router";
-import {
-  Bot,
-  ChevronRight,
-  Info,
-  Loader2,
-  MonitorSmartphone,
-  PlusCircle,
-  Terminal,
-} from "lucide-react";
+import { Bot, ChevronRight, Loader2, MonitorSmartphone, PlusCircle, Terminal } from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
@@ -45,8 +37,6 @@ import { toast } from "@/components/toast";
 import { resolveSessionRowState } from "@/lib/session-row-state";
 import { CreateFrontendPreviewDialog } from "@/components/preview/create-frontend-preview-dialog";
 import { PreviewList } from "@/components/preview/preview-list";
-
-const FRONTEND_PREVIEW_INFO = "网页可生成分享链接；模拟器需已在开发机上启动。";
 
 interface SessionListProps {
   layout: "page" | "sidebar";
@@ -538,31 +528,9 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
         >
           <MonitorSmartphone className="mt-0.5 size-4 text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5 font-medium">
-              前端预览
-              <Tooltip delayDuration={250}>
-                <TooltipTrigger asChild>
-                  <span
-                    data-slot="frontend-preview-info-trigger"
-                    className="inline-flex size-5 items-center justify-center rounded text-muted-foreground"
-                    aria-label="前端预览说明"
-                    onClick={(event) => event.stopPropagation()}
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    <Info className="size-3.5" aria-hidden="true" />
-                  </span>
-                </TooltipTrigger>
-                <TooltipContent
-                  side="right"
-                  className="max-w-[min(16rem,calc(100vw-1rem))] text-left text-wrap"
-                  data-slot="frontend-preview-info-tooltip"
-                >
-                  {FRONTEND_PREVIEW_INFO}
-                </TooltipContent>
-              </Tooltip>
-            </span>
+            <span className="flex items-center gap-1.5 font-medium">前端预览</span>
             <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
-              打开网页或设备模拟器
+              在浏览器中预览网页或设备模拟器
             </span>
           </span>
         </DropdownMenuItem>
@@ -658,7 +626,7 @@ function CreateSessionTypeSheet({
           <Button
             type="button"
             variant="ghost"
-            className="min-h-20 justify-start gap-3 rounded-md px-3 text-left"
+            className="min-h-16 justify-start gap-3 rounded-md px-3 text-left"
             data-slot="create-frontend-preview-sheet-item"
             onClick={() => chooseSessionType(onCreatePreview)}
           >
@@ -669,10 +637,7 @@ function CreateSessionTypeSheet({
             <span className="min-w-0">
               <span className="flex items-center gap-1.5 font-medium">前端预览</span>
               <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
-                打开网页或设备模拟器
-              </span>
-              <span className="mt-0.5 block text-xs leading-4 text-muted-foreground/80">
-                {FRONTEND_PREVIEW_INFO}
+                在浏览器中预览网页或设备模拟器
               </span>
             </span>
           </Button>

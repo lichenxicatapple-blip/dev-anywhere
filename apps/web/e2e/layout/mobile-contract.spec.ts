@@ -428,8 +428,8 @@ test.describe("mobile UX contract", () => {
     await expect(sheet).toBeFocused();
     await expectTouchTarget(sheet.locator('[data-slot="create-agent-session-sheet-item"]'));
     await expectTouchTarget(sheet.locator('[data-slot="create-terminal-session-sheet-item"]'));
-    const webPreviewItem = sheet.locator('[data-slot="create-web-preview-sheet-item"]');
-    await expectTouchTarget(webPreviewItem);
+    const frontendPreviewItem = sheet.locator('[data-slot="create-frontend-preview-sheet-item"]');
+    await expectTouchTarget(frontendPreviewItem);
     await expectTouchTarget(sheet.locator('[data-slot="sheet-close"]'));
     await sheet.locator('[data-slot="create-agent-session-sheet-item"]').click();
 
@@ -451,7 +451,7 @@ test.describe("mobile UX contract", () => {
       .not.toMatch(/^(INPUT|TEXTAREA):/);
 
     await expectTouchTarget(page.getByLabel("工作目录"));
-    await expectTouchTarget(page.getByLabel("Agent CLI").getByRole("button", { name: /Claude/ }));
+    await expectTouchTarget(page.getByRole("combobox", { name: "Agent CLI" }));
     await expectTouchTarget(page.getByLabel("交互方式").getByRole("button", { name: /终端模式/ }));
     const cliPathCard = page.locator('[data-slot="agent-cli-path-card"]');
     await expectTouchTarget(cliPathCard.getByRole("button", { name: "指定路径" }));
@@ -469,6 +469,46 @@ test.describe("mobile UX contract", () => {
     await page.getByLabel("工作目录").focus();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toBeVisible();
     await expectTouchTarget(page.locator('[data-slot="file-entry"]').first());
+  });
+
+  test("long device names stay inside the mobile preview sheet", async ({ page }) => {
+    await selectFakeProxy(page);
+    const createSheet = await openMobileCreateTypeSheet(page);
+    await createSheet.locator('[data-slot="create-frontend-preview-sheet-item"]').click();
+
+    const typeSheet = page.locator('[data-slot="create-frontend-preview-dialog"]');
+    await expect(typeSheet).toBeVisible();
+    await typeSheet.locator('[data-slot="frontend-preview-ios"]').click();
+
+    const deviceSheet = page.locator('[data-slot="create-device-preview-dialog"]');
+    const targets = deviceSheet.locator('[data-slot="device-preview-target"]');
+    await expect(targets).toHaveCount(2);
+    await expectMobileInsetSurface(page, deviceSheet);
+
+    const layout = await deviceSheet.evaluate((surface) => {
+      const surfaceRect = surface.getBoundingClientRect();
+      const targetRects = Array.from(
+        surface.querySelectorAll<HTMLElement>('[data-slot="device-preview-target"]'),
+        (target) => {
+          const rect = target.getBoundingClientRect();
+          return { left: rect.left, right: rect.right };
+        },
+      );
+      return {
+        clientWidth: surface.clientWidth,
+        scrollWidth: surface.scrollWidth,
+        surfaceLeft: surfaceRect.left,
+        surfaceRight: surfaceRect.right,
+        targetRects,
+      };
+    });
+
+    expect(layout.scrollWidth).toBeLessThanOrEqual(layout.clientWidth + 1);
+    for (const targetRect of layout.targetRects) {
+      expect(targetRect.left).toBeGreaterThanOrEqual(layout.surfaceLeft);
+      expect(targetRect.right).toBeLessThanOrEqual(layout.surfaceRight);
+    }
+    await expectNoHorizontalDocumentOverflow(page);
   });
 
   test("mobile create type sheet can start a pure terminal session", async ({ page }) => {
@@ -1079,35 +1119,27 @@ test.describe("mobile UX contract", () => {
   });
 });
 
-test.describe("desktop web preview menu", () => {
+test.describe("desktop frontend preview menu", () => {
   test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
 
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
   });
 
-  test("info tooltip wraps to its content width without leaving the viewport", async ({ page }) => {
+  test("frontend preview item stays inside the menu without an info tooltip", async ({ page }) => {
     await selectFakeProxy(page);
     await page.locator('[data-slot="create-session-trigger"]:visible').click();
-    await page.locator('[data-slot="web-preview-info-trigger"]').hover();
+    const menu = page.locator('[data-slot="create-session-type-menu"]');
+    const item = menu.locator('[data-slot="create-frontend-preview-item"]');
+    await expect(item).toBeVisible();
+    await expect(page.locator('[data-slot="web-preview-info-trigger"]')).toHaveCount(0);
+    await expect(page.locator('[data-slot="web-preview-info-tooltip"]')).toHaveCount(0);
 
-    const tooltip = page.locator('[data-slot="web-preview-info-tooltip"]');
-    await expect(tooltip).toBeVisible();
-
-    const metrics = await tooltip.evaluate((node) => {
-      const rect = node.getBoundingClientRect();
-      return {
-        textWrap: getComputedStyle(node).getPropertyValue("text-wrap"),
-        width: rect.width,
-        left: rect.left,
-        right: rect.right,
-        viewportWidth: window.innerWidth,
-      };
-    });
-    expect(metrics.textWrap).toBe("wrap");
-    expect(metrics.width).toBeLessThanOrEqual(256.5);
-    expect(metrics.left).toBeGreaterThanOrEqual(0);
-    expect(metrics.right).toBeLessThanOrEqual(metrics.viewportWidth);
+    const [menuBox, itemBox] = await Promise.all([menu.boundingBox(), item.boundingBox()]);
+    expect(menuBox).not.toBeNull();
+    expect(itemBox).not.toBeNull();
+    expect(itemBox!.x).toBeGreaterThanOrEqual(menuBox!.x);
+    expect(itemBox!.x + itemBox!.width).toBeLessThanOrEqual(menuBox!.x + menuBox!.width + 0.5);
   });
 });
 

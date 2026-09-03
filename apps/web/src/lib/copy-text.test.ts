@@ -63,8 +63,8 @@ describe("copyText", () => {
     document.execCommand = execCommand;
 
     await expect(
-      copyText("http://192.168.1.2:5174/#/", { allowLegacyFallback: true }),
-    ).resolves.toBe("legacy");
+      copyText("http://192.168.1.2:5174/#/", { allowUserGestureFallback: true }),
+    ).resolves.toBe("user-gesture");
     expect(execCommand).toHaveBeenCalledWith("copy");
     expect(document.querySelector('textarea[aria-hidden="true"]')).toBeNull();
   });
@@ -82,7 +82,9 @@ describe("copyText", () => {
     const execCommand = vi.fn(() => true);
     document.execCommand = execCommand;
 
-    await expect(copyText("blocked", { allowLegacyFallback: true })).resolves.toBe("legacy");
+    await expect(copyText("blocked", { allowUserGestureFallback: true })).resolves.toBe(
+      "user-gesture",
+    );
     expect(writeText).toHaveBeenCalledWith("blocked");
     expect(execCommand).toHaveBeenCalledWith("copy");
   });

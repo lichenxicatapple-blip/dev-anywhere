@@ -7,8 +7,6 @@ import { ControlErrorCode, type ProxyInfo } from "@dev-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
-import { usePreviewStore } from "@/stores/preview-store";
-import { useDevicePreviewStore } from "@/stores/device-preview-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { Popover, PopoverTrigger, PopoverContent } from "@/components/ui/popover";
@@ -23,8 +21,7 @@ import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
 import { STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { loadSessionHistory } from "@/services/session-history-loader";
-import { syncWebPreviewSnapshot } from "@/services/preview-snapshot-loader";
-import { syncDevicePreviewSnapshot } from "@/services/device-preview-snapshot-loader";
+import { previewController } from "@/services/preview-controller";
 import {
   applyExplicitProxyRemovalState,
   clearPendingProxyRemoval,
@@ -68,11 +65,24 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
         toast.error(`无法连接 ${displayName}：${result.error ?? "未知错误"}`);
         return;
       }
+      const scope = relay.getPreviewScope();
+      if (!scope || scope.proxyId !== proxyId || scope.bindingId !== result.bindingId) {
+        previewController.dispose();
+        relay.clearBoundProxy();
+        throw new Error("开发机绑定状态无效，请重试");
+      }
+      previewController.activate(relay, scope);
+      void previewController.syncWebSnapshot(scope).catch((error: unknown) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        console.error("[proxy-switcher] web preview snapshot failed", error);
+      });
+      void previewController.syncDeviceSnapshot(scope).catch((error: unknown) => {
+        if (error instanceof Error && error.name === "AbortError") return;
+        console.error("[proxy-switcher] device preview snapshot failed", error);
+      });
       if (isChangingProxy) {
         useSessionStore.getState().prepareForProxySwitch(displayName);
         useFileStore.getState().prepareForProxySwitch();
-        usePreviewStore.getState().prepareForProxySwitch();
-        useDevicePreviewStore.getState().prepareForProxySwitch();
       }
       writeStorageValue("local", STORAGE_KEYS.proxyId, proxyId);
       useAppStore.getState().setProxy(proxyId, proxyName ?? null);
@@ -83,26 +93,36 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
       void relay
         .requestProxyInfo()
         .then((info) => {
-          if (useAppStore.getState().selectedProxyId !== proxyId) return;
+          if (
+            useAppStore.getState().selectedProxyId !== proxyId ||
+            !previewController.isActive(relay, scope)
+          ) {
+            return;
+          }
           const fileStore = useFileStore.getState();
           fileStore.setHomePath(info.homePath);
           fileStore.setAgentCli(info.agentCli);
-          syncWebPreviewSnapshot(relay, proxyId, info.webPreview, "proxy-switcher");
-          syncDevicePreviewSnapshot(relay, proxyId, info.devicePreview, "proxy-switcher");
         })
         .catch((err: unknown) => {
+          if (!previewController.isActive(relay, scope)) return;
           console.error("[proxy-switcher] post-bind proxy info fetch failed", err);
         });
       void relay
         .requestAgentStatuses()
         .then((statuses) => {
-          if (useAppStore.getState().selectedProxyId !== proxyId) return;
+          if (
+            useAppStore.getState().selectedProxyId !== proxyId ||
+            !previewController.isActive(relay, scope)
+          ) {
+            return;
+          }
           const store = useSessionStore.getState();
           for (const status of statuses) {
             store.setAgentStatus(status.sessionId, status.payload);
           }
         })
         .catch((err: unknown) => {
+          if (!previewController.isActive(relay, scope)) return;
           console.error("[proxy-switcher] post-bind data fetch failed", err);
         });
       void loadSessionHistory(relay).then((result) => {

@@ -5,7 +5,6 @@ import type WebSocket from "ws";
 import { describe, expect, it, vi } from "vitest";
 import {
   IosSimulatorAdapter,
-  JpegStreamFramer,
   isSupportedBaguetteVersion,
   parseBaguetteChromeLayout,
   parseBaguetteVersion,
@@ -29,6 +28,9 @@ interface MockChild {
 class MockWebSocket extends EventEmitter {
   readyState = 0;
   readonly sent: string[] = [];
+  readonly ping = vi.fn((_callback?: (error?: Error) => void) => {
+    queueMicrotask(() => _callback?.());
+  });
   readonly terminate = vi.fn(() => {
     if (this.readyState === 3) return;
     this.readyState = 3;
@@ -51,6 +53,10 @@ class MockWebSocket extends EventEmitter {
 
   receiveJson(payload: unknown): void {
     this.emit("message", Buffer.from(JSON.stringify(payload)), false);
+  }
+
+  receivePong(): void {
+    this.emit("pong", Buffer.alloc(0));
   }
 }
 
@@ -78,18 +84,21 @@ function simctlOutput(): string {
         {
           udid: BOOTED_UDID.toLowerCase(),
           name: "iPhone 17 Pro",
+          deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
           state: "Booted",
           isAvailable: true,
         },
         {
           udid: SHUTDOWN_UDID,
           name: "iPhone Air",
+          deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-Air",
           state: "Shutdown",
           isAvailable: true,
         },
         {
           udid: "--help",
           name: "Injected",
+          deviceTypeIdentifier: "com.apple.CoreSimulator.SimDeviceType.iPhone-17-Pro",
           state: "Booted",
           isAvailable: true,
         },
@@ -130,6 +139,30 @@ function mockChild(): MockChild {
     kill,
   });
   return { child, stdin, stdout, stderr, kill };
+}
+
+function spawnWithInputProcess(serveProcess: MockChild, inputProcess: MockChild): SpawnRunner {
+  return vi.fn((_command, args) => (args[0] === "input" ? inputProcess.child : serveProcess.child));
+}
+
+function acknowledgeInputProcess(
+  inputProcess: MockChild,
+  acknowledge = true,
+): Array<Record<string, unknown>> {
+  const envelopes: Array<Record<string, unknown>> = [];
+  let buffered = "";
+  inputProcess.stdin.setEncoding("utf8");
+  inputProcess.stdin.on("data", (chunk: string) => {
+    buffered += chunk;
+    const lines = buffered.split("\n");
+    buffered = lines.pop()!;
+    for (const line of lines) {
+      if (!line) continue;
+      envelopes.push(JSON.parse(line) as Record<string, unknown>);
+      if (acknowledge) queueMicrotask(() => inputProcess.stdout.write('{"ok":true}\n'));
+    }
+  });
+  return envelopes;
 }
 
 function discoveryExecFile(
@@ -289,6 +322,7 @@ describe("IosSimulatorAdapter capability and discovery", () => {
         platform: "ios",
         udid: BOOTED_UDID,
         name: "iPhone 17 Pro",
+        model: "iPhone 17 Pro",
         runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
         rawState: "Booted",
         state: "booted",
@@ -301,6 +335,7 @@ describe("IosSimulatorAdapter capability and discovery", () => {
         platform: "ios",
         udid: SHUTDOWN_UDID,
         name: "iPhone Air",
+        model: "iPhone Air",
         runtimeIdentifier: "com.apple.CoreSimulator.SimRuntime.iOS-26-5",
         rawState: "Shutdown",
         state: "shutdown",
@@ -373,14 +408,14 @@ describe("IosSimulatorAdapter capability and discovery", () => {
   it("loads logical input dimensions from baguette chrome layout instead of framebuffer pixels", async () => {
     const execFile = discoveryExecFile();
     const adapter = adapterWith(execFile);
-    await adapter.discoverDevices();
+    const devices = await adapter.discoverDevices();
 
     await expect(adapter.refreshTargetMetadata(BOOTED_UDID)).resolves.toEqual({
       udid: BOOTED_UDID,
       logicalPointSize: { width: 402, height: 874 },
       orientation: "portrait",
     });
-    expect(adapter.listDiscoveredDevices()[0]).toMatchObject({
+    expect(devices[0]).toMatchObject({
       logicalPointSize: { width: 402, height: 874 },
       orientation: "portrait",
     });
@@ -390,47 +425,21 @@ describe("IosSimulatorAdapter capability and discovery", () => {
     const execFile = discoveryExecFile(undefined, "{}");
     const spawn = vi.fn() as unknown as SpawnRunner;
     const adapter = adapterWith(execFile, spawn);
-    await adapter.discoverDevices();
+    const devices = await adapter.discoverDevices();
 
     await expect(adapter.refreshTargetMetadata(BOOTED_UDID)).rejects.toMatchObject({
       code: "INVALID_TARGET_METADATA",
     });
-    expect(adapter.listDiscoveredDevices()[0]?.logicalPointSize).toBeUndefined();
+    expect(devices[0]?.logicalPointSize).toBeUndefined();
     expect(spawn).not.toHaveBeenCalled();
   });
 });
 
-describe("JpegStreamFramer", () => {
-  it("finds multiple JPEGs across arbitrary chunk and multipart boundaries", () => {
-    const framer = new JpegStreamFramer();
-
-    expect(framer.push(Buffer.from([0x2d, 0x2d, 0xff]))).toEqual([]);
-    expect(framer.push(Buffer.from([0xd8, 0x01, 0xff]))).toEqual([]);
-    expect(
-      framer.push(Buffer.from([0xd9, 0x0d, 0x0a, 0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9])),
-    ).toEqual([
-      Buffer.from([0xff, 0xd8, 0x01, 0xff, 0xd9]),
-      Buffer.from([0xff, 0xd8, 0x02, 0x03, 0xff, 0xd9]),
-    ]);
-  });
-
-  it("fails closed when an unterminated JPEG exceeds its configured bound", () => {
-    const framer = new JpegStreamFramer(5);
-    expect(() => framer.push(Buffer.from([0xff, 0xd8, 1, 2, 3, 4]))).toThrowError(
-      expect.objectContaining({ code: "STREAM_FAILED" }),
-    );
-  });
-
-  it("resynchronizes at a new SOI after a truncated frame", () => {
-    const framer = new JpegStreamFramer();
-    expect(framer.push(Buffer.from([0xff, 0xd8, 0x01, 0x02]))).toEqual([]);
-    expect(framer.push(Buffer.from([0xff, 0xd8, 0x03, 0xff, 0xd9]))).toEqual([
-      Buffer.from([0xff, 0xd8, 0x03, 0xff, 0xd9]),
-    ]);
-  });
-});
-
 describe("IosSimulatorAdapter MJPEG streaming", () => {
+  function jpeg(marker: number): Buffer {
+    return Buffer.from([0xff, 0xd8, marker, 0xff, 0xd9]);
+  }
+
   it("runs a private loopback Baguette server, reads raw JPEG messages, and aborts cleanly", async () => {
     const process = mockChild();
     const harness = mockSocketHarness();
@@ -473,6 +482,146 @@ describe("IosSimulatorAdapter MJPEG streaming", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(process.kill).toHaveBeenCalledWith("SIGTERM");
     expect(harness.socket.terminate).toHaveBeenCalledOnce();
+  });
+
+  it("keeps a static MJPEG stream alive while every heartbeat receives a pong", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = mockChild();
+      const harness = mockSocketHarness();
+      const adapter = adapterWith(
+        discoveryExecFile(),
+        vi.fn(() => process.child),
+        { createWebSocket: harness.createWebSocket },
+      );
+      await adapter.discoverDevices();
+      const abort = new AbortController();
+      const iterator = adapter.streamMjpeg({ udid: BOOTED_UDID, signal: abort.signal });
+      const first = iterator.next();
+      await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(1));
+      harness.socket.receiveBinary(jpeg(1));
+      await expect(first).resolves.toEqual({ done: false, value: jpeg(1) });
+
+      let pendingSettled = false;
+      const pending = iterator.next().finally(() => {
+        pendingSettled = true;
+      });
+      for (let heartbeat = 1; heartbeat <= 8; heartbeat += 1) {
+        await vi.advanceTimersByTimeAsync(15_000);
+        expect(harness.socket.ping).toHaveBeenCalledTimes(heartbeat);
+        harness.socket.receivePong();
+      }
+
+      expect(pendingSettled).toBe(false);
+      expect(process.kill).not.toHaveBeenCalled();
+      expect(harness.socket.terminate).not.toHaveBeenCalled();
+
+      abort.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails only the current MJPEG session when its heartbeat pong deadline expires", async () => {
+    vi.useFakeTimers();
+    try {
+      const process = mockChild();
+      const harness = mockSocketHarness();
+      const adapter = adapterWith(
+        discoveryExecFile(),
+        vi.fn(() => process.child),
+        { createWebSocket: harness.createWebSocket },
+      );
+      await adapter.discoverDevices();
+      const iterator = adapter.streamMjpeg({ udid: BOOTED_UDID });
+      const first = iterator.next();
+      await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(1));
+      harness.socket.receiveBinary(jpeg(1));
+      await expect(first).resolves.toEqual({ done: false, value: jpeg(1) });
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(harness.socket.ping).toHaveBeenCalledOnce();
+
+      const frameDuringPongDeadline = iterator.next();
+      await vi.advanceTimersByTimeAsync(5_000);
+      harness.socket.receiveBinary(jpeg(2));
+      await expect(frameDuringPongDeadline).resolves.toEqual({ done: false, value: jpeg(2) });
+      expect(process.kill).not.toHaveBeenCalled();
+
+      const failure = expect(iterator.next()).rejects.toMatchObject({ code: "STREAM_FAILED" });
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      await failure;
+      expect(process.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(harness.socket.terminate).toHaveBeenCalledOnce();
+      expect(harness.socket.listenerCount("pong")).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fully detaches an old heartbeat before a replacement MJPEG session starts", async () => {
+    vi.useFakeTimers();
+    try {
+      const firstProcess = mockChild();
+      const secondProcess = mockChild();
+      const firstSocket = new MockWebSocket();
+      const secondSocket = new MockWebSocket();
+      const spawn: SpawnRunner = vi
+        .fn<SpawnRunner>()
+        .mockImplementationOnce(() => firstProcess.child)
+        .mockImplementationOnce(() => secondProcess.child);
+      const createWebSocket: BaguetteWebSocketFactory = vi
+        .fn<BaguetteWebSocketFactory>()
+        .mockImplementationOnce(() => {
+          queueMicrotask(() => firstSocket.open());
+          return firstSocket as unknown as WebSocket;
+        })
+        .mockImplementationOnce(() => {
+          queueMicrotask(() => secondSocket.open());
+          return secondSocket as unknown as WebSocket;
+        });
+      const adapter = adapterWith(discoveryExecFile(), spawn, { createWebSocket });
+      await adapter.discoverDevices();
+
+      const firstAbort = new AbortController();
+      const firstPending = adapter
+        .streamMjpeg({ udid: BOOTED_UDID, signal: firstAbort.signal })
+        .next();
+      await vi.waitFor(() => expect(firstSocket.sent).toHaveLength(1));
+      firstAbort.abort();
+      await expect(firstPending).rejects.toMatchObject({ name: "AbortError" });
+      expect(firstSocket.listenerCount("pong")).toBe(0);
+
+      const secondAbort = new AbortController();
+      const secondIterator = adapter.streamMjpeg({
+        udid: BOOTED_UDID,
+        signal: secondAbort.signal,
+      });
+      const secondFirst = secondIterator.next();
+      await vi.waitFor(() => expect(secondSocket.sent).toHaveLength(1));
+      secondSocket.receiveBinary(jpeg(2));
+      await expect(secondFirst).resolves.toEqual({ done: false, value: jpeg(2) });
+      const secondPending = secondIterator.next();
+
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(firstSocket.ping).not.toHaveBeenCalled();
+      expect(secondSocket.ping).toHaveBeenCalledOnce();
+      firstSocket.receivePong();
+      secondSocket.receivePong();
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(firstSocket.ping).not.toHaveBeenCalled();
+      expect(secondSocket.ping).toHaveBeenCalledTimes(2);
+      secondSocket.receivePong();
+
+      expect(secondProcess.kill).not.toHaveBeenCalled();
+      secondAbort.abort();
+      await expect(secondPending).rejects.toMatchObject({ name: "AbortError" });
+      expect(secondSocket.listenerCount("pong")).toBe(0);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("fails closed on a non-JPEG WebSocket frame and reaps the private server", async () => {
@@ -551,6 +700,143 @@ describe("IosSimulatorAdapter MJPEG streaming", () => {
     await expect(pending).rejects.toMatchObject({ name: "AbortError" });
     expect(process.kill).toHaveBeenCalledWith("SIGTERM");
   });
+
+  it("delivers the first frame immediately and only the latest frame from a burst", async () => {
+    const process = mockChild();
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      vi.fn(() => process.child),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const abort = new AbortController();
+    const iterator = adapter.streamMjpeg({ udid: BOOTED_UDID, signal: abort.signal });
+    const first = iterator.next();
+    await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(1));
+
+    vi.useFakeTimers();
+    try {
+      harness.socket.receiveBinary(jpeg(1));
+      await expect(first).resolves.toEqual({ done: false, value: jpeg(1) });
+
+      let secondSettled = false;
+      const second = iterator.next().then((result) => {
+        secondSettled = true;
+        return result;
+      });
+      harness.socket.receiveBinary(jpeg(2));
+      harness.socket.receiveBinary(jpeg(3));
+      harness.socket.receiveBinary(jpeg(4));
+      await vi.advanceTimersByTimeAsync(60);
+      expect(secondSettled).toBe(false);
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(second).resolves.toEqual({ done: false, value: jpeg(4) });
+
+      const pending = iterator.next();
+      abort.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not catch up or burst after a slow consumer resumes", async () => {
+    const process = mockChild();
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      vi.fn(() => process.child),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const abort = new AbortController();
+    const iterator = adapter.streamMjpeg({ udid: BOOTED_UDID, signal: abort.signal });
+    const first = iterator.next();
+    await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(1));
+
+    vi.useFakeTimers();
+    try {
+      harness.socket.receiveBinary(jpeg(1));
+      await expect(first).resolves.toEqual({ done: false, value: jpeg(1) });
+
+      harness.socket.receiveBinary(jpeg(2));
+      harness.socket.receiveBinary(jpeg(3));
+      await vi.advanceTimersByTimeAsync(1_000);
+      await expect(iterator.next()).resolves.toEqual({ done: false, value: jpeg(3) });
+
+      let nextSettled = false;
+      const next = iterator.next().then((result) => {
+        nextSettled = true;
+        return result;
+      });
+      harness.socket.receiveBinary(jpeg(4));
+      await vi.advanceTimersByTimeAsync(60);
+      expect(nextSettled).toBe(false);
+      harness.socket.receiveBinary(jpeg(5));
+      await vi.advanceTimersByTimeAsync(10);
+      await expect(next).resolves.toEqual({ done: false, value: jpeg(5) });
+
+      const pending = iterator.next();
+      abort.abort();
+      await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it.each(["socket", "process"] as const)(
+    "rejects a pending sampled frame and clears buffered work on %s failure",
+    async (failureSource) => {
+      const process = mockChild();
+      const harness = mockSocketHarness();
+      const adapter = adapterWith(
+        discoveryExecFile(),
+        vi.fn(() => process.child),
+        { createWebSocket: harness.createWebSocket },
+      );
+      await adapter.discoverDevices();
+      const iterator = adapter.streamMjpeg({ udid: BOOTED_UDID });
+      const first = iterator.next();
+      await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(1));
+      harness.socket.receiveBinary(jpeg(1));
+      await expect(first).resolves.toMatchObject({ done: false });
+
+      const pending = iterator.next();
+      harness.socket.receiveBinary(jpeg(2));
+      if (failureSource === "socket") {
+        harness.socket.emit("error", new Error("socket failed"));
+      } else {
+        process.child.emit("error", Object.assign(new Error("process failed"), { code: "EIO" }));
+      }
+
+      await expect(pending).rejects.toMatchObject({ code: "STREAM_FAILED" });
+      expect(process.kill).toHaveBeenCalledWith("SIGTERM");
+      expect(harness.socket.terminate).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("closes a consumer-ended stream normally without draining a buffered frame", async () => {
+    const process = mockChild();
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      vi.fn(() => process.child),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const iterator = adapter.streamMjpeg({ udid: BOOTED_UDID });
+    const first = iterator.next();
+    await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(1));
+    harness.socket.receiveBinary(jpeg(1));
+    await expect(first).resolves.toEqual({ done: false, value: jpeg(1) });
+    harness.socket.receiveBinary(jpeg(2));
+
+    await expect(iterator.return(undefined)).resolves.toEqual({ done: true, value: undefined });
+    expect(process.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(harness.socket.terminate).toHaveBeenCalledOnce();
+    harness.socket.receiveBinary(jpeg(3));
+  });
 });
 
 describe("IosSimulatorAdapter input", () => {
@@ -575,7 +861,7 @@ describe("IosSimulatorAdapter input", () => {
     await expect(pendingFrame).rejects.toMatchObject({ name: "AbortError" });
   }
 
-  it("serializes gestures on the stream socket and waits only for paste_result", async () => {
+  it("serializes toolbar input on the stream socket and waits only for paste_result", async () => {
     const process = mockChild();
     const harness = mockSocketHarness();
     const spawn: SpawnRunner = vi.fn(() => process.child);
@@ -585,47 +871,16 @@ describe("IosSimulatorAdapter input", () => {
     await adapter.discoverDevices();
     const preview = await startPreview(adapter, harness);
 
-    const tap = adapter.sendInput(BOOTED_UDID, {
-      type: "tap",
-      x: 0.25,
-      y: 0.5,
-      durationMs: 80,
-    });
-    const swipe = adapter.sendInput(BOOTED_UDID, {
-      type: "swipe",
-      startX: 0,
-      startY: 1,
-      endX: 1,
-      endY: 0.25,
-      durationMs: 450,
-    });
+    const home = adapter.sendInput(BOOTED_UDID, { type: "home" });
     const text = adapter.sendInput(BOOTED_UDID, {
       type: "text",
       text: '你好 👋\n"quoted"',
     });
 
-    await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(4));
-    expect(JSON.parse(harness.socket.sent[1]!)).toEqual({
-      type: "tap",
-      x: 100.5,
-      y: 437,
-      width: 402,
-      height: 874,
-      duration: 0.08,
-    });
-    await expect(tap).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(3));
+    expect(JSON.parse(harness.socket.sent[1]!)).toEqual({ type: "button", button: "home" });
+    await expect(home).resolves.toBeUndefined();
     expect(JSON.parse(harness.socket.sent[2]!)).toEqual({
-      type: "swipe",
-      startX: 0,
-      startY: 874,
-      endX: 402,
-      endY: 218.5,
-      width: 402,
-      height: 874,
-      duration: 0.45,
-    });
-    await expect(swipe).resolves.toBeUndefined();
-    expect(JSON.parse(harness.socket.sent[3]!)).toEqual({
       type: "paste",
       text: '你好 👋\n"quoted"',
     });
@@ -636,7 +891,673 @@ describe("IosSimulatorAdapter input", () => {
     await stopPreview(preview.abort, preview.pendingFrame);
   });
 
-  it("serializes home, orientation, and later gestures while updating logical point orientation", async () => {
+  it("forwards phased touch input in device points", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess);
+    const harness = mockSocketHarness();
+    const spawn = spawnWithInputProcess(serveProcess, inputProcess);
+    const adapter = adapterWith(discoveryExecFile(), spawn, {
+      createWebSocket: harness.createWebSocket,
+    });
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "move",
+      x: 0.48,
+      y: 0.6,
+    });
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "up",
+      x: 0.48,
+      y: 0.58,
+    });
+    expect(inputEnvelopes).toEqual([
+      {
+        type: "touch1-down",
+        x: 201,
+        y: 874,
+        width: 402,
+        height: 874,
+      },
+      {
+        type: "touch1-move",
+        x: 192.96,
+        y: 524.4,
+        width: 402,
+        height: 874,
+      },
+      {
+        type: "touch1-up",
+        x: 192.96,
+        y: 506.92,
+        width: 402,
+        height: 874,
+      },
+    ]);
+    expect(harness.socket.sent).toHaveLength(1);
+    expect(spawn).toHaveBeenNthCalledWith(2, BAGUETTE, ["input", "--udid", BOOTED_UDID], {
+      env: { PATH: "/isolated", BAGUETTE_MARKER: "test" },
+      stdio: ["pipe", "pipe", "pipe"],
+      windowsHide: true,
+    });
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+    expect(inputProcess.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("rejects out-of-order and concurrent phases without corrupting the active touch", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "move",
+        x: 0.5,
+        y: 0.5,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "up",
+        x: 0.5,
+        y: 0.5,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.25,
+      y: 0.5,
+    });
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "down",
+        x: 0.75,
+        y: 0.5,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "move",
+      x: 0.3,
+      y: 0.55,
+    });
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "up",
+      x: 0.3,
+      y: 0.55,
+    });
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "up",
+        x: 0.3,
+        y: 0.55,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+
+    expect(inputEnvelopes.map((envelope) => envelope.type)).toEqual([
+      "touch1-down",
+      "touch1-move",
+      "touch1-up",
+    ]);
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("waits for each phased-touch ACK and keeps stream-socket input behind it", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    let downSettled = false;
+    const down = adapter
+      .sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "down",
+        x: 0.5,
+        y: 1,
+      })
+      .finally(() => {
+        downSettled = true;
+      });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    await Promise.resolve();
+    expect(downSettled).toBe(false);
+
+    const home = adapter.sendInput(BOOTED_UDID, { type: "home" });
+    await Promise.resolve();
+    expect(harness.socket.sent).toHaveLength(1);
+    inputProcess.stdout.write('{"ok":true}\n');
+    await expect(down).resolves.toBeUndefined();
+    await vi.waitFor(() => expect(harness.socket.sent).toHaveLength(2));
+    await expect(home).resolves.toBeUndefined();
+
+    let moveSettled = false;
+    const move = adapter
+      .sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "move",
+        x: 0.5,
+        y: 0.58,
+      })
+      .finally(() => {
+        moveSettled = true;
+      });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(2));
+    inputProcess.stdout.write('{"ok":');
+    await Promise.resolve();
+    expect(moveSettled).toBe(false);
+    inputProcess.stdout.write("true}\n");
+    await expect(move).resolves.toBeUndefined();
+
+    const up = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "up",
+      x: 0.5,
+      y: 0.58,
+    });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(3));
+    inputProcess.stdout.write('{"ok":true}\n');
+    await expect(up).resolves.toBeUndefined();
+    expect(JSON.parse(harness.socket.sent[1]!)).toEqual({ type: "button", button: "home" });
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("poisons an unacknowledged input helper without interrupting video and recreates it", async () => {
+    const serveProcess = mockChild();
+    const firstInputProcess = mockChild();
+    const secondInputProcess = mockChild();
+    const firstEnvelopes = acknowledgeInputProcess(firstInputProcess, false);
+    const secondEnvelopes = acknowledgeInputProcess(secondInputProcess);
+    let inputIndex = 0;
+    const spawn: SpawnRunner = vi.fn((_command, args) => {
+      if (args[0] !== "input") return serveProcess.child;
+      return [firstInputProcess, secondInputProcess][inputIndex++]!.child;
+    });
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(discoveryExecFile(), spawn, {
+      inputAckTimeoutMs: 20,
+      createWebSocket: harness.createWebSocket,
+    });
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const timedOut = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    const timeoutExpectation = expect(timedOut).rejects.toMatchObject({ code: "INPUT_TIMEOUT" });
+    await vi.waitFor(() => expect(firstEnvelopes).toHaveLength(1));
+    await timeoutExpectation;
+    expect(firstInputProcess.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(serveProcess.kill).not.toHaveBeenCalled();
+
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "down",
+        x: 0.5,
+        y: 1,
+      }),
+    ).resolves.toBeUndefined();
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "up",
+        x: 0.5,
+        y: 0.5,
+      }),
+    ).resolves.toBeUndefined();
+    expect(secondEnvelopes.map((envelope) => envelope.type)).toEqual(["touch1-down", "touch1-up"]);
+    expect(harness.socket.readyState).toBe(1);
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("terminates a phased-touch helper when its written request is aborted", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+    const abort = new AbortController();
+
+    const pending = adapter.sendInput(
+      BOOTED_UDID,
+      { type: "touch", phase: "down", x: 0.5, y: 1 },
+      { signal: abort.signal },
+    );
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    abort.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
+    expect(inputProcess.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(serveProcess.kill).not.toHaveBeenCalled();
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("treats an acknowledged touch as successful when abort arrives in the same turn", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+    const abort = new AbortController();
+
+    const down = adapter.sendInput(
+      BOOTED_UDID,
+      { type: "touch", phase: "down", x: 0.5, y: 1 },
+      { signal: abort.signal },
+    );
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    inputProcess.stdout.write('{"ok":true}\n');
+    abort.abort();
+    await expect(down).resolves.toBeUndefined();
+
+    const release = adapter.releaseTouch(BOOTED_UDID);
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(2));
+    inputProcess.stdout.write('{"ok":true}\n');
+    await expect(release).resolves.toBeUndefined();
+    expect(inputEnvelopes[1]?.type).toBe("touch1-up");
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("does not poison an active helper when a queued touch aborts before writing", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const spawn = spawnWithInputProcess(serveProcess, inputProcess);
+    const adapter = adapterWith(discoveryExecFile(), spawn, {
+      createWebSocket: harness.createWebSocket,
+    });
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const down = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    const abort = new AbortController();
+    const queuedMove = adapter.sendInput(
+      BOOTED_UDID,
+      { type: "touch", phase: "move", x: 0.5, y: 0.7 },
+      { signal: abort.signal },
+    );
+    abort.abort();
+    inputProcess.stdout.write('{"ok":true}\n');
+    await expect(down).resolves.toBeUndefined();
+    await expect(queuedMove).rejects.toMatchObject({ name: "AbortError" });
+    expect(inputEnvelopes).toHaveLength(1);
+    expect(inputProcess.kill).not.toHaveBeenCalled();
+
+    const up = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "up",
+      x: 0.5,
+      y: 0.7,
+    });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(2));
+    inputProcess.stdout.write('{"ok":true}\n');
+    await expect(up).resolves.toBeUndefined();
+    expect(spawn).toHaveBeenCalledTimes(2);
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("clears an owned touch when its acknowledged helper closes", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const spawn = spawnWithInputProcess(serveProcess, inputProcess);
+    const adapter = adapterWith(discoveryExecFile(), spawn, {
+      createWebSocket: harness.createWebSocket,
+    });
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const down = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    inputProcess.stdout.write('{"ok":true}\n');
+    await expect(down).resolves.toBeUndefined();
+    inputProcess.child.emit("close", 0, null);
+
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "move",
+        x: 0.5,
+        y: 0.6,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    expect(spawn).toHaveBeenCalledTimes(2);
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("does not commit a down when its helper ends immediately after the ACK", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const spawn = spawnWithInputProcess(serveProcess, inputProcess);
+    const adapter = adapterWith(discoveryExecFile(), spawn, {
+      createWebSocket: harness.createWebSocket,
+    });
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const down = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    inputProcess.stdout.end('{"ok":true}\n');
+    await down.catch(() => undefined);
+    await vi.waitFor(() => expect(inputProcess.kill).toHaveBeenCalledWith("SIGTERM"));
+
+    await expect(
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "move",
+        x: 0.5,
+        y: 0.6,
+      }),
+    ).rejects.toMatchObject({ code: "INVALID_INPUT" });
+    expect(spawn).toHaveBeenCalledTimes(2);
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it.each([
+    ["malformed JSON", Buffer.from("{]\n"), "INPUT_PROTOCOL_ERROR"],
+    ["invalid ok field", Buffer.from('{"ok":"yes"}\n'), "INPUT_PROTOCOL_ERROR"],
+    ["negative ACK", Buffer.from('{"ok":false,"error":"denied"}\n'), "INPUT_FAILED"],
+    [
+      "invalid UTF-8",
+      Buffer.concat([
+        Buffer.from('{"ok":true,"extra":"'),
+        Buffer.from([0xff]),
+        Buffer.from('"}\n'),
+      ]),
+      "INPUT_PROTOCOL_ERROR",
+    ],
+    ["unsolicited second ACK", Buffer.from('{"ok":true}\n{"ok":true}\n'), "INPUT_PROTOCOL_ERROR"],
+    ["oversized response", Buffer.alloc(64 * 1024 + 1, 0x61), "INPUT_PROTOCOL_ERROR"],
+  ])("poisons only the input helper for %s", async (_name, response, code) => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const down = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    const expectation = expect(down).rejects.toMatchObject({ code });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    inputProcess.stdout.write(response);
+    await expectation;
+    expect(inputProcess.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(serveProcess.kill).not.toHaveBeenCalled();
+    expect(harness.socket.readyState).toBe(1);
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("handles a stdout pipe error without an unhandled process error", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const down = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    const expectation = expect(down).rejects.toMatchObject({ code: "INPUT_FAILED" });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    inputProcess.stdout.emit("error", new Error("broken pipe"));
+    await expectation;
+    expect(inputProcess.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(serveProcess.kill).not.toHaveBeenCalled();
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("rejects a pending touch and reaps both helpers when disposed", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess, false);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const down = adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    const downExpectation = expect(down).rejects.toMatchObject({ code: "INPUT_FAILED" });
+    await vi.waitFor(() => expect(inputEnvelopes).toHaveLength(1));
+    adapter.dispose();
+
+    await downExpectation;
+    await expect(preview.pendingFrame).rejects.toMatchObject({ name: "AbortError" });
+    expect(inputProcess.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(serveProcess.kill).toHaveBeenCalledWith("SIGTERM");
+  });
+
+  it("releases an interrupted touch at its last point", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "down",
+      x: 0.5,
+      y: 1,
+    });
+    await adapter.sendInput(BOOTED_UDID, {
+      type: "touch",
+      phase: "move",
+      x: 0.48,
+      y: 0.6,
+    });
+    await adapter.releaseTouch(BOOTED_UDID);
+    await adapter.releaseTouch(BOOTED_UDID);
+
+    expect(inputEnvelopes).toEqual([
+      {
+        type: "touch1-down",
+        x: 201,
+        y: 874,
+        width: 402,
+        height: 874,
+      },
+      {
+        type: "touch1-move",
+        x: 192.96,
+        y: 524.4,
+        width: 402,
+        height: 874,
+      },
+      {
+        type: "touch1-up",
+        x: 192.96,
+        y: 524.4,
+        width: 402,
+        height: 874,
+      },
+    ]);
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("maps visual touch coordinates for every simulator orientation", async () => {
+    const serveProcess = mockChild();
+    const inputProcess = mockChild();
+    const inputEnvelopes = acknowledgeInputProcess(inputProcess);
+    const harness = mockSocketHarness();
+    const adapter = adapterWith(
+      discoveryExecFile(async () => ({ stdout: "", stderr: "" })),
+      spawnWithInputProcess(serveProcess, inputProcess),
+      { createWebSocket: harness.createWebSocket },
+    );
+    await adapter.discoverDevices();
+    const preview = await startPreview(adapter, harness);
+
+    const cases = [
+      {
+        orientation: "portrait" as const,
+        x: 100.5,
+        y: 655.5,
+        width: 402,
+        height: 874,
+      },
+      {
+        orientation: "landscape-left" as const,
+        x: 655.5,
+        y: 301.5,
+        width: 874,
+        height: 402,
+      },
+      {
+        orientation: "portrait-upside-down" as const,
+        x: 301.5,
+        y: 218.5,
+        width: 402,
+        height: 874,
+      },
+      {
+        orientation: "landscape-right" as const,
+        x: 218.5,
+        y: 100.5,
+        width: 874,
+        height: 402,
+      },
+    ];
+
+    for (const current of cases) {
+      await adapter.sendInput(BOOTED_UDID, {
+        type: "orientation",
+        orientation: current.orientation,
+      });
+      await adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "down",
+        x: 0.25,
+        y: 0.75,
+      });
+      await adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "up",
+        x: 0.25,
+        y: 0.75,
+      });
+    }
+
+    const downEnvelopes = inputEnvelopes.filter((envelope) => envelope.type === "touch1-down");
+    expect(downEnvelopes).toEqual(
+      cases.map(({ orientation: _orientation, ...point }) => ({ type: "touch1-down", ...point })),
+    );
+
+    await stopPreview(preview.abort, preview.pendingFrame);
+  });
+
+  it("serializes home and orientation while updating logical point orientation", async () => {
     const orientationCalls: Array<{ command: string; args: readonly string[] }> = [];
     const execFile = discoveryExecFile(async (command, args) => {
       orientationCalls.push({ command, args: [...args] });
@@ -665,22 +1586,13 @@ describe("IosSimulatorAdapter input", () => {
         args: ["orientation", "--udid", BOOTED_UDID, "landscape-left"],
       },
     ]);
-    expect(adapter.listDiscoveredDevices()[0]).toMatchObject({
+    expect(adapter.getTargetMetadata(BOOTED_UDID)).toMatchObject({
       logicalPointSize: { width: 874, height: 402 },
       orientation: "landscape-left",
     });
 
-    const tap = adapter.sendInput(BOOTED_UDID, { type: "tap", x: 0.5, y: 0.5 });
-    await expect(tap).resolves.toBeUndefined();
-    expect(JSON.parse(harness.socket.sent[2]!)).toMatchObject({
-      type: "tap",
-      x: 437,
-      y: 201,
-      width: 874,
-      height: 402,
-    });
-    await adapter.discoverDevices();
-    expect(adapter.listDiscoveredDevices()[0]).toMatchObject({
+    const devices = await adapter.discoverDevices();
+    expect(devices[0]).toMatchObject({
       logicalPointSize: { width: 874, height: 402 },
       orientation: "landscape-left",
     });
@@ -707,7 +1619,7 @@ describe("IosSimulatorAdapter input", () => {
     await stopPreview(preview.abort, preview.pendingFrame);
   });
 
-  it("validates normalized input before serving and aborts one input without closing the stream", async () => {
+  it("validates touch input before serving and aborts one input without closing the stream", async () => {
     const process = mockChild();
     const harness = mockSocketHarness();
     const spawn: SpawnRunner = vi.fn(() => process.child);
@@ -717,11 +1629,16 @@ describe("IosSimulatorAdapter input", () => {
     await adapter.discoverDevices();
 
     expect(() =>
-      adapter.sendInput(BOOTED_UDID, { type: "tap", x: Number.NaN, y: 0.5 }),
+      adapter.sendInput(BOOTED_UDID, {
+        type: "touch",
+        phase: "down",
+        x: Number.NaN,
+        y: 0.5,
+      }),
     ).toThrowError(expect.objectContaining({ code: "INVALID_INPUT" }));
-    expect(() => adapter.sendInput(BOOTED_UDID, { type: "tap", x: -0.1, y: 0.5 })).toThrowError(
-      expect.objectContaining({ code: "INVALID_INPUT" }),
-    );
+    expect(() =>
+      adapter.sendInput(BOOTED_UDID, { type: "touch", phase: "down", x: -0.1, y: 0.5 }),
+    ).toThrowError(expect.objectContaining({ code: "INVALID_INPUT" }));
     expect(() => adapter.sendInput(BOOTED_UDID, { type: "text", text: "" })).toThrowError(
       expect.objectContaining({ code: "INVALID_INPUT" }),
     );

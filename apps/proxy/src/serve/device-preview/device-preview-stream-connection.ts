@@ -2,7 +2,9 @@ import WebSocket from "ws";
 import {
   DevicePreviewStreamServerMessageSchema,
   encodeDevicePreviewFrame,
+  encodeDevicePreviewH264ProxyPacket,
 } from "@dev-anywhere/shared";
+import type { DevicePreviewH264Packet } from "./types.js";
 import { serviceLogger } from "../../common/logger.js";
 
 const STREAM_JSON_MAX_BYTES = 64 * 1024;
@@ -19,11 +21,11 @@ interface PendingFrame {
   reject: (error: Error) => void;
 }
 
-export interface DevicePreviewStreamConnectionOptions {
+interface DevicePreviewStreamConnectionOptions {
   relayUrl: string;
   proxyId: string;
   token?: string;
-  onFlow: (streamId: string, paused: boolean) => void;
+  onFlow: (streamId: string, paused: boolean, resyncRequired: boolean) => void;
   createWebSocket?: (url: string, options: typeof STREAM_WEBSOCKET_OPTIONS) => WebSocket;
   random?: () => number;
 }
@@ -38,7 +40,7 @@ export class DevicePreviewStreamConnection {
   private readonly relayUrl: string;
   private readonly proxyId: string;
   private readonly token?: string;
-  private readonly onFlow: (streamId: string, paused: boolean) => void;
+  private readonly onFlow: (streamId: string, paused: boolean, resyncRequired: boolean) => void;
   private readonly createWebSocket: NonNullable<
     DevicePreviewStreamConnectionOptions["createWebSocket"]
   >;
@@ -93,6 +95,39 @@ export class DevicePreviewStreamConnection {
     let frame: Buffer;
     try {
       frame = Buffer.from(encodeDevicePreviewFrame(streamId, frameSequence, jpeg));
+    } catch (error) {
+      return Promise.reject(error instanceof Error ? error : streamError("设备画面编码失败"));
+    }
+    const pending = new Promise<void>((resolve, reject) => {
+      this.pendingFrames.set(streamId, { frame, resolve, reject });
+    });
+    this.flushPending();
+    return pending;
+  }
+
+  sendH264Packet(
+    streamId: string,
+    packetSequence: number,
+    packet: Pick<DevicePreviewH264Packet, "kind" | "keyframe" | "durationMs" | "data">,
+  ): Promise<void> {
+    if (this.closed || !this.connectionId) {
+      return Promise.reject(streamError("设备画面连接不可用"));
+    }
+    if (this.pendingFrames.has(streamId)) {
+      return Promise.reject(streamError("同一设备画面流已有待发送数据"));
+    }
+
+    let frame: Buffer;
+    try {
+      frame = Buffer.from(
+        encodeDevicePreviewH264ProxyPacket(streamId, {
+          packetSequence,
+          configuration: packet.kind === "configuration",
+          keyframe: packet.keyframe,
+          durationMs: packet.durationMs,
+          annexB: packet.data,
+        }),
+      );
     } catch (error) {
       return Promise.reject(error instanceof Error ? error : streamError("设备画面编码失败"));
     }
@@ -175,7 +210,7 @@ export class DevicePreviewStreamConnection {
       if (message.data.type === "device_preview_stream_register_response") {
         if (!message.data.success) {
           this.registrationRejected = true;
-          this.rejectPending(streamError(message.data.error ?? "设备画面连接注册失败"));
+          this.rejectPending(streamError(message.data.error));
           ws.close();
           return;
         }
@@ -184,7 +219,7 @@ export class DevicePreviewStreamConnection {
         this.flushPending();
         return;
       }
-      this.onFlow(message.data.streamId, message.data.paused);
+      this.onFlow(message.data.streamId, message.data.paused, message.data.resyncRequired);
     });
     ws.once("error", (error) => {
       serviceLogger.warn({ error: String(error) }, "Device preview stream socket error");

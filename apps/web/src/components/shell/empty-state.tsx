@@ -20,15 +20,15 @@ interface EmptyStateProps {
 const COPY: Record<Variant, { heading: string; body: string }> = {
   "no-proxy": {
     heading: "还没有连接开发机",
-    body: "在开发机上启动 DEV Anywhere，本页会显示可连接的开发机。",
+    body: "在开发机上启动 DEV Anywhere，本页会显示可连接的开发机",
   },
   "client-token-missing": {
     heading: "需要 client token",
-    body: "Relay 服务器已启用客户端访问控制。请在设置里填写。",
+    body: "Relay 已启用客户端访问控制，请在设置中填写",
   },
   "client-token-invalid": {
     heading: "client token 无效",
-    body: "当前浏览器保存的 client token 无效或已过期。请在设置里更新。",
+    body: "client token 无效或已过期，请在设置中更新",
   },
   "no-session": {
     heading: "没有选中的会话",

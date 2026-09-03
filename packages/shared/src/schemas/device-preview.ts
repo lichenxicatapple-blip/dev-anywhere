@@ -1,6 +1,5 @@
 import { z } from "zod";
 import { IdSchema } from "./id.js";
-import { PreviewStateSchema } from "./web-preview.js";
 
 const DEVICE_PREVIEW_PATH_MAX_LENGTH = 4_096;
 const DEVICE_PREVIEW_TEXT_MAX_LENGTH = 4_096;
@@ -8,67 +7,142 @@ const DEVICE_PREVIEW_ERROR_MAX_LENGTH = 4_096;
 const DEVICE_PREVIEW_NAME_MAX_LENGTH = 256;
 const DEVICE_PREVIEW_VERSION_MAX_LENGTH = 256;
 const DEVICE_PREVIEW_SCREEN_EDGE_MAX = 16_384;
-const DEVICE_PREVIEW_STREAM_MAX_WIDTH = 4_096;
+
+export const DevicePreviewNameSchema = z.string().trim().min(1).max(DEVICE_PREVIEW_NAME_MAX_LENGTH);
+
+export const devicePreviewStreamFormatValues = ["jpeg", "h264_annex_b"] as const;
+export const DevicePreviewStreamFormatSchema = z.enum(devicePreviewStreamFormatValues);
+export type DevicePreviewStreamFormat = z.infer<typeof DevicePreviewStreamFormatSchema>;
 
 export const devicePreviewPlatformValues = ["ios", "android"] as const;
 export const DevicePreviewPlatformSchema = z.enum(devicePreviewPlatformValues);
 export type DevicePreviewPlatform = z.infer<typeof DevicePreviewPlatformSchema>;
 
-export const DevicePreviewToolStatusSchema = z.object({
-  supported: z.boolean(),
-  available: z.boolean(),
-  interactive: z.boolean(),
-  command: z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH).optional(),
-  version: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
-  error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH).optional(),
-  suggestions: z.array(z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH)).max(32).optional(),
-});
+const DevicePreviewToolSuggestionsSchema = z
+  .array(z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH))
+  .max(32)
+  .optional();
+
+export const DevicePreviewToolStatusSchema = z.union([
+  z
+    .object({
+      supported: z.literal(false),
+      available: z.literal(false),
+      interactive: z.literal(false),
+      command: z.never().optional(),
+      version: z.never().optional(),
+      error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
+      suggestions: DevicePreviewToolSuggestionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      supported: z.literal(true),
+      available: z.literal(false),
+      interactive: z.literal(false),
+      command: z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH).optional(),
+      version: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
+      error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
+      suggestions: DevicePreviewToolSuggestionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      supported: z.literal(true),
+      available: z.literal(true),
+      interactive: z.literal(true),
+      command: z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH),
+      version: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
+      error: z.never().optional(),
+      suggestions: DevicePreviewToolSuggestionsSchema,
+    })
+    .strict(),
+]);
 export type DevicePreviewToolStatus = z.infer<typeof DevicePreviewToolStatusSchema>;
 
-export const DevicePreviewCapabilitySchema = z.object({
-  supported: z.boolean(),
-  ios: DevicePreviewToolStatusSchema,
-  android: DevicePreviewToolStatusSchema,
-});
+export const DevicePreviewCapabilitySchema = z
+  .object({
+    ios: DevicePreviewToolStatusSchema,
+    android: DevicePreviewToolStatusSchema,
+  })
+  .strict();
 export type DevicePreviewCapability = z.infer<typeof DevicePreviewCapabilitySchema>;
 
-export const DevicePreviewTargetSchema = z.object({
+const DevicePreviewTargetBaseSchema = z.object({
   targetId: IdSchema,
   platform: DevicePreviewPlatformSchema,
   name: z.string().min(1).max(DEVICE_PREVIEW_NAME_MAX_LENGTH),
-  osVersion: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
-  runtime: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
-  width: z.number().int().positive().max(DEVICE_PREVIEW_SCREEN_EDGE_MAX).optional(),
-  height: z.number().int().positive().max(DEVICE_PREVIEW_SCREEN_EDGE_MAX).optional(),
-  state: z.enum(["booted", "shutdown", "transitioning", "offline"]),
+  model: z.string().min(1).max(DEVICE_PREVIEW_NAME_MAX_LENGTH),
+  osVersion: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH),
   interactive: z.boolean(),
 });
+
+const DevicePreviewScreenEdgeSchema = z
+  .number()
+  .int()
+  .positive()
+  .max(DEVICE_PREVIEW_SCREEN_EDGE_MAX);
+
+export const DevicePreviewTargetSchema = z.union([
+  DevicePreviewTargetBaseSchema.extend({
+    width: DevicePreviewScreenEdgeSchema,
+    height: DevicePreviewScreenEdgeSchema,
+  }).strict(),
+  DevicePreviewTargetBaseSchema.extend({
+    width: z.never().optional(),
+    height: z.never().optional(),
+  }).strict(),
+]);
 export type DevicePreviewTarget = z.infer<typeof DevicePreviewTargetSchema>;
 
-export const DevicePreviewSummarySchema = z.object({
+export const DevicePreviewStateSchema = z.enum(["ready", "disconnected"]);
+export type DevicePreviewState = z.infer<typeof DevicePreviewStateSchema>;
+
+const DevicePreviewSummaryBaseSchema = z.object({
   previewId: IdSchema,
-  name: z.string().min(1).max(DEVICE_PREVIEW_NAME_MAX_LENGTH),
+  name: DevicePreviewNameSchema,
   platform: DevicePreviewPlatformSchema,
   targetId: IdSchema,
-  targetName: z.string().min(1).max(DEVICE_PREVIEW_NAME_MAX_LENGTH),
-  state: PreviewStateSchema,
+  model: z.string().min(1).max(DEVICE_PREVIEW_NAME_MAX_LENGTH),
+  osVersion: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH),
   interactive: z.boolean(),
-  error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH).optional(),
   createdAt: z.number().int().nonnegative(),
   updatedAt: z.number().int().nonnegative(),
 });
+
+export const DevicePreviewSummarySchema = z.discriminatedUnion("state", [
+  DevicePreviewSummaryBaseSchema.extend({
+    state: z.literal("ready"),
+    error: z.never().optional(),
+  }).strict(),
+  DevicePreviewSummaryBaseSchema.extend({
+    state: z.literal("disconnected"),
+    error: z.never().optional(),
+  }).strict(),
+]);
 export type DevicePreviewSummary = z.infer<typeof DevicePreviewSummarySchema>;
 
-export const DevicePreviewStreamProfileSchema = z.object({
-  maxFps: z.number().int().min(1).max(30).optional(),
-  maxWidth: z.number().int().min(320).max(DEVICE_PREVIEW_STREAM_MAX_WIDTH).optional(),
-  jpegQuality: z.number().int().min(30).max(95).optional(),
-});
+export const DevicePreviewJpegStreamProfileSchema = z
+  .object({
+    format: z.literal("jpeg"),
+    maxFps: z.number().int().min(1).max(30).optional(),
+  })
+  .strict();
+
+export const DevicePreviewH264StreamProfileSchema = z
+  .object({
+    format: z.literal("h264_annex_b"),
+  })
+  .strict();
+
+export const DevicePreviewStreamProfileSchema = z.discriminatedUnion("format", [
+  DevicePreviewJpegStreamProfileSchema,
+  DevicePreviewH264StreamProfileSchema,
+]);
 export type DevicePreviewStreamProfile = z.infer<typeof DevicePreviewStreamProfileSchema>;
 
 export const devicePreviewStreamStopReasonValues = [
   "client_closed",
-  "token_revoked",
   "preview_closed",
   "proxy_offline",
   "relay_shutdown",
@@ -78,7 +152,9 @@ export const DevicePreviewStreamStopReasonSchema = z.enum(devicePreviewStreamSto
 export type DevicePreviewStreamStopReason = z.infer<typeof DevicePreviewStreamStopReasonSchema>;
 
 const NormalizedCoordinateSchema = z.number().finite().min(0).max(1);
-const DevicePreviewGestureDurationSchema = z.number().int().min(16).max(5_000);
+export const devicePreviewTouchPhaseValues = ["down", "move", "up"] as const;
+export const DevicePreviewTouchPhaseSchema = z.enum(devicePreviewTouchPhaseValues);
+export type DevicePreviewTouchPhase = z.infer<typeof DevicePreviewTouchPhaseSchema>;
 
 export const devicePreviewOrientationValues = [
   "portrait",
@@ -93,61 +169,84 @@ export type DevicePreviewOrientation = z.infer<typeof DevicePreviewOrientationSc
 // Browser coordinates are normalized. Only the Proxy adapter may turn them into device pixels or
 // iOS points; this keeps stale frame dimensions and rotated screens out of the wire contract.
 export const DevicePreviewInputSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("tap"),
-    x: NormalizedCoordinateSchema,
-    y: NormalizedCoordinateSchema,
-  }),
-  z.object({
-    kind: z.literal("swipe"),
-    startX: NormalizedCoordinateSchema,
-    startY: NormalizedCoordinateSchema,
-    endX: NormalizedCoordinateSchema,
-    endY: NormalizedCoordinateSchema,
-    durationMs: DevicePreviewGestureDurationSchema,
-  }),
-  z.object({
-    kind: z.literal("text"),
-    text: z.string().min(1).max(DEVICE_PREVIEW_TEXT_MAX_LENGTH),
-  }),
-  z.object({
-    kind: z.literal("button"),
-    button: z.enum(["home", "back"]),
-  }),
-  z.object({
-    kind: z.literal("orientation"),
-    orientation: DevicePreviewOrientationSchema,
-  }),
+  z
+    .object({
+      kind: z.literal("touch"),
+      phase: DevicePreviewTouchPhaseSchema,
+      x: NormalizedCoordinateSchema,
+      y: NormalizedCoordinateSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("text"),
+      text: z.string().min(1).max(DEVICE_PREVIEW_TEXT_MAX_LENGTH),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("button"),
+      button: z.enum(["home", "back"]),
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("orientation"),
+      orientation: DevicePreviewOrientationSchema,
+    })
+    .strict(),
 ]);
 export type DevicePreviewInput = z.infer<typeof DevicePreviewInputSchema>;
 
 // `/proxy-stream` is a dedicated, authenticated image data channel. Its small JSON handshake and
 // flow-control messages deliberately stay outside RelayControlSchema: they must never be accepted
 // on the main `/proxy` or `/client` sockets.
-export const DevicePreviewStreamRegisterSchema = z.object({
-  type: z.literal("device_preview_stream_register"),
-  proxyId: IdSchema,
-  connectionId: IdSchema,
-});
+export const DevicePreviewStreamRegisterSchema = z
+  .object({
+    type: z.literal("device_preview_stream_register"),
+    proxyId: IdSchema,
+    connectionId: IdSchema,
+  })
+  .strict();
 export type DevicePreviewStreamRegister = z.infer<typeof DevicePreviewStreamRegisterSchema>;
 
-export const DevicePreviewStreamRegisterResponseSchema = z.object({
-  type: z.literal("device_preview_stream_register_response"),
-  success: z.boolean(),
-  error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH).optional(),
-});
+export const DevicePreviewStreamRegisterResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_stream_register_response"),
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_stream_register_response"),
+      success: z.literal(false),
+      error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
+    })
+    .strict(),
+]);
 export type DevicePreviewStreamRegisterResponse = z.infer<
   typeof DevicePreviewStreamRegisterResponseSchema
 >;
 
-export const DevicePreviewStreamFlowSchema = z.object({
+const DevicePreviewStreamFlowBaseSchema = z.object({
   type: z.literal("device_preview_stream_flow"),
   streamId: IdSchema,
-  paused: z.boolean(),
 });
+
+export const DevicePreviewStreamFlowSchema = z.discriminatedUnion("paused", [
+  DevicePreviewStreamFlowBaseSchema.extend({
+    paused: z.literal(true),
+    resyncRequired: z.literal(false),
+  }).strict(),
+  DevicePreviewStreamFlowBaseSchema.extend({
+    paused: z.literal(false),
+    resyncRequired: z.boolean(),
+  }).strict(),
+]);
 export type DevicePreviewStreamFlow = z.infer<typeof DevicePreviewStreamFlowSchema>;
 
-export const DevicePreviewStreamServerMessageSchema = z.discriminatedUnion("type", [
+export const DevicePreviewStreamServerMessageSchema = z.union([
   DevicePreviewStreamRegisterResponseSchema,
   DevicePreviewStreamFlowSchema,
 ]);

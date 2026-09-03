@@ -652,6 +652,19 @@ describe("RelayControlSchema", () => {
     ).toThrow();
   });
 
+  it("requires a connectionId on every successful Proxy registration response", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_register_response",
+        status: "new",
+        connectionId: "connection-1",
+      }),
+    ).toMatchObject({ status: "new", connectionId: "connection-1" });
+    expect(
+      RelayControlSchema.safeParse({ type: "proxy_register_response", status: "new" }).success,
+    ).toBe(false);
+  });
+
   it("rejects proxy_offline with missing proxyId", () => {
     expect(() => RelayControlSchema.parse({ type: "proxy_offline" })).toThrow();
   });
@@ -853,6 +866,29 @@ describe("RelayControlSchema", () => {
         kimi: { available: true, command: "/home/dev/.kimi-code/bin/kimi" },
       },
     });
+
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_info_request",
+        requestId: "legacy-refresh",
+        refreshPath: true,
+      }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_info",
+        requestId: "legacy-capabilities",
+        homePath: "/home/dev",
+        agentCli: {
+          claude: { available: true },
+          codex: { available: true },
+        },
+        webPreview: {
+          cloudflared: { available: false },
+          cpolar: { available: false },
+        },
+      }).success,
+    ).toBe(false);
   });
 
   it("parses agent CLI path update request/response", () => {
@@ -1118,17 +1154,38 @@ describe("RelayControlSchema", () => {
     ).toThrow();
   });
 
-  it("parses proxy_select_response with success=true and proxyId", () => {
+  it("parses proxy_select_response with success=true and its new bindingId", () => {
     const result = RelayControlSchema.parse({
       type: "proxy_select_response",
       success: true,
       proxyId: "p1",
+      bindingId: "binding-1",
     });
     expect(result.type).toBe("proxy_select_response");
-    if (result.type === "proxy_select_response") {
+    if (result.type === "proxy_select_response" && result.success) {
       expect(result.success).toBe(true);
       expect(result.proxyId).toBe("p1");
+      expect(result.bindingId).toBe("binding-1");
     }
+  });
+
+  it("parses restored client registration and stale-binding errors", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "client_register_response",
+        status: "restored",
+        proxyId: "p1",
+        bindingId: "binding-2",
+      }),
+    ).toMatchObject({ proxyId: "p1", bindingId: "binding-2" });
+    expect(
+      RelayControlSchema.parse({
+        type: "relay_error",
+        requestId: "preview-list-1",
+        code: "STALE_BINDING",
+        message: "Preview request used a stale client binding",
+      }),
+    ).toMatchObject({ requestId: "preview-list-1", code: "STALE_BINDING" });
   });
 
   it("parses proxy_select_response with success=false and error", () => {
@@ -1139,11 +1196,63 @@ describe("RelayControlSchema", () => {
       error: "Proxy not online: p1",
     });
     expect(result.type).toBe("proxy_select_response");
-    if (result.type === "proxy_select_response") {
+    if (result.type === "proxy_select_response" && !result.success) {
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe("PROXY_OFFLINE");
       expect(result.error).toBe("Proxy not online: p1");
     }
+  });
+
+  it("rejects incomplete or mixed proxy selection response branches", () => {
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_select_response",
+        success: true,
+        proxyId: "p1",
+      }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_select_response",
+        success: true,
+        bindingId: "binding-1",
+      }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_select_response",
+        success: false,
+        proxyId: "p1",
+        bindingId: "binding-1",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects incomplete or mixed client registration response branches", () => {
+    for (const status of ["restored", "proxy_offline"] as const) {
+      expect(
+        RelayControlSchema.safeParse({
+          type: "client_register_response",
+          status,
+          proxyId: "p1",
+        }).success,
+      ).toBe(false);
+      expect(
+        RelayControlSchema.safeParse({
+          type: "client_register_response",
+          status,
+          bindingId: "binding-1",
+        }).success,
+      ).toBe(false);
+    }
+    expect(
+      RelayControlSchema.safeParse({
+        type: "client_register_response",
+        status: "new",
+        proxyId: "p1",
+        bindingId: "binding-1",
+      }).success,
+    ).toBe(false);
   });
 
   it("parses proxy_list_response with sessions field in ProxyInfo", () => {

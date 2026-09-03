@@ -175,6 +175,26 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     expect(nonces).toEqual(["connection-1"]);
   });
 
+  it("terminates without syncing when registration response omits connectionId", async () => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    const connected = vi.fn();
+    const streamConnection = vi.fn();
+    conn.on("connected", connected);
+    conn.on("stream_connection", streamConnection);
+    fakeWs.readyState = 1;
+    fakeWs.emit("open");
+
+    fakeWs.emit(
+      "message",
+      Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "new" })),
+    );
+
+    expect(fakeWs.terminate).toHaveBeenCalledOnce();
+    expect(conn.getStatus().connectionState).not.toBe(RelayConnectionState.SYNCED);
+    expect(connected).not.toHaveBeenCalled();
+    expect(streamConnection).not.toHaveBeenCalled();
+  });
+
   it("does not throw when ws 'open' fires after close() (race A)", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
     conn.close();
@@ -191,7 +211,11 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     conn.close(); // 然后外部 close
     const leaked: unknown[] = [];
     conn.on("message", (msg: unknown) => leaked.push(msg));
-    const resp = JSON.stringify({ type: "proxy_register_response", status: "ok" });
+    const resp = JSON.stringify({
+      type: "proxy_register_response",
+      status: "new",
+      connectionId: "connection-1",
+    });
     // register_response 在 CLOSED 态应被忽略：不改状态、不泄露为 message
     fakeWs.emit("message", Buffer.from(resp));
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
@@ -216,7 +240,13 @@ describe("RelayConnection: async ws events arriving after close()", () => {
       fakeWs.emit("open");
       fakeWs.emit(
         "message",
-        Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "ok" })),
+        Buffer.from(
+          JSON.stringify({
+            type: "proxy_register_response",
+            status: "new",
+            connectionId: "connection-1",
+          }),
+        ),
       );
       expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
 
@@ -249,7 +279,13 @@ describe("RelayConnection: async ws events arriving after close()", () => {
       fakeWs.emit("open");
       fakeWs.emit(
         "message",
-        Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "ok" })),
+        Buffer.from(
+          JSON.stringify({
+            type: "proxy_register_response",
+            status: "new",
+            connectionId: "connection-1",
+          }),
+        ),
       );
 
       await vi.advanceTimersByTimeAsync(100);

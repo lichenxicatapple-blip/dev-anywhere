@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ChildProcess } from "node:child_process";
 import { afterEach, describe, expect, it, vi } from "vitest";
+import { ControlErrorCode } from "@dev-anywhere/shared";
 import type { CloudflaredQuickTunnel } from "#src/common/cloudflared-quick-tunnel.js";
 import type { CpolarQuickTunnel } from "#src/common/cpolar-quick-tunnel.js";
 import type { CloudflaredLocator } from "#src/serve/preview/cloudflared-locator.js";
@@ -148,17 +149,17 @@ describe("PreviewManager protocol invariants", () => {
     );
   });
 
-  it("deduplicates concurrent operationId retries and preserves them across Proxy restart", async () => {
+  it("preserves create operation identity across Proxy restart", async () => {
     const root = await staticFixture();
     const store = new MemoryStore();
     const options = managerOptions(store);
     const manager = new PreviewManager(options);
 
-    const [first, retry] = await Promise.all([
-      manager.create("operation-1", { kind: "static", path: root }, "cloudflare"),
-      manager.create("operation-1", { kind: "static", path: root }, "cloudflare"),
-    ]);
-    expect(retry.previewId).toBe(first.previewId);
+    const first = await manager.create(
+      "operation-1",
+      { kind: "static", path: root, entryPath: "index.html" },
+      "cloudflare",
+    );
     expect(manager.list().previews).toHaveLength(1);
     expect(first).not.toHaveProperty("operationId");
     expect(store.definitions[0]?.operationId).toBe("operation-1");
@@ -174,12 +175,104 @@ describe("PreviewManager protocol invariants", () => {
       {
         kind: "static",
         path: root,
+        entryPath: "index.html",
       },
       "cloudflare",
     );
     expect(afterRestartRetry.previewId).toBe(first.previewId);
     expect(restartedLocator.inspect).not.toHaveBeenCalled();
+    expect(() =>
+      restarted.create(
+        "operation-1",
+        { kind: "static", path: root, entryPath: "index.html" },
+        "cloudflare",
+        "Different preview",
+      ),
+    ).toThrow(expect.objectContaining({ errorCode: ControlErrorCode.OPERATION_CONFLICT }));
     await Promise.all([manager.shutdown(), restarted.shutdown()]);
+  });
+
+  it("uses optional custom names and persists rename without restarting the preview runtime", async () => {
+    const root = await staticFixture();
+    const store = new MemoryStore();
+    let now = 100;
+    const events: Array<{ type: string; revision: number }> = [];
+    const options = {
+      ...managerOptions(store),
+      runtimeRoot: root,
+      now: () => now,
+      onEvent: (event: { type: string; revision: number }) => events.push(event),
+    };
+    const manager = new PreviewManager(options);
+
+    const automatic = await manager.create(
+      "automatic-name",
+      { kind: "static", path: root, entryPath: "index.html" },
+      "cloudflare",
+      "  ",
+    );
+    const custom = await manager.create(
+      "custom-name",
+      { kind: "static", path: root, entryPath: "index.html" },
+      "cloudflare",
+      "  Landing page  ",
+    );
+    expect(automatic.name).not.toBe("");
+    expect(custom.name).toBe("Landing page");
+
+    await vi.waitFor(() => expect(options.startTunnel).toHaveBeenCalledTimes(2));
+    await vi.waitFor(() =>
+      expect(manager.list().previews.every((preview) => preview.state === "ready")).toBe(true),
+    );
+    const startsBeforeRename = options.startGateway.mock.calls.length;
+    const revisionBeforeRename = manager.list().revision;
+    now = 200;
+
+    const renamed = manager.rename(custom.previewId, "  Product demo  ");
+
+    expect(renamed).toMatchObject({ name: "Product demo", updatedAt: 200, state: "ready" });
+    expect(manager.list().revision).toBe(revisionBeforeRename + 1);
+    expect(options.startGateway).toHaveBeenCalledTimes(startsBeforeRename);
+    expect(store.definitions.find((item) => item.previewId === custom.previewId)).toMatchObject({
+      name: "Product demo",
+      updatedAt: 200,
+    });
+    expect(events.at(-1)).toMatchObject({ type: "state", revision: revisionBeforeRename + 1 });
+
+    const restarted = new PreviewManager(managerOptions(store));
+    expect(
+      restarted.list().previews.find((preview) => preview.previewId === custom.previewId),
+    ).toMatchObject({
+      name: "Product demo",
+      state: "disconnected",
+    });
+    await Promise.all([manager.shutdown(), restarted.shutdown()]);
+  });
+
+  it("rejects invalid rename and rolls back when the renamed definition cannot be saved", async () => {
+    const root = await staticFixture();
+    const store = new MemoryStore();
+    const options = { ...managerOptions(store), runtimeRoot: root, now: () => 200 };
+    const manager = new PreviewManager(options);
+    const created = await manager.create(
+      "rename-rollback",
+      { kind: "static", path: root, entryPath: "index.html" },
+      "cloudflare",
+    );
+    const revisionBeforeRename = manager.list().revision;
+
+    expect(() => manager.rename(created.previewId, "   ")).toThrow("预览名称不能为空");
+    expect(() => manager.rename(created.previewId, "bad\nname")).toThrow("不能包含控制字符");
+    store.failSave = true;
+    expect(() => manager.rename(created.previewId, "Unsaved name")).toThrow("无法保存预览名称");
+    expect(manager.list()).toMatchObject({
+      revision: revisionBeforeRename,
+      previews: [{ previewId: created.previewId, name: created.name }],
+    });
+    expect(store.definitions[0]?.name).toBe(created.name);
+
+    store.failSave = false;
+    await manager.shutdown();
   });
 
   it("launches the selected cpolar provider and persists it for reconnect", async () => {
@@ -197,7 +290,7 @@ describe("PreviewManager protocol invariants", () => {
 
     const created = await manager.create(
       "cpolar-operation",
-      { kind: "static", path: root },
+      { kind: "static", path: root, entryPath: "index.html" },
       "cpolar",
     );
     expect(created.tunnelProvider).toBe("cpolar");
@@ -272,7 +365,7 @@ describe("PreviewManager protocol invariants", () => {
 
     const created = await manager.create(
       "connector-readiness",
-      { kind: "static", path: root },
+      { kind: "static", path: root, entryPath: "index.html" },
       "cloudflare",
     );
     await vi.waitFor(() => expect(options.startTunnel).toHaveBeenCalledOnce());
@@ -304,11 +397,19 @@ describe("PreviewManager protocol invariants", () => {
     const locator = { inspect: vi.fn(() => pendingLocate) };
     const manager = new PreviewManager(managerOptions(new MemoryStore(), locator));
     const accepted = Array.from({ length: 8 }, (_, index) =>
-      manager.create(`operation-${index}`, { kind: "static" as const, path: root }, "cloudflare"),
+      manager.create(
+        `operation-${index}`,
+        { kind: "static" as const, path: root, entryPath: "index.html" },
+        "cloudflare",
+      ),
     );
 
     expect(() =>
-      manager.create("operation-9", { kind: "static", path: root }, "cloudflare"),
+      manager.create(
+        "operation-9",
+        { kind: "static", path: root, entryPath: "index.html" },
+        "cloudflare",
+      ),
     ).toThrow(/最多同时开启 8 个/);
     resolveLocate(locatedCloudflared());
     await Promise.all(accepted);
@@ -324,6 +425,8 @@ describe("PreviewManager protocol invariants", () => {
       tunnelProvider: "cloudflare",
       createdAt: index,
       updatedAt: index,
+      operationId: `reconnect-operation-${index}`,
+      operationFingerprint: "a".repeat(64),
     }));
     let resolveLocate!: (value: ReturnType<typeof locatedCloudflared>) => void;
     const pendingLocate = new Promise<ReturnType<typeof locatedCloudflared>>((resolve) => {
@@ -365,6 +468,8 @@ describe("PreviewManager protocol invariants", () => {
         tunnelProvider: "cloudflare",
         createdAt: 1,
         updatedAt: 1,
+        operationId: "pending-operation",
+        operationFingerprint: "b".repeat(64),
       };
       const options = managerOptions(new MemoryStore([definition]), locator);
       return {
@@ -404,7 +509,11 @@ describe("PreviewManager protocol invariants", () => {
     const store = new MemoryStore();
     const options = managerOptions(store, locator);
     const manager = new PreviewManager(options);
-    const create = manager.create("pending-create", { kind: "static", path: root }, "cloudflare");
+    const create = manager.create(
+      "pending-create",
+      { kind: "static", path: root, entryPath: "index.html" },
+      "cloudflare",
+    );
 
     await manager.shutdown();
     resolveLocate(locatedCloudflared());
@@ -424,12 +533,17 @@ describe("PreviewManager protocol invariants", () => {
       createdAt: index,
       updatedAt: index,
       operationId: `old-operation-${index}`,
+      operationFingerprint: "c".repeat(64),
     }));
     const locator = { inspect: vi.fn(async () => locatedCloudflared()) };
     const manager = new PreviewManager(managerOptions(new MemoryStore(definitions), locator));
 
     expect(() =>
-      manager.create("new-operation", { kind: "static", path: "/tmp" }, "cloudflare"),
+      manager.create(
+        "new-operation",
+        { kind: "static", path: "/tmp", entryPath: "index.html" },
+        "cloudflare",
+      ),
     ).toThrow(/最多保留 100 个/);
     expect(locator.inspect).not.toHaveBeenCalled();
   });
@@ -442,13 +556,17 @@ describe("PreviewManager protocol invariants", () => {
     const manager = new PreviewManager(options);
 
     await expect(
-      manager.create("operation-fails", { kind: "static", path: root }, "cloudflare"),
+      manager.create(
+        "operation-fails",
+        { kind: "static", path: root, entryPath: "index.html" },
+        "cloudflare",
+      ),
     ).rejects.toThrow("无法保存网页预览");
     expect(manager.list().previews).toEqual([]);
     expect(options.startGateway).not.toHaveBeenCalled();
   });
 
-  it("keeps a stopped disconnected record when close persistence fails, then converges on retry", async () => {
+  it("keeps a failed record when close persistence fails, then converges on retry", async () => {
     const definition: PersistedPreviewDefinition = {
       previewId: "preview-close",
       name: "index.html",
@@ -457,6 +575,7 @@ describe("PreviewManager protocol invariants", () => {
       createdAt: 1,
       updatedAt: 1,
       operationId: "operation-close",
+      operationFingerprint: "d".repeat(64),
     };
     const store = new MemoryStore([definition]);
     store.failSave = true;
@@ -469,7 +588,7 @@ describe("PreviewManager protocol invariants", () => {
     await expect(manager.close(definition.previewId)).rejects.toThrow("关闭预览未完成");
     expect(manager.list().previews[0]).toMatchObject({
       previewId: definition.previewId,
-      state: "disconnected",
+      state: "failed",
       error: "关闭预览未完成，请重试",
     });
     expect(events.some((event) => event.type === "removed")).toBe(false);
@@ -502,7 +621,7 @@ describe("PreviewManager protocol invariants", () => {
 
     const created = await manager.create(
       "close-confirmed-exit",
-      { kind: "static", path: root },
+      { kind: "static", path: root, entryPath: "index.html" },
       "cloudflare",
     );
     await vi.waitFor(() => expect(manager.list().previews[0]).toMatchObject({ state: "ready" }));
@@ -519,12 +638,16 @@ describe("PreviewManager protocol invariants", () => {
     const accepted = Array.from({ length: 7 }, (_, index) =>
       manager.create(
         `capacity-after-stop-failure-${index}`,
-        { kind: "static" as const, path: root },
+        { kind: "static" as const, path: root, entryPath: "index.html" },
         "cloudflare",
       ),
     );
     expect(() =>
-      manager.create("capacity-after-stop-failure-8", { kind: "static", path: root }, "cloudflare"),
+      manager.create(
+        "capacity-after-stop-failure-8",
+        { kind: "static", path: root, entryPath: "index.html" },
+        "cloudflare",
+      ),
     ).toThrow(/最多同时开启 8 个/);
     await Promise.all(accepted);
 
@@ -557,7 +680,7 @@ describe("PreviewManager protocol invariants", () => {
 
     const created = await manager.create(
       "shutdown-stop-failure",
-      { kind: "static", path: root },
+      { kind: "static", path: root, entryPath: "index.html" },
       "cloudflare",
     );
     await vi.waitFor(() => expect(manager.list().previews[0]).toMatchObject({ state: "ready" }));

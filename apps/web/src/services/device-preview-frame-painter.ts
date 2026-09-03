@@ -1,4 +1,4 @@
-export interface DevicePreviewFrameSize {
+interface DevicePreviewFrameSize {
   width: number;
   height: number;
 }
@@ -16,7 +16,7 @@ async function decodeJpeg(jpeg: Uint8Array): Promise<ImageBitmap> {
   return createImageBitmap(new Blob([bytes.buffer], { type: "image/jpeg" }));
 }
 
-/** Paints only the newest decoded frame and lets a new HTTP stream restart its sequence at zero. */
+/** Paints completed frames while keeping only the newest frame waiting to be decoded. */
 export class LatestDevicePreviewFramePainter {
   private latest: PendingFrame | null = null;
   private painting = false;
@@ -82,8 +82,7 @@ export class LatestDevicePreviewFramePainter {
           if (
             this.disposed ||
             frame.generation !== this.generation ||
-            frame.sequence <= this.lastSequence ||
-            this.hasNewerQueuedFrame(frame)
+            frame.sequence <= this.lastSequence
           ) {
             continue;
           }
@@ -107,10 +106,5 @@ export class LatestDevicePreviewFramePainter {
       this.painting = false;
       if (!this.disposed && this.latest) void this.paintLoop();
     }
-  }
-
-  private hasNewerQueuedFrame(frame: PendingFrame): boolean {
-    const latest = this.latest;
-    return latest?.generation === frame.generation && latest.sequence > frame.sequence;
   }
 }

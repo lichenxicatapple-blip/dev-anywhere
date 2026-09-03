@@ -15,18 +15,25 @@ vi.mock("@/components/toast", () => ({
 
 import { PreviewRow } from "./preview-row";
 
+function preview(state: "ready"): Extract<PreviewSummary, { state: "ready" }>;
+function preview(state: "failed"): Extract<PreviewSummary, { state: "failed" }>;
+function preview(
+  state: "starting" | "disconnected" | "stopping",
+): Extract<PreviewSummary, { state: "starting" | "disconnected" | "stopping" }>;
 function preview(state: PreviewState): PreviewSummary {
-  return {
+  const common = {
     previewId: "preview-1",
     name: "localhost:5173",
-    source: { kind: "local", url: "http://localhost:5173/admin" },
-    state,
-    tunnelProvider: "cloudflare",
-    ...(state === "ready" ? { publicUrl: "https://preview-row.trycloudflare.com/admin" } : {}),
-    ...(state === "failed" ? { error: "preview-error-sentinel" } : {}),
+    source: { kind: "local" as const, url: "http://localhost:5173/admin" },
+    tunnelProvider: "cloudflare" as const,
     createdAt: 10,
     updatedAt: 20,
   };
+  if (state === "ready") {
+    return { ...common, state, publicUrl: "https://preview-row.trycloudflare.com/admin" };
+  }
+  if (state === "failed") return { ...common, state, error: "preview-error-sentinel" };
+  return { ...common, state };
 }
 
 function openMenu(): void {
@@ -52,7 +59,14 @@ describe("PreviewRow", () => {
     copyText.mockResolvedValue("clipboard");
     const onClose = vi.fn();
 
-    render(<PreviewRow preview={preview("ready")} onReconnect={vi.fn()} onClose={onClose} />);
+    render(
+      <PreviewRow
+        preview={preview("ready")}
+        onRename={vi.fn()}
+        onReconnect={vi.fn()}
+        onClose={onClose}
+      />,
+    );
 
     const link = document.querySelector('[data-slot="preview-row-open"]')!;
     expect(link).toHaveAttribute("href", "https://preview-row.trycloudflare.com/admin");
@@ -78,7 +92,14 @@ describe("PreviewRow", () => {
     const onReconnect = vi.fn();
     const onClose = vi.fn();
     const failedPreview = preview("failed");
-    render(<PreviewRow preview={failedPreview} onReconnect={onReconnect} onClose={onClose} />);
+    render(
+      <PreviewRow
+        preview={failedPreview}
+        onRename={vi.fn()}
+        onReconnect={onReconnect}
+        onClose={onClose}
+      />,
+    );
 
     expect(document.querySelector('[data-slot="preview-row-open"]')).not.toBeInTheDocument();
     expect(document.querySelector('[data-slot="preview-row"]')).toHaveAttribute(
@@ -102,7 +123,14 @@ describe("PreviewRow", () => {
   });
 
   it("keeps close available while starting and disables every action while stopping", async () => {
-    render(<PreviewRow preview={preview("starting")} onReconnect={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <PreviewRow
+        preview={preview("starting")}
+        onRename={vi.fn()}
+        onReconnect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
     openMenu();
     await vi.waitFor(() =>
       expect(document.querySelector('[data-slot="preview-row-close-item"]')).toBeInTheDocument(),
@@ -112,7 +140,54 @@ describe("PreviewRow", () => {
     ).not.toBeInTheDocument();
 
     cleanup();
-    render(<PreviewRow preview={preview("stopping")} onReconnect={vi.fn()} onClose={vi.fn()} />);
+    render(
+      <PreviewRow
+        preview={preview("stopping")}
+        onRename={vi.fn()}
+        onReconnect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(document.querySelector('[data-slot="preview-row-menu-trigger"]')).toBeDisabled();
+  });
+
+  it("opens rename from the row menu", async () => {
+    const onRename = vi.fn();
+    render(
+      <PreviewRow
+        preview={preview("ready")}
+        onRename={onRename}
+        onReconnect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    openMenu();
+    const renameItem = await vi.waitFor(() => {
+      const item = document.querySelector('[data-slot="preview-row-rename-item"]');
+      expect(item).toBeInTheDocument();
+      return item!;
+    });
+    fireEvent.click(renameItem);
+
+    expect(onRename).toHaveBeenCalledOnce();
+  });
+
+  it("shows command progress without changing the authoritative preview state", () => {
+    render(
+      <PreviewRow
+        preview={preview("disconnected")}
+        pendingOperation="reconnect"
+        onRename={vi.fn()}
+        onReconnect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+
+    const row = document.querySelector('[data-slot="preview-row"]');
+    expect(row).toHaveAttribute("data-preview-state", "disconnected");
+    expect(row).toHaveAttribute("data-preview-operation", "reconnect");
+    expect(row).toHaveTextContent("正在重新连接");
     expect(document.querySelector('[data-slot="preview-row-menu-trigger"]')).toBeDisabled();
   });
 });

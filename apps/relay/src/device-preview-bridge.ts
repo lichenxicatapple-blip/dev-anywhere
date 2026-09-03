@@ -4,14 +4,19 @@ import { WebSocket } from "ws";
 import {
   ControlErrorCode,
   DEVICE_PREVIEW_FRAME_MAX_BYTES,
+  DEVICE_PREVIEW_H264_PACKET_SENTINEL,
   DevicePreviewStreamRegisterSchema,
   RelayCloseCode,
   decodeDevicePreviewFrame,
+  decodeDevicePreviewH264ProxyPacket,
+  encodeDevicePreviewH264HttpPacket,
   encodeDevicePreviewHttpFrame,
   serializeControl,
   type ControlMessage,
   type ControlErrorCodeType,
   type DevicePreviewStreamProfile,
+  type DevicePreviewStreamFormat,
+  type DevicePreviewH264Packet,
   type DevicePreviewStreamStopReason,
   type RelayControlMessage,
 } from "@dev-anywhere/shared";
@@ -29,7 +34,8 @@ import type { RelayRegistry } from "./registry.js";
 
 const DEFAULT_TOKEN_TTL_MS = 20_000;
 const DEFAULT_START_TIMEOUT_MS = 10_000;
-const DEFAULT_FRAME_IDLE_TIMEOUT_MS = 20_000;
+const DEFAULT_FIRST_FRAME_TIMEOUT_MS = 20_000;
+const DEFAULT_DRAIN_TIMEOUT_MS = 5_000;
 const DEFAULT_REGISTER_TIMEOUT_MS = 5_000;
 const DEFAULT_MAX_STREAMS = 64;
 const DEFAULT_MAX_STREAMS_PER_PROXY = 8;
@@ -38,8 +44,17 @@ const DEFAULT_MAX_STREAMS_PER_PREVIEW = 3;
 const DEFAULT_MAX_INPUTS_PER_SECOND = 120;
 const DEFAULT_MAX_OUTSTANDING_INPUTS_PER_LEASE = 32;
 const STREAM_CONTENT_TYPE = "application/x-dev-anywhere-device-preview";
+const MAX_BUFFERED_STARTING_H264_BYTES = 4 * 1024 * 1024;
+const MAX_BUFFERED_STARTING_H264_PACKETS = 512;
 
-type ClientSocket = WebSocket & { clientId?: string; boundProxyId?: string };
+type H264SyncState = "awaiting_configuration" | "awaiting_keyframe" | "synced";
+type StreamWriteResult = "writable" | "backpressured" | "failed";
+
+type ClientSocket = WebSocket & {
+  clientId?: string;
+  boundProxyId?: string;
+  bindingId?: string;
+};
 type StreamTransportSocket = WebSocket & {
   isAlive?: boolean;
   devicePreviewProxyId?: string;
@@ -62,6 +77,7 @@ interface ControlLease {
   clientId: string;
   clientWs: ClientSocket;
   proxyId: string;
+  bindingId: string;
   proxyWs: WebSocket;
   previewId: string;
   controller: boolean;
@@ -76,7 +92,7 @@ interface ControlLease {
 interface StreamToken {
   token: string;
   leaseId: string;
-  profile?: DevicePreviewStreamProfile;
+  profile: DevicePreviewStreamProfile;
   expiresAt: number;
   timer: ReturnType<typeof setTimeout>;
 }
@@ -86,6 +102,17 @@ interface BufferedStartingFrame {
   jpeg: Uint8Array;
 }
 
+interface BufferedStartingH264Packet extends DevicePreviewH264Packet {
+  annexB: Uint8Array;
+}
+
+interface BufferedStartingH264State {
+  configuration: BufferedStartingH264Packet;
+  packets: BufferedStartingH264Packet[];
+  totalBytes: number;
+  hasKeyframe: boolean;
+}
+
 interface ActiveStream {
   streamId: string;
   lease: ControlLease;
@@ -93,16 +120,22 @@ interface ActiveStream {
   res: Response;
   state: "starting" | "streaming";
   startTimer: ReturnType<typeof setTimeout>;
-  idleTimer: ReturnType<typeof setTimeout> | null;
+  firstFrameTimer: ReturnType<typeof setTimeout> | null;
   headersSent: boolean;
   finished: boolean;
   paused: boolean;
+  requestedFormat: DevicePreviewStreamFormat;
+  format?: DevicePreviewStreamFormat;
+  h264SyncState: H264SyncState;
+  h264DroppedWhilePaused: boolean;
   lastFrameSequence: number | null;
   bufferedStartingFrame?: BufferedStartingFrame;
+  bufferedStartingH264?: BufferedStartingH264State;
   drainListener?: () => void;
+  drainTimer?: ReturnType<typeof setTimeout>;
 }
 
-export interface DevicePreviewBridgeOptions {
+interface DevicePreviewBridgeOptions {
   registry: RelayRegistry;
   logger: Logger;
   chaos?: RelayChaos;
@@ -110,7 +143,8 @@ export interface DevicePreviewBridgeOptions {
   validateClientToken?: (token: string | null) => boolean;
   tokenTtlMs?: number;
   startTimeoutMs?: number;
-  frameIdleTimeoutMs?: number;
+  firstFrameTimeoutMs?: number;
+  drainTimeoutMs?: number;
   registerTimeoutMs?: number;
   maxStreams?: number;
   maxStreamsPerProxy?: number;
@@ -157,7 +191,8 @@ export class DevicePreviewBridge {
   private readonly streams = new Map<string, ActiveStream>();
   private readonly tokenTtlMs: number;
   private readonly startTimeoutMs: number;
-  private readonly frameIdleTimeoutMs: number;
+  private readonly firstFrameTimeoutMs: number;
+  private readonly drainTimeoutMs: number;
   private readonly registerTimeoutMs: number;
   private readonly maxStreams: number;
   private readonly maxStreamsPerProxy: number;
@@ -173,10 +208,11 @@ export class DevicePreviewBridge {
   constructor(private readonly options: DevicePreviewBridgeOptions) {
     this.tokenTtlMs = Math.max(1, options.tokenTtlMs ?? DEFAULT_TOKEN_TTL_MS);
     this.startTimeoutMs = Math.max(1, options.startTimeoutMs ?? DEFAULT_START_TIMEOUT_MS);
-    this.frameIdleTimeoutMs = Math.max(
+    this.firstFrameTimeoutMs = Math.max(
       1,
-      options.frameIdleTimeoutMs ?? DEFAULT_FRAME_IDLE_TIMEOUT_MS,
+      options.firstFrameTimeoutMs ?? DEFAULT_FIRST_FRAME_TIMEOUT_MS,
     );
+    this.drainTimeoutMs = Math.max(1, options.drainTimeoutMs ?? DEFAULT_DRAIN_TIMEOUT_MS);
     this.registerTimeoutMs = Math.max(1, options.registerTimeoutMs ?? DEFAULT_REGISTER_TIMEOUT_MS);
     this.maxStreams = Math.max(1, options.maxStreams ?? DEFAULT_MAX_STREAMS);
     this.maxStreamsPerProxy = Math.max(
@@ -299,11 +335,19 @@ export class DevicePreviewBridge {
         this.rejectTransport(transportWs, "unexpected device stream transport message");
         return;
       }
-      if (data.length > DEVICE_PREVIEW_FRAME_MAX_BYTES + 260) {
+      if (data.length > DEVICE_PREVIEW_FRAME_MAX_BYTES + 512) {
         this.options.logger.warn(
           { proxyId: registered.proxyId, bytes: data.length },
           "Oversized device preview frame dropped",
         );
+        return;
+      }
+      const h264Packet =
+        data[0] === DEVICE_PREVIEW_H264_PACKET_SENTINEL
+          ? decodeDevicePreviewH264ProxyPacket(data)
+          : null;
+      if (h264Packet) {
+        this.handleH264Packet(registered, h264Packet.streamId, h264Packet);
         return;
       }
       const frame = decodeDevicePreviewFrame(data);
@@ -363,13 +407,6 @@ export class DevicePreviewBridge {
       return true;
     }
     switch (message.type) {
-      case "device_preview_state_push":
-        this.broadcastToProxyClients(proxyId, serializeControl(message), message.type);
-        return true;
-      case "device_preview_removed_push":
-        this.stopPreviewStreams(proxyId, message.previewId, "preview_closed");
-        this.broadcastToProxyClients(proxyId, serializeControl(message), message.type);
-        return true;
       case "device_preview_stream_start_response":
         this.handleStreamStartResponse(proxyId, message);
         return true;
@@ -384,6 +421,11 @@ export class DevicePreviewBridge {
         // unexpected or locally-generated variant fall through to generic Proxy broadcasting.
         return this.isDeviceMessage(message);
     }
+  }
+
+  handlePreviewRemovedEvent(proxyId: string, proxyWs: WebSocket, previewId: string): void {
+    if (!this.isCurrentProxyConnection(proxyId, proxyWs)) return;
+    this.stopPreviewStreams(proxyId, previewId, "preview_closed");
   }
 
   handleHttpRequest(req: Request, res: Response): void {
@@ -455,10 +497,13 @@ export class DevicePreviewBridge {
       res,
       state: "starting",
       startTimer,
-      idleTimer: null,
+      firstFrameTimer: null,
       headersSent: false,
       finished: false,
       paused: false,
+      requestedFormat: token.profile.format,
+      h264SyncState: "awaiting_configuration",
+      h264DroppedWhilePaused: false,
       lastFrameSequence: null,
     };
     lease.streamId = streamId;
@@ -475,9 +520,10 @@ export class DevicePreviewBridge {
       streamId,
       leaseId: lease.leaseId,
       previewId: lease.previewId,
-      ...(profile?.maxFps !== undefined ? { maxFps: profile.maxFps } : {}),
-      ...(profile?.maxWidth !== undefined ? { maxWidth: profile.maxWidth } : {}),
-      ...(profile?.jpegQuality !== undefined ? { jpegQuality: profile.jpegQuality } : {}),
+      format: profile.format,
+      ...(profile.format === "jpeg" && profile.maxFps !== undefined
+        ? { maxFps: profile.maxFps }
+        : {}),
     });
     try {
       lease.proxyWs.send(startMessage, (error) => {
@@ -530,17 +576,44 @@ export class DevicePreviewBridge {
     message: DevicePreviewRequestMessage,
   ): void {
     if (!clientWs.clientId) {
-      this.sendRelayError(clientWs, message.requestId, "NOT_REGISTERED", "客户端未注册");
+      if (
+        !this.sendManagementFailure(
+          clientWs,
+          message,
+          "客户端未注册",
+          ControlErrorCode.PROXY_OFFLINE,
+        )
+      ) {
+        this.sendRelayError(clientWs, message.requestId, "NOT_REGISTERED", "客户端未注册");
+      }
       return;
     }
     const proxyId = clientWs.boundProxyId;
     if (!proxyId) {
-      this.sendRelayError(clientWs, message.requestId, "NOT_BOUND", "当前未连接开发机");
+      if (
+        !this.sendManagementFailure(
+          clientWs,
+          message,
+          "当前未连接开发机",
+          ControlErrorCode.PROXY_OFFLINE,
+        )
+      ) {
+        this.sendRelayError(clientWs, message.requestId, "NOT_BOUND", "当前未连接开发机");
+      }
       return;
     }
     const proxyWs = this.options.registry.getProxy(proxyId);
     if (!proxyWs || proxyWs.readyState !== WebSocket.OPEN) {
-      this.sendRelayError(clientWs, message.requestId, "PROXY_OFFLINE", "当前开发机不在线");
+      if (
+        !this.sendManagementFailure(
+          clientWs,
+          message,
+          "当前开发机不在线",
+          ControlErrorCode.PROXY_OFFLINE,
+        )
+      ) {
+        this.sendRelayError(clientWs, message.requestId, "PROXY_OFFLINE", "当前开发机不在线");
+      }
       return;
     }
     let registration: ReturnType<DevicePreviewRouteRegistry["register"]>;
@@ -557,30 +630,146 @@ export class DevicePreviewBridge {
         { proxyId, type: message.type, error: errorText(error) },
         "Could not allocate Device Preview management route",
       );
-      this.sendRelayError(
-        clientWs,
-        message.requestId,
-        "INVALID_MESSAGE",
-        "暂时无法处理设备预览请求",
-      );
+      if (
+        !this.sendManagementFailure(
+          clientWs,
+          message,
+          "暂时无法处理设备预览请求",
+          ControlErrorCode.UNKNOWN,
+        )
+      ) {
+        this.sendRelayError(
+          clientWs,
+          message.requestId,
+          "INVALID_MESSAGE",
+          "暂时无法处理设备预览请求",
+        );
+      }
       return;
     }
     if (registration.kind !== "registered") {
-      this.sendRelayError(
-        clientWs,
-        message.requestId,
-        "INVALID_MESSAGE",
+      const error =
         registration.kind === "client_capacity_exceeded"
           ? "当前客户端有过多待处理的设备预览请求"
-          : "设备预览请求过多",
-      );
+          : "设备预览请求过多";
+      if (!this.sendManagementFailure(clientWs, message, error, ControlErrorCode.RATE_LIMITED)) {
+        this.sendRelayError(clientWs, message.requestId, "INVALID_MESSAGE", error);
+      }
       return;
     }
     const upstream = {
       ...message,
       requestId: registration.upstreamRequestId,
     } as DevicePreviewRequestMessage;
-    this.sendProxy(proxyWs, serializeControl(upstream), message.type);
+    const requestRouteStillCurrent = (): boolean =>
+      clientWs.readyState === WebSocket.OPEN &&
+      proxyWs.readyState === WebSocket.OPEN &&
+      this.options.registry.getProxy(proxyId) === proxyWs &&
+      this.options.registry.isCurrentClientBinding(clientWs.clientId, clientWs, message.scope);
+    this.sendProxy(proxyWs, serializeControl(upstream), message.type, requestRouteStillCurrent);
+  }
+
+  private sendManagementFailure(
+    clientWs: ClientSocket,
+    message: DevicePreviewRequestMessage,
+    error: string,
+    errorCode: ControlErrorCodeType,
+  ): boolean {
+    switch (message.type) {
+      case "device_preview_capability_request":
+        this.sendClient(
+          clientWs,
+          serializeControl({
+            type: "device_preview_capability_response",
+            requestId: message.requestId,
+            scope: message.scope,
+            success: false,
+            error,
+            errorCode,
+          }),
+          "device_preview_capability_response",
+        );
+        return true;
+      case "device_preview_targets_request":
+        this.sendClient(
+          clientWs,
+          serializeControl({
+            type: "device_preview_targets_response",
+            requestId: message.requestId,
+            scope: message.scope,
+            success: false,
+            error,
+            errorCode,
+          }),
+          "device_preview_targets_response",
+        );
+        return true;
+      case "device_preview_create_request":
+        this.sendClient(
+          clientWs,
+          serializeControl({
+            type: "device_preview_create_response",
+            requestId: message.requestId,
+            scope: message.scope,
+            operationId: message.operationId,
+            accepted: false,
+            error,
+            errorCode,
+          }),
+          "device_preview_create_response",
+        );
+        return true;
+      case "device_preview_rename_request":
+        this.sendClient(
+          clientWs,
+          serializeControl({
+            type: "device_preview_rename_response",
+            requestId: message.requestId,
+            scope: message.scope,
+            operationId: message.operationId,
+            previewId: message.previewId,
+            success: false,
+            error,
+            errorCode,
+          }),
+          "device_preview_rename_response",
+        );
+        return true;
+      case "device_preview_reconnect_request":
+        this.sendClient(
+          clientWs,
+          serializeControl({
+            type: "device_preview_reconnect_response",
+            requestId: message.requestId,
+            scope: message.scope,
+            operationId: message.operationId,
+            previewId: message.previewId,
+            success: false,
+            error,
+            errorCode,
+          }),
+          "device_preview_reconnect_response",
+        );
+        return true;
+      case "device_preview_close_request":
+        this.sendClient(
+          clientWs,
+          serializeControl({
+            type: "device_preview_close_response",
+            requestId: message.requestId,
+            scope: message.scope,
+            operationId: message.operationId,
+            previewId: message.previewId,
+            success: false,
+            error,
+            errorCode,
+          }),
+          "device_preview_close_response",
+        );
+        return true;
+      case "device_preview_list_request":
+        return false;
+    }
   }
 
   private resolveManagementResponse(
@@ -601,18 +790,24 @@ export class DevicePreviewBridge {
       );
       return;
     }
-    if (route.clientWs.readyState !== WebSocket.OPEN) return;
+    const isCurrentRoute = (): boolean =>
+      this.isCurrentProxyConnection(proxyId, proxyWs) &&
+      this.options.registry.isCurrentClientBinding(route.clientId, route.clientWs, route.scope);
+    if (route.clientWs.readyState !== WebSocket.OPEN || !isCurrentRoute()) return;
     const response = {
       ...message,
       requestId: route.clientRequestId,
+      scope: route.scope,
     } as DevicePreviewResponseMessage;
-    this.sendClient(route.clientWs, serializeControl(response), message.type);
+    this.sendClient(route.clientWs, serializeControl(response), message.type, isCurrentRoute);
   }
 
   private issueStreamUrl(
     clientWs: ClientSocket,
     message: ControlMessage<"device_preview_stream_url_request">,
   ): void {
+    const requestBindingStillCurrent = (): boolean =>
+      this.options.registry.isCurrentClientBinding(clientWs.clientId, clientWs, message.scope);
     const failure = (
       error: string,
       errorCode: ControlErrorCodeType = ControlErrorCode.UNKNOWN,
@@ -622,12 +817,14 @@ export class DevicePreviewBridge {
         serializeControl({
           type: "device_preview_stream_url_response",
           requestId: message.requestId,
+          scope: message.scope,
           previewId: message.previewId,
           success: false,
           error,
           errorCode,
         }),
         "device_preview_stream_url_response",
+        requestBindingStillCurrent,
       );
     };
     if (!clientWs.clientId) {
@@ -692,6 +889,7 @@ export class DevicePreviewBridge {
       clientId: clientWs.clientId,
       clientWs,
       proxyId,
+      bindingId: message.scope.bindingId,
       proxyWs,
       previewId: message.previewId,
       controller,
@@ -710,7 +908,7 @@ export class DevicePreviewBridge {
     const token: StreamToken = {
       token: tokenValue,
       leaseId,
-      ...(message.profile ? { profile: message.profile } : {}),
+      profile: message.profile,
       expiresAt,
       timer,
     };
@@ -722,6 +920,7 @@ export class DevicePreviewBridge {
       serializeControl({
         type: "device_preview_stream_url_response",
         requestId: message.requestId,
+        scope: message.scope,
         previewId: message.previewId,
         success: true,
         url: `/api/device-preview-streams/${tokenValue}`,
@@ -730,6 +929,7 @@ export class DevicePreviewBridge {
         controlMode: controller ? "controller" : "view_only",
       }),
       "device_preview_stream_url_response",
+      () => this.leases.get(lease.leaseId) === lease && this.clientLeaseStillValid(lease),
     );
   }
 
@@ -737,6 +937,8 @@ export class DevicePreviewBridge {
     clientWs: ClientSocket,
     message: ControlMessage<"device_preview_input">,
   ): void {
+    const requestBindingStillCurrent = (): boolean =>
+      this.options.registry.isCurrentClientBinding(clientWs.clientId, clientWs, message.scope);
     const lease = this.leases.get(message.leaseId);
     const reject = (
       error: string,
@@ -746,6 +948,7 @@ export class DevicePreviewBridge {
         clientWs,
         serializeControl({
           type: "device_preview_input_ack",
+          scope: message.scope,
           leaseId: message.leaseId,
           inputSeq: message.inputSeq,
           success: false,
@@ -753,6 +956,22 @@ export class DevicePreviewBridge {
           errorCode,
         }),
         "device_preview_input_ack",
+        requestBindingStillCurrent,
+      );
+    };
+    const inputStillAuthorized = (): boolean => {
+      if (!lease) return false;
+      const streamId = lease.streamId;
+      return (
+        message.scope.proxyId === lease.proxyId &&
+        message.scope.bindingId === lease.bindingId &&
+        lease.clientWs === clientWs &&
+        this.leases.get(lease.leaseId) === lease &&
+        lease.controller &&
+        streamId !== undefined &&
+        this.streams.get(streamId)?.lease === lease &&
+        lease.outstandingInputSeqs.has(message.inputSeq) &&
+        this.clientLeaseStillValid(lease)
       );
     };
     if (
@@ -760,7 +979,7 @@ export class DevicePreviewBridge {
       lease.clientWs !== clientWs ||
       !lease.controller ||
       !lease.streamId ||
-      !this.streams.has(lease.streamId) ||
+      this.streams.get(lease.streamId)?.lease !== lease ||
       !this.clientLeaseStillValid(lease)
     ) {
       reject("设备控制权已失效");
@@ -786,13 +1005,15 @@ export class DevicePreviewBridge {
     lease.inputCount += 1;
     lease.lastInputSeq = message.inputSeq;
     lease.outstandingInputSeqs.add(message.inputSeq);
-    this.sendProxy(lease.proxyWs, serializeControl(message), message.type);
+    this.sendProxy(lease.proxyWs, serializeControl(message), message.type, inputStillAuthorized);
   }
 
   private claimControl(
     clientWs: ClientSocket,
     message: ControlMessage<"device_preview_control_claim_request">,
   ): void {
+    const requestBindingStillCurrent = (): boolean =>
+      this.options.registry.isCurrentClientBinding(clientWs.clientId, clientWs, message.scope);
     const lease = this.leases.get(message.leaseId);
     if (
       !lease ||
@@ -806,13 +1027,14 @@ export class DevicePreviewBridge {
         serializeControl({
           type: "device_preview_control_claim_response",
           requestId: message.requestId,
+          scope: message.scope,
           leaseId: message.leaseId,
           success: false,
-          controlMode: "view_only",
           error: "设备画面已失效",
           errorCode: ControlErrorCode.CONTROL_LEASE_INVALID,
         }),
         "device_preview_control_claim_response",
+        requestBindingStillCurrent,
       );
       return;
     }
@@ -836,18 +1058,18 @@ export class DevicePreviewBridge {
             serializeControl({
               type: "device_preview_control_claim_response",
               requestId: message.requestId,
+              scope: message.scope,
               leaseId: message.leaseId,
               success: false,
-              controlMode: "view_only",
               error: "开发机连接已断开",
               errorCode: ControlErrorCode.PROXY_OFFLINE,
             }),
             "device_preview_control_claim_response",
+            requestBindingStillCurrent,
           );
           return;
         }
         old.controller = false;
-        old.lastInputSeq = -1;
         old.rateWindowStartedAt = this.now();
         old.inputCount = 0;
         for (const inputSeq of old.outstandingInputSeqs) {
@@ -855,6 +1077,7 @@ export class DevicePreviewBridge {
             old.clientWs,
             serializeControl({
               type: "device_preview_input_ack",
+              scope: { proxyId: old.proxyId, bindingId: old.bindingId },
               leaseId: old.leaseId,
               inputSeq,
               success: false,
@@ -862,20 +1085,14 @@ export class DevicePreviewBridge {
               errorCode: ControlErrorCode.CONTROL_LEASE_INVALID,
             }),
             "device_preview_input_ack",
+            () =>
+              this.leases.get(old.leaseId) === old &&
+              !old.controller &&
+              this.clientBindingStillMatches(old),
           );
         }
         old.outstandingInputSeqs.clear();
-        if (old.clientWs.readyState === WebSocket.OPEN) {
-          this.sendClient(
-            old.clientWs,
-            serializeControl({
-              type: "device_preview_control_revoked_push",
-              leaseId: old.leaseId,
-              reason: "taken_over",
-            }),
-            "device_preview_control_revoked_push",
-          );
-        }
+        this.sendControlRevoked(old, "taken_over");
       }
     }
     lease.controller = true;
@@ -885,11 +1102,16 @@ export class DevicePreviewBridge {
       serializeControl({
         type: "device_preview_control_claim_response",
         requestId: message.requestId,
+        scope: message.scope,
         leaseId: lease.leaseId,
         success: true,
         controlMode: "controller",
       }),
       "device_preview_control_claim_response",
+      () =>
+        this.leases.get(lease.leaseId) === lease &&
+        lease.controller &&
+        this.clientLeaseStillValid(lease),
     );
   }
 
@@ -908,13 +1130,19 @@ export class DevicePreviewBridge {
     }
     clearTimeout(stream.startTimer);
     if (!message.success) {
-      this.failStream(
-        stream.streamId,
-        streamErrorStatus(message.errorCode),
-        message.error ?? "无法启动设备画面",
+      this.options.logger.warn(
+        { streamId: stream.streamId, proxyId, error: message.error },
+        "Device preview stream failed to start",
       );
+      this.failStream(stream.streamId, streamErrorStatus(message.errorCode), message.error);
       return;
     }
+    const format = message.format;
+    if (stream.requestedFormat !== format) {
+      this.failStream(stream.streamId, 502, "开发机返回了错误的设备画面格式", "stream_error");
+      return;
+    }
+    stream.format = format;
     try {
       stream.res.status(200);
       stream.res.setHeader("Content-Type", STREAM_CONTENT_TYPE);
@@ -922,6 +1150,7 @@ export class DevicePreviewBridge {
       stream.res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
       stream.res.setHeader("X-Content-Type-Options", "nosniff");
       stream.res.setHeader("X-Accel-Buffering", "no");
+      stream.res.setHeader("X-Device-Preview-Format", format);
       if (message.width !== undefined)
         stream.res.setHeader("X-Device-Width", String(message.width));
       if (message.height !== undefined)
@@ -929,12 +1158,19 @@ export class DevicePreviewBridge {
       stream.res.flushHeaders();
       stream.headersSent = true;
       stream.state = "streaming";
+      // Both backends are allowed to be change-driven: a static simulator can legitimately emit
+      // nothing after its first renderable image. This deadline proves startup only. Ongoing
+      // liveness comes from the Proxy stream WebSocket heartbeat and explicit capture completion,
+      // not from visual changes on the device.
+      this.armFirstFrameTimer(stream);
       const bufferedFrame = stream.bufferedStartingFrame;
       stream.bufferedStartingFrame = undefined;
-      if (bufferedFrame) {
+      const bufferedH264 = stream.bufferedStartingH264;
+      stream.bufferedStartingH264 = undefined;
+      if (format === "h264_annex_b" && bufferedH264) {
+        for (const packet of bufferedH264.packets) this.writeH264Packet(stream, packet);
+      } else if (format === "jpeg" && bufferedFrame) {
         this.writeFrame(stream, bufferedFrame.sequence, bufferedFrame.jpeg);
-      } else {
-        this.armIdleTimer(stream);
       }
     } catch (error) {
       this.failStream(stream.streamId, 500, errorText(error), "stream_error");
@@ -954,11 +1190,11 @@ export class DevicePreviewBridge {
     ) {
       return;
     }
-    if (!message.success) {
-      this.failStream(stream.streamId, 502, message.error ?? "设备画面已中断");
-      return;
-    }
-    this.finishStream(stream, "client_closed", false);
+    this.options.logger.warn(
+      { streamId: stream.streamId, proxyId, error: message.error },
+      "Device preview stream capture failed",
+    );
+    this.failStream(stream.streamId, 502, message.error);
   }
 
   private handleInputAck(
@@ -974,7 +1210,17 @@ export class DevicePreviewBridge {
     ) {
       return;
     }
-    this.sendClient(lease.clientWs, serializeControl(message), message.type);
+    const response = {
+      ...message,
+      scope: { proxyId: lease.proxyId, bindingId: lease.bindingId },
+    } as ControlMessage<"device_preview_input_ack">;
+    this.sendClient(lease.clientWs, serializeControl(response), message.type, () => {
+      return (
+        this.leases.get(lease.leaseId) === lease &&
+        lease.controller &&
+        this.clientLeaseStillValid(lease)
+      );
+    });
   }
 
   private handleFrame(
@@ -992,6 +1238,11 @@ export class DevicePreviewBridge {
     ) {
       return;
     }
+    if (stream.requestedFormat !== "jpeg") return;
+    if (stream.state === "streaming" && stream.format !== undefined && stream.format !== "jpeg") {
+      this.failStream(streamId, 502, "开发机发送了错误的设备画面格式", "stream_error");
+      return;
+    }
     if (stream.lastFrameSequence !== null && sequence <= stream.lastFrameSequence) return;
     stream.lastFrameSequence = sequence;
     if (stream.state === "starting") {
@@ -1004,44 +1255,178 @@ export class DevicePreviewBridge {
     this.writeFrame(stream, sequence, jpeg);
   }
 
+  private handleH264Packet(
+    transport: StreamTransport,
+    streamId: string,
+    packet: DevicePreviewH264Packet,
+  ): void {
+    const stream = this.streams.get(streamId);
+    if (
+      !stream ||
+      stream.finished ||
+      stream.transport !== transport ||
+      stream.lease.proxyId !== transport.proxyId
+    ) {
+      return;
+    }
+    if (stream.requestedFormat !== "h264_annex_b") {
+      return;
+    }
+    if (stream.state === "streaming" && stream.format !== "h264_annex_b") {
+      this.failStream(streamId, 502, "开发机发送了错误的设备画面格式", "stream_error");
+      return;
+    }
+    if (stream.lastFrameSequence !== null && packet.packetSequence <= stream.lastFrameSequence) {
+      return;
+    }
+    stream.lastFrameSequence = packet.packetSequence;
+    if (stream.state === "starting") {
+      if (packet.configuration) {
+        const configuration: BufferedStartingH264Packet = {
+          ...packet,
+          annexB: Buffer.from(packet.annexB),
+        };
+        stream.bufferedStartingH264 = {
+          configuration,
+          packets: [configuration],
+          totalBytes: configuration.annexB.length,
+          hasKeyframe: false,
+        };
+        return;
+      }
+      const buffered = stream.bufferedStartingH264;
+      if (!buffered) return;
+      if (packet.keyframe) {
+        const keyframe: BufferedStartingH264Packet = {
+          ...packet,
+          annexB: Buffer.from(packet.annexB),
+        };
+        buffered.packets = [buffered.configuration, keyframe];
+        buffered.totalBytes = buffered.configuration.annexB.length + keyframe.annexB.length;
+        buffered.hasKeyframe = true;
+        return;
+      }
+      if (!buffered.hasKeyframe) return;
+      if (
+        buffered.packets.length >= MAX_BUFFERED_STARTING_H264_PACKETS ||
+        buffered.totalBytes + packet.annexB.length > MAX_BUFFERED_STARTING_H264_BYTES
+      ) {
+        buffered.packets = [buffered.configuration];
+        buffered.totalBytes = buffered.configuration.annexB.length;
+        buffered.hasKeyframe = false;
+        this.requestH264Resync(stream);
+        return;
+      }
+      const copy: BufferedStartingH264Packet = {
+        ...packet,
+        annexB: Buffer.from(packet.annexB),
+      };
+      buffered.packets.push(copy);
+      buffered.totalBytes += copy.annexB.length;
+      return;
+    }
+    this.writeH264Packet(stream, packet);
+  }
+
   private writeFrame(stream: ActiveStream, sequence: number, jpeg: Uint8Array): void {
-    this.armIdleTimer(stream);
     if (stream.paused) return;
 
     const record = encodeDevicePreviewHttpFrame(sequence, jpeg);
+    const writeResult = this.writeStreamRecord(stream, record);
+    if (writeResult !== "failed") this.clearFirstFrameTimer(stream);
+  }
+
+  private writeH264Packet(stream: ActiveStream, packet: DevicePreviewH264Packet): void {
+    if (stream.paused) {
+      stream.h264DroppedWhilePaused = true;
+      return;
+    }
+    if (stream.h264SyncState === "awaiting_configuration" && !packet.configuration) return;
+    if (stream.h264SyncState === "awaiting_keyframe" && !packet.configuration && !packet.keyframe) {
+      return;
+    }
+    const establishesSync =
+      stream.h264SyncState === "awaiting_keyframe" && !packet.configuration && packet.keyframe;
+    const record = encodeDevicePreviewH264HttpPacket(packet);
+    const writeResult = this.writeStreamRecord(stream, record);
+    if (writeResult === "failed" || stream.finished) return;
+
+    if (packet.configuration) {
+      stream.h264SyncState = "awaiting_keyframe";
+    } else if (establishesSync) {
+      stream.h264SyncState = "synced";
+      this.clearFirstFrameTimer(stream);
+    }
+  }
+
+  private writeStreamRecord(stream: ActiveStream, record: Uint8Array): StreamWriteResult {
     let writable: boolean;
     try {
       writable = stream.res.write(Buffer.from(record));
     } catch (error) {
       this.failStream(stream.streamId, 502, errorText(error), "stream_error");
-      return;
+      return "failed";
     }
-    if (writable) return;
+    if (writable) return "writable";
 
     stream.paused = true;
-    this.sendFlow(stream, true);
+    stream.h264DroppedWhilePaused = false;
+    this.sendFlow(stream, true, false);
     const onDrain = (): void => {
       stream.drainListener = undefined;
+      if (stream.drainTimer) clearTimeout(stream.drainTimer);
+      stream.drainTimer = undefined;
       if (stream.finished || !stream.paused) return;
       stream.paused = false;
-      this.sendFlow(stream, false);
+      const resyncRequired = stream.format === "h264_annex_b" && stream.h264DroppedWhilePaused;
+      stream.h264DroppedWhilePaused = false;
+      if (resyncRequired) {
+        stream.h264SyncState = "awaiting_configuration";
+      }
+      this.sendFlow(stream, false, resyncRequired);
     };
     stream.drainListener = onDrain;
     stream.res.once("drain", onDrain);
+    stream.drainTimer = setTimeout(() => {
+      stream.drainTimer = undefined;
+      if (stream.finished || !stream.paused) return;
+      this.failStream(stream.streamId, 504, "设备画面发送超时", "stream_error");
+    }, this.drainTimeoutMs);
+    stream.drainTimer.unref?.();
+    return "backpressured";
   }
 
-  private armIdleTimer(stream: ActiveStream): void {
-    if (stream.idleTimer) clearTimeout(stream.idleTimer);
-    stream.idleTimer = setTimeout(() => {
-      this.failStream(stream.streamId, 504, "设备画面长时间没有新帧", "stream_error");
-    }, this.frameIdleTimeoutMs);
-    stream.idleTimer.unref?.();
+  private requestH264Resync(stream: ActiveStream): void {
+    if (stream.finished || stream.transport.ws.readyState !== WebSocket.OPEN) return;
+    // Reuse per-stream flow control to discard the Proxy viewer's stale GOP and request a fresh
+    // configuration + keyframe pair without disturbing other viewers sharing the capture source.
+    this.sendFlow(stream, true, false);
+    this.sendFlow(stream, false, true);
   }
 
-  private sendFlow(stream: ActiveStream, paused: boolean): void {
+  private armFirstFrameTimer(stream: ActiveStream): void {
+    if (stream.firstFrameTimer || stream.finished) return;
+    stream.firstFrameTimer = setTimeout(() => {
+      this.failStream(stream.streamId, 504, "等待设备画面首帧超时", "stream_error");
+    }, this.firstFrameTimeoutMs);
+    stream.firstFrameTimer.unref?.();
+  }
+
+  private clearFirstFrameTimer(stream: ActiveStream): void {
+    if (!stream.firstFrameTimer) return;
+    clearTimeout(stream.firstFrameTimer);
+    stream.firstFrameTimer = null;
+  }
+
+  private sendFlow(stream: ActiveStream, paused: boolean, resyncRequired: boolean): void {
     if (stream.transport.ws.readyState !== WebSocket.OPEN) return;
     stream.transport.ws.send(
-      JSON.stringify({ type: "device_preview_stream_flow", streamId: stream.streamId, paused }),
+      JSON.stringify({
+        type: "device_preview_stream_flow",
+        streamId: stream.streamId,
+        paused,
+        resyncRequired,
+      }),
     );
   }
 
@@ -1093,9 +1478,13 @@ export class DevicePreviewBridge {
     stream.finished = true;
     this.streams.delete(stream.streamId);
     stream.bufferedStartingFrame = undefined;
+    stream.bufferedStartingH264 = undefined;
     clearTimeout(stream.startTimer);
-    if (stream.idleTimer) clearTimeout(stream.idleTimer);
+    this.clearFirstFrameTimer(stream);
     if (stream.drainListener) stream.res.removeListener("drain", stream.drainListener);
+    if (stream.drainTimer) clearTimeout(stream.drainTimer);
+    stream.drainListener = undefined;
+    stream.drainTimer = undefined;
     if (stopReason && stream.lease.proxyWs.readyState === WebSocket.OPEN) {
       this.sendProxyInternal(
         stream.lease.proxyWs,
@@ -1152,17 +1541,7 @@ export class DevicePreviewBridge {
     const key = previewKey(lease.proxyId, lease.previewId);
     if (this.controllerByPreview.get(key) === lease.leaseId) {
       this.controllerByPreview.delete(key);
-      if (notify && lease.clientWs.readyState === WebSocket.OPEN) {
-        this.sendClient(
-          lease.clientWs,
-          serializeControl({
-            type: "device_preview_control_revoked_push",
-            leaseId: lease.leaseId,
-            reason,
-          }),
-          "device_preview_control_revoked_push",
-        );
-      }
+      if (notify) this.sendControlRevoked(lease, reason);
     }
   }
 
@@ -1198,16 +1577,45 @@ export class DevicePreviewBridge {
     );
   }
 
-  private clientLeaseStillValid(lease: ControlLease): boolean {
+  private clientBindingStillMatches(lease: ControlLease): boolean {
     const binding = this.options.registry.getClientBinding(lease.clientId);
-    const connection = this.proxyConnections.get(lease.proxyId);
     return (
       lease.clientWs.readyState === WebSocket.OPEN &&
       lease.clientWs.boundProxyId === lease.proxyId &&
+      lease.clientWs.bindingId === lease.bindingId &&
       binding?.proxyId === lease.proxyId &&
-      binding.ws === lease.clientWs &&
+      binding.bindingId === lease.bindingId &&
+      binding.ws === lease.clientWs
+    );
+  }
+
+  private clientLeaseStillValid(lease: ControlLease): boolean {
+    const connection = this.proxyConnections.get(lease.proxyId);
+    return (
+      this.clientBindingStillMatches(lease) &&
       this.options.registry.getProxy(lease.proxyId) === lease.proxyWs &&
       connection?.proxyWs === lease.proxyWs
+    );
+  }
+
+  private sendControlRevoked(
+    lease: ControlLease,
+    reason: "taken_over" | "stream_closed" | "proxy_offline" | "lease_expired",
+  ): void {
+    const isStillRelevant = (): boolean =>
+      this.clientBindingStillMatches(lease) &&
+      (reason !== "taken_over" || (this.leases.get(lease.leaseId) === lease && !lease.controller));
+    if (!isStillRelevant()) return;
+    this.sendClient(
+      lease.clientWs,
+      serializeControl({
+        type: "device_preview_control_revoked_push",
+        scope: { proxyId: lease.proxyId, bindingId: lease.bindingId },
+        leaseId: lease.leaseId,
+        reason,
+      }),
+      "device_preview_control_revoked_push",
+      isStillRelevant,
     );
   }
 
@@ -1263,20 +1671,28 @@ export class DevicePreviewBridge {
     }
   }
 
-  private sendClient(ws: WebSocket, raw: string, type: string): void {
-    if (ws.readyState !== WebSocket.OPEN) return;
+  private sendClient(ws: WebSocket, raw: string, type: string, guard?: () => boolean): void {
+    if (ws.readyState !== WebSocket.OPEN || (guard && !guard())) return;
     if (this.options.chaos) {
-      this.options.chaos.send(ws, raw, { direction: "proxy_to_client", type });
-    } else {
+      this.options.chaos.send(ws, raw, {
+        direction: "proxy_to_client",
+        type,
+        ...(guard ? { guard } : {}),
+      });
+    } else if (!guard || guard()) {
       ws.send(raw);
     }
   }
 
-  private sendProxy(ws: WebSocket, raw: string, type: string): void {
-    if (ws.readyState !== WebSocket.OPEN) return;
+  private sendProxy(ws: WebSocket, raw: string, type: string, guard?: () => boolean): void {
+    if (ws.readyState !== WebSocket.OPEN || (guard && !guard())) return;
     if (this.options.chaos) {
-      this.options.chaos.send(ws, raw, { direction: "client_to_proxy", type });
-    } else {
+      this.options.chaos.send(ws, raw, {
+        direction: "client_to_proxy",
+        type,
+        ...(guard ? { guard } : {}),
+      });
+    } else if (!guard || guard()) {
       ws.send(raw);
     }
   }
@@ -1293,12 +1709,6 @@ export class DevicePreviewBridge {
         "Failed to send internal Device Preview control",
       );
       return false;
-    }
-  }
-
-  private broadcastToProxyClients(proxyId: string, raw: string, type: string): void {
-    for (const clientWs of this.options.registry.getClientsForProxy(proxyId)) {
-      this.sendClient(clientWs, raw, type);
     }
   }
 

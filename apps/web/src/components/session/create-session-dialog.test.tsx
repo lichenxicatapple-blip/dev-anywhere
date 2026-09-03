@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, waitFor, within } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -108,6 +108,11 @@ function renderDialog() {
   );
 }
 
+function selectAgentCli(label: "Claude Code" | "Codex" | "Kimi Code"): void {
+  fireEvent.click(screen.getByRole("combobox", { name: "Agent CLI" }));
+  fireEvent.click(screen.getByRole("option", { name: label }));
+}
+
 describe("CreateSessionDialog", () => {
   afterEach(() => {
     cleanup();
@@ -141,6 +146,18 @@ describe("CreateSessionDialog", () => {
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
     });
+  });
+
+  it("shows Agent CLI providers as name-only dropdown options", () => {
+    renderDialog();
+
+    fireEvent.click(screen.getByRole("combobox", { name: "Agent CLI" }));
+
+    expect(screen.getAllByRole("option").map((option) => option.textContent)).toEqual([
+      "Claude Code",
+      "Codex",
+      "Kimi Code",
+    ]);
   });
 
   it("keeps initial focus inside the dialog without focusing a form field", async () => {
@@ -209,7 +226,7 @@ describe("CreateSessionDialog", () => {
     const { getByRole } = renderDialog();
 
     fireEvent.click(getByRole("button", { name: /聊天模式/ }));
-    fireEvent.click(getByRole("button", { name: "Codex" }));
+    selectAgentCli("Codex");
     fireEvent.click(getByRole("button", { name: "创建" }));
 
     await waitFor(() => {
@@ -242,7 +259,7 @@ describe("CreateSessionDialog", () => {
     const { getByRole, getByText } = renderDialog();
 
     fireEvent.click(getByRole("button", { name: /聊天模式/ }));
-    fireEvent.click(getByRole("button", { name: "Kimi Code" }));
+    selectAgentCli("Kimi Code");
 
     const chatMode = getByRole("button", { name: /聊天模式/ }) as HTMLButtonElement;
     expect(chatMode.disabled).toBe(false);
@@ -327,9 +344,7 @@ describe("CreateSessionDialog", () => {
         fireEvent.click(getByRole("button", { name: /聊天模式/ }));
       }
       if (provider !== "claude") {
-        fireEvent.click(
-          getByRole("button", { name: provider === "codex" ? "Codex" : "Kimi Code" }),
-        );
+        selectAgentCli(provider === "codex" ? "Codex" : "Kimi Code");
       }
       fireEvent.click(getByRole("combobox", { name: "权限模式" }));
       fireEvent.click(getByRole("option", { name: permissionLabel }));
@@ -508,14 +523,12 @@ describe("CreateSessionDialog", () => {
 
     const { getByRole, getByText } = renderDialog();
 
-    await waitFor(() => {
-      getByText("未找到");
-    });
-    const claudeButton = getByRole("button", { name: "Claude Code" }) as HTMLButtonElement;
+    await waitFor(() => getByText("claude not found in PATH"));
+    const providerSelect = getByRole("combobox", { name: "Agent CLI" }) as HTMLButtonElement;
     // Missing CLI providers remain selectable so the path editor can be opened; only create is
     // blocked until the selected provider becomes available.
-    expect(claudeButton.disabled).toBe(false);
-    expect(claudeButton).not.toHaveAttribute("aria-disabled");
+    expect(providerSelect.disabled).toBe(false);
+    expect(providerSelect).not.toHaveAttribute("aria-disabled");
     expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
@@ -530,10 +543,9 @@ describe("CreateSessionDialog", () => {
       },
     });
 
-    const { getByPlaceholderText, getByRole, getByText } = renderDialog();
+    const { getByPlaceholderText, getByRole } = renderDialog();
 
-    fireEvent.click(getByRole("button", { name: "Kimi Code" }));
-    getByText("未检测");
+    selectAgentCli("Kimi Code");
     expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
 
     fireEvent.click(getByRole("button", { name: "指定路径" }));
@@ -562,10 +574,7 @@ describe("CreateSessionDialog", () => {
 
     const { getByLabelText, getByRole, getByText } = renderDialog();
 
-    await waitFor(() => {
-      getByText("未找到");
-    });
-    fireEvent.click(getByRole("button", { name: "Claude Code" }));
+    await waitFor(() => getByText("claude not found in PATH"));
     fireEvent.click(getByRole("button", { name: "指定路径" }));
     fireEvent.change(getByLabelText("CLI 路径"), {
       target: { value: "/home/dev/.local/bin/claude" },

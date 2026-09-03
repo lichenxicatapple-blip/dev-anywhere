@@ -1,4 +1,4 @@
-export interface DevicePreviewFrameLayout {
+interface DevicePreviewFrameLayout {
   left: number;
   top: number;
   width: number;
@@ -7,20 +7,22 @@ export interface DevicePreviewFrameLayout {
   frameHeight: number;
 }
 
-export interface NormalizedDevicePoint {
+interface NormalizedDevicePoint {
   x: number;
   y: number;
 }
 
-/** Maps a browser pointer into an object-fit:contain frame. Letterboxed space is not clickable. */
-export function normalizedPointInDeviceFrame(
-  clientX: number,
-  clientY: number,
-  layout: DevicePreviewFrameLayout,
-): NormalizedDevicePoint | null {
+interface RenderedDeviceFrame {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+  width: number;
+  height: number;
+}
+
+function renderedDeviceFrame(layout: DevicePreviewFrameLayout): RenderedDeviceFrame | null {
   const values = [
-    clientX,
-    clientY,
     layout.left,
     layout.top,
     layout.width,
@@ -39,50 +41,51 @@ export function normalizedPointInDeviceFrame(
   }
 
   const scale = Math.min(layout.width / layout.frameWidth, layout.height / layout.frameHeight);
-  const renderedWidth = layout.frameWidth * scale;
-  const renderedHeight = layout.frameHeight * scale;
-  const renderedLeft = layout.left + (layout.width - renderedWidth) / 2;
-  const renderedTop = layout.top + (layout.height - renderedHeight) / 2;
-  const x = (clientX - renderedLeft) / renderedWidth;
-  const y = (clientY - renderedTop) / renderedHeight;
-  if (x < 0 || x > 1 || y < 0 || y > 1) return null;
-  return { x: Math.min(1, Math.max(0, x)), y: Math.min(1, Math.max(0, y)) };
+  const width = layout.frameWidth * scale;
+  const height = layout.frameHeight * scale;
+  const left = layout.left + (layout.width - width) / 2;
+  const top = layout.top + (layout.height - height) / 2;
+  return { left, top, right: left + width, bottom: top + height, width, height };
 }
 
-export type DevicePointerGesture =
-  | { kind: "tap"; x: number; y: number }
-  | {
-      kind: "swipe";
-      startX: number;
-      startY: number;
-      endX: number;
-      endY: number;
-      durationMs: number;
-    };
-
-export function devicePointerGesture(input: {
-  start: NormalizedDevicePoint;
-  end: NormalizedDevicePoint;
-  startClientX: number;
-  startClientY: number;
-  endClientX: number;
-  endClientY: number;
-  durationMs: number;
-  tapSlopPx?: number;
-}): DevicePointerGesture {
-  const distance = Math.hypot(
-    input.endClientX - input.startClientX,
-    input.endClientY - input.startClientY,
-  );
-  if (distance <= (input.tapSlopPx ?? 8)) {
-    return { kind: "tap", x: input.end.x, y: input.end.y };
-  }
+function pointInRenderedFrame(
+  clientX: number,
+  clientY: number,
+  frame: RenderedDeviceFrame,
+): NormalizedDevicePoint {
   return {
-    kind: "swipe",
-    startX: input.start.x,
-    startY: input.start.y,
-    endX: input.end.x,
-    endY: input.end.y,
-    durationMs: Math.min(5_000, Math.max(16, Math.round(input.durationMs))),
+    x: Math.min(1, Math.max(0, (clientX - frame.left) / frame.width)),
+    y: Math.min(1, Math.max(0, (clientY - frame.top) / frame.height)),
   };
+}
+
+/** Maps a browser pointer into an object-fit:contain frame. Letterboxed space is not clickable. */
+export function normalizedPointInDeviceFrame(
+  clientX: number,
+  clientY: number,
+  layout: DevicePreviewFrameLayout,
+): NormalizedDevicePoint | null {
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+  const frame = renderedDeviceFrame(layout);
+  if (!frame) return null;
+  if (
+    clientX < frame.left ||
+    clientX > frame.right ||
+    clientY < frame.top ||
+    clientY > frame.bottom
+  ) {
+    return null;
+  }
+  return pointInRenderedFrame(clientX, clientY, frame);
+}
+
+/** Maps an already-captured pointer back onto the nearest screen coordinate. */
+export function clampedPointInDeviceFrame(
+  clientX: number,
+  clientY: number,
+  layout: DevicePreviewFrameLayout,
+): NormalizedDevicePoint | null {
+  if (!Number.isFinite(clientX) || !Number.isFinite(clientY)) return null;
+  const frame = renderedDeviceFrame(layout);
+  return frame ? pointInRenderedFrame(clientX, clientY, frame) : null;
 }

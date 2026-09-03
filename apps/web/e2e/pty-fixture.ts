@@ -152,6 +152,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
               requestId: msg.requestId,
               success: true,
               proxyId: "proxy-1",
+              bindingId: `pty-binding-${String(msg.requestId)}`,
             });
             return;
           }

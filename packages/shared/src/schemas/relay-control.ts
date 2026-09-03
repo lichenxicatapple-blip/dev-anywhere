@@ -20,6 +20,7 @@ import {
 import { PTY_INITIAL_MAX_COLS, PTY_INITIAL_MAX_ROWS } from "../constants/pty.js";
 import {
   PreviewHtmlEntriesSchema,
+  WebPreviewNameSchema,
   PreviewSummarySchema,
   TunnelProviderSchema,
   WebPreviewCapabilitySchema,
@@ -28,12 +29,17 @@ import {
 } from "./web-preview.js";
 import {
   DevicePreviewCapabilitySchema,
+  DevicePreviewH264StreamProfileSchema,
   DevicePreviewInputSchema,
+  DevicePreviewJpegStreamProfileSchema,
+  DevicePreviewNameSchema,
+  DevicePreviewStreamFormatSchema,
   DevicePreviewStreamProfileSchema,
   DevicePreviewStreamStopReasonSchema,
   DevicePreviewSummarySchema,
   DevicePreviewTargetSchema,
 } from "./device-preview.js";
+import { PreviewScopeSchema } from "./preview-scope.js";
 
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
@@ -137,6 +143,10 @@ const RequestErrorShape = {
   error: z.string().optional(),
   errorCode: ControlErrorCodeSchema.optional(),
 };
+const RequiredRequestErrorShape = {
+  error: z.string().min(1),
+  errorCode: ControlErrorCodeSchema,
+};
 const RemoteFileDispositionSchema = z.enum(["inline", "download"]);
 const RemoteFileUploadKindSchema = z.enum(["clipboard_image", "file"]);
 
@@ -172,6 +182,511 @@ function control<T extends string, S extends z.ZodRawShape>(
   };
 }
 
+function strictControl<T extends string, S extends z.ZodRawShape>(
+  type: T,
+  shape: S,
+  directions?: RelayControlDirection | RelayControlDirection[],
+): ControlDefinition<T, S> {
+  return {
+    type,
+    directions: new Set(Array.isArray(directions) ? directions : directions ? [directions] : []),
+    schema: z
+      .object({
+        type: z.literal(type),
+        ...shape,
+      })
+      .strict() as ControlDefinition<T, S>["schema"],
+  };
+}
+
+function controlSchema<T extends string, S extends z.ZodType>(
+  type: T,
+  schema: S,
+  directions?: RelayControlDirection | RelayControlDirection[],
+): { type: T; directions: ReadonlySet<RelayControlDirection>; schema: S } {
+  return {
+    type,
+    directions: new Set(Array.isArray(directions) ? directions : directions ? [directions] : []),
+    schema,
+  };
+}
+
+const ProxySelectResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("proxy_select_response"),
+      ...RequestIdShape,
+      success: z.literal(true),
+      proxyId: IdSchema,
+      bindingId: IdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("proxy_select_response"),
+      ...RequestIdShape,
+      success: z.literal(false),
+      ...RequestErrorShape,
+    })
+    .strict(),
+]);
+
+const ClientRegisterResponseSchema = z.discriminatedUnion("status", [
+  z
+    .object({
+      type: z.literal("client_register_response"),
+      status: z.literal("restored"),
+      proxyId: IdSchema,
+      bindingId: IdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("client_register_response"),
+      status: z.literal("proxy_offline"),
+      proxyId: IdSchema,
+      bindingId: IdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("client_register_response"),
+      status: z.literal("new"),
+    })
+    .strict(),
+]);
+
+const PreviewCreateResponseSchema = z.discriminatedUnion("accepted", [
+  z
+    .object({
+      type: z.literal("preview_create_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      accepted: z.literal(true),
+      previewId: IdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("preview_create_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      accepted: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewCreateResponseSchema = z.discriminatedUnion("accepted", [
+  z
+    .object({
+      type: z.literal("device_preview_create_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      accepted: z.literal(true),
+      previewId: IdSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_create_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      accepted: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const PreviewCapabilityResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("preview_capability_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(true),
+      capability: WebPreviewCapabilitySchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("preview_capability_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewCapabilityResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_capability_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(true),
+      capability: DevicePreviewCapabilitySchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_capability_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const ProxyInfoRequestSchema = z
+  .object({
+    type: z.literal("proxy_info_request"),
+    ...RequestIdShape,
+  })
+  .strict();
+
+const ProxyInfoResponseSchema = z
+  .object({
+    type: z.literal("proxy_info"),
+    ...RequestIdShape,
+    homePath: z.string(),
+    agentCli: AgentCliStatusSchema,
+  })
+  .strict();
+
+const PreviewStaticInspectResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("preview_static_inspect_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(true),
+      entryPath: WebPreviewPathSchema.optional(),
+      htmlEntries: PreviewHtmlEntriesSchema,
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("preview_static_inspect_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const PreviewRenameResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("preview_rename_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("preview_rename_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const PreviewReconnectResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("preview_reconnect_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("preview_reconnect_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const PreviewCloseResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("preview_close_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("preview_close_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewTargetsResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_targets_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(true),
+      targets: z.array(DevicePreviewTargetSchema).max(1_024),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_targets_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewRenameResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_rename_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_rename_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewReconnectResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_reconnect_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_reconnect_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewCloseResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_close_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_close_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewStreamUrlResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_stream_url_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      previewId: IdSchema,
+      success: z.literal(true),
+      url: z.string().min(1).max(4_096),
+      leaseId: IdSchema,
+      expiresAt: z.number().int().nonnegative(),
+      controlMode: z.enum(["controller", "view_only"]),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_stream_url_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      previewId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewStreamStartResponseBaseShape = {
+  type: z.literal("device_preview_stream_start_response"),
+  streamId: IdSchema,
+  leaseId: IdSchema,
+  previewId: IdSchema,
+};
+
+const DevicePreviewStreamStartSuccessSchema = z
+  .object({
+    ...DevicePreviewStreamStartResponseBaseShape,
+    success: z.literal(true),
+    format: DevicePreviewStreamFormatSchema,
+    width: z.number().int().positive().max(16_384).optional(),
+    height: z.number().int().positive().max(16_384).optional(),
+  })
+  .strict()
+  .superRefine((response, context) => {
+    if ((response.width === undefined) === (response.height === undefined)) return;
+    context.addIssue({
+      code: "custom",
+      path: response.width === undefined ? ["width"] : ["height"],
+      message: "Device preview stream dimensions must include both width and height",
+    });
+  });
+
+const DevicePreviewStreamStartResponseSchema = z.discriminatedUnion("success", [
+  DevicePreviewStreamStartSuccessSchema,
+  z
+    .object({
+      ...DevicePreviewStreamStartResponseBaseShape,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewStreamCompleteSchema = z
+  .object({
+    type: z.literal("device_preview_stream_complete"),
+    streamId: IdSchema,
+    leaseId: IdSchema,
+    previewId: IdSchema,
+    success: z.literal(false),
+    error: z.string().min(1),
+  })
+  .strict();
+
+const DevicePreviewStreamStartBaseShape = {
+  type: z.literal("device_preview_stream_start"),
+  streamId: IdSchema,
+  leaseId: IdSchema,
+  previewId: IdSchema,
+};
+
+const DevicePreviewStreamStartSchema = z.discriminatedUnion("format", [
+  z
+    .object({
+      ...DevicePreviewStreamStartBaseShape,
+      ...DevicePreviewJpegStreamProfileSchema.shape,
+    })
+    .strict(),
+  z
+    .object({
+      ...DevicePreviewStreamStartBaseShape,
+      ...DevicePreviewH264StreamProfileSchema.shape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewInputAckSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_input_ack"),
+      scope: PreviewScopeSchema,
+      leaseId: IdSchema,
+      inputSeq: z.number().int().min(0).max(0xffffffff),
+      success: z.literal(true),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_input_ack"),
+      scope: PreviewScopeSchema,
+      leaseId: IdSchema,
+      inputSeq: z.number().int().min(0).max(0xffffffff),
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
+const DevicePreviewControlClaimResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("device_preview_control_claim_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      leaseId: IdSchema,
+      success: z.literal(true),
+      controlMode: z.literal("controller"),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("device_preview_control_claim_response"),
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      leaseId: IdSchema,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+    })
+    .strict(),
+]);
+
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 const relayControlDefinitions = [
   control("proxy_register", {
@@ -183,10 +698,10 @@ const relayControlDefinitions = [
     status: z.enum(["new", "reconnected"]),
     // optional 只用于滚动升级：新 Proxy 连接旧 Relay 时继续工作，但不会自动更新。
     relayVersion: z.string().min(1).max(64).optional(),
-    // New Relays rotate this nonce for every main Proxy connection. The dedicated image stream
-    // socket must present it before Relay accepts frames, so a superseded Proxy connection cannot
-    // keep publishing into a newly registered Proxy with the same persistent proxyId.
-    connectionId: IdSchema.optional(),
+    // Relay rotates this nonce for every successful main Proxy registration. The dedicated image
+    // stream socket must present it before Relay accepts frames, so a superseded Proxy connection
+    // cannot keep publishing into a newly registered Proxy with the same persistent proxyId.
+    connectionId: IdSchema,
   }),
   control("proxy_list_request", RequestIdShape),
   control("proxy_list_response", {
@@ -310,12 +825,7 @@ const relayControlDefinitions = [
     path: z.string().optional(),
   }),
   control("proxy_select", { ...RequestIdShape, proxyId: IdSchema }),
-  control("proxy_select_response", {
-    ...RequestIdShape,
-    success: z.boolean(),
-    proxyId: IdSchema.optional(),
-    ...RequestErrorShape,
-  }),
+  controlSchema("proxy_select_response", ProxySelectResponseSchema),
   control("relay_error", {
     code: z.enum(Object.values(RelayErrorCode) as [RelayErrorCode, ...RelayErrorCode[]]),
     message: z.string(),
@@ -395,106 +905,117 @@ const relayControlDefinitions = [
 
   // Web preview is independent from Agent/terminal sessions. Relay rewrites requestId and routes
   // every response to the exact requesting WebSocket; only the two push messages are broadcast.
-  control(
+  strictControl(
+    "preview_capability_request",
+    {
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      refreshPath: z.boolean(),
+    },
+    "client_to_proxy",
+  ),
+  controlSchema("preview_capability_response", PreviewCapabilityResponseSchema, "proxy_to_client"),
+  strictControl(
     "preview_static_inspect_request",
     {
       ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
       path: WebPreviewPathSchema,
     },
     "client_to_proxy",
   ),
-  control(
+  controlSchema(
     "preview_static_inspect_response",
-    {
-      ...RequiredRequestIdShape,
-      success: z.boolean(),
-      rootPath: WebPreviewPathSchema.optional(),
-      entryPath: WebPreviewPathSchema.optional(),
-      htmlEntries: PreviewHtmlEntriesSchema.optional(),
-      ...RequestErrorShape,
-    },
+    PreviewStaticInspectResponseSchema,
     "proxy_to_client",
   ),
-  control(
+  strictControl(
     "preview_create_request",
     {
       ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
       operationId: IdSchema,
       source: WebPreviewSourceInputSchema,
       tunnelProvider: TunnelProviderSchema,
+      name: WebPreviewNameSchema.optional(),
     },
     "client_to_proxy",
   ),
-  control(
-    "preview_create_response",
-    {
-      ...RequiredRequestIdShape,
-      operationId: IdSchema,
-      accepted: z.boolean(),
-      previewId: IdSchema.optional(),
-      ...RequestErrorShape,
-    },
-    "proxy_to_client",
+  controlSchema("preview_create_response", PreviewCreateResponseSchema, "proxy_to_client"),
+  strictControl(
+    "preview_list_request",
+    { ...RequiredRequestIdShape, scope: PreviewScopeSchema },
+    "client_to_proxy",
   ),
-  control("preview_list_request", RequiredRequestIdShape, "client_to_proxy"),
-  control(
+  strictControl(
     "preview_list_response",
     {
       ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
       epoch: IdSchema,
       revision: z.number().int().nonnegative(),
       previews: z.array(PreviewSummarySchema),
     },
     "proxy_to_client",
   ),
-  control(
+  strictControl(
+    "preview_rename_request",
+    {
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      name: WebPreviewNameSchema,
+    },
+    "client_to_proxy",
+  ),
+  controlSchema("preview_rename_response", PreviewRenameResponseSchema, "proxy_to_client"),
+  strictControl(
     "preview_reconnect_request",
     {
       ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
       previewId: IdSchema,
     },
     "client_to_proxy",
   ),
-  control(
-    "preview_reconnect_response",
-    {
-      ...RequiredRequestIdShape,
-      previewId: IdSchema,
-      success: z.boolean(),
-      ...RequestErrorShape,
-    },
-    "proxy_to_client",
-  ),
-  control(
+  controlSchema("preview_reconnect_response", PreviewReconnectResponseSchema, "proxy_to_client"),
+  strictControl(
     "preview_close_request",
     {
       ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
       previewId: IdSchema,
     },
     "client_to_proxy",
   ),
-  control(
-    "preview_close_response",
-    {
-      ...RequiredRequestIdShape,
-      previewId: IdSchema,
-      success: z.boolean(),
-      ...RequestErrorShape,
-    },
-    "proxy_to_client",
-  ),
-  control(
+  controlSchema("preview_close_response", PreviewCloseResponseSchema, "proxy_to_client"),
+  strictControl("preview_state_event", {
+    epoch: IdSchema,
+    revision: z.number().int().nonnegative(),
+    preview: PreviewSummarySchema,
+  }),
+  strictControl("preview_removed_event", {
+    epoch: IdSchema,
+    revision: z.number().int().nonnegative(),
+    previewId: IdSchema,
+  }),
+  strictControl(
     "preview_state_push",
     {
+      scope: PreviewScopeSchema,
       epoch: IdSchema,
       revision: z.number().int().nonnegative(),
       preview: PreviewSummarySchema,
     },
     "proxy_to_client",
   ),
-  control(
+  strictControl(
     "preview_removed_push",
     {
+      scope: PreviewScopeSchema,
       epoch: IdSchema,
       revision: z.number().int().nonnegative(),
       previewId: IdSchema,
@@ -503,202 +1024,183 @@ const relayControlDefinitions = [
   ),
 
   // Device previews are a sibling of Web previews under the product-level Preview entry, but
-  // their data plane is private. Management and input use the authenticated main sockets; JPEG
-  // frames use `/proxy-stream` plus a one-use HTTP stream URL issued by Relay.
-  control(
+  // their data plane is private. Management and input use the authenticated main sockets;
+  // JPEG/H.264 frames use `/proxy-stream` plus a one-use HTTP stream URL issued by Relay.
+  strictControl(
     "device_preview_capability_request",
     {
       ...RequiredRequestIdShape,
-      refreshPath: z.boolean().optional(),
+      scope: PreviewScopeSchema,
+      refreshPath: z.boolean(),
     },
     "client_to_proxy",
   ),
-  control(
+  controlSchema(
     "device_preview_capability_response",
-    {
-      ...RequiredRequestIdShape,
-      ...RequestErrorShape,
-      capability: DevicePreviewCapabilitySchema.optional(),
-    },
+    DevicePreviewCapabilityResponseSchema,
     "proxy_to_client",
   ),
-  control(
+  strictControl(
     "device_preview_targets_request",
     {
       ...RequiredRequestIdShape,
-      refresh: z.boolean().optional(),
+      scope: PreviewScopeSchema,
+      refresh: z.boolean(),
     },
     "client_to_proxy",
   ),
-  control(
+  controlSchema(
     "device_preview_targets_response",
-    {
-      ...RequiredRequestIdShape,
-      ...RequestErrorShape,
-      success: z.boolean(),
-      targets: z.array(DevicePreviewTargetSchema).max(1_024),
-    },
+    DevicePreviewTargetsResponseSchema,
     "proxy_to_client",
   ),
-  control(
+  strictControl(
     "device_preview_create_request",
     {
       ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
       operationId: IdSchema,
       targetId: IdSchema,
+      name: DevicePreviewNameSchema.optional(),
     },
     "client_to_proxy",
   ),
-  control(
+  controlSchema(
     "device_preview_create_response",
-    {
-      ...RequiredRequestIdShape,
-      ...RequestErrorShape,
-      operationId: IdSchema,
-      accepted: z.boolean(),
-      previewId: IdSchema.optional(),
-    },
+    DevicePreviewCreateResponseSchema,
     "proxy_to_client",
   ),
-  control("device_preview_list_request", RequiredRequestIdShape, "client_to_proxy"),
-  control(
+  strictControl(
+    "device_preview_list_request",
+    { ...RequiredRequestIdShape, scope: PreviewScopeSchema },
+    "client_to_proxy",
+  ),
+  strictControl(
     "device_preview_list_response",
     {
       ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
       epoch: IdSchema,
       revision: z.number().int().nonnegative(),
       previews: z.array(DevicePreviewSummarySchema).max(1_024),
     },
     "proxy_to_client",
   ),
-  control(
+  strictControl(
+    "device_preview_rename_request",
+    {
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+      name: DevicePreviewNameSchema,
+    },
+    "client_to_proxy",
+  ),
+  controlSchema(
+    "device_preview_rename_response",
+    DevicePreviewRenameResponseSchema,
+    "proxy_to_client",
+  ),
+  strictControl(
     "device_preview_reconnect_request",
-    { ...RequiredRequestIdShape, previewId: IdSchema },
+    {
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+    },
     "client_to_proxy",
   ),
-  control(
+  controlSchema(
     "device_preview_reconnect_response",
-    {
-      ...RequiredRequestIdShape,
-      ...RequestErrorShape,
-      previewId: IdSchema,
-      success: z.boolean(),
-    },
+    DevicePreviewReconnectResponseSchema,
     "proxy_to_client",
   ),
-  control(
+  strictControl(
     "device_preview_close_request",
-    { ...RequiredRequestIdShape, previewId: IdSchema },
+    {
+      ...RequiredRequestIdShape,
+      scope: PreviewScopeSchema,
+      operationId: IdSchema,
+      previewId: IdSchema,
+    },
     "client_to_proxy",
   ),
-  control(
+  controlSchema(
     "device_preview_close_response",
-    {
-      ...RequiredRequestIdShape,
-      ...RequestErrorShape,
-      previewId: IdSchema,
-      success: z.boolean(),
-    },
+    DevicePreviewCloseResponseSchema,
     "proxy_to_client",
   ),
-  control(
+  strictControl("device_preview_state_event", {
+    epoch: IdSchema,
+    revision: z.number().int().nonnegative(),
+    preview: DevicePreviewSummarySchema,
+  }),
+  strictControl("device_preview_removed_event", {
+    epoch: IdSchema,
+    revision: z.number().int().nonnegative(),
+    previewId: IdSchema,
+  }),
+  strictControl(
     "device_preview_state_push",
     {
+      scope: PreviewScopeSchema,
       epoch: IdSchema,
       revision: z.number().int().nonnegative(),
       preview: DevicePreviewSummarySchema,
     },
     "proxy_to_client",
   ),
-  control(
+  strictControl(
     "device_preview_removed_push",
     {
+      scope: PreviewScopeSchema,
       epoch: IdSchema,
       revision: z.number().int().nonnegative(),
       previewId: IdSchema,
     },
     "proxy_to_client",
   ),
-  control("device_preview_stream_url_request", {
+  strictControl("device_preview_stream_url_request", {
     ...RequiredRequestIdShape,
+    scope: PreviewScopeSchema,
     previewId: IdSchema,
-    profile: DevicePreviewStreamProfileSchema.optional(),
+    profile: DevicePreviewStreamProfileSchema,
   }),
-  control("device_preview_stream_url_response", {
-    ...RequiredRequestIdShape,
-    ...RequestErrorShape,
-    previewId: IdSchema,
-    success: z.boolean(),
-    url: z.string().min(1).max(4_096).optional(),
-    leaseId: IdSchema.optional(),
-    expiresAt: z.number().int().nonnegative().optional(),
-    controlMode: z.enum(["controller", "view_only"]).optional(),
-  }),
-  control("device_preview_stream_start", {
-    streamId: IdSchema,
-    leaseId: IdSchema,
-    previewId: IdSchema,
-    maxFps: DevicePreviewStreamProfileSchema.shape.maxFps,
-    maxWidth: DevicePreviewStreamProfileSchema.shape.maxWidth,
-    jpegQuality: DevicePreviewStreamProfileSchema.shape.jpegQuality,
-  }),
-  control("device_preview_stream_start_response", {
-    ...RequestErrorShape,
-    streamId: IdSchema,
-    leaseId: IdSchema,
-    previewId: IdSchema,
-    success: z.boolean(),
-    width: z.number().int().positive().max(16_384).optional(),
-    height: z.number().int().positive().max(16_384).optional(),
-  }),
-  control("device_preview_stream_stop", {
+  controlSchema("device_preview_stream_url_response", DevicePreviewStreamUrlResponseSchema),
+  controlSchema("device_preview_stream_start", DevicePreviewStreamStartSchema),
+  controlSchema("device_preview_stream_start_response", DevicePreviewStreamStartResponseSchema),
+  strictControl("device_preview_stream_stop", {
     streamId: IdSchema,
     reason: DevicePreviewStreamStopReasonSchema,
   }),
-  control("device_preview_stream_complete", {
-    ...RequestErrorShape,
-    streamId: IdSchema,
-    leaseId: IdSchema,
-    previewId: IdSchema,
-    success: z.boolean(),
-  }),
-  control(
+  controlSchema("device_preview_stream_complete", DevicePreviewStreamCompleteSchema),
+  strictControl(
     "device_preview_input",
     {
+      scope: PreviewScopeSchema,
       leaseId: IdSchema,
       inputSeq: z.number().int().min(0).max(0xffffffff),
       input: DevicePreviewInputSchema,
     },
     "client_to_proxy",
   ),
-  control(
-    "device_preview_input_ack",
-    {
-      ...RequestErrorShape,
-      leaseId: IdSchema,
-      inputSeq: z.number().int().min(0).max(0xffffffff),
-      success: z.boolean(),
-    },
-    "proxy_to_client",
-  ),
+  controlSchema("device_preview_input_ack", DevicePreviewInputAckSchema, "proxy_to_client"),
   // Relay-internal ordering barrier. It is deliberately absent from both public direction sets:
   // browsers cannot abort another viewer's queued input, and Proxy never sends it to browsers.
-  control("device_preview_input_revoke", {
+  strictControl("device_preview_input_revoke", {
     leaseId: IdSchema,
     reason: z.literal("control_taken_over"),
   }),
-  control("device_preview_control_claim_request", {
+  strictControl("device_preview_control_claim_request", {
     ...RequiredRequestIdShape,
+    scope: PreviewScopeSchema,
     leaseId: IdSchema,
   }),
-  control("device_preview_control_claim_response", {
-    ...RequiredRequestIdShape,
-    ...RequestErrorShape,
-    leaseId: IdSchema,
-    success: z.boolean(),
-    controlMode: z.enum(["controller", "view_only"]),
-  }),
-  control("device_preview_control_revoked_push", {
+  controlSchema("device_preview_control_claim_response", DevicePreviewControlClaimResponseSchema),
+  strictControl("device_preview_control_revoked_push", {
+    scope: PreviewScopeSchema,
     leaseId: IdSchema,
     reason: z.enum(["taken_over", "stream_closed", "proxy_offline", "lease_expired"]),
   }),
@@ -713,10 +1215,7 @@ const relayControlDefinitions = [
     osName: z.string().min(1),
     deviceKind: z.enum(["desktop", "tablet", "phone", "unknown"]),
   }),
-  control("client_register_response", {
-    status: z.enum(["restored", "proxy_offline", "new"]),
-    proxyId: IdSchema.optional(),
-  }),
+  controlSchema("client_register_response", ClientRegisterResponseSchema),
 
   // Proxy 离线通知
   control("proxy_offline", {
@@ -883,23 +1382,8 @@ const relayControlDefinitions = [
   ),
   // 客户端询问 proxy 的环境信息 (home 路径等), client -> proxy -> response
   // FilePathPicker 用 homePath 作为 select 模式下的默认起点, 新建会话时打开即可浏览
-  control(
-    "proxy_info_request",
-    { ...RequestIdShape, refreshPath: z.boolean().optional() },
-    "client_to_proxy",
-  ),
-  control(
-    "proxy_info",
-    {
-      ...RequestIdShape,
-      homePath: z.string(),
-      agentCli: AgentCliStatusSchema,
-      webPreview: WebPreviewCapabilitySchema.optional(),
-      // Optional for rolling upgrades: older Proxy builds only report Web preview support.
-      devicePreview: DevicePreviewCapabilitySchema.optional(),
-    },
-    "proxy_to_client",
-  ),
+  controlSchema("proxy_info_request", ProxyInfoRequestSchema, "client_to_proxy"),
+  controlSchema("proxy_info", ProxyInfoResponseSchema, "proxy_to_client"),
   control(
     "agent_cli_config_update",
     { ...RequestIdShape, provider: z.enum(providerValues), path: z.string().min(1) },

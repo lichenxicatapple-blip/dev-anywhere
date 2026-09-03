@@ -114,18 +114,6 @@ export function providerStatus(
   return { label: "未找到", disabled: true, title: status.error };
 }
 
-export function providerTooltip(
-  provider: ProviderId,
-  status: ReturnType<typeof providerStatus>,
-): string {
-  if (status.title) {
-    return status.disabled
-      ? `${PROVIDER_LABEL[provider]}：${status.title}`
-      : `${PROVIDER_LABEL[provider]} 路径：${status.title}`;
-  }
-  return `${PROVIDER_LABEL[provider]}：${status.label}`;
-}
-
 export function normalizePermissionModeForProvider(
   provider: ProviderId,
   permissionMode: PermissionMode,

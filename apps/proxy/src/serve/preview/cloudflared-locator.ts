@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
+import type { WebPreviewTunnelStatus } from "@dev-anywhere/shared";
 import { refreshLoginShellPath } from "../../common/login-shell-path.js";
 import { findExecutableCandidates } from "../../providers/path-resolver.js";
 
@@ -10,13 +11,7 @@ const SHARED_PATH_MAX_LENGTH = 4_096;
 const SHARED_VERSION_MAX_LENGTH = 256;
 const SHARED_SUGGESTION_MAX_COUNT = 32;
 
-export interface CloudflaredCapability {
-  available: boolean;
-  command?: string;
-  version?: string;
-  error?: string;
-  suggestions?: string[];
-}
+export type CloudflaredCapability = WebPreviewTunnelStatus;
 
 interface LocatedCloudflared {
   capability: CloudflaredCapability;

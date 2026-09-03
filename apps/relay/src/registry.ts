@@ -1,5 +1,6 @@
 import { WebSocket } from "ws";
 import { defineFSM } from "@dev-anywhere/shared";
+import { nanoid } from "nanoid";
 
 // 显式代理连接状态，取代 ws null 检查
 type ProxyConnectionState = "online" | "offline";
@@ -30,9 +31,15 @@ interface ProxyState {
 // 客户端绑定状态，通过 clientId 而非 WebSocket 引用标识
 interface ClientBinding {
   proxyId: string;
+  bindingId: string;
   ws: WebSocket | null;
   connectionState: ClientConnectionState;
 }
+
+type BoundClientSocket = WebSocket & {
+  boundProxyId?: string;
+  bindingId?: string;
+};
 
 interface ClientConnectionMetadata {
   clientId?: string;
@@ -121,6 +128,7 @@ export class RelayRegistry {
     // 解绑所有绑定到该 proxy 的客户端
     for (const [clientId, binding] of this.clientBindings) {
       if (binding.proxyId === proxyId) {
+        if (binding.ws) this.clearSocketBinding(binding.ws);
         this.clientBindings.delete(clientId);
       }
     }
@@ -128,9 +136,10 @@ export class RelayRegistry {
     // ClientSocket 还单独缓存了 boundProxyId 供消息热路径路由。只删 clientBindings 会让
     // 活跃/重复 tab 残留旧 ID，并在同 ID 的 Proxy 日后重新注册时绕过重新选择直接路由。
     for (const ws of this.connectedClients.keys()) {
-      const clientWs = ws as WebSocket & { boundProxyId?: string };
+      const clientWs = ws as BoundClientSocket;
       if (clientWs.boundProxyId === proxyId) {
         delete clientWs.boundProxyId;
+        delete clientWs.bindingId;
       }
     }
 
@@ -225,25 +234,28 @@ export class RelayRegistry {
   }
 
   // clientId 绑定方式
-  bindClientById(clientId: string, proxyId: string, ws: WebSocket): boolean {
+  bindClientById(clientId: string, proxyId: string, ws: WebSocket): string | undefined {
     if (!this.proxyStates.has(proxyId)) {
-      return false;
+      return undefined;
     }
-    this.clientBindings.set(clientId, { proxyId, ws, connectionState: "bound" });
-    return true;
+    return this.installClientBinding(clientId, proxyId, ws).bindingId;
   }
 
-  updateClientSocket(clientId: string, ws: WebSocket): void {
+  restoreClientBinding(
+    clientId: string,
+    ws: WebSocket,
+  ): { proxyId: string; bindingId: string } | undefined {
     const binding = this.clientBindings.get(clientId);
-    if (binding) {
-      binding.ws = ws;
-    }
+    if (!binding) return undefined;
+    const restored = this.installClientBinding(clientId, binding.proxyId, ws);
+    return { proxyId: restored.proxyId, bindingId: restored.bindingId };
   }
 
   // 断开客户端 WebSocket 但保留绑定关系，重连时可恢复
   unbindClientById(clientId: string): void {
     const binding = this.clientBindings.get(clientId);
     if (binding) {
+      if (binding.ws) this.clearSocketBinding(binding.ws);
       binding.ws = null;
     }
   }
@@ -253,12 +265,53 @@ export class RelayRegistry {
   unbindClientSocket(clientId: string, ws: WebSocket): boolean {
     const binding = this.clientBindings.get(clientId);
     if (!binding || binding.ws !== ws) return false;
+    this.clearSocketBinding(ws);
     binding.ws = null;
     return true;
   }
 
   getClientBinding(clientId: string): ClientBinding | undefined {
     return this.clientBindings.get(clientId);
+  }
+
+  isCurrentClientBinding(
+    clientId: string | undefined,
+    ws: WebSocket,
+    scope: { proxyId: string; bindingId: string },
+  ): boolean {
+    if (!clientId) return false;
+    const socket = ws as BoundClientSocket;
+    const binding = this.clientBindings.get(clientId);
+    return (
+      binding?.ws === ws &&
+      binding.proxyId === scope.proxyId &&
+      binding.bindingId === scope.bindingId &&
+      socket.boundProxyId === scope.proxyId &&
+      socket.bindingId === scope.bindingId
+    );
+  }
+
+  private installClientBinding(clientId: string, proxyId: string, ws: WebSocket): ClientBinding {
+    const previous = this.clientBindings.get(clientId);
+    if (previous?.ws) this.clearSocketBinding(previous.ws);
+
+    const binding: ClientBinding = {
+      proxyId,
+      bindingId: nanoid(),
+      ws,
+      connectionState: "bound",
+    };
+    this.clientBindings.set(clientId, binding);
+    const socket = ws as BoundClientSocket;
+    socket.boundProxyId = proxyId;
+    socket.bindingId = binding.bindingId;
+    return binding;
+  }
+
+  private clearSocketBinding(ws: WebSocket): void {
+    const socket = ws as BoundClientSocket;
+    delete socket.boundProxyId;
+    delete socket.bindingId;
   }
 
   // 获取绑定到指定 proxy 的所有活跃客户端 WebSocket

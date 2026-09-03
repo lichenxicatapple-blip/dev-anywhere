@@ -1,5 +1,10 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
-import { usePreviewStore } from "@/stores/preview-store";
+import type { DevicePreviewSummary } from "@dev-anywhere/shared";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createPreviewScope, type PreviewScope } from "@/services/preview-scope";
+import { previewController } from "@/services/preview-controller";
+import { selectDevicePreviews, useDevicePreviewStore } from "@/stores/device-preview-store";
+import { selectWebPreviews, usePreviewStore } from "@/stores/preview-store";
+import type { RelayClient } from "./relay-client";
 
 const { toastSuccess, toastError, copyText } = vi.hoisted(() => ({
   toastSuccess: vi.fn(),
@@ -26,24 +31,74 @@ const readyPreview = {
   updatedAt: 20,
 };
 
+const startingPreview = {
+  previewId: readyPreview.previewId,
+  name: readyPreview.name,
+  source: readyPreview.source,
+  state: "starting" as const,
+  tunnelProvider: readyPreview.tunnelProvider,
+  createdAt: readyPreview.createdAt,
+  updatedAt: 10,
+};
+
+const readyDevicePreview: DevicePreviewSummary = {
+  previewId: "device-preview-one",
+  name: "Pixel 9",
+  platform: "android",
+  targetId: "emulator-5554",
+  model: "Pixel 9",
+  osVersion: "15",
+  state: "ready",
+  interactive: true,
+  createdAt: 1,
+  updatedAt: 2,
+};
+
+function relayForScope(scope: PreviewScope): RelayClient {
+  return {
+    getPreviewScope: () => scope,
+    requestWebPreviewList: vi.fn(),
+    requestDevicePreviewList: vi.fn(),
+  } as unknown as RelayClient;
+}
+
 describe("preview-dispatcher", () => {
+  let scope: PreviewScope;
+  let relay: RelayClient;
+
   beforeEach(() => {
-    usePreviewStore.getState().clear();
+    previewController.dispose();
+    scope = createPreviewScope("proxy-a", "binding-a");
+    relay = relayForScope(scope);
+    previewController.activate(relay, scope);
+    usePreviewStore.getState().replaceSnapshot(scope, {
+      epoch: "web-epoch",
+      revision: 0,
+      previews: [startingPreview],
+    });
+    useDevicePreviewStore.getState().replaceSnapshot(scope, {
+      epoch: "device-epoch",
+      revision: 0,
+      previews: [],
+    });
     toastSuccess.mockReset();
     toastError.mockReset();
     copyText.mockReset();
     copyText.mockResolvedValue("clipboard");
   });
 
-  it("upserts state pushes and exposes a working copy action", async () => {
-    dispatchPreviewMessage({
+  afterEach(() => previewController.dispose());
+
+  it("routes web pushes through the active controller and exposes a working copy action", async () => {
+    dispatchPreviewMessage(relay, {
       type: "preview_state_push",
-      epoch: "epoch-a",
+      scope,
+      epoch: "web-epoch",
       revision: 1,
       preview: readyPreview,
     });
 
-    expect(usePreviewStore.getState().previews).toEqual([readyPreview]);
+    expect(selectWebPreviews(usePreviewStore.getState())).toEqual([readyPreview]);
     expect(toastSuccess).toHaveBeenCalledOnce();
 
     const options = toastSuccess.mock.calls[0][1] as { action: { onClick: () => void } };
@@ -51,21 +106,51 @@ describe("preview-dispatcher", () => {
     options.action.onClick();
     await vi.waitFor(() =>
       expect(copyText).toHaveBeenCalledWith(readyPreview.publicUrl, {
-        allowLegacyFallback: true,
+        allowUserGestureFallback: true,
       }),
     );
   });
 
-  it("removes previews from a removed push", () => {
-    usePreviewStore.getState().applyPreviewState(readyPreview, "epoch-a", 1);
+  it("routes device state and removal pushes through the same dispatcher", () => {
+    dispatchPreviewMessage(relay, {
+      type: "device_preview_state_push",
+      scope,
+      epoch: "device-epoch",
+      revision: 1,
+      preview: readyDevicePreview,
+    });
+    expect(selectDevicePreviews(useDevicePreviewStore.getState())).toEqual([readyDevicePreview]);
 
-    dispatchPreviewMessage({
-      type: "preview_removed_push",
-      epoch: "epoch-a",
+    dispatchPreviewMessage(relay, {
+      type: "device_preview_removed_push",
+      scope,
+      epoch: "device-epoch",
       revision: 2,
-      previewId: readyPreview.previewId,
+      previewId: readyDevicePreview.previewId,
+    });
+    expect(selectDevicePreviews(useDevicePreviewStore.getState())).toEqual([]);
+  });
+
+  it("drops pushes delivered by a stale Relay binding", () => {
+    const staleRelay = relay;
+    const currentScope = createPreviewScope("proxy-b", "binding-b");
+    const currentRelay = relayForScope(currentScope);
+    previewController.activate(currentRelay, currentScope);
+    usePreviewStore.getState().replaceSnapshot(currentScope, {
+      epoch: "current-epoch",
+      revision: 0,
+      previews: [],
     });
 
-    expect(usePreviewStore.getState().previews).toEqual([]);
+    dispatchPreviewMessage(staleRelay, {
+      type: "preview_state_push",
+      scope,
+      epoch: "web-epoch",
+      revision: 1,
+      preview: readyPreview,
+    });
+
+    expect(selectWebPreviews(usePreviewStore.getState())).toEqual([]);
+    expect(toastSuccess).not.toHaveBeenCalled();
   });
 });

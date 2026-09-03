@@ -14,6 +14,8 @@ import { cn } from "@/lib/utils";
 
 interface PreviewRowProps {
   preview: PreviewSummary;
+  pendingOperation?: "rename" | "reconnect" | "close";
+  onRename: () => void;
   onReconnect: () => void;
   onClose: () => void;
 }
@@ -58,7 +60,7 @@ function previewSourceLabel(preview: PreviewSummary): string {
 }
 
 async function copyPreviewLink(url: string): Promise<void> {
-  const result = await copyText(url, { allowLegacyFallback: true });
+  const result = await copyText(url, { allowUserGestureFallback: true });
   if (result === "failed") {
     toast.error("复制失败，请稍后重试");
     return;
@@ -66,19 +68,42 @@ async function copyPreviewLink(url: string): Promise<void> {
   toast.success("链接已复制");
 }
 
-async function sharePreview(preview: PreviewSummary): Promise<void> {
-  if (!preview.publicUrl || typeof navigator.share !== "function") return;
+async function sharePreview(name: string, url: string): Promise<void> {
+  if (typeof navigator.share !== "function") return;
   try {
-    await navigator.share({ title: preview.name, url: preview.publicUrl });
+    await navigator.share({ title: name, url });
   } catch (error) {
     if (error instanceof DOMException && error.name === "AbortError") return;
     toast.error("无法打开系统分享面板");
   }
 }
 
-export function PreviewRow({ preview, onReconnect, onClose }: PreviewRowProps) {
-  const style = STATE_STYLE[preview.state];
-  const canOpen = preview.state === "ready" && !!preview.publicUrl;
+export function PreviewRow({
+  preview,
+  pendingOperation,
+  onRename,
+  onReconnect,
+  onClose,
+}: PreviewRowProps) {
+  const authoritativeStyle = STATE_STYLE[preview.state];
+  const style =
+    pendingOperation === "reconnect"
+      ? {
+          dot: "bg-[var(--color-status-working)] animate-pulse",
+          text: "text-[var(--color-status-working)]",
+          label: "正在重新连接",
+          busy: true,
+        }
+      : pendingOperation === "close"
+        ? {
+            dot: "bg-muted-foreground animate-pulse",
+            text: "text-muted-foreground",
+            label: "正在关闭",
+            busy: true,
+          }
+        : authoritativeStyle;
+  const publicUrl = preview.state === "ready" ? preview.publicUrl : null;
+  const canOpen = publicUrl !== null;
   const canReconnect = preview.state === "failed" || preview.state === "disconnected";
   const canShare =
     canOpen && typeof navigator !== "undefined" && typeof navigator.share === "function";
@@ -108,7 +133,7 @@ export function PreviewRow({ preview, onReconnect, onClose }: PreviewRowProps) {
         </span>
         <span className={cn("shrink-0", style.text)}>{style.label}</span>
       </span>
-      {preview.error && (preview.state === "failed" || preview.state === "disconnected") ? (
+      {preview.state === "failed" ? (
         <span
           data-slot="preview-row-error"
           className="truncate text-xs text-destructive/90"
@@ -126,10 +151,11 @@ export function PreviewRow({ preview, onReconnect, onClose }: PreviewRowProps) {
       data-slot="preview-row"
       data-preview-id={preview.previewId}
       data-preview-state={preview.state}
+      data-preview-operation={pendingOperation}
     >
       {canOpen ? (
         <a
-          href={preview.publicUrl}
+          href={publicUrl}
           target="_blank"
           rel="noopener noreferrer"
           data-slot="preview-row-open"
@@ -155,9 +181,9 @@ export function PreviewRow({ preview, onReconnect, onClose }: PreviewRowProps) {
             className="size-11 md:size-6"
             aria-label="预览操作"
             data-slot="preview-row-menu-trigger"
-            disabled={preview.state === "stopping"}
+            disabled={preview.state === "stopping" || pendingOperation !== undefined}
           >
-            {style.busy ? (
+            {style.busy || pendingOperation === "rename" ? (
               <Loader2 className="animate-spin" aria-hidden="true" />
             ) : (
               <MoreHorizontal aria-hidden="true" />
@@ -165,10 +191,13 @@ export function PreviewRow({ preview, onReconnect, onClose }: PreviewRowProps) {
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" data-slot="preview-row-menu">
-          {canOpen && preview.publicUrl ? (
+          <DropdownMenuItem data-slot="preview-row-rename-item" onSelect={onRename}>
+            重命名
+          </DropdownMenuItem>
+          {canOpen ? (
             <DropdownMenuItem
               data-slot="preview-row-copy-item"
-              onSelect={() => void copyPreviewLink(preview.publicUrl!)}
+              onSelect={() => void copyPreviewLink(publicUrl)}
             >
               复制链接
             </DropdownMenuItem>
@@ -176,7 +205,7 @@ export function PreviewRow({ preview, onReconnect, onClose }: PreviewRowProps) {
           {canShare ? (
             <DropdownMenuItem
               data-slot="preview-row-share-item"
-              onSelect={() => void sharePreview(preview)}
+              onSelect={() => void sharePreview(preview.name, publicUrl)}
             >
               分享…
             </DropdownMenuItem>
@@ -186,7 +215,7 @@ export function PreviewRow({ preview, onReconnect, onClose }: PreviewRowProps) {
               重新连接
             </DropdownMenuItem>
           ) : null}
-          {(canOpen || canReconnect) && <DropdownMenuSeparator />}
+          <DropdownMenuSeparator />
           <DropdownMenuItem
             variant="destructive"
             data-slot="preview-row-close-item"

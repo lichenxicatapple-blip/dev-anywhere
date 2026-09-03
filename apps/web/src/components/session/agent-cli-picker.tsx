@@ -1,14 +1,17 @@
 import { PencilLine } from "lucide-react";
 import type { AgentCliStatus } from "@dev-anywhere/shared";
 import { Button } from "@/components/ui/button";
-import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
-import { cn } from "@/lib/utils";
 import {
-  type ProviderId,
-  PROVIDER_LABEL,
-  providerStatus,
-  providerTooltip,
-} from "./create-session-submit";
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { cn } from "@/lib/utils";
+import { type ProviderId, PROVIDER_LABEL } from "./create-session-submit";
+
+const PROVIDERS = ["claude", "codex", "kimi"] as const satisfies readonly ProviderId[];
 
 interface AgentCliPickerProps {
   agentCli: AgentCliStatus | null;
@@ -37,40 +40,27 @@ export function AgentCliPicker({
   onCancelCliPathEditor,
   onSaveCliPath,
 }: AgentCliPickerProps) {
-  const claudeStatus = providerStatus("claude", agentCli);
-  const codexStatus = providerStatus("codex", agentCli);
-  const kimiStatus = providerStatus("kimi", agentCli);
   const selectedCli = agentCli?.[provider];
 
   return (
     <section aria-label="Agent CLI" className="flex min-w-0 flex-col gap-2">
-      <div className="flex items-center justify-between">
-        <span className="text-sm">Agent CLI</span>
-        <span className="text-xs text-muted-foreground">选择要启动的 CLI</span>
-      </div>
-      <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-3">
-        <ProviderButton
-          provider="claude"
-          selected={provider === "claude"}
-          status={claudeStatus}
-          agentCliLoaded={Boolean(agentCli)}
-          onClick={() => onProviderChange("claude")}
-        />
-        <ProviderButton
-          provider="codex"
-          selected={provider === "codex"}
-          status={codexStatus}
-          agentCliLoaded={Boolean(agentCli)}
-          onClick={() => onProviderChange("codex")}
-        />
-        <ProviderButton
-          provider="kimi"
-          selected={provider === "kimi"}
-          status={kimiStatus}
-          agentCliLoaded={Boolean(agentCli)}
-          onClick={() => onProviderChange("kimi")}
-        />
-      </div>
+      <span className="text-sm">Agent CLI</span>
+      <Select value={provider} onValueChange={(value) => onProviderChange(value as ProviderId)}>
+        <SelectTrigger
+          className="min-h-11 w-full md:min-h-0"
+          aria-label="Agent CLI"
+          data-slot="agent-cli-provider-select"
+        >
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent data-slot="agent-cli-provider-options">
+          {PROVIDERS.map((option) => (
+            <SelectItem key={option} value={option} className="min-h-11 md:min-h-0">
+              {PROVIDER_LABEL[option]}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
       <div
         className="relative min-w-0 rounded-md border border-border bg-muted/20 px-3 py-2.5 md:p-3"
         data-slot="agent-cli-path-card"
@@ -95,50 +85,6 @@ export function AgentCliPicker({
         )}
       </div>
     </section>
-  );
-}
-
-function ProviderButton({
-  provider,
-  selected,
-  status,
-  agentCliLoaded,
-  onClick,
-}: {
-  provider: ProviderId;
-  selected: boolean;
-  status: ReturnType<typeof providerStatus>;
-  agentCliLoaded: boolean;
-  onClick: () => void;
-}) {
-  return (
-    <Tooltip>
-      <TooltipTrigger asChild>
-        <button
-          type="button"
-          aria-pressed={selected}
-          aria-label={PROVIDER_LABEL[provider]}
-          onClick={onClick}
-          className={cn(
-            "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-            selected ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
-          )}
-        >
-          <span className="text-sm font-medium">{PROVIDER_LABEL[provider]}</span>
-          <span
-            className={cn(
-              "text-xs text-muted-foreground",
-              status.disabled && agentCliLoaded && "text-destructive",
-            )}
-          >
-            {status.label}
-          </span>
-        </button>
-      </TooltipTrigger>
-      <TooltipContent side="top" className="max-w-[min(520px,calc(100vw-2rem))]">
-        <span className="break-all font-mono text-xs">{providerTooltip(provider, status)}</span>
-      </TooltipContent>
-    </Tooltip>
   );
 }
 

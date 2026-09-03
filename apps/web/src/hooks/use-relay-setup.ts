@@ -14,9 +14,7 @@ import { registerChatDispatcher } from "@/services/chat-dispatcher";
 import { registerSessionDispatcher } from "@/services/session-dispatcher";
 import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 import { registerPreviewDispatcher } from "@/services/preview-dispatcher";
-import { usePreviewStore } from "@/stores/preview-store";
-import { registerDevicePreviewDispatcher } from "@/services/device-preview-dispatcher";
-import { useDevicePreviewStore } from "@/stores/device-preview-store";
+import { previewController } from "@/services/preview-controller";
 import { loadFontCSS } from "@/lib/font-assets";
 import { checkRelayClientAuth } from "@/lib/relay-client-auth";
 import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
@@ -61,8 +59,7 @@ function applyRelayClientAuthIssue(authIssue: RelayClientAuthIssue): void {
   store.setProxy(null, null);
   store.setProxies([]);
   store.setPhase("proxy_selecting");
-  usePreviewStore.getState().clear();
-  useDevicePreviewStore.getState().clear();
+  previewController.dispose();
 }
 
 function prepareRelayReconnect(): void {
@@ -72,8 +69,7 @@ function prepareRelayReconnect(): void {
   store.setProxyOnline(false);
   store.setProxies([]);
   store.resetProxyListLoaded();
-  usePreviewStore.getState().markListLoading();
-  useDevicePreviewStore.getState().markListLoading();
+  previewController.dispose();
 
   if (hasSelectedProxy) {
     if (store.phase !== "reconnecting") store.setPhase("reconnecting");
@@ -148,9 +144,8 @@ export function useRelaySetup(): void {
     const unregisterSession = registerSessionDispatcher();
     // 资源 dispatcher: command_list_push / dir_list_response / file_tree_push → command-store / file-store
     const unregisterResource = registerResourceDispatcher();
-    // 网页预览拥有独立于 Session 的生命周期与 store；只消费 state/removed 广播。
+    // 网页和设备预览共享同一条按 Relay binding 隔离的事件分发链路。
     const unregisterPreview = registerPreviewDispatcher();
-    const unregisterDevicePreview = registerDevicePreviewDispatcher();
 
     void reconnectRelayClient(abort.signal).finally(() => {
       if (disposed) ws.close();
@@ -165,7 +160,7 @@ export function useRelaySetup(): void {
       unregisterSession();
       unregisterResource();
       unregisterPreview();
-      unregisterDevicePreview();
+      previewController.dispose();
       disposePhaseMachineTimers(timers);
       ws.close();
       setRuntimeRefs({ wsManagerRef: null, relayClientRef: null });

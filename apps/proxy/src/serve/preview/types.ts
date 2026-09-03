@@ -19,7 +19,8 @@ export interface PreviewDefinition {
 }
 
 export interface PersistedPreviewDefinition extends PreviewDefinition {
-  operationId?: string;
+  operationId: string;
+  operationFingerprint: string;
 }
 
 export interface PreviewSnapshot {
@@ -31,7 +32,6 @@ export interface PreviewSnapshot {
 export type PreviewCreateInput = WebPreviewSourceInput;
 
 export interface StaticPreviewInspection {
-  path: string;
   rootPath: string;
   entryPath?: string;
   htmlEntries: string[];

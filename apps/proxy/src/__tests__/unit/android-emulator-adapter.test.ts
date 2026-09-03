@@ -1,12 +1,7 @@
-import { EventEmitter } from "node:events";
-import { PassThrough } from "node:stream";
-import type { ChildProcess } from "node:child_process";
 import { describe, expect, it, vi } from "vitest";
 import {
   AndroidEmulatorAdapter,
-  AndroidEmulatorAdapterError,
   type AndroidExecFile,
-  type AndroidSpawn,
 } from "#src/serve/device-preview/android-adapter.js";
 
 const ADB = "/opt/android/platform-tools/adb";
@@ -18,15 +13,6 @@ function result(stdout = "", stderr = "") {
 
 function argsKey(args: readonly string[]): string {
   return args.join("\u0000");
-}
-
-function png(width: number, height: number): Buffer {
-  const frame = Buffer.alloc(24);
-  Buffer.from([137, 80, 78, 71, 13, 10, 26, 10]).copy(frame);
-  frame.write("IHDR", 12, "ascii");
-  frame.writeUInt32BE(width, 16);
-  frame.writeUInt32BE(height, 20);
-  return frame;
 }
 
 function discoveryResponses(overrides: Record<string, string> = {}): Record<string, string> {
@@ -57,36 +43,11 @@ function createExecFile(
   });
 }
 
-function createAdapter(
-  execFile: AndroidExecFile,
-  options: { spawn?: AndroidSpawn; frameIntervalMs?: number } = {},
-) {
+function createAdapter(execFile: AndroidExecFile) {
   return new AndroidEmulatorAdapter({
     command: ADB,
     env: { PATH: "/ignored", MARKER: "test-env" },
     execFile,
-    spawn: options.spawn,
-    frameIntervalMs: options.frameIntervalMs,
-    encodePngToJpeg: vi.fn(async (input) => Buffer.concat([Buffer.from("jpeg:"), input])),
-  });
-}
-
-function successfulScreenshotSpawn(frame: Buffer): AndroidSpawn {
-  return vi.fn(() => {
-    const child = new EventEmitter() as ChildProcess;
-    const stdout = new PassThrough();
-    const stderr = new PassThrough();
-    Object.assign(child, {
-      stdout,
-      stderr,
-      kill: vi.fn(() => true),
-    });
-    queueMicrotask(() => {
-      stdout.end(frame);
-      stderr.end();
-      child.emit("close", 0, null);
-    });
-    return child;
   });
 }
 
@@ -108,7 +69,8 @@ describe("AndroidEmulatorAdapter discovery", () => {
     });
     const adapter = createAdapter(createExecFile(responses, calls));
 
-    await expect(adapter.discover()).resolves.toEqual([
+    const devices = await adapter.discover();
+    expect(devices).toEqual([
       {
         platform: "android",
         serial: SERIAL,
@@ -127,25 +89,20 @@ describe("AndroidEmulatorAdapter discovery", () => {
     expect(serialCalls.length).toBeGreaterThan(0);
     expect(serialCalls.every((call) => /^emulator-\d+$/u.test(call.args[1] ?? ""))).toBe(true);
     expect(calls.some((call) => call.args.includes("-s device"))).toBe(false);
-    expect(adapter.getDevice(SERIAL)?.width).toBe(2400);
+    expect(devices[0]?.width).toBe(2400);
   });
 
-  it("rejects syntactically valid but undiscovered serials before spawning or running adb", async () => {
+  it("rejects syntactically valid but undiscovered serials before running adb", async () => {
     const execFile = createExecFile(discoveryResponses());
-    const spawn = vi.fn() as unknown as AndroidSpawn;
-    const adapter = createAdapter(execFile, { spawn });
+    const adapter = createAdapter(execFile);
     await adapter.discover();
     const callsBefore = vi.mocked(execFile).mock.calls.length;
 
     await expect(adapter.sendInput("emulator-9999", { type: "home" })).rejects.toMatchObject({
       code: "device-not-allowed",
     });
-    await expect(
-      adapter.streamFrames("-s", vi.fn(), { signal: new AbortController().signal }),
-    ).rejects.toMatchObject({ code: "device-not-allowed" });
 
     expect(vi.mocked(execFile).mock.calls).toHaveLength(callsBefore);
-    expect(spawn).not.toHaveBeenCalled();
   });
 
   it("does not add an emulator to the allow-list until sys.boot_completed is exactly 1", async () => {
@@ -155,123 +112,55 @@ describe("AndroidEmulatorAdapter discovery", () => {
     const adapter = createAdapter(createExecFile(responses));
 
     await expect(adapter.discover()).resolves.toEqual([]);
-    expect(adapter.getDevice(SERIAL)).toBeUndefined();
-  });
-});
-
-describe("AndroidEmulatorAdapter frame capture", () => {
-  it("captures frames sequentially, updates the latest size, and requests 720px quality-70 JPEGs", async () => {
-    const execFile = createExecFile(discoveryResponses());
-    const spawn = successfulScreenshotSpawn(png(2400, 1080));
-    let encodersInFlight = 0;
-    let maxEncodersInFlight = 0;
-    const encodePngToJpeg = vi.fn(async (_input: Buffer, options) => {
-      encodersInFlight += 1;
-      maxEncodersInFlight = Math.max(maxEncodersInFlight, encodersInFlight);
-      await Promise.resolve();
-      encodersInFlight -= 1;
-      expect(options).toMatchObject({ width: 720, quality: 70 });
-      return Buffer.from("jpeg-frame");
+    await expect(adapter.sendInput(SERIAL, { type: "home" })).rejects.toMatchObject({
+      code: "device-not-allowed",
     });
-    const adapter = new AndroidEmulatorAdapter({
-      command: ADB,
-      execFile,
-      spawn,
-      encodePngToJpeg,
-      frameIntervalMs: 50,
-    });
-    await adapter.discover();
-    const abort = new AbortController();
-    const frames: Buffer[] = [];
-
-    await adapter.streamFrames(
-      SERIAL,
-      (frame) => {
-        frames.push(frame);
-        if (frames.length === 2) abort.abort();
-      },
-      { signal: abort.signal },
-    );
-
-    expect(frames.map(String)).toEqual(["jpeg-frame", "jpeg-frame"]);
-    expect(spawn).toHaveBeenCalledTimes(2);
-    expect(spawn).toHaveBeenNthCalledWith(
-      1,
-      ADB,
-      ["-s", SERIAL, "exec-out", "screencap", "-p"],
-      expect.objectContaining({ stdio: ["ignore", "pipe", "pipe"] }),
-    );
-    expect(encodePngToJpeg).toHaveBeenCalledTimes(2);
-    expect(maxEncodersInFlight).toBe(1);
-    expect(adapter.getDevice(SERIAL)).toMatchObject({ width: 2400, height: 1080 });
   });
 
-  it("kills an in-flight screencap and resolves normally when aborted", async () => {
-    const execFile = createExecFile(discoveryResponses());
-    const child = new EventEmitter() as ChildProcess;
-    Object.assign(child, {
-      stdout: new PassThrough(),
-      stderr: new PassThrough(),
-      kill: vi.fn(() => true),
+  it("keeps a previously verified emulator when a later metadata probe fails", async () => {
+    const responses = discoveryResponses();
+    let failMetadata = false;
+    const execFile: AndroidExecFile = vi.fn(async (_command, args) => {
+      const key = argsKey(args);
+      if (
+        failMetadata &&
+        key === argsKey(["-s", SERIAL, "shell", "getprop", "ro.build.version.release"])
+      ) {
+        throw new Error("transient adb failure");
+      }
+      const response = responses[key];
+      if (response !== undefined) return result(response);
+      if (args[0] === "-s" && args[1] === SERIAL) return result();
+      throw new Error(`Unexpected adb call: ${args.join(" ")}`);
     });
-    const spawn = vi.fn(() => child) as unknown as AndroidSpawn;
-    const adapter = createAdapter(execFile, { spawn });
-    await adapter.discover();
-    const abort = new AbortController();
+    const adapter = createAdapter(execFile);
+    const initial = await adapter.discover();
+    failMetadata = true;
 
-    const streaming = adapter.streamFrames(SERIAL, vi.fn(), { signal: abort.signal });
-    await vi.waitFor(() => expect(spawn).toHaveBeenCalledOnce());
-    abort.abort();
-
-    await expect(streaming).resolves.toBeUndefined();
-    expect(child.kill).toHaveBeenCalledWith("SIGKILL");
-  });
-
-  it("surfaces a bounded capture error instead of retrying indefinitely", async () => {
-    const execFile = createExecFile(discoveryResponses());
-    const spawn = vi.fn(() => {
-      const child = new EventEmitter() as ChildProcess;
-      const stdout = new PassThrough();
-      const stderr = new PassThrough();
-      Object.assign(child, { stdout, stderr, kill: vi.fn(() => true) });
-      queueMicrotask(() => {
-        stderr.end("device offline");
-        stdout.end();
-        child.emit("close", 1, null);
-      });
-      return child;
-    }) as unknown as AndroidSpawn;
-    const adapter = createAdapter(execFile, { spawn });
-    await adapter.discover();
-
-    await expect(
-      adapter.streamFrames(SERIAL, vi.fn(), { signal: new AbortController().signal }),
-    ).rejects.toMatchObject({ code: "capture-failed" });
-    expect(spawn).toHaveBeenCalledOnce();
+    await expect(adapter.discover()).resolves.toEqual(initial);
+    await expect(adapter.sendInput(SERIAL, { type: "home" })).resolves.toBeUndefined();
   });
 });
 
 describe("AndroidEmulatorAdapter input", () => {
-  it("serializes input and maps normalized coordinates against freshly queried dimensions", async () => {
-    let releaseTap!: () => void;
-    let tapStarted!: () => void;
-    const tapStartedPromise = new Promise<void>((resolve) => {
-      tapStarted = resolve;
+  it("serializes toolbar input for one emulator", async () => {
+    let releaseHome!: () => void;
+    let homeStarted!: () => void;
+    const homeStartedPromise = new Promise<void>((resolve) => {
+      homeStarted = resolve;
     });
-    const responses = discoveryResponses({
-      [argsKey(["-s", SERIAL, "shell", "wm", "size"])]: "Physical size: 100x200\n",
-    });
+    const responses = discoveryResponses();
     const calls: readonly string[][] = [];
     const execFile: AndroidExecFile = vi.fn(async (_command, args) => {
       (calls as string[][]).push([...args]);
-      if (argsKey(args) === argsKey(["-s", SERIAL, "shell", "input", "tap", "99", "100"])) {
-        tapStarted();
+      if (argsKey(args) === argsKey(["-s", SERIAL, "shell", "input", "keyevent", "KEYCODE_HOME"])) {
+        homeStarted();
         await new Promise<void>((resolve) => {
-          releaseTap = resolve;
+          releaseHome = resolve;
         });
         return result();
       }
-      if (argsKey(args) === argsKey(["-s", SERIAL, "shell", "input", "keyevent", "KEYCODE_HOME"])) {
+      if (argsKey(args) === argsKey(["-s", SERIAL, "shell", "input", "keyevent", "KEYCODE_BACK"])) {
         return result();
       }
       const response = responses[argsKey(args)];
@@ -281,19 +170,19 @@ describe("AndroidEmulatorAdapter input", () => {
     const adapter = createAdapter(execFile);
     await adapter.discover();
 
-    const tap = adapter.sendInput(SERIAL, { type: "tap", x: 1, y: 0.5 });
     const home = adapter.sendInput(SERIAL, { type: "home" });
-    await tapStartedPromise;
-    expect(calls.some((args) => args.includes("KEYCODE_HOME"))).toBe(false);
-    releaseTap();
-    await Promise.all([tap, home]);
+    const back = adapter.sendInput(SERIAL, { type: "back" });
+    await homeStartedPromise;
+    expect(calls.some((args) => args.includes("KEYCODE_BACK"))).toBe(false);
+    releaseHome();
+    await Promise.all([home, back]);
 
-    expect(calls).toContainEqual(["-s", SERIAL, "shell", "input", "tap", "99", "100"]);
     expect(calls).toContainEqual(["-s", SERIAL, "shell", "input", "keyevent", "KEYCODE_HOME"]);
+    expect(calls).toContainEqual(["-s", SERIAL, "shell", "input", "keyevent", "KEYCODE_BACK"]);
     expect(calls.filter((args) => args[0] === "-s").every((args) => args[1] === SERIAL)).toBe(true);
   });
 
-  it("supports swipe, quoted text, back, fixed rotation, and free rotation without emulator lifecycle calls", async () => {
+  it("supports back, fixed rotation, and free rotation without emulator lifecycle calls", async () => {
     const responses = discoveryResponses();
     const calls: string[][] = [];
     const execFile: AndroidExecFile = vi.fn(async (_command, args) => {
@@ -306,73 +195,161 @@ describe("AndroidEmulatorAdapter input", () => {
     const adapter = createAdapter(execFile);
     await adapter.discover();
 
-    await adapter.sendInput(SERIAL, {
-      type: "swipe",
-      from: { x: 0, y: 0.25 },
-      to: { x: 1, y: 0.75 },
-      durationMs: 420,
-    });
-    await adapter.sendInput(SERIAL, { type: "text", text: "hello'; reboot; echo ' world" });
     await adapter.sendInput(SERIAL, { type: "back" });
     await adapter.sendInput(SERIAL, { type: "rotate", rotation: 270 });
     await adapter.sendInput(SERIAL, { type: "free" });
 
-    expect(calls).toContainEqual([
-      "-s",
-      SERIAL,
-      "shell",
-      "input",
-      "swipe",
-      "0",
-      "600",
-      "1079",
-      "1799",
-      "420",
-    ]);
-    const textCall = calls.find((args) => args[3] === "input" && args[4] === "text");
-    expect(textCall).toEqual([
-      "-s",
-      SERIAL,
-      "shell",
-      "input",
-      "text",
-      "'hello'\\'';%sreboot;%secho%s'\\''%sworld'",
-    ]);
     expect(calls).toContainEqual(["-s", SERIAL, "shell", "input", "keyevent", "KEYCODE_BACK"]);
     expect(calls).toContainEqual([
       "-s",
       SERIAL,
       "shell",
-      "settings",
-      "put",
-      "system",
-      "user_rotation",
-      "3",
+      "wm",
+      "fixed-to-user-rotation",
+      "enabled",
     ]);
+    expect(calls).toContainEqual(["-s", SERIAL, "shell", "wm", "user-rotation", "lock", "3"]);
+    expect(calls).toContainEqual(["-s", SERIAL, "shell", "wm", "user-rotation", "free"]);
     expect(calls).toContainEqual([
       "-s",
       SERIAL,
       "shell",
-      "settings",
-      "put",
-      "system",
-      "accelerometer_rotation",
-      "1",
+      "wm",
+      "fixed-to-user-rotation",
+      "default",
     ]);
     expect(calls.some((args) => args.includes("kill-server"))).toBe(false);
     expect(calls.some((args) => args.includes("emu"))).toBe(false);
   });
 
-  it("rejects invalid normalized coordinates before invoking the input command", async () => {
-    const execFile = createExecFile(discoveryResponses());
+  it("uses WindowManager rotation commands that survive app orientation reversion", async () => {
+    const responses = discoveryResponses();
+    const calls: string[][] = [];
+    const execFile: AndroidExecFile = vi.fn(async (_command, args) => {
+      calls.push([...args]);
+      const key = argsKey(args);
+      if (key in responses) return result(responses[key]);
+      if (args[0] === "-s" && args[1] === SERIAL) return result();
+      throw new Error(`Unexpected adb call: ${args.join(" ")}`);
+    });
     const adapter = createAdapter(execFile);
     await adapter.discover();
 
-    await expect(
-      adapter.sendInput(SERIAL, { type: "tap", x: -0.01, y: 0.5 }),
-    ).rejects.toBeInstanceOf(AndroidEmulatorAdapterError);
-    expect(
-      vi.mocked(execFile).mock.calls.some((call) => (call[1] as readonly string[]).includes("tap")),
-    ).toBe(false);
+    await adapter.sendInput(SERIAL, { type: "rotate", rotation: 0 });
+    await adapter.sendInput(SERIAL, { type: "rotate", rotation: 90 });
+    await adapter.sendInput(SERIAL, { type: "rotate", rotation: 180 });
+    await adapter.sendInput(SERIAL, { type: "rotate", rotation: 270 });
+    await adapter.sendInput(SERIAL, { type: "free" });
+
+    const rotationCalls = calls.filter(
+      (args) =>
+        args[3] === "wm" && (args[4] === "user-rotation" || args[4] === "fixed-to-user-rotation"),
+    );
+    expect(rotationCalls).toEqual([
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "enabled"],
+      ["-s", SERIAL, "shell", "wm", "user-rotation", "lock", "0"],
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "enabled"],
+      ["-s", SERIAL, "shell", "wm", "user-rotation", "lock", "1"],
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "enabled"],
+      ["-s", SERIAL, "shell", "wm", "user-rotation", "lock", "2"],
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "enabled"],
+      ["-s", SERIAL, "shell", "wm", "user-rotation", "lock", "3"],
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "default"],
+      ["-s", SERIAL, "shell", "wm", "user-rotation", "free"],
+    ]);
+    expect(calls.some((args) => args[3] === "settings" && args.includes("user_rotation"))).toBe(
+      false,
+    );
+  });
+
+  it("restores default app orientation handling when the rotation lock command fails", async () => {
+    const responses = discoveryResponses();
+    const calls: string[][] = [];
+    const execFile: AndroidExecFile = vi.fn(async (_command, args) => {
+      calls.push([...args]);
+      const key = argsKey(args);
+      if (key in responses) return result(responses[key]);
+      if (args[3] === "wm" && args[4] === "user-rotation") {
+        throw new Error("lock failed");
+      }
+      if (args[0] === "-s" && args[1] === SERIAL) return result();
+      throw new Error(`Unexpected adb call: ${args.join(" ")}`);
+    });
+    const adapter = createAdapter(execFile);
+    await adapter.discover();
+
+    await expect(adapter.sendInput(SERIAL, { type: "rotate", rotation: 90 })).rejects.toMatchObject(
+      {
+        name: "AndroidEmulatorAdapterError",
+        code: "input-failed",
+        message: "Failed to lock Android Emulator orientation",
+      },
+    );
+    expect(calls.slice(-3)).toEqual([
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "enabled"],
+      ["-s", SERIAL, "shell", "wm", "user-rotation", "lock", "1"],
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "default"],
+    ]);
+  });
+
+  it("restores the fixed-orientation override when releasing the user lock fails", async () => {
+    const responses = discoveryResponses();
+    const calls: string[][] = [];
+    const execFile: AndroidExecFile = vi.fn(async (_command, args) => {
+      calls.push([...args]);
+      const key = argsKey(args);
+      if (key in responses) return result(responses[key]);
+      if (args[3] === "wm" && args[4] === "user-rotation" && args[5] === "free") {
+        throw new Error("free failed");
+      }
+      if (args[0] === "-s" && args[1] === SERIAL) return result();
+      throw new Error(`Unexpected adb call: ${args.join(" ")}`);
+    });
+    const adapter = createAdapter(execFile);
+    await adapter.discover();
+
+    await expect(adapter.sendInput(SERIAL, { type: "free" })).rejects.toMatchObject({
+      name: "AndroidEmulatorAdapterError",
+      code: "input-failed",
+      message: "Failed to enable automatic Android Emulator rotation",
+    });
+    expect(calls.slice(-3)).toEqual([
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "default"],
+      ["-s", SERIAL, "shell", "wm", "user-rotation", "free"],
+      ["-s", SERIAL, "shell", "wm", "fixed-to-user-rotation", "enabled"],
+    ]);
+  });
+
+  it("keeps the user rotation lock when releasing the app override fails", async () => {
+    const responses = discoveryResponses();
+    const calls: string[][] = [];
+    const execFile: AndroidExecFile = vi.fn(async (_command, args) => {
+      calls.push([...args]);
+      const key = argsKey(args);
+      if (key in responses) return result(responses[key]);
+      if (args[3] === "wm" && args[4] === "fixed-to-user-rotation") {
+        throw new Error("default failed");
+      }
+      if (args[0] === "-s" && args[1] === SERIAL) return result();
+      throw new Error(`Unexpected adb call: ${args.join(" ")}`);
+    });
+    const adapter = createAdapter(execFile);
+    await adapter.discover();
+
+    await expect(adapter.sendInput(SERIAL, { type: "free" })).rejects.toMatchObject({
+      name: "AndroidEmulatorAdapterError",
+      code: "input-failed",
+      message:
+        "Failed to restore app orientation handling before enabling automatic Android Emulator rotation",
+    });
+    expect(calls.at(-1)).toEqual([
+      "-s",
+      SERIAL,
+      "shell",
+      "wm",
+      "fixed-to-user-rotation",
+      "default",
+    ]);
+    expect(calls.some((args) => args[4] === "user-rotation" && args[5] === "free")).toBe(false);
   });
 });

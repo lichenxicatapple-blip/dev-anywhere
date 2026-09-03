@@ -16,6 +16,11 @@ import { CloudflaredLocator, type CloudflaredCapability } from "./cloudflared-lo
 import { CpolarLocator, type CpolarCapability } from "./cpolar-locator.js";
 import { normalizeLocalPreviewUrl, probeLocalPreviewTarget } from "./local-preview-url.js";
 import { startPreviewGateway, type PreviewGateway } from "./preview-gateway.js";
+import { normalizeOptionalPreviewName, normalizeRequiredPreviewName } from "./preview-name.js";
+import {
+  fingerprintPreviewOperationParameters,
+  PreviewOperationJournalError,
+} from "./preview-operation-journal.js";
 import { MAX_PERSISTED_PREVIEWS, PreviewStore } from "./preview-store.js";
 import { inspectStaticPreviewPath, resolveStaticPreviewSource } from "./static-preview.js";
 import {
@@ -63,7 +68,8 @@ interface PreviewRuntime {
 
 interface PreviewRecord {
   summary: PreviewSummary;
-  operationId?: string;
+  operationId: string;
+  operationFingerprint: string;
   generation: number;
   runtime?: PreviewRuntime;
 }
@@ -132,8 +138,7 @@ export class PreviewManager {
   private revision = 0;
   private readonly records = new Map<string, PreviewRecord>();
   private readonly closing = new Map<string, Promise<void>>();
-  private readonly createOperations = new Map<string, Promise<PreviewSummary>>();
-  private readonly activeCreateReservations = new Set<string>();
+  private readonly activeCreateReservations = new Set<symbol>();
   private readonly reconnectOperations = new Map<string, Promise<void>>();
   private readonly activeReconnectReservations = new Set<string>();
   private readonly locator: CloudflaredLocator;
@@ -169,6 +174,7 @@ export class PreviewManager {
           state: "disconnected",
         },
         operationId: definition.operationId,
+        operationFingerprint: definition.operationFingerprint,
         generation: 0,
       });
     }
@@ -180,7 +186,6 @@ export class PreviewManager {
       this.cpolarLocator.inspect({ refreshPath }),
     ]);
     return {
-      supported: true,
       cloudflared: cloudflared.capability,
       cpolar: cpolar.capability,
     };
@@ -213,29 +218,41 @@ export class PreviewManager {
     operationId: string,
     input: PreviewCreateInput,
     tunnelProvider: TunnelProvider,
+    name?: string,
   ): Promise<PreviewSummary> {
     if (this.shuttingDown) return Promise.reject(new PreviewOperationError("Proxy 正在停止"));
+    const customName = this.normalizeOptionalName(name);
+    const operationFingerprint = fingerprintPreviewOperationParameters({
+      source: input,
+      tunnelProvider,
+      name: customName ?? null,
+    });
     const existing = Array.from(this.records.values()).find(
       (record) => record.operationId === operationId,
     );
-    if (existing) return Promise.resolve(cloneSummary(existing.summary));
-    const inFlight = this.createOperations.get(operationId);
-    if (inFlight) return inFlight.then(cloneSummary);
-
+    if (existing) {
+      if (existing.operationFingerprint !== operationFingerprint) {
+        throw new PreviewOperationJournalError(
+          "operationId 已用于不同的预览操作",
+          ControlErrorCode.OPERATION_CONFLICT,
+        );
+      }
+      return Promise.resolve(cloneSummary(existing.summary));
+    }
     this.assertCreateCapacity();
-    this.activeCreateReservations.add(operationId);
-    const operation = this.createOnce(operationId, input, tunnelProvider).finally(() => {
-      this.createOperations.delete(operationId);
-      this.activeCreateReservations.delete(operationId);
-    });
-    this.createOperations.set(operationId, operation);
-    return operation.then(cloneSummary);
+    const reservation = Symbol("preview-create");
+    this.activeCreateReservations.add(reservation);
+    return this.createOnce(operationId, operationFingerprint, input, tunnelProvider, customName)
+      .finally(() => this.activeCreateReservations.delete(reservation))
+      .then(cloneSummary);
   }
 
   private async createOnce(
     operationId: string,
+    operationFingerprint: string,
     input: PreviewCreateInput,
     tunnelProvider: TunnelProvider,
+    customName: string | undefined,
   ): Promise<PreviewSummary> {
     if (this.shuttingDown) throw new PreviewOperationError("Proxy 正在停止");
     const located = await this.locateProvider(tunnelProvider);
@@ -265,7 +282,7 @@ export class PreviewManager {
       const url = new URL(normalized.sourceUrl);
       definition = {
         previewId,
-        name: `${url.hostname}${url.port ? `:${url.port}` : ""}`,
+        name: customName ?? `${url.hostname}${url.port ? `:${url.port}` : ""}`,
         source: { kind: "local", url: normalized.sourceUrl },
         tunnelProvider,
         createdAt: now,
@@ -276,7 +293,7 @@ export class PreviewManager {
         const resolved = await resolveStaticPreviewSource(input.path, input.entryPath);
         definition = {
           previewId,
-          name: resolved.name,
+          name: customName ?? resolved.name,
           source: resolved.source,
           tunnelProvider,
           createdAt: now,
@@ -293,6 +310,7 @@ export class PreviewManager {
     const record: PreviewRecord = {
       summary: { ...definition, state: "starting" },
       operationId,
+      operationFingerprint,
       generation: 0,
     };
     if (this.shuttingDown) throw new PreviewOperationError("Proxy 正在停止");
@@ -307,13 +325,32 @@ export class PreviewManager {
       );
       throw new PreviewOperationError("无法保存网页预览，请重试");
     }
+    this.emitState(record.summary);
     this.scheduleStart(record, { localHost, command: located.command, env: located.env });
     return record.summary;
   }
 
-  announce(previewId: string): void {
+  rename(previewId: string, name: string): PreviewSummary {
+    if (this.shuttingDown) throw new PreviewOperationError("Proxy 正在停止");
     const record = this.records.get(previewId);
-    if (record) this.emitState(record.summary);
+    if (!record) throw new PreviewOperationError("网页预览不存在");
+    const normalized = this.normalizeRequiredName(name);
+    if (record.summary.name === normalized) return cloneSummary(record.summary);
+
+    const previous = record.summary;
+    record.summary = { ...previous, name: normalized, updatedAt: this.now() };
+    try {
+      this.persist();
+    } catch (error) {
+      record.summary = previous;
+      serviceLogger.error(
+        { previewId, error: error instanceof Error ? error.message : String(error) },
+        "Failed to persist web preview rename",
+      );
+      throw new PreviewOperationError("无法保存预览名称，请重试");
+    }
+    this.emitState(record.summary);
+    return cloneSummary(record.summary);
   }
 
   async reconnect(previewId: string): Promise<void> {
@@ -370,7 +407,7 @@ export class PreviewManager {
       throw new PreviewOperationError("网页预览正在关闭");
     }
     if (record.summary.state === "starting" || record.summary.state === "ready") return;
-    this.transition(record, "starting", { clearPublicUrl: true, clearError: true });
+    this.transition(record, "starting");
     this.startInBackground(record, { localHost, command: located.command, env: located.env });
   }
 
@@ -381,7 +418,7 @@ export class PreviewManager {
     if (!record) return Promise.resolve();
 
     if (record.summary.state !== "stopping") {
-      this.transition(record, "stopping", { clearPublicUrl: true, clearError: true });
+      this.transition(record, "stopping");
     }
     const closing = this.finishClose(record).finally(() => this.closing.delete(previewId));
     this.closing.set(previewId, closing);
@@ -408,10 +445,7 @@ export class PreviewManager {
         if (record.runtime === runtime) record.runtime = undefined;
       } catch (error) {
         if (this.records.get(record.summary.previewId) === record) {
-          this.transition(record, "failed", {
-            error: "无法关闭预览，请重试",
-            clearPublicUrl: true,
-          });
+          this.transition(record, "failed", { error: "无法关闭预览，请重试" });
         }
         serviceLogger.error(
           {
@@ -428,7 +462,7 @@ export class PreviewManager {
       this.records.get(record.summary.previewId) === record &&
       record.summary.state !== "disconnected"
     ) {
-      this.transition(record, "disconnected", { clearPublicUrl: true, clearError: true });
+      this.transition(record, "disconnected");
     }
   }
 
@@ -545,7 +579,7 @@ export class PreviewManager {
       const publicBase = await tunnel.publicReady;
       const publicUrl = buildPreviewPublicUrl(publicBase, record.summary);
       if (!this.isCurrentRuntime(record, runtime) || record.summary.state !== "starting") return;
-      this.transition(record, "ready", { publicUrl, clearError: true });
+      this.transition(record, "ready", { publicUrl });
       serviceLogger.info(
         {
           previewId: record.summary.previewId,
@@ -576,7 +610,6 @@ export class PreviewManager {
           error: stopFailed
             ? "内网穿透进程未能停止，请关闭预览后重试"
             : publicFailureMessage(error, runtime.provider, runtime.tunnel?.getOutput()),
-          clearPublicUrl: true,
         });
       }
       serviceLogger.warn(
@@ -629,7 +662,6 @@ export class PreviewManager {
       this.transition(record, "failed", {
         error:
           runtime.provider === "cloudflare" ? "Cloudflare Tunnel 连接已停止" : "Cpolar 连接已停止",
-        clearPublicUrl: true,
       });
     }
     serviceLogger.warn(
@@ -646,10 +678,7 @@ export class PreviewManager {
         if (record.runtime === runtime) record.runtime = undefined;
       } catch {
         if (this.records.get(record.summary.previewId) === record) {
-          this.transition(record, "failed", {
-            error: "无法关闭预览，请重试",
-            clearPublicUrl: true,
-          });
+          this.transition(record, "failed", { error: "无法关闭预览，请重试" });
         }
         throw new PreviewOperationError("无法关闭预览，请重试");
       }
@@ -657,10 +686,7 @@ export class PreviewManager {
     try {
       this.store.save(this.definitions(record.summary.previewId));
     } catch (error) {
-      this.transition(record, "disconnected", {
-        error: "关闭预览未完成，请重试",
-        clearPublicUrl: true,
-      });
+      this.transition(record, "failed", { error: "关闭预览未完成，请重试" });
       serviceLogger.error(
         {
           previewId: record.summary.previewId,
@@ -738,29 +764,54 @@ export class PreviewManager {
     }
   }
 
+  private normalizeOptionalName(name: string | undefined): string | undefined {
+    try {
+      return normalizeOptionalPreviewName(name);
+    } catch (error) {
+      throw new PreviewOperationError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private normalizeRequiredName(name: string): string {
+    try {
+      return normalizeRequiredPreviewName(name);
+    } catch (error) {
+      throw new PreviewOperationError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private transition(record: PreviewRecord, state: "starting" | "disconnected" | "stopping"): void;
+  private transition(record: PreviewRecord, state: "ready", details: { publicUrl: string }): void;
+  private transition(record: PreviewRecord, state: "failed", details: { error: string }): void;
   private transition(
     record: PreviewRecord,
     state: PreviewState,
-    options: {
-      publicUrl?: string;
-      error?: string;
-      clearPublicUrl?: boolean;
-      clearError?: boolean;
-    } = {},
+    details?: { publicUrl: string } | { error: string },
   ): void {
     const from = record.summary.state;
     if (from !== state && !previewFsm.canTransition(from, state)) {
       throw new Error(`Invalid preview state transition: ${from} -> ${state}`);
     }
-    record.summary = {
-      ...record.summary,
-      state,
-      updatedAt: this.now(),
-      ...(options.publicUrl ? { publicUrl: options.publicUrl } : {}),
-      ...(options.error ? { error: options.error } : {}),
+    const base = {
+      previewId: record.summary.previewId,
+      name: record.summary.name,
+      source: record.summary.source,
+      tunnelProvider: record.summary.tunnelProvider,
+      createdAt: record.summary.createdAt,
     };
-    if (options.clearPublicUrl) delete record.summary.publicUrl;
-    if (options.clearError) delete record.summary.error;
+    if (state === "ready") {
+      if (!details || !("publicUrl" in details)) {
+        throw new Error("A ready web preview requires a public URL");
+      }
+      record.summary = { ...base, state, publicUrl: details.publicUrl, updatedAt: this.now() };
+    } else if (state === "failed") {
+      if (!details || !("error" in details)) {
+        throw new Error("A failed web preview requires an error");
+      }
+      record.summary = { ...base, state, error: details.error, updatedAt: this.now() };
+    } else {
+      record.summary = { ...base, state, updatedAt: this.now() };
+    }
     this.persistBestEffort(`transition:${from}->${state}`);
     this.emitState(record.summary);
   }
@@ -775,7 +826,8 @@ export class PreviewManager {
         tunnelProvider: record.summary.tunnelProvider,
         createdAt: record.summary.createdAt,
         updatedAt: record.summary.updatedAt,
-        ...(record.operationId ? { operationId: record.operationId } : {}),
+        operationId: record.operationId,
+        operationFingerprint: record.operationFingerprint,
       }));
   }
 

@@ -111,20 +111,30 @@ describe("LatestDevicePreviewFramePainter", () => {
     expect(oldBitmap.close).toHaveBeenCalledTimes(1);
   });
 
-  it("drops an older decode when a newer frame is already queued", async () => {
+  it("paints a completed decode while the pending queue remains latest-wins", async () => {
     const { canvas, context } = canvasHarness();
     const firstDecode = deferred<ImageBitmap>();
+    const latestDecode = deferred<ImageBitmap>();
     const decoder = vi
       .fn<(jpeg: Uint8Array) => Promise<ImageBitmap>>()
       .mockReturnValueOnce(firstDecode.promise)
-      .mockResolvedValueOnce(bitmap(390, 844));
+      .mockReturnValueOnce(latestDecode.promise);
     const painter = new LatestDevicePreviewFramePainter(canvas, vi.fn(), decoder);
 
     painter.enqueue(1, Uint8Array.of(1));
     painter.enqueue(2, Uint8Array.of(2));
-    firstDecode.resolve(bitmap(390, 844));
+    painter.enqueue(3, Uint8Array.of(3));
+    const firstBitmap = bitmap(390, 844);
+    firstDecode.resolve(firstBitmap);
 
     await vi.waitFor(() => expect(context.drawImage).toHaveBeenCalledTimes(1));
+    expect(context.drawImage).toHaveBeenCalledWith(firstBitmap, 0, 0);
     expect(decoder).toHaveBeenCalledTimes(2);
+    expect(decoder).toHaveBeenNthCalledWith(2, Uint8Array.of(3));
+
+    const latestBitmap = bitmap(390, 844);
+    latestDecode.resolve(latestBitmap);
+    await vi.waitFor(() => expect(context.drawImage).toHaveBeenCalledTimes(2));
+    expect(context.drawImage).toHaveBeenLastCalledWith(latestBitmap, 0, 0);
   });
 });

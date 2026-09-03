@@ -7,9 +7,8 @@ import type {
 } from "@dev-anywhere/shared";
 import { useNavigate } from "react-router";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { useDevicePreviewStore } from "@/stores/device-preview-store";
+import { selectDevicePreviews, useDevicePreviewStore } from "@/stores/device-preview-store";
 import { useAppStore } from "@/stores/app-store";
-import { startingDevicePreview } from "@/types/device-preview";
 import { toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,6 +28,8 @@ import {
 } from "@/components/ui/sheet";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { cn } from "@/lib/utils";
+import { createClientOperationId } from "@/lib/client-operation-id";
+import { previewController } from "@/services/preview-controller";
 
 interface CreateDevicePreviewDialogProps {
   open: boolean;
@@ -53,25 +54,31 @@ export function CreateDevicePreviewDialog({
   const targets = useDevicePreviewStore((state) => state.targets);
   const targetsStatus = useDevicePreviewStore((state) => state.targetsStatus);
   const targetsError = useDevicePreviewStore((state) => state.targetsError);
-  const previews = useDevicePreviewStore((state) => state.previews);
+  const previews = useDevicePreviewStore(selectDevicePreviews);
+  const previewScope = useDevicePreviewStore((state) => state.authoritative?.scope ?? null);
+  const previewScopeKey = previewScope
+    ? `${previewScope.proxyId}\0${previewScope.bindingId}`
+    : null;
+  const [name, setName] = useState("");
   const [selectedTargetId, setSelectedTargetId] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
-  const generationRef = useRef(0);
+  const detectionAbortRef = useRef<AbortController | null>(null);
   const openRef = useRef(open);
   openRef.current = open;
-  const operationRef = useRef<{ targetId: string; operationId: string } | null>(null);
+  const operationRef = useRef<{
+    proxyId: string;
+    targetId: string;
+    name: string;
+    operationId: string;
+  } | null>(null);
+  const activeCreateOperationIdRef = useRef<string | null>(null);
 
   const platformTargets = useMemo(
-    () => targets.filter((target) => target.platform === platform && target.state === "booted"),
+    () => targets.filter((target) => target.platform === platform),
     [platform, targets],
   );
   const occupiedTargetIds = useMemo(
-    () =>
-      new Set(
-        previews
-          .filter((preview) => preview.state !== "stopping")
-          .map((preview) => preview.targetId),
-      ),
+    () => new Set(previews.map((preview) => preview.targetId)),
     [previews],
   );
   const selectableTargets = useMemo(
@@ -83,47 +90,28 @@ export function CreateDevicePreviewDialog({
 
   const detect = useCallback(
     async (refreshPath: boolean): Promise<void> => {
-      const generation = ++generationRef.current;
+      detectionAbortRef.current?.abort();
+      const abort = new AbortController();
+      detectionAbortRef.current = abort;
       const relay = relayClientRef;
-      const proxyId = selectedProxyId;
-      const isCurrent = (): boolean =>
-        generation === generationRef.current &&
-        openRef.current &&
-        relayClientRef === relay &&
-        useAppStore.getState().selectedProxyId === proxyId;
-      if (!relay || !proxyId) {
-        useDevicePreviewStore.getState().setTargetsError("请先连接开发机");
+      const scope = previewController.getActiveScope();
+      if (!relay || !scope || scope.proxyId !== selectedProxyId) {
         return;
       }
-      useDevicePreviewStore.getState().setTargetsLoading();
       try {
         // Capability refresh may configure the backend, so target discovery must run afterwards.
-        const capabilityResult = await relay.requestDevicePreviewCapability(refreshPath);
-        if (!isCurrent()) return;
-        if (!capabilityResult.capability) {
-          useDevicePreviewStore.getState().setCapabilityUnsupported();
-          return;
-        }
-        useDevicePreviewStore.getState().setCapability(capabilityResult.capability);
-        if (!capabilityResult.capability.supported) {
-          useDevicePreviewStore.getState().setTargets([]);
-          return;
-        }
-
-        const targetsResult = await relay.requestDevicePreviewTargets(true);
-        if (!isCurrent()) return;
-        if (!targetsResult.success) {
-          useDevicePreviewStore
-            .getState()
-            .setTargetsError(targetsResult.error ?? "无法读取模拟器列表");
-          return;
-        }
-        useDevicePreviewStore.getState().setTargets(targetsResult.targets);
-      } catch (error) {
-        if (!isCurrent()) return;
-        useDevicePreviewStore
-          .getState()
-          .setTargetsError(error instanceof Error ? error.message : "无法读取模拟器列表");
+        const capabilityResult = await previewController.requestDevicePreviewCapability(
+          scope,
+          refreshPath,
+          { signal: abort.signal },
+        );
+        if (!capabilityResult || abort.signal.aborted || !openRef.current) return;
+        if (!capabilityResult.success) return;
+        await previewController.requestDevicePreviewTargets(scope, true, {
+          signal: abort.signal,
+        });
+      } catch {
+        // Capability/target failures are already reflected by the controller-owned store state.
       }
     },
     [selectedProxyId],
@@ -131,19 +119,25 @@ export function CreateDevicePreviewDialog({
 
   useEffect(() => {
     if (!open) {
-      generationRef.current += 1;
+      detectionAbortRef.current?.abort();
+      detectionAbortRef.current = null;
+      setName("");
       setSelectedTargetId(null);
       setSubmitting(false);
       operationRef.current = null;
+      activeCreateOperationIdRef.current = null;
       return;
     }
     void detect(false);
-  }, [detect, open, platform]);
+    return () => {
+      detectionAbortRef.current?.abort();
+      detectionAbortRef.current = null;
+    };
+  }, [detect, open, platform, previewScopeKey]);
 
   useEffect(() => {
     if (!open) return;
     if (selectedTargetId && !selectedTarget) {
-      operationRef.current = null;
       setSelectedTargetId(null);
       return;
     }
@@ -156,64 +150,96 @@ export function CreateDevicePreviewDialog({
     const target = selectedTarget;
     if (!target || submitting || tool?.available !== true) return;
     const relay = relayClientRef;
-    const proxyId = selectedProxyId;
-    if (!relay || !proxyId) {
+    const scope = previewController.getActiveScope();
+    if (!relay || !scope || scope.proxyId !== selectedProxyId) {
       toast.error("请先连接开发机");
       return;
     }
-    const generation = ++generationRef.current;
-    const isCurrent = (): boolean =>
-      generation === generationRef.current &&
-      openRef.current &&
-      relayClientRef === relay &&
-      useAppStore.getState().selectedProxyId === proxyId;
     setSubmitting(true);
+    let operationId: string | null = null;
     try {
+      const customName = name.trim();
       const operation =
-        operationRef.current?.targetId === target.targetId
+        operationRef.current?.proxyId === scope.proxyId &&
+        operationRef.current.targetId === target.targetId &&
+        operationRef.current.name === customName
           ? operationRef.current
           : {
+              proxyId: scope.proxyId,
               targetId: target.targetId,
-              operationId: `device-preview-operation-${crypto.randomUUID()}`,
+              name: customName,
+              operationId: createClientOperationId("device-preview-operation"),
             };
       operationRef.current = operation;
-      const result = await relay.createDevicePreview(target.targetId, {
+      operationId = operation.operationId;
+      activeCreateOperationIdRef.current = operationId;
+      const result = await previewController.createDevicePreview(scope, target.targetId, {
         operationId: operation.operationId,
+        ...(customName ? { name: customName } : {}),
       });
-      if (!isCurrent()) return;
-      if (!result.accepted || !result.previewId) {
-        toast.error(result.error ?? "无法创建模拟器预览");
+      if (activeCreateOperationIdRef.current !== operation.operationId) return;
+      if (!result.accepted) {
+        if (operationRef.current?.operationId === operation.operationId) {
+          operationRef.current = null;
+        }
+        if (!openRef.current || !previewController.isActive(relay, scope)) return;
+        toast.error(result.error);
         return;
       }
-      useDevicePreviewStore
-        .getState()
-        .addStartingPreview(startingDevicePreview(result.previewId, target));
-      generationRef.current += 1;
-      operationRef.current = null;
+      if (operationRef.current?.operationId === operation.operationId) {
+        operationRef.current = null;
+      }
+      if (!openRef.current || !previewController.isActive(relay, scope)) return;
       onOpenChange(false);
       navigate(`/preview/device/${result.previewId}`);
     } catch (error) {
-      if (!isCurrent()) return;
+      if (!operationId || activeCreateOperationIdRef.current !== operationId) return;
+      if (!openRef.current || !previewController.isActive(relay, scope)) return;
       toast.error(error instanceof Error ? error.message : "无法创建模拟器预览");
     } finally {
-      if (generation === generationRef.current) setSubmitting(false);
+      if (operationId && activeCreateOperationIdRef.current === operationId) {
+        activeCreateOperationIdRef.current = null;
+        if (openRef.current) setSubmitting(false);
+      }
     }
   }
 
   function handleOpenChange(nextOpen: boolean): void {
     if (!nextOpen && submitting) return;
     if (!nextOpen) {
-      generationRef.current += 1;
+      detectionAbortRef.current?.abort();
+      detectionAbortRef.current = null;
       operationRef.current = null;
+      activeCreateOperationIdRef.current = null;
+      setName("");
       setSelectedTargetId(null);
     }
     onOpenChange(nextOpen);
   }
 
   const content = (
-    <div className="grid gap-4">
+    <div className="grid min-w-0 grid-cols-1 gap-4">
+      <label className="flex min-w-0 flex-col gap-1">
+        <span className="text-sm">名称（可选）</span>
+        <input
+          type="text"
+          name="dev-anywhere-device-preview-name"
+          value={name}
+          maxLength={256}
+          autoComplete="off"
+          autoCorrect="off"
+          spellCheck={false}
+          disabled={submitting}
+          placeholder="自动生成"
+          data-slot="device-preview-name"
+          onChange={(event) => {
+            setName(event.target.value);
+          }}
+          className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 text-base outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 md:h-9 md:min-h-0 md:text-sm"
+        />
+      </label>
       <DeviceToolStatus platform={platform} tool={tool} />
-      <div className="grid gap-2" data-slot="device-preview-targets">
+      <div className="grid min-w-0 grid-cols-1 gap-2" data-slot="device-preview-targets">
         {targetsStatus === "loading" ? (
           <div className="flex min-h-28 items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="size-4 animate-spin" aria-hidden="true" />
@@ -235,7 +261,6 @@ export function CreateDevicePreviewDialog({
                 disabled={alreadyOpen || submitting}
                 alreadyOpen={alreadyOpen}
                 onClick={() => {
-                  operationRef.current = null;
                   setSelectedTargetId(target.targetId);
                 }}
               />
@@ -275,7 +300,7 @@ export function CreateDevicePreviewDialog({
         <SheetContent
           side="bottom"
           showCloseButton={!submitting}
-          className="inset-x-2 max-h-[calc(100dvh-0.75rem)] w-auto overflow-y-auto rounded-t-xl border bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
+          className="inset-x-2 max-h-[calc(100dvh-0.75rem)] w-auto min-w-0 max-w-[calc(100%-1rem)] overflow-x-hidden overflow-y-auto rounded-t-xl border bg-background px-4 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3"
           data-slot="create-device-preview-dialog"
           data-platform={platform}
           focusSurfaceOnOpen
@@ -317,7 +342,7 @@ function DeviceToolStatus({
   tool: DevicePreviewToolStatus | undefined;
 }) {
   if (!tool || tool.available) return null;
-  const name = platform === "ios" ? "Baguette" : "ADB";
+  const name = platform === "ios" ? "Baguette" : "Scrcpy";
   const status = !tool.supported
     ? "unsupported"
     : platform === "ios" && tool.version
@@ -337,7 +362,8 @@ function DeviceToolStatus({
     tool.error ??
     (platform === "ios"
       ? "需要先在开发机上安装 Baguette 0.1.96 或更高版本。"
-      : "需要先在开发机上安装 Android Platform Tools。");
+      : "需要先在开发机上安装 Scrcpy 4.1。");
+  const showDescription = description.trim() !== title.trim();
   return (
     <div
       className="rounded-lg border border-amber-500/45 bg-amber-500/5 p-3 text-sm"
@@ -348,10 +374,18 @@ function DeviceToolStatus({
         <AlertCircle className="mt-0.5 size-4 shrink-0 text-amber-600" aria-hidden="true" />
         <div className="min-w-0">
           <p className="font-medium">{title}</p>
-          <p className="mt-1 text-muted-foreground">{description}</p>
-          {platform === "ios" && status !== "unsupported" ? (
+          {showDescription ? (
+            <p className="mt-1 text-muted-foreground" data-slot="device-preview-tool-description">
+              {description}
+            </p>
+          ) : null}
+          {status !== "unsupported" ? (
             <a
-              href="https://github.com/tddworks/baguette#install"
+              href={
+                platform === "ios"
+                  ? "https://github.com/tddworks/baguette#install"
+                  : "https://github.com/Genymobile/scrcpy"
+              }
               target="_blank"
               rel="noreferrer"
               className="mt-1 inline-block text-primary underline underline-offset-4"
@@ -386,12 +420,13 @@ function TargetButton({
   alreadyOpen: boolean;
   onClick: () => void;
 }) {
-  const detail = [target.osVersion, target.runtime].filter(Boolean).join(" · ");
+  const platformLabel = target.platform === "ios" ? "iOS" : "Android";
+  const detail = `${target.model} · ${platformLabel} ${target.osVersion}`;
   return (
     <button
       type="button"
       className={cn(
-        "flex min-h-16 w-full items-center gap-3 rounded-lg border px-3 py-2 text-left outline-none transition-colors",
+        "flex min-h-16 w-full min-w-0 max-w-full items-center gap-3 overflow-hidden rounded-lg border px-3 py-2 text-left outline-none transition-colors",
         selected ? "border-primary bg-primary/5" : "border-border hover:bg-accent",
         disabled && "cursor-not-allowed opacity-55",
       )}
@@ -406,9 +441,14 @@ function TargetButton({
       <Smartphone className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
       <span className="min-w-0 flex-1">
         <span className="block truncate text-sm font-medium">{target.name}</span>
-        {detail ? (
-          <span className="mt-0.5 block truncate text-xs text-muted-foreground">{detail}</span>
-        ) : null}
+        <span
+          className="mt-0.5 block truncate text-xs text-muted-foreground"
+          data-slot="device-preview-target-device"
+          data-device-model={target.model}
+          data-os-version={target.osVersion}
+        >
+          {detail}
+        </span>
       </span>
       {alreadyOpen ? (
         <span className="text-xs text-muted-foreground">已在预览</span>

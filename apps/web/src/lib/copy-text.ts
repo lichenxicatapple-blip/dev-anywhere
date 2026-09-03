@@ -1,12 +1,12 @@
-type CopyTextResult = "clipboard" | "legacy" | "failed";
+type CopyTextResult = "clipboard" | "user-gesture" | "failed";
 
 interface CopyTextOptions {
-  allowLegacyFallback?: boolean;
+  allowUserGestureFallback?: boolean;
 }
 
 export async function copyText(
   text: string,
-  { allowLegacyFallback = false }: CopyTextOptions = {},
+  { allowUserGestureFallback = false }: CopyTextOptions = {},
 ): Promise<CopyTextResult> {
   const writeText = navigator.clipboard?.writeText?.bind(navigator.clipboard);
   if (writeText && window.isSecureContext !== false) {
@@ -18,8 +18,8 @@ export async function copyText(
     }
   }
 
-  if (!allowLegacyFallback) return "failed";
-  return copyTextFromActiveUserGesture(text) ? "legacy" : "failed";
+  if (!allowUserGestureFallback) return "failed";
+  return copyTextFromActiveUserGesture(text) ? "user-gesture" : "failed";
 }
 
 function copyTextFromActiveUserGesture(text: string): boolean {

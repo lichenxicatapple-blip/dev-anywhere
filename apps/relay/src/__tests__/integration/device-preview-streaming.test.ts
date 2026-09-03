@@ -1,9 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
+  DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES,
   RelayCloseCode,
+  decodeDevicePreviewH264HttpPacketHeader,
   decodeDevicePreviewHttpFrameHeader,
   encodeDevicePreviewFrame,
+  encodeDevicePreviewH264ProxyPacket,
+  type DevicePreviewStreamProfile,
+  type PreviewScope,
 } from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "#src/server.js";
@@ -12,6 +17,7 @@ import { collectMessages, getPort, settle, waitForMessageType, waitForOpen } fro
 const logger = createLogger({ name: "device-preview-streaming-test", silent: true });
 const PROXY_TOKEN = "device-proxy-secret";
 const CLIENT_TOKEN = "device-client-secret";
+const untrustedProxyScope = { proxyId: "forged-proxy", bindingId: "forged-binding" } as const;
 
 type JsonMessage = Record<string, unknown> & { type: string };
 
@@ -19,6 +25,7 @@ describe("Device Preview Relay data plane", () => {
   let relay: RelayServer;
   let port: number;
   const sockets: WebSocket[] = [];
+  const clientScopes = new WeakMap<WebSocket, PreviewScope>();
 
   beforeEach(async () => {
     relay = createRelayServer({
@@ -47,7 +54,7 @@ describe("Device Preview Relay data plane", () => {
     return ws;
   }
 
-  async function setupProxy(): Promise<{
+  async function setupProxy(proxyId = "device-proxy"): Promise<{
     proxy: WebSocket;
     streamTransport: WebSocket;
     connectionId: string;
@@ -55,7 +62,7 @@ describe("Device Preview Relay data plane", () => {
     const proxy = connect(`/proxy?token=${PROXY_TOKEN}`);
     await waitForOpen(proxy);
     const registeredPromise = waitForMessageType(proxy, "proxy_register_response");
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "device-proxy" }));
+    proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
     const registered = JSON.parse(await registeredPromise) as JsonMessage & {
       connectionId: string;
     };
@@ -70,7 +77,7 @@ describe("Device Preview Relay data plane", () => {
     streamTransport.send(
       JSON.stringify({
         type: "device_preview_stream_register",
-        proxyId: "device-proxy",
+        proxyId,
         connectionId: registered.connectionId,
       }),
     );
@@ -78,7 +85,24 @@ describe("Device Preview Relay data plane", () => {
     return { proxy, streamTransport, connectionId: registered.connectionId };
   }
 
-  async function setupClient(clientId: string): Promise<WebSocket> {
+  async function selectProxy(
+    client: WebSocket,
+    proxyId: string,
+    requestId = `select-${proxyId}`,
+  ): Promise<PreviewScope> {
+    const selectedPromise = waitForMessageType(client, "proxy_select_response");
+    client.send(JSON.stringify({ type: "proxy_select", requestId, proxyId }));
+    const selected = JSON.parse(await selectedPromise) as {
+      proxyId: string;
+      bindingId: string;
+    };
+    expect(selected).toMatchObject({ proxyId, bindingId: expect.any(String) });
+    const scope = { proxyId: selected.proxyId, bindingId: selected.bindingId };
+    clientScopes.set(client, scope);
+    return scope;
+  }
+
+  async function setupClient(clientId: string, proxyId = "device-proxy"): Promise<WebSocket> {
     const client = connect(`/client?token=${CLIENT_TOKEN}`);
     await waitForOpen(client);
     const registeredPromise = waitForMessageType(client, "client_register_response");
@@ -92,16 +116,24 @@ describe("Device Preview Relay data plane", () => {
       }),
     );
     await registeredPromise;
-    const selectedPromise = waitForMessageType(client, "proxy_select_response");
-    client.send(JSON.stringify({ type: "proxy_select", proxyId: "device-proxy" }));
-    await selectedPromise;
+    await selectProxy(client, proxyId);
     return client;
+  }
+
+  function previewScope(client: WebSocket): PreviewScope {
+    const scope = clientScopes.get(client);
+    if (!scope) throw new Error("Test client has no Preview scope");
+    return scope;
   }
 
   async function requestStreamUrl(
     client: WebSocket,
     requestId: string,
     previewId = "ios-preview",
+    profile: DevicePreviewStreamProfile = {
+      format: "jpeg",
+      maxFps: 15,
+    },
   ): Promise<
     JsonMessage & {
       url: string;
@@ -114,8 +146,9 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_stream_url_request",
         requestId,
+        scope: previewScope(client),
         previewId,
-        profile: { maxFps: 15, maxWidth: 960, jpegQuality: 70 },
+        profile,
       }),
     );
     const response = JSON.parse(await responsePromise);
@@ -125,6 +158,7 @@ describe("Device Preview Relay data plane", () => {
       success: true,
       url: expect.any(String),
       leaseId: expect.any(String),
+      scope: previewScope(client),
     });
     return response;
   }
@@ -143,9 +177,8 @@ describe("Device Preview Relay data plane", () => {
     expect(start).toMatchObject({
       leaseId: access.leaseId,
       previewId: "ios-preview",
+      format: "jpeg",
       maxFps: 15,
-      maxWidth: 960,
-      jpegQuality: 70,
     });
     proxy.send(
       JSON.stringify({
@@ -154,6 +187,7 @@ describe("Device Preview Relay data plane", () => {
         leaseId: access.leaseId,
         previewId: "ios-preview",
         success: true,
+        format: "jpeg",
         width: 1179,
         height: 2556,
       }),
@@ -215,6 +249,139 @@ describe("Device Preview Relay data plane", () => {
     });
   });
 
+  it("preserves H.264 configuration and keyframes that arrive before stream start completes", async () => {
+    const { proxy, streamTransport } = await setupProxy();
+    const client = await setupClient("device-client-h264");
+    const access = await requestStreamUrl(client, "stream-url-h264", "android-preview", {
+      format: "h264_annex_b",
+    });
+    const controller = new AbortController();
+    const startPromise = waitForMessageType(proxy, "device_preview_stream_start");
+    const responsePromise = fetch(`http://127.0.0.1:${port}${access.url}`, {
+      headers: { authorization: `Bearer ${CLIENT_TOKEN}` },
+      signal: controller.signal,
+    });
+    const start = JSON.parse(await startPromise) as JsonMessage & { streamId: string };
+    expect(start).toMatchObject({
+      previewId: "android-preview",
+      format: "h264_annex_b",
+    });
+    expect(start).not.toHaveProperty("maxFps");
+
+    const configuration = Uint8Array.of(0, 0, 0, 1, 0x67, 0x42, 0x80, 0x1f);
+    const keyframe = Uint8Array.of(0, 0, 0, 1, 0x65, 0x01, 0x02);
+    streamTransport.send(
+      encodeDevicePreviewH264ProxyPacket(start.streamId, {
+        packetSequence: 0,
+        configuration: true,
+        keyframe: false,
+        durationMs: 0,
+        annexB: configuration,
+      }),
+      { binary: true, compress: false },
+    );
+    streamTransport.send(
+      encodeDevicePreviewH264ProxyPacket(start.streamId, {
+        packetSequence: 1,
+        configuration: false,
+        keyframe: true,
+        durationMs: 33,
+        annexB: keyframe,
+      }),
+      { binary: true, compress: false },
+    );
+    await settle(25);
+    proxy.send(
+      JSON.stringify({
+        type: "device_preview_stream_start_response",
+        streamId: start.streamId,
+        leaseId: access.leaseId,
+        previewId: "android-preview",
+        success: true,
+        format: "h264_annex_b",
+        width: 324,
+        height: 720,
+      }),
+    );
+
+    const response = await responsePromise;
+    expect(response.status).toBe(200);
+    expect(response.headers.get("x-device-preview-format")).toBe("h264_annex_b");
+    const expectedLength =
+      DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES * 2 + configuration.length + keyframe.length;
+    const reader = response.body!.getReader();
+    let bytes = new Uint8Array(0);
+    while (bytes.length < expectedLength) {
+      const chunk = await reader.read();
+      expect(chunk.done).toBe(false);
+      const joined = new Uint8Array(bytes.length + chunk.value.length);
+      joined.set(bytes);
+      joined.set(chunk.value, bytes.length);
+      bytes = joined;
+    }
+    const first = decodeDevicePreviewH264HttpPacketHeader(bytes);
+    expect(first).toMatchObject({
+      packetSequence: 0,
+      configuration: true,
+      keyframe: false,
+      annexBLength: configuration.length,
+    });
+    const secondOffset = DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES + configuration.length;
+    expect(decodeDevicePreviewH264HttpPacketHeader(bytes.subarray(secondOffset))).toMatchObject({
+      packetSequence: 1,
+      configuration: false,
+      keyframe: true,
+      annexBLength: keyframe.length,
+    });
+
+    const stopPromise = waitForMessageType(proxy, "device_preview_stream_stop");
+    await reader.cancel();
+    controller.abort();
+    expect(JSON.parse(await stopPromise)).toMatchObject({
+      streamId: start.streamId,
+      reason: "client_closed",
+    });
+  });
+
+  it("fails closed when Proxy returns a format different from the requested format", async () => {
+    const { proxy } = await setupProxy();
+    const client = await setupClient("device-client-h264-negotiation-mismatch");
+    const access = await requestStreamUrl(
+      client,
+      "stream-url-h264-negotiation-mismatch",
+      "android-preview",
+      { format: "h264_annex_b" },
+    );
+    const startPromise = waitForMessageType(proxy, "device_preview_stream_start");
+    const responsePromise = fetch(`http://127.0.0.1:${port}${access.url}`, {
+      headers: { authorization: `Bearer ${CLIENT_TOKEN}` },
+    });
+    const start = JSON.parse(await startPromise) as JsonMessage & { streamId: string };
+    expect(start).toMatchObject({ format: "h264_annex_b" });
+
+    const stopPromise = waitForMessageType(proxy, "device_preview_stream_stop");
+    proxy.send(
+      JSON.stringify({
+        type: "device_preview_stream_start_response",
+        streamId: start.streamId,
+        leaseId: access.leaseId,
+        previewId: "android-preview",
+        success: true,
+        format: "jpeg",
+      }),
+    );
+
+    const response = await responsePromise;
+    expect(response.status).toBe(502);
+    await expect(response.json()).resolves.toMatchObject({
+      error: expect.stringContaining("返回了错误的设备画面格式"),
+    });
+    expect(JSON.parse(await stopPromise)).toMatchObject({
+      streamId: start.streamId,
+      reason: "stream_error",
+    });
+  });
+
   it("flushes the newest frame that arrives before the stream-start response", async () => {
     const { proxy, streamTransport } = await setupProxy();
     const client = await setupClient("device-client-cached-first-frame");
@@ -250,6 +417,7 @@ describe("Device Preview Relay data plane", () => {
         leaseId: access.leaseId,
         previewId: "ios-preview",
         success: true,
+        format: "jpeg",
         width: 1179,
         height: 2556,
       }),
@@ -293,6 +461,7 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_create_request",
         requestId: "same-browser-request",
+        scope: previewScope(clientA),
         operationId: "device-operation-a",
         targetId: "ios:simulator-a",
       }),
@@ -301,6 +470,7 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_create_request",
         requestId: "same-browser-request",
+        scope: previewScope(clientB),
         operationId: "device-operation-b",
         targetId: "android:emulator-b",
       }),
@@ -311,6 +481,8 @@ describe("Device Preview Relay data plane", () => {
     expect(requestA?.requestId).toMatch(/^relay-device-preview-/u);
     expect(requestB?.requestId).toMatch(/^relay-device-preview-/u);
     expect(requestA?.requestId).not.toBe(requestB?.requestId);
+    expect(requestA?.scope).toEqual(previewScope(clientA));
+    expect(requestB?.scope).toEqual(previewScope(clientB));
 
     const responseA = waitForMessageType(clientA, "device_preview_create_response");
     const responseB = waitForMessageType(clientB, "device_preview_create_response");
@@ -318,6 +490,7 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_create_response",
         requestId: requestB?.requestId,
+        scope: untrustedProxyScope,
         operationId: "device-operation-b",
         accepted: true,
         previewId: "preview-b",
@@ -327,6 +500,7 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_create_response",
         requestId: requestA?.requestId,
+        scope: untrustedProxyScope,
         operationId: "device-operation-a",
         accepted: true,
         previewId: "preview-a",
@@ -336,11 +510,172 @@ describe("Device Preview Relay data plane", () => {
       requestId: "same-browser-request",
       operationId: "device-operation-a",
       previewId: "preview-a",
+      scope: previewScope(clientA),
     });
     expect(JSON.parse(await responseB)).toMatchObject({
       requestId: "same-browser-request",
       operationId: "device-operation-b",
       previewId: "preview-b",
+      scope: previewScope(clientB),
+    });
+  });
+
+  it("rejects a stale binding generation before routing Device Preview management", async () => {
+    const { proxy } = await setupProxy();
+    const client = await setupClient("device-stale-binding");
+    const staleScope = previewScope(client);
+
+    const selectedPromise = waitForMessageType(client, "proxy_select_response");
+    client.send(
+      JSON.stringify({
+        type: "proxy_select",
+        requestId: "device-reselect",
+        proxyId: "device-proxy",
+      }),
+    );
+    const selected = JSON.parse(await selectedPromise) as {
+      proxyId: string;
+      bindingId: string;
+    };
+    expect(selected.bindingId).not.toBe(staleScope.bindingId);
+
+    const proxyMessages: JsonMessage[] = [];
+    proxy.on("message", (data) => proxyMessages.push(JSON.parse(data.toString()) as JsonMessage));
+    const staleError = waitForMessageType(client, "relay_error");
+    client.send(
+      JSON.stringify({
+        type: "device_preview_list_request",
+        requestId: "device-list-stale",
+        scope: staleScope,
+      }),
+    );
+    expect(JSON.parse(await staleError)).toMatchObject({
+      requestId: "device-list-stale",
+      code: "STALE_BINDING",
+    });
+    await settle(50);
+    expect(proxyMessages).toEqual([]);
+
+    const currentScope = { proxyId: selected.proxyId, bindingId: selected.bindingId };
+    const forwarded = waitForMessageType(proxy, "device_preview_list_request");
+    client.send(
+      JSON.stringify({
+        type: "device_preview_list_request",
+        requestId: "device-list-current",
+        scope: currentScope,
+      }),
+    );
+    expect(JSON.parse(await forwarded)).toMatchObject({
+      type: "device_preview_list_request",
+      scope: currentScope,
+    });
+  });
+
+  it.each([
+    ["same Proxy rebind", false],
+    ["cross-Proxy switch with the same previewId", true],
+  ])("rejects stale Device stream and control scope after %s", async (_label, crossProxy) => {
+    await setupProxy("device-proxy-a");
+    if (crossProxy) await setupProxy("device-proxy-b");
+    const client = await setupClient("device-data-stale-binding", "device-proxy-a");
+    const staleScope = previewScope(client);
+    const currentScope = await selectProxy(
+      client,
+      crossProxy ? "device-proxy-b" : "device-proxy-a",
+      "device-data-reselect",
+    );
+    expect(currentScope.bindingId).not.toBe(staleScope.bindingId);
+
+    const staleUrlError = waitForMessageType(client, "relay_error");
+    client.send(
+      JSON.stringify({
+        type: "device_preview_stream_url_request",
+        requestId: "stale-stream-url",
+        scope: staleScope,
+        previewId: "shared-preview-id",
+        profile: { format: "jpeg" },
+      }),
+    );
+    expect(JSON.parse(await staleUrlError)).toMatchObject({
+      requestId: "stale-stream-url",
+      code: "STALE_BINDING",
+    });
+
+    const access = await requestStreamUrl(client, "current-stream-url", "shared-preview-id", {
+      format: "jpeg",
+    });
+    expect(access.controlMode).toBe("controller");
+
+    const staleInputError = waitForMessageType(client, "device_preview_input_ack");
+    client.send(
+      JSON.stringify({
+        type: "device_preview_input",
+        scope: staleScope,
+        leaseId: access.leaseId,
+        inputSeq: 1,
+        input: { kind: "button", button: "home" },
+      }),
+    );
+    expect(JSON.parse(await staleInputError)).toMatchObject({
+      scope: staleScope,
+      leaseId: access.leaseId,
+      inputSeq: 1,
+      success: false,
+      error: "Preview request used a stale client binding",
+      errorCode: "CONTROL_LEASE_INVALID",
+    });
+
+    const staleClaimError = waitForMessageType(client, "relay_error");
+    client.send(
+      JSON.stringify({
+        type: "device_preview_control_claim_request",
+        requestId: "stale-control-claim",
+        scope: staleScope,
+        leaseId: access.leaseId,
+      }),
+    );
+    expect(JSON.parse(await staleClaimError)).toMatchObject({
+      requestId: "stale-control-claim",
+      code: "STALE_BINDING",
+    });
+  });
+
+  it("preserves operationId while rewriting Device Preview rename request IDs", async () => {
+    const { proxy } = await setupProxy();
+    const client = await setupClient("device-rename-routing");
+    const forwardedPromise = waitForMessageType(proxy, "device_preview_rename_request");
+    client.send(
+      JSON.stringify({
+        type: "device_preview_rename_request",
+        requestId: "device-rename-client-request",
+        scope: previewScope(client),
+        operationId: "device-rename-operation-1",
+        previewId: "preview-1",
+        name: "QA phone",
+      }),
+    );
+    const forwarded = JSON.parse(await forwardedPromise);
+    expect(forwarded).toMatchObject({
+      requestId: expect.stringMatching(/^relay-device-preview-/u),
+      operationId: "device-rename-operation-1",
+    });
+
+    const responsePromise = waitForMessageType(client, "device_preview_rename_response");
+    proxy.send(
+      JSON.stringify({
+        type: "device_preview_rename_response",
+        requestId: forwarded.requestId,
+        scope: untrustedProxyScope,
+        operationId: forwarded.operationId,
+        previewId: "preview-1",
+        success: true,
+      }),
+    );
+    expect(JSON.parse(await responsePromise)).toMatchObject({
+      requestId: "device-rename-client-request",
+      operationId: "device-rename-operation-1",
+      success: true,
+      scope: previewScope(client),
     });
   });
 
@@ -377,6 +712,7 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_stream_url_response",
         requestId: "forged-url",
+        scope: untrustedProxyScope,
         previewId: "forged-preview",
         success: true,
         url: "/api/device-preview-streams/forged",
@@ -389,6 +725,7 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_control_claim_response",
         requestId: "forged-claim",
+        scope: untrustedProxyScope,
         leaseId: "forged-lease",
         success: true,
         controlMode: "controller",
@@ -397,6 +734,7 @@ describe("Device Preview Relay data plane", () => {
     proxy.send(
       JSON.stringify({
         type: "device_preview_control_revoked_push",
+        scope: { proxyId: "device-proxy", bindingId: "forged-binding" },
         leaseId: "forged-lease",
         reason: "taken_over",
       }),
@@ -541,7 +879,7 @@ describe("Device Preview Relay data plane", () => {
     expect(retry.success).toBe(true);
   });
 
-  it("keeps input on the exact live lease and supports explicit controller takeover", async () => {
+  it("keeps input sequence monotonic across controller takeover and ignores delayed ACKs", async () => {
     const { proxy } = await setupProxy();
     const clientA = await setupClient("device-control-a");
     const clientB = await setupClient("device-control-b");
@@ -554,15 +892,16 @@ describe("Device Preview Relay data plane", () => {
     clientA.send(
       JSON.stringify({
         type: "device_preview_input",
+        scope: previewScope(clientA),
         leaseId: accessA.leaseId,
         inputSeq: 1,
-        input: { kind: "tap", x: 0.25, y: 0.75 },
+        input: { kind: "button", button: "home" },
       }),
     );
     expect(JSON.parse(await forwardedInputPromise)).toMatchObject({
       leaseId: accessA.leaseId,
       inputSeq: 1,
-      input: { kind: "tap", x: 0.25, y: 0.75 },
+      input: { kind: "button", button: "home" },
     });
 
     const rejectedInputPromise = waitForMessageType(clientB, "device_preview_input_ack");
@@ -570,6 +909,7 @@ describe("Device Preview Relay data plane", () => {
     clientB.send(
       JSON.stringify({
         type: "device_preview_input",
+        scope: previewScope(clientB),
         leaseId: accessA.leaseId,
         inputSeq: 2,
         input: { kind: "button", button: "home" },
@@ -587,18 +927,27 @@ describe("Device Preview Relay data plane", () => {
     expect(accessB.controlMode).toBe("view_only");
 
     const revokedPromise = waitForMessageType(clientA, "device_preview_control_revoked_push");
+    const revokedInputAckPromise = waitForMessageType(clientA, "device_preview_input_ack");
     const claimedPromise = waitForMessageType(clientB, "device_preview_control_claim_response");
     const inputRevokePromise = waitForMessageType(proxy, "device_preview_input_revoke");
     clientB.send(
       JSON.stringify({
         type: "device_preview_control_claim_request",
         requestId: "claim-b",
+        scope: previewScope(clientB),
         leaseId: accessB.leaseId,
       }),
     );
     expect(JSON.parse(await revokedPromise)).toMatchObject({
+      scope: previewScope(clientA),
       leaseId: accessA.leaseId,
       reason: "taken_over",
+    });
+    expect(JSON.parse(await revokedInputAckPromise)).toMatchObject({
+      leaseId: accessA.leaseId,
+      inputSeq: 1,
+      success: false,
+      errorCode: "CONTROL_LEASE_INVALID",
     });
     expect(JSON.parse(await inputRevokePromise)).toEqual({
       type: "device_preview_input_revoke",
@@ -618,11 +967,13 @@ describe("Device Preview Relay data plane", () => {
       JSON.stringify({
         type: "device_preview_control_claim_request",
         requestId: "claim-a-again",
+        scope: previewScope(clientA),
         leaseId: accessA.leaseId,
       }),
     );
     expect(JSON.parse(await inputRevokeBPromise)).toMatchObject({ leaseId: accessB.leaseId });
     expect(JSON.parse(await revokedBPromise)).toMatchObject({
+      scope: previewScope(clientB),
       leaseId: accessB.leaseId,
       reason: "taken_over",
     });
@@ -632,18 +983,66 @@ describe("Device Preview Relay data plane", () => {
       controlMode: "controller",
     });
 
-    const resumedInputPromise = waitForMessageType(proxy, "device_preview_input");
+    const staleSequenceAckPromise = waitForMessageType(clientA, "device_preview_input_ack");
+    const unexpectedReusedInput = collectMessages(proxy, 1, 100);
     clientA.send(
       JSON.stringify({
         type: "device_preview_input",
+        scope: previewScope(clientA),
         leaseId: accessA.leaseId,
         inputSeq: 1,
         input: { kind: "button", button: "home" },
       }),
     );
-    expect(JSON.parse(await resumedInputPromise)).toMatchObject({
+    expect(JSON.parse(await staleSequenceAckPromise)).toMatchObject({
       leaseId: accessA.leaseId,
       inputSeq: 1,
+      success: false,
+    });
+    expect(await unexpectedReusedInput).toEqual([]);
+
+    const resumedInputPromise = waitForMessageType(proxy, "device_preview_input");
+    clientA.send(
+      JSON.stringify({
+        type: "device_preview_input",
+        scope: previewScope(clientA),
+        leaseId: accessA.leaseId,
+        inputSeq: 2,
+        input: { kind: "button", button: "home" },
+      }),
+    );
+    expect(JSON.parse(await resumedInputPromise)).toMatchObject({
+      leaseId: accessA.leaseId,
+      inputSeq: 2,
+    });
+
+    const unexpectedDelayedAck = collectMessages(clientA, 1, 100);
+    proxy.send(
+      JSON.stringify({
+        type: "device_preview_input_ack",
+        scope: untrustedProxyScope,
+        leaseId: accessA.leaseId,
+        inputSeq: 1,
+        success: true,
+      }),
+    );
+    expect(await unexpectedDelayedAck).toEqual([]);
+
+    const currentInputAckPromise = waitForMessageType(clientA, "device_preview_input_ack");
+    proxy.send(
+      JSON.stringify({
+        type: "device_preview_input_ack",
+        scope: untrustedProxyScope,
+        leaseId: accessA.leaseId,
+        inputSeq: 2,
+        success: true,
+      }),
+    );
+    expect(JSON.parse(await currentInputAckPromise)).toMatchObject({
+      leaseId: accessA.leaseId,
+      inputSeq: 2,
+      success: true,
+      scope: previewScope(clientA),
     });
 
     abortA.abort();
@@ -665,9 +1064,10 @@ describe("Device Preview Relay data plane", () => {
       client.send(
         JSON.stringify({
           type: "device_preview_input",
+          scope: previewScope(client),
           leaseId: access.leaseId,
           inputSeq,
-          input: { kind: "tap", x: 0.5, y: 0.5 },
+          input: { kind: "button", button: "home" },
         }),
       );
     }

@@ -7,8 +7,8 @@ import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
-import { syncWebPreviewSnapshot } from "@/services/preview-snapshot-loader";
-import { syncDevicePreviewSnapshot } from "@/services/device-preview-snapshot-loader";
+import { previewController } from "@/services/preview-controller";
+import type { PreviewScope } from "@/services/preview-scope";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { loadSessionHistory } from "@/services/session-history-loader";
 import {
@@ -52,34 +52,59 @@ function extractSessionIdFromHash(): string | null {
   return match?.[1] ?? null;
 }
 
-function requestProxyState(relay: RelayClient): void {
-  const requestedProxyId = useAppStore.getState().selectedProxyId;
-  if (!requestedProxyId) return;
+function activatePreviewBinding(relay: RelayClient, proxyId: string): PreviewScope | null {
+  const scope = relay.getPreviewScope();
+  if (!scope || scope.proxyId !== proxyId) {
+    previewController.dispose();
+    console.error("[phase-machine] Relay acknowledged a binding without a matching preview scope");
+    return null;
+  }
+  previewController.activate(relay, scope);
+  return scope;
+}
+
+function previewBindingIsCurrent(relay: RelayClient, scope: PreviewScope): boolean {
+  return (
+    useAppStore.getState().selectedProxyId === scope.proxyId &&
+    previewController.isActive(relay, scope)
+  );
+}
+
+function requestProxyState(relay: RelayClient, scope: PreviewScope): void {
+  if (!previewBindingIsCurrent(relay, scope)) return;
   relay.sendControl({ type: "session_list" });
+  void previewController.syncWebSnapshot(scope).catch((error: unknown) => {
+    if (error instanceof Error && error.name === "AbortError") return;
+    console.error("[phase-machine] requestWebPreviewList failed", error);
+  });
+  void previewController.syncDeviceSnapshot(scope).catch((error: unknown) => {
+    if (error instanceof Error && error.name === "AbortError") return;
+    console.error("[phase-machine] requestDevicePreviewList failed", error);
+  });
   void relay
     .requestProxyInfo()
     .then((info) => {
-      if (useAppStore.getState().selectedProxyId !== requestedProxyId) return;
+      if (!previewBindingIsCurrent(relay, scope)) return;
       const fileStore = useFileStore.getState();
       fileStore.setHomePath(info.homePath);
       fileStore.setAgentCli(info.agentCli);
-      syncWebPreviewSnapshot(relay, requestedProxyId, info.webPreview, "phase-machine");
-      syncDevicePreviewSnapshot(relay, requestedProxyId, info.devicePreview, "phase-machine");
     })
     .catch((err: unknown) => {
+      if (!previewBindingIsCurrent(relay, scope)) return;
       console.error("[phase-machine] requestProxyInfo failed", err);
       toast.error("无法获取开发机信息");
     });
   void relay
     .requestAgentStatuses()
     .then((statuses) => {
-      if (useAppStore.getState().selectedProxyId !== requestedProxyId) return;
+      if (!previewBindingIsCurrent(relay, scope)) return;
       const store = useSessionStore.getState();
       for (const status of statuses) {
         store.setAgentStatus(status.sessionId, status.payload);
       }
     })
     .catch((err: unknown) => {
+      if (!previewBindingIsCurrent(relay, scope)) return;
       // 后台辅助数据，失败仅日志，不打扰用户（避免每次重连飞 toast）
       console.error("[phase-machine] requestAgentStatuses failed", err);
     });
@@ -105,11 +130,13 @@ async function restoreSelectedProxyBinding(
 ): Promise<boolean> {
   const result = await ensureBinding(relay, { proxyId: proxy.proxyId });
   if (isBindingError(result) || !shouldCommit()) return false;
+  const scope = activatePreviewBinding(relay, result.proxyId);
+  if (!scope) return false;
 
   writeStorageValue("local", STORAGE_KEYS.proxyId, proxy.proxyId);
   useAppStore.getState().setProxy(proxy.proxyId, proxy.name ?? null);
   useAppStore.getState().setProxyOnline(true);
-  requestProxyState(relay);
+  requestProxyState(relay, scope);
   requestSessionHistory(relay);
   return true;
 }
@@ -150,6 +177,7 @@ function ensureReconnectFallback(timers: Timers): void {
     if (timers.disposed || useAppStore.getState().phase !== "reconnecting") return;
 
     timers.coldStartDone = false;
+    previewController.dispose();
     useAppStore.getState().setProxyOnline(false);
     useAppStore.getState().setProxies([]);
     useAppStore.getState().resetProxyListLoaded();
@@ -241,6 +269,7 @@ async function attemptReconnectBinding(
 export function disposePhaseMachineTimers(timers: Timers): void {
   timers.disposed = true;
   clearReconnectRecovery(timers);
+  previewController.dispose();
 }
 
 function bindingErrorMessage(code: string): string {
@@ -262,6 +291,7 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
     // A new raw socket invalidates any proxy_select still pending on the previous transport.
     // Input stays disabled until the selected proxy binding is acknowledged below.
     invalidateBindingRecovery(timers);
+    previewController.dispose();
     relay.register();
 
     if (s.phase === "connecting") {
@@ -275,6 +305,7 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
     }
   } else {
     invalidateBindingRecovery(timers);
+    previewController.dispose();
     useAppStore.getState().setProxyOnline(false);
     useAppStore.getState().setProxies([]);
     useAppStore.getState().resetProxyListLoaded();
@@ -297,6 +328,14 @@ export async function handleRelayMessage(
 
   // client_register_response: 从 registering 转入 proxy_selecting
   if (msg.type === "client_register_response") {
+    if (
+      (msg.status === "restored" || msg.status === "proxy_offline") &&
+      typeof msg.proxyId === "string"
+    ) {
+      activatePreviewBinding(relay, msg.proxyId);
+    } else {
+      previewController.dispose();
+    }
     if (s.phase === "registering") {
       relay.listProxies();
       useAppStore.getState().setPhase("proxy_selecting");
@@ -305,6 +344,7 @@ export async function handleRelayMessage(
   }
 
   if (msg.type === "relay_client_kicked") {
+    previewController.dispose();
     toast.info("这个客户端已被断开");
     return;
   }
@@ -331,6 +371,7 @@ export async function handleRelayMessage(
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
       invalidateBindingRecovery(timers);
+      previewController.dispose();
       relay.clearBoundProxy(typeof msg.proxyId === "string" ? msg.proxyId : undefined);
       useAppStore.getState().setProxyOnline(false);
       toast.warning("当前开发机已离线");
@@ -340,11 +381,16 @@ export async function handleRelayMessage(
 
   // proxy_online: 更新标记并刷新列表
   if (msg.type === "proxy_online") {
+    if (typeof msg.proxyId !== "string") return;
     relay.listProxies();
     if (msg.proxyId === s.selectedProxyId) {
       const alreadyBound = relay.getBoundProxyId() === msg.proxyId;
       if (alreadyBound && s.phase !== "reconnecting") {
+        const scope = activatePreviewBinding(relay, msg.proxyId);
+        if (!scope) return;
         useAppStore.getState().setProxyOnline(true);
+        requestProxyState(relay, scope);
+        requestSessionHistory(relay);
         toast.success("当前开发机已恢复连接");
         return;
       }
@@ -400,11 +446,16 @@ export async function handleRelayMessage(
           return;
         }
         const proxyInfo = proxies.find((p) => p.proxyId === result.proxyId);
+        const scope = activatePreviewBinding(relay, result.proxyId);
+        if (!scope) {
+          timers.coldStartDone = false;
+          return;
+        }
         useAppStore.getState().setProxy(result.proxyId, proxyInfo?.name || null);
         useAppStore.getState().setProxyOnline(true);
         writeStorageValue("local", STORAGE_KEYS.proxyId, result.proxyId);
         useAppStore.getState().setPhase("chatting");
-        requestProxyState(relay);
+        requestProxyState(relay, scope);
         requestSessionHistory(relay);
         return;
       }
@@ -414,12 +465,17 @@ export async function handleRelayMessage(
       } else {
         const result = await ensureBinding(relay, { proxyId: savedProxyId });
         if (!isBindingError(result)) {
+          const scope = activatePreviewBinding(relay, result.proxyId);
+          if (!scope) {
+            timers.coldStartDone = false;
+            return;
+          }
           const proxyInfo = proxies.find((p) => p.proxyId === savedProxyId);
           useAppStore.getState().setProxy(savedProxyId, proxyInfo?.name || null);
           useAppStore.getState().setProxyOnline(true);
           // 冷启动绑定成功后拉取 session 列表 + 历史; 路由由 route-restore (AppShell)
           // 按 last-chat-route 决定, 这里只推进 phase 状态。
-          requestProxyState(relay);
+          requestProxyState(relay, scope);
           requestSessionHistory(relay);
           useAppStore.getState().setPhase("session_browsing");
           return;

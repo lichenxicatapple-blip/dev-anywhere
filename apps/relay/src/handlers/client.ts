@@ -7,6 +7,8 @@ import {
   RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
   type ControlErrorCodeType,
+  type PreviewScope,
+  type RelayControlMessage,
 } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "../registry.js";
@@ -26,12 +28,14 @@ import {
   type WebPreviewRouteRegistry,
 } from "../web-preview-route-registry.js";
 import type { DevicePreviewBridge } from "../device-preview-bridge.js";
+import { isDevicePreviewRequestMessage } from "../device-preview-route-registry.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
   isAlive: boolean;
   clientId?: string;
   boundProxyId?: string;
+  bindingId?: string;
 }
 
 interface ClientConnectionInfo {
@@ -65,11 +69,14 @@ function handleClientRegister(
   clientWs: ClientSocket,
   registry: RelayRegistry,
   logger: Logger,
-  devicePreviewBridge?: DevicePreviewBridge,
+  webPreviewRoutes: WebPreviewRouteRegistry,
+  devicePreviewBridge: DevicePreviewBridge,
 ): void {
   const { clientId } = registration;
   if (clientWs.clientId && clientWs.clientId !== clientId) {
-    devicePreviewBridge?.abandonClientSocket(clientWs);
+    webPreviewRoutes.abandonSocket(clientWs);
+    devicePreviewBridge.abandonClientSocket(clientWs);
+    registry.unbindClientSocket(clientWs.clientId, clientWs);
   }
   clientWs.clientId = clientId;
   registry.updateConnectedClientMetadata(clientWs, {
@@ -87,32 +94,32 @@ function handleClientRegister(
   const binding = registry.getClientBinding(clientId);
 
   if (!binding) {
-    clientWs.send(
-      JSON.stringify({
-        type: "client_register_response",
-        status: "new",
-      }),
-    );
+    clientWs.send(serializeControl({ type: "client_register_response", status: "new" }));
     logger.info({ clientId, status: "new" }, "Client registered");
     return;
   }
 
-  const { proxyId } = binding;
-  if (binding.ws && binding.ws !== clientWs) {
-    // A clientId has one authoritative socket in RelayRegistry. Revoke any private stream bound
-    // to the superseded socket before moving the binding, otherwise its HTTP response could keep
-    // receiving frames even though control/input has moved to the new tab or reconnect.
-    devicePreviewBridge?.abandonClientSocket(binding.ws);
+  const previousWs = binding.ws;
+  if (previousWs) {
+    // Registering an existing clientId always creates a new binding generation. Pending Preview
+    // responses and private streams belong to the superseded generation, even when the same
+    // physical WebSocket sends client_register again.
+    webPreviewRoutes.abandonSocket(previousWs);
+    devicePreviewBridge.abandonClientSocket(previousWs);
   }
-  registry.updateClientSocket(clientId, clientWs);
-  clientWs.boundProxyId = proxyId;
+  const restored = registry.restoreClientBinding(clientId, clientWs);
+  if (!restored) {
+    throw new Error(`Client binding disappeared while restoring ${clientId}`);
+  }
+  const { proxyId, bindingId } = restored;
 
   if (!registry.isProxyOnline(proxyId)) {
     clientWs.send(
-      JSON.stringify({
+      serializeControl({
         type: "client_register_response",
         status: "proxy_offline",
         proxyId,
+        bindingId,
       }),
     );
     logger.info({ clientId, proxyId, status: "proxy_offline" }, "Client registered");
@@ -121,10 +128,11 @@ function handleClientRegister(
 
   // proxy 在线，恢复绑定（relay 无状态，不做增量回放）
   clientWs.send(
-    JSON.stringify({
+    serializeControl({
       type: "client_register_response",
       status: "restored",
       proxyId,
+      bindingId,
     }),
   );
 
@@ -211,7 +219,7 @@ function handleProxyRemove(
   sessionHistoryRoutes: SessionHistoryRouteRegistry,
   webPreviewRoutes: WebPreviewRouteRegistry,
   remoteFileBridge: RemoteFileBridge | undefined,
-  devicePreviewBridge: DevicePreviewBridge | undefined,
+  devicePreviewBridge: DevicePreviewBridge,
   requestId: string,
   proxyId: string,
   chaos?: RelayChaos,
@@ -258,7 +266,7 @@ function handleProxyRemove(
     logger.error({ err, proxyId }, "Failed to finish remote file cleanup for removed proxy");
   }
   try {
-    devicePreviewBridge?.revokeProxy(proxyId);
+    devicePreviewBridge.revokeProxy(proxyId);
   } catch (err) {
     logger.error({ err, proxyId }, "Failed to finish Device Preview cleanup for removed proxy");
   }
@@ -360,13 +368,143 @@ function rejectNotRegistered(ws: ClientSocket, requestId: string | undefined): v
   );
 }
 
+function rejectStaleBinding(ws: ClientSocket, requestId?: string): void {
+  ws.send(
+    JSON.stringify({
+      type: "relay_error",
+      ...(requestId ? { requestId } : {}),
+      code: RelayErrorCode.STALE_BINDING,
+      message: "Preview request used a stale client binding",
+    }),
+  );
+}
+
+function rejectStaleDevicePreviewInput(
+  ws: ClientSocket,
+  message: Extract<RelayControlMessage, { type: "device_preview_input" }>,
+): void {
+  ws.send(
+    serializeControl({
+      type: "device_preview_input_ack",
+      scope: message.scope,
+      leaseId: message.leaseId,
+      inputSeq: message.inputSeq,
+      success: false,
+      error: "Preview request used a stale client binding",
+      errorCode: ControlErrorCode.CONTROL_LEASE_INVALID,
+    }),
+  );
+}
+
+function sendWebPreviewFailure(
+  ws: ClientSocket,
+  message: WebPreviewRequestMessage,
+  error: string,
+  errorCode: ControlErrorCodeType,
+): boolean {
+  switch (message.type) {
+    case "preview_capability_request":
+      ws.send(
+        serializeControl({
+          type: "preview_capability_response",
+          requestId: message.requestId,
+          scope: message.scope,
+          success: false,
+          error,
+          errorCode,
+        }),
+      );
+      return true;
+    case "preview_static_inspect_request":
+      ws.send(
+        serializeControl({
+          type: "preview_static_inspect_response",
+          requestId: message.requestId,
+          scope: message.scope,
+          success: false,
+          error,
+          errorCode,
+        }),
+      );
+      return true;
+    case "preview_create_request":
+      ws.send(
+        serializeControl({
+          type: "preview_create_response",
+          requestId: message.requestId,
+          scope: message.scope,
+          operationId: message.operationId,
+          accepted: false,
+          error,
+          errorCode,
+        }),
+      );
+      return true;
+    case "preview_rename_request":
+      ws.send(
+        serializeControl({
+          type: "preview_rename_response",
+          requestId: message.requestId,
+          scope: message.scope,
+          operationId: message.operationId,
+          previewId: message.previewId,
+          success: false,
+          error,
+          errorCode,
+        }),
+      );
+      return true;
+    case "preview_reconnect_request":
+      ws.send(
+        serializeControl({
+          type: "preview_reconnect_response",
+          requestId: message.requestId,
+          scope: message.scope,
+          operationId: message.operationId,
+          previewId: message.previewId,
+          success: false,
+          error,
+          errorCode,
+        }),
+      );
+      return true;
+    case "preview_close_request":
+      ws.send(
+        serializeControl({
+          type: "preview_close_response",
+          requestId: message.requestId,
+          scope: message.scope,
+          operationId: message.operationId,
+          previewId: message.previewId,
+          success: false,
+          error,
+          errorCode,
+        }),
+      );
+      return true;
+    case "preview_list_request":
+      return false;
+  }
+}
+
+function validatePreviewScope(
+  ws: ClientSocket,
+  registry: RelayRegistry,
+  requestId: string | undefined,
+  scope: PreviewScope,
+): boolean {
+  if (registry.isCurrentClientBinding(ws.clientId, ws, scope)) return true;
+  rejectStaleBinding(ws, requestId);
+  return false;
+}
+
 function closeRejectedClientProtocol(ws: ClientSocket): void {
   ws.close(RelayCloseCode.CLIENT_PROTOCOL_REJECTED, "client protocol rejected");
 }
 
 function rejectProxySelect(ws: ClientSocket, requestId: string | undefined, proxyId: string): void {
   ws.send(
-    JSON.stringify({
+    serializeControl({
       type: "proxy_select_response",
       requestId,
       success: false,
@@ -444,12 +582,12 @@ export function handleClientConnection(
   ptySnapshotRoutes: PtySnapshotRouteRegistry,
   sessionHistoryRoutes: SessionHistoryRouteRegistry,
   webPreviewRoutes: WebPreviewRouteRegistry,
+  devicePreviewBridge: DevicePreviewBridge,
   chaos?: RelayChaos,
   voiceConfigStore?: VoiceConfigStore,
   voiceProviders?: VoiceProviderRegistry,
   remoteFileBridge?: RemoteFileBridge,
   connectionInfo: ClientConnectionInfo = {},
-  devicePreviewBridge?: DevicePreviewBridge,
 ): void {
   const clientWs = ws as ClientSocket;
   clientWs.isAlive = true;
@@ -484,7 +622,14 @@ export function handleClientConnection(
       );
 
       if (msg.type === "client_register") {
-        handleClientRegister(msg, clientWs, registry, logger, devicePreviewBridge);
+        handleClientRegister(
+          msg,
+          clientWs,
+          registry,
+          logger,
+          webPreviewRoutes,
+          devicePreviewBridge,
+        );
         return;
       }
 
@@ -520,7 +665,22 @@ export function handleClientConnection(
         return;
       }
 
-      if (devicePreviewBridge?.handleClientControl(clientWs, msg)) {
+      const isScopedDevicePreviewMessage =
+        isDevicePreviewRequestMessage(msg) ||
+        msg.type === "device_preview_stream_url_request" ||
+        msg.type === "device_preview_input" ||
+        msg.type === "device_preview_control_claim_request";
+      if (isScopedDevicePreviewMessage) {
+        if (
+          msg.type === "device_preview_input" &&
+          !registry.isCurrentClientBinding(clientWs.clientId, clientWs, msg.scope)
+        ) {
+          rejectStaleDevicePreviewInput(clientWs, msg);
+          return;
+        }
+        const requestId = msg.type === "device_preview_input" ? undefined : msg.requestId;
+        if (!validatePreviewScope(clientWs, registry, requestId, msg.scope)) return;
+        devicePreviewBridge.handleClientControl(clientWs, msg);
         return;
       }
 
@@ -731,43 +891,93 @@ export function handleClientConnection(
       }
 
       if (isWebPreviewRequestMessage(msg)) {
+        if (!validatePreviewScope(clientWs, registry, msg.requestId, msg.scope)) {
+          return;
+        }
         const targetProxyId = clientWs.boundProxyId;
         if (!targetProxyId) {
-          rejectNotBound(clientWs, msg.requestId);
+          if (
+            !sendWebPreviewFailure(
+              clientWs,
+              msg,
+              "当前未连接开发机",
+              ControlErrorCode.PROXY_OFFLINE,
+            )
+          ) {
+            rejectNotBound(clientWs, msg.requestId);
+          }
           return;
         }
         const proxyWs = registry.getProxy(targetProxyId);
         if (!proxyWs || proxyWs.readyState !== WebSocket.OPEN) {
-          clientWs.send(
-            JSON.stringify({
-              type: "relay_error",
-              requestId: msg.requestId,
-              code: RelayErrorCode.PROXY_OFFLINE,
-              message: `Proxy ${targetProxyId} is not available`,
-            }),
-          );
+          if (
+            !sendWebPreviewFailure(
+              clientWs,
+              msg,
+              `开发机 ${targetProxyId} 不在线`,
+              ControlErrorCode.PROXY_OFFLINE,
+            )
+          ) {
+            clientWs.send(
+              JSON.stringify({
+                type: "relay_error",
+                requestId: msg.requestId,
+                code: RelayErrorCode.PROXY_OFFLINE,
+                message: `Proxy ${targetProxyId} is not available`,
+              }),
+            );
+          }
           return;
         }
 
-        const registration = webPreviewRoutes.register(
-          targetProxyId,
-          msg.requestId,
-          webPreviewResponseByRequest[msg.type],
-          clientWs,
-          proxyWs,
-        );
-        if (registration.kind !== "registered") {
-          clientWs.send(
-            JSON.stringify({
-              type: "relay_error",
-              requestId: msg.requestId,
-              code: RelayErrorCode.INVALID_MESSAGE,
-              message:
-                registration.kind === "client_capacity_exceeded"
-                  ? "Too many pending Web Preview requests for this client"
-                  : "Too many pending Web Preview requests",
-            }),
+        let registration: ReturnType<WebPreviewRouteRegistry["register"]>;
+        try {
+          registration = webPreviewRoutes.register(
+            targetProxyId,
+            msg.requestId,
+            webPreviewResponseByRequest[msg.type],
+            clientWs,
+            proxyWs,
           );
+        } catch (error) {
+          logger.error(
+            { proxyId: targetProxyId, type: msg.type, error },
+            "Could not allocate Web Preview management route",
+          );
+          if (
+            !sendWebPreviewFailure(
+              clientWs,
+              msg,
+              "暂时无法处理网页预览请求",
+              ControlErrorCode.UNKNOWN,
+            )
+          ) {
+            clientWs.send(
+              JSON.stringify({
+                type: "relay_error",
+                requestId: msg.requestId,
+                code: RelayErrorCode.INVALID_MESSAGE,
+                message: "Could not allocate Web Preview request",
+              }),
+            );
+          }
+          return;
+        }
+        if (registration.kind !== "registered") {
+          const message =
+            registration.kind === "client_capacity_exceeded"
+              ? "当前客户端有过多待处理的网页预览请求"
+              : "网页预览请求过多";
+          if (!sendWebPreviewFailure(clientWs, msg, message, ControlErrorCode.RATE_LIMITED)) {
+            clientWs.send(
+              JSON.stringify({
+                type: "relay_error",
+                requestId: msg.requestId,
+                code: RelayErrorCode.INVALID_MESSAGE,
+                message,
+              }),
+            );
+          }
           return;
         }
 
@@ -776,12 +986,19 @@ export function handleClientConnection(
           requestId: registration.upstreamRequestId,
         } as WebPreviewRequestMessage;
         const upstreamRaw = serializeControl(upstreamRequest);
+        const requestRouteStillCurrent = (): boolean =>
+          clientWs.readyState === WebSocket.OPEN &&
+          proxyWs.readyState === WebSocket.OPEN &&
+          registry.getProxy(targetProxyId) === proxyWs &&
+          registry.isCurrentClientBinding(clientWs.clientId, clientWs, msg.scope);
+        if (!requestRouteStillCurrent()) return;
         if (chaos) {
           chaos.send(proxyWs, upstreamRaw, {
             direction: "client_to_proxy",
             type: msg.type,
+            guard: requestRouteStillCurrent,
           });
-        } else {
+        } else if (requestRouteStillCurrent()) {
           proxyWs.send(upstreamRaw);
         }
         return;
@@ -924,31 +1141,32 @@ export function handleClientConnection(
           rejectProxySelect(clientWs, msg.requestId, msg.proxyId);
           return;
         }
-        const bound = registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
-        if (!bound) {
+        const bindingId = registry.bindClientById(clientWs.clientId, msg.proxyId, clientWs);
+        if (!bindingId) {
           rejectProxySelect(clientWs, msg.requestId, msg.proxyId);
           return;
         }
-        if (clientWs.boundProxyId !== msg.proxyId) {
-          // A response from the previously bound Proxy must not mutate the newly selected
-          // machine's Preview store. Keep tombstones so late responses cannot fall through to
-          // the generic broadcast path.
-          webPreviewRoutes.abandonSocket(clientWs);
-          devicePreviewBridge?.abandonClientSocket(clientWs);
-        }
-        clientWs.boundProxyId = msg.proxyId;
-        const response = JSON.stringify({
+        // Every successful selection installs a new binding generation, including re-selecting
+        // the same Proxy. Any in-flight Preview work belongs to the previous generation.
+        webPreviewRoutes.abandonSocket(clientWs);
+        devicePreviewBridge.abandonClientSocket(clientWs);
+        const response = serializeControl({
           type: "proxy_select_response",
           requestId: msg.requestId,
           success: true,
           proxyId: msg.proxyId,
+          bindingId,
         });
+        const selectedScope = { proxyId: msg.proxyId, bindingId };
+        const selectionStillCurrent = (): boolean =>
+          registry.isCurrentClientBinding(clientWs.clientId, clientWs, selectedScope);
         if (chaos) {
           chaos.send(clientWs, response, {
             direction: "proxy_to_client",
             type: "proxy_select_response",
+            guard: selectionStillCurrent,
           });
-        } else {
+        } else if (selectionStillCurrent()) {
           clientWs.send(response);
         }
         logger.info({ proxyId: msg.proxyId, clientId: clientWs.clientId }, "Client bound to proxy");
@@ -991,7 +1209,7 @@ export function handleClientConnection(
     ptySnapshotRoutes.abandonSocket(clientWs);
     sessionHistoryRoutes.abandonSocket(clientWs);
     webPreviewRoutes.abandonSocket(clientWs);
-    devicePreviewBridge?.abandonClientSocket(clientWs);
+    devicePreviewBridge.abandonClientSocket(clientWs);
     registry.removeClientWs(clientWs);
     // 清掉 binding.ws 引用：保留绑定关系（重连时还能恢复 proxyId 关联），但释放对已关闭 ws 对象的强引用，
     // 避免高频重连下 clientBindings Map 长期持有死 ws 对象阻止 GC，同时让 countClients 数字不再虚高。

@@ -8,6 +8,22 @@ interface RawInputTerminal {
   onData: (handler: (data: string) => void) => Disposable;
   attachCustomKeyEventHandler?: (handler: (event: KeyboardEvent) => boolean) => void;
   textarea?: HTMLTextAreaElement;
+  element?: HTMLElement;
+  cols?: number;
+  rows?: number;
+  buffer?: {
+    active: {
+      baseY: number;
+      cursorX: number;
+      cursorY: number;
+      viewportY: number;
+      getLine: (line: number) =>
+        | {
+            getCell: (column: number) => { getWidth: () => number } | undefined;
+          }
+        | undefined;
+    };
+  };
 }
 
 interface XtermRawInputOptions {
@@ -18,6 +34,11 @@ interface XtermRawInputOptions {
   isPhysicalKeyboardMode?: () => boolean;
   isInputEnabled?: () => boolean;
 }
+
+type ImeAnchorCompensation = {
+  helpers?: HTMLElement;
+  previousHelpersTop?: string;
+};
 
 const NATIVE_TEXT_TIMEOUT_MS = 16;
 const NATIVE_ECHO_SUPPRESSION_TIMEOUT_MS = 16;
@@ -176,6 +197,69 @@ function applyPhysicalKeyboardHints(textarea: HTMLTextAreaElement): () => void {
   };
 }
 
+function restoreImeAnchorCompensation(state: ImeAnchorCompensation): void {
+  if (state.helpers) state.helpers.style.top = state.previousHelpersTop ?? "";
+  state.helpers = undefined;
+  state.previousHelpersTop = undefined;
+}
+
+function syncImeAnchorToTerminalCursor(term: RawInputTerminal, state: ImeAnchorCompensation): void {
+  const { textarea, element, buffer, cols, rows } = term;
+  if (!textarea || !element || !buffer || !cols || !rows) {
+    restoreImeAnchorCompensation(state);
+    return;
+  }
+
+  const screen = element.querySelector<HTMLElement>(".xterm-screen");
+  const helpers = screen?.querySelector<HTMLElement>(".xterm-helpers");
+  if (!screen || !helpers || screen.clientWidth <= 0 || screen.clientHeight <= 0) {
+    restoreImeAnchorCompensation(state);
+    return;
+  }
+
+  const cellWidth = screen.clientWidth / cols;
+  const cellHeight = screen.clientHeight / rows;
+  if (!Number.isFinite(cellWidth) || !Number.isFinite(cellHeight)) {
+    restoreImeAnchorCompensation(state);
+    return;
+  }
+
+  const activeBuffer = buffer.active;
+  const cursorX = Math.max(0, Math.min(activeBuffer.cursorX, cols - 1));
+  const cursorY = Math.max(0, Math.min(activeBuffer.cursorY, rows - 1));
+  const cursorViewportY = activeBuffer.baseY + cursorY - activeBuffer.viewportY;
+  if (cursorViewportY < 0 || cursorViewportY >= rows) {
+    restoreImeAnchorCompensation(state);
+    return;
+  }
+  const cursorCellWidth = Math.max(
+    1,
+    activeBuffer
+      .getLine(activeBuffer.baseY + cursorY)
+      ?.getCell(cursorX)
+      ?.getWidth() ?? 1,
+  );
+
+  if (state.helpers !== helpers) {
+    restoreImeAnchorCompensation(state);
+    state.helpers = helpers;
+    state.previousHelpersTop = helpers.style.top;
+  }
+
+  // xterm 6.0 can leave its hidden textarea at a previous cursor location when an agentic TUI
+  // redraws the prompt in several chunks. The browser anchors the native IME candidate window to
+  // that textarea. Our semantic live bottom can also render a visible cursor while viewportY is
+  // earlier than baseY; xterm positions its helper children from cursorY alone. Shift the shared
+  // helper coordinate plane by that row delta so xterm's own composition updates stay aligned too.
+  helpers.style.top = `${(activeBuffer.baseY - activeBuffer.viewportY) * cellHeight}px`;
+  textarea.style.left = `${cursorX * cellWidth}px`;
+  textarea.style.top = `${cursorY * cellHeight}px`;
+  textarea.style.width = `${cursorCellWidth * cellWidth}px`;
+  textarea.style.height = `${cellHeight}px`;
+  textarea.style.lineHeight = `${cellHeight}px`;
+  textarea.style.zIndex = "-5";
+}
+
 export function attachXtermRawInput(
   term: RawInputTerminal,
   sessionId: string,
@@ -186,6 +270,7 @@ export function attachXtermRawInput(
   let recentXtermText: RecentXtermText | undefined;
   let isComposing = false;
   let clearTextareaTimer: ReturnType<typeof setTimeout> | undefined;
+  const imeAnchorCompensation: ImeAnchorCompensation = {};
   const isPhysicalKeyboardMode = (): boolean =>
     options.isPhysicalKeyboardMode?.() ?? options.physicalKeyboardMode === true;
   const getPlainEnterBehavior = (): "submit" | "linefeed" =>
@@ -367,6 +452,7 @@ export function attachXtermRawInput(
   };
 
   const onCompositionStart = (): void => {
+    syncImeAnchorToTerminalCursor(term, imeAnchorCompensation);
     isComposing = true;
     if (clearTextareaTimer) {
       clearTimeout(clearTextareaTimer);
@@ -376,11 +462,20 @@ export function attachXtermRawInput(
     if (textarea) textarea.value = "";
   };
 
+  const onCompositionUpdate = (): void => {
+    syncImeAnchorToTerminalCursor(term, imeAnchorCompensation);
+  };
+
   const onCompositionEnd = (event: CompositionEvent): void => {
+    restoreImeAnchorCompensation(imeAnchorCompensation);
     isComposing = false;
     if (pendingNativeText && event.data) {
       resolvePendingNativeTextInput(event.data);
     }
+  };
+
+  const onTextareaBlur = (): void => {
+    restoreImeAnchorCompensation(imeAnchorCompensation);
   };
 
   const dataDisposable = term.onData((data) => {
@@ -399,7 +494,9 @@ export function attachXtermRawInput(
   });
   term.textarea?.addEventListener("input", onNativeInput);
   term.textarea?.addEventListener("compositionstart", onCompositionStart, true);
+  term.textarea?.addEventListener("compositionupdate", onCompositionUpdate, true);
   term.textarea?.addEventListener("compositionend", onCompositionEnd);
+  term.textarea?.addEventListener("blur", onTextareaBlur);
   term.attachCustomKeyEventHandler?.((event) => {
     if (isPhysicalKeyboardMode()) {
       if (
@@ -437,7 +534,10 @@ export function attachXtermRawInput(
       dataDisposable.dispose();
       term.textarea?.removeEventListener("input", onNativeInput);
       term.textarea?.removeEventListener("compositionstart", onCompositionStart, true);
+      term.textarea?.removeEventListener("compositionupdate", onCompositionUpdate, true);
       term.textarea?.removeEventListener("compositionend", onCompositionEnd);
+      term.textarea?.removeEventListener("blur", onTextareaBlur);
+      restoreImeAnchorCompensation(imeAnchorCompensation);
       if (pendingNativeText) {
         clearTimeout(pendingNativeText.timer);
         pendingNativeText = undefined;

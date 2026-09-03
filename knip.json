@@ -11,7 +11,8 @@
       "entry": [
         "e2e/**/*.{ts,d.ts,mjs}",
         "public/notification-sw.js",
-        "src/types/echogarden-fvad-wasm.d.ts"
+        "src/types/echogarden-fvad-wasm.d.ts",
+        "src/types/jmuxer.d.ts"
       ],
       "ignore": ["src/components/ui/**"]
     }

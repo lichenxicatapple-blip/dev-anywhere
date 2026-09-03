@@ -70,6 +70,7 @@ describe("client_register protocol", () => {
     expect(response.type).toBe("client_register_response");
     expect(response.status).toBe("new");
     expect(response.proxyId).toBeUndefined();
+    expect(response.bindingId).toBeUndefined();
   });
 
   it("rejects incomplete client_register without device descriptor", async () => {
@@ -195,7 +196,8 @@ describe("client_register protocol", () => {
 
     // 通过 proxy_select 绑定到 proxy
     client1.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await waitForMessage(client1); // consume proxy_select_response ACK
+    const selected = JSON.parse(await waitForMessage(client1));
+    expect(selected.bindingId).toEqual(expect.any(String));
 
     // 断开第一个客户端
     client1.close();
@@ -213,6 +215,8 @@ describe("client_register protocol", () => {
     expect(response.type).toBe("client_register_response");
     expect(response.status).toBe("restored");
     expect(response.proxyId).toBe("p1");
+    expect(response.bindingId).toEqual(expect.any(String));
+    expect(response.bindingId).not.toBe(selected.bindingId);
   });
 
   it("returns restored without relay-side message replay", async () => {
@@ -284,14 +288,22 @@ describe("client_register protocol", () => {
     previousClient.send(JSON.stringify(clientRegister("c1")));
     await waitForMessageType(previousClient, "client_register_response");
     previousClient.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
-    await waitForMessageType(previousClient, "proxy_select_response");
+    const previousSelection = JSON.parse(
+      await waitForMessageType(previousClient, "proxy_select_response"),
+    );
 
     const replacementClient = connectClient();
     await waitForOpen(replacementClient);
     replacementClient.send(JSON.stringify(clientRegister("c1")));
-    expect(
-      JSON.parse(await waitForMessageType(replacementClient, "client_register_response")),
-    ).toMatchObject({ status: "restored", proxyId: "p1" });
+    const restored = JSON.parse(
+      await waitForMessageType(replacementClient, "client_register_response"),
+    );
+    expect(restored).toMatchObject({
+      status: "restored",
+      proxyId: "p1",
+      bindingId: expect.any(String),
+    });
+    expect(restored.bindingId).not.toBe(previousSelection.bindingId);
 
     const previousClosed = new Promise<void>((resolve) =>
       previousClient.once("close", () => resolve()),
@@ -356,6 +368,7 @@ describe("client_register protocol", () => {
     expect(response.type).toBe("client_register_response");
     expect(response.status).toBe("proxy_offline");
     expect(response.proxyId).toBe("p1");
+    expect(response.bindingId).toEqual(expect.any(String));
   });
 
   it("sends PROXY_OFFLINE error when client sends envelope during grace period", async () => {
@@ -466,6 +479,7 @@ describe("client_register protocol", () => {
     expect(response.type).toBe("proxy_select_response");
     expect(response.success).toBe(true);
     expect(response.proxyId).toBe("p1");
+    expect(response.bindingId).toEqual(expect.any(String));
   });
 
   it("proxy_list_response includes sessions per proxy", async () => {
@@ -532,13 +546,14 @@ describe("client_register protocol", () => {
     expect(response.type).toBe("proxy_register_response");
     expect(response.status).toBe("new");
     expect(response.relayVersion).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(response.connectionId).toEqual(expect.any(String));
   });
 
   it("proxy receives proxy_register_response with status 'reconnected' on second register with same proxyId", async () => {
     const proxy1 = connectProxy();
     await waitForOpen(proxy1);
     proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
-    await waitForMessage(proxy1); // consume register response
+    const firstResponse = JSON.parse(await waitForMessage(proxy1));
     await settle();
 
     // proxy 断线
@@ -555,5 +570,7 @@ describe("client_register protocol", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
     expect(response.status).toBe("reconnected");
+    expect(response.connectionId).toEqual(expect.any(String));
+    expect(response.connectionId).not.toBe(firstResponse.connectionId);
   });
 });

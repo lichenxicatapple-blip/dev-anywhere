@@ -234,13 +234,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         serializeControl(
           event.type === "state"
             ? {
-                type: "preview_state_push",
+                type: "preview_state_event",
                 epoch: event.epoch,
                 revision: event.revision,
                 preview: event.preview,
               }
             : {
-                type: "preview_removed_push",
+                type: "preview_removed_event",
                 epoch: event.epoch,
                 revision: event.revision,
                 previewId: event.previewId,
@@ -253,13 +253,16 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayUrl,
     proxyId: relayConnection.getProxyId(),
     token: relayToken,
-    onFlow: (streamId, paused) => devicePreviewManager.setFlowPaused(streamId, paused),
+    onFlow: (streamId, paused, resyncRequired) =>
+      devicePreviewManager.setFlowPaused(streamId, paused, resyncRequired),
   });
   const devicePreviewManager = new DevicePreviewManager({
     backend: new DefaultDevicePreviewBackend(),
     streamTransport: {
       sendFrame: (streamId, frameSequence, jpeg) =>
         devicePreviewStream.sendFrame(streamId, frameSequence, jpeg),
+      sendH264Packet: (streamId, packetSequence, packet) =>
+        devicePreviewStream.sendH264Packet(streamId, packetSequence, packet),
       sendComplete: (payload) => {
         relaySend(
           serializeControl({
@@ -274,13 +277,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
         serializeControl(
           event.type === "state"
             ? {
-                type: "device_preview_state_push",
+                type: "device_preview_state_event",
                 epoch: event.epoch,
                 revision: event.revision,
                 preview: event.preview,
               }
             : {
-                type: "device_preview_removed_push",
+                type: "device_preview_removed_event",
                 epoch: event.epoch,
                 revision: event.revision,
                 previewId: event.previewId,

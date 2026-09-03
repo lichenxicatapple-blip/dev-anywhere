@@ -126,6 +126,92 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await expect.poll(() => readRawPtyInput(page)).toBe("，.");
   });
 
+  test("anchors IME composition to the visible cursor at a scrollback-backed live bottom", async ({
+    page,
+  }) => {
+    await page.setViewportSize({ width: 800, height: 360 });
+    const history = Array.from(
+      { length: 100 },
+      (_, index) => `history ${String(index).padStart(3, "0")}\r\n`,
+    ).join("");
+    await setupPtyChat(page, {
+      sessionId: "pty-ime-anchor",
+      cols: 80,
+      rows: 40,
+      snapshotData: `${history}\x1b[2J\x1b[Hfirst\r\nsecond\r\nime-anchor> `,
+    });
+    await expectPtyTerminalMounted(page);
+
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const term = window.__ccTestPtyTerminals?.get("pty-ime-anchor");
+          if (!term) return false;
+          return term.buffer.active.viewportY < term.buffer.active.baseY;
+        }),
+      )
+      .toBe(true);
+
+    const input = page.locator('[data-slot="pty-host"] .xterm-helper-textarea');
+    await input.focus();
+
+    const offsets = await input.evaluate(async (textarea) => {
+      const renderedRows = document.querySelector<HTMLElement>(
+        '[data-slot="pty-host"] .xterm-screen > .xterm-rows',
+      );
+      const cursorRow = Array.from(renderedRows?.children ?? []).find((row) =>
+        row.textContent?.startsWith("ime-anchor> "),
+      );
+      const cursorCell = cursorRow?.lastElementChild;
+      const helpers = textarea.parentElement;
+      if (!(cursorCell instanceof HTMLElement) || !helpers?.classList.contains("xterm-helpers")) {
+        throw new Error("xterm cursor geometry is missing");
+      }
+      const originalHelpersTop = helpers.style.top;
+
+      const readOffset = () => {
+        const textareaRect = textarea.getBoundingClientRect();
+        const cursorRect = cursorCell.getBoundingClientRect();
+        return {
+          x: textareaRect.left - cursorRect.left,
+          y: textareaRect.top - cursorRect.top,
+        };
+      };
+
+      textarea.style.left = "1px";
+      textarea.style.top = "1px";
+      let startOffset = { x: Number.NaN, y: Number.NaN };
+      textarea.addEventListener(
+        "compositionstart",
+        () => {
+          startOffset = readOffset();
+        },
+        { once: true },
+      );
+      textarea.dispatchEvent(new CompositionEvent("compositionstart", { bubbles: true }));
+      textarea.dispatchEvent(
+        new CompositionEvent("compositionupdate", { bubbles: true, data: "ni" }),
+      );
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const updateOffset = readOffset();
+      textarea.dispatchEvent(new CompositionEvent("compositionend", { bubbles: true, data: "你" }));
+      await new Promise((resolve) => setTimeout(resolve, 20));
+
+      return {
+        startOffset,
+        updateOffset,
+        helpersTopAfterEnd: helpers.style.top,
+        originalHelpersTop,
+      };
+    });
+
+    expect(Math.abs(offsets.startOffset.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(offsets.startOffset.y)).toBeLessThanOrEqual(1);
+    expect(Math.abs(offsets.updateOffset.x)).toBeLessThanOrEqual(1);
+    expect(Math.abs(offsets.updateOffset.y)).toBeLessThanOrEqual(1);
+    expect(offsets.helpersTopAfterEnd).toBe(offsets.originalHelpersTop);
+  });
+
   test("guards Codex mobile clear button from sending duplicate Ctrl+C on double tap", async ({
     page,
   }) => {

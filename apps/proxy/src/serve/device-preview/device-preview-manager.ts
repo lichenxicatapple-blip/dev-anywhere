@@ -1,15 +1,23 @@
 import {
+  ControlErrorCode,
   DEVICE_PREVIEW_FRAME_MAX_BYTES,
+  type ControlErrorCode as ControlErrorCodeType,
   type DevicePreviewCapability,
   type DevicePreviewInput,
+  type DevicePreviewStreamFormat,
   type DevicePreviewSummary,
   type DevicePreviewTarget,
 } from "@dev-anywhere/shared";
 import { nanoid } from "nanoid";
 import { serviceLogger } from "../../common/logger.js";
+import {
+  normalizeOptionalPreviewName,
+  normalizeRequiredPreviewName,
+} from "../preview/preview-name.js";
 import type {
   DevicePreviewBackend,
-  DevicePreviewFrame,
+  DevicePreviewH264Packet,
+  DevicePreviewJpegFrame,
   DevicePreviewManagerEvent,
   DevicePreviewSnapshot,
   DevicePreviewStreamStarted,
@@ -19,19 +27,19 @@ import type {
 
 const MAX_DEVICE_PREVIEWS = 16;
 const MAX_DEVICE_VIEWERS = 8;
-const OPERATION_ID_CACHE_SIZE = 128;
 const INPUT_RESULT_CACHE_SIZE = 64;
 const MAX_OUTSTANDING_INPUTS_PER_LEASE = 32;
 const DEFAULT_MAX_FPS = 15;
 const MIN_MAX_FPS = 1;
 const MAX_MAX_FPS = 30;
-const CAPTURE_MAX_WIDTH = 720;
-const CAPTURE_JPEG_QUALITY = 70;
+const MAX_H264_QUEUE_PACKETS = 4;
+const H264_KEYFRAME_REQUEST_COOLDOWN_MS = 500;
+const H264_KEYFRAME_RESPONSE_TIMEOUT_MS = 2_500;
+const MAX_H264_KEYFRAME_REQUEST_ATTEMPTS = 2;
 const MAX_PUBLIC_ERROR_LENGTH = 1_024;
 
 interface PreviewRecord {
   summary: DevicePreviewSummary;
-  operationIds: Set<string>;
 }
 
 interface Viewer {
@@ -39,13 +47,16 @@ interface Viewer {
   leaseId: string;
   previewId: string;
   targetId: string;
+  format: DevicePreviewStreamFormat;
   maxFps: number;
   paused: boolean;
   stopped: boolean;
   sending: boolean;
   frameSequence: number;
   lastSentAt: number;
-  pendingFrame?: DevicePreviewFrame;
+  pendingFrame?: DevicePreviewJpegFrame;
+  h264Queue: DevicePreviewH264Packet[];
+  needsKeyframe: boolean;
   sendTimer?: NodeJS.Timeout;
   inputAbort: AbortController;
 }
@@ -55,7 +66,14 @@ interface CaptureGroup {
   viewers: Set<string>;
   abort: AbortController;
   task: Promise<void>;
-  latestFrame?: DevicePreviewFrame;
+  latestFrame?: DevicePreviewJpegFrame;
+  h264Configuration?: DevicePreviewH264Packet;
+  keyframeRequestInFlight: boolean;
+  keyframeRequestGeneration: number;
+  lastKeyframeRequestAt: number;
+  keyframeRequestAttempts: number;
+  keyframeRequestTimer?: NodeJS.Timeout;
+  keyframeResponseTimer?: NodeJS.Timeout;
 }
 
 interface PendingStreamStart {
@@ -72,7 +90,16 @@ interface LeaseInputState {
   pendingSequences: Set<number>;
 }
 
-export interface DevicePreviewManagerOptions {
+interface ActiveTouchState {
+  leaseId: string;
+}
+
+interface TargetDiscovery {
+  generation: number;
+  promise: Promise<DevicePreviewTarget[]>;
+}
+
+interface DevicePreviewManagerOptions {
   backend: DevicePreviewBackend;
   streamTransport: DevicePreviewStreamTransport;
   onEvent?: (event: DevicePreviewManagerEvent) => void;
@@ -80,7 +107,10 @@ export interface DevicePreviewManagerOptions {
 }
 
 export class DevicePreviewOperationError extends Error {
-  constructor(message: string) {
+  constructor(
+    message: string,
+    readonly errorCode: ControlErrorCodeType = ControlErrorCode.UNKNOWN,
+  ) {
     super(message);
     this.name = "DevicePreviewOperationError";
   }
@@ -111,14 +141,22 @@ function validateInputSequence(value: number): void {
   }
 }
 
-function validateStreamProfile(input: DevicePreviewStreamStart): void {
-  const maxWidth = input.maxWidth ?? CAPTURE_MAX_WIDTH;
-  const jpegQuality = input.jpegQuality ?? CAPTURE_JPEG_QUALITY;
-  if (maxWidth !== CAPTURE_MAX_WIDTH || jpegQuality !== CAPTURE_JPEG_QUALITY) {
+function expectedFormat(platform: DevicePreviewTarget["platform"]): DevicePreviewStreamFormat {
+  return platform === "android" ? "h264_annex_b" : "jpeg";
+}
+
+function validateStreamProfile(
+  input: DevicePreviewStreamStart,
+  platform: DevicePreviewTarget["platform"],
+): DevicePreviewStreamFormat {
+  const expected = expectedFormat(platform);
+  const format = input.format;
+  if (format !== expected) {
     throw new DevicePreviewOperationError(
-      `当前版本仅支持 ${CAPTURE_MAX_WIDTH}px、JPEG 质量 ${CAPTURE_JPEG_QUALITY} 的设备画面`,
+      platform === "android" ? "Android 模拟器画面仅支持 H.264" : "iOS 模拟器画面仅支持 JPEG",
     );
   }
+  return format;
 }
 
 export class DevicePreviewManager {
@@ -130,13 +168,17 @@ export class DevicePreviewManager {
   private readonly now: () => number;
   private readonly previews = new Map<string, PreviewRecord>();
   private readonly targets = new Map<string, DevicePreviewTarget>();
-  private readonly createOperations = new Map<string, Promise<DevicePreviewSummary>>();
   private readonly pendingStarts = new Map<string, PendingStreamStart>();
   private readonly viewers = new Map<string, Viewer>();
   private readonly leaseViewers = new Map<string, Viewer>();
   private readonly captures = new Map<string, CaptureGroup>();
+  private readonly targetAvailabilityProbes = new Map<string, Promise<void>>();
   private readonly leaseInputs = new Map<string, LeaseInputState>();
   private readonly targetInputQueues = new Map<string, Promise<void>>();
+  private readonly activeTouches = new Map<string, ActiveTouchState>();
+  private readonly pendingTargetReleases = new Set<string>();
+  private discoveryGeneration = 0;
+  private latestDiscovery?: TargetDiscovery;
   private shuttingDown = false;
   private shutdownTask?: Promise<void>;
 
@@ -152,16 +194,35 @@ export class DevicePreviewManager {
     return this.backend.inspectCapabilities(refreshPath);
   }
 
-  async discoverTargets(refresh = false): Promise<DevicePreviewTarget[]> {
+  discoverTargets(refresh = false): Promise<DevicePreviewTarget[]> {
     this.assertRunning();
-    const targets = await this.backend.discoverTargets(refresh);
+    const generation = ++this.discoveryGeneration;
+    const promise = this.runTargetDiscovery(generation, refresh);
+    this.latestDiscovery = { generation, promise };
+    return promise;
+  }
+
+  private async runTargetDiscovery(
+    generation: number,
+    refresh: boolean,
+  ): Promise<DevicePreviewTarget[]> {
+    let targets: DevicePreviewTarget[];
+    try {
+      targets = await this.backend.discoverTargets(refresh);
+    } catch (error) {
+      this.assertRunning();
+      if (generation !== this.discoveryGeneration) return this.awaitLatestDiscovery(generation);
+      throw error;
+    }
     this.assertRunning();
+    if (generation !== this.discoveryGeneration) return this.awaitLatestDiscovery(generation);
     this.targets.clear();
     for (const target of targets) this.targets.set(target.targetId, cloneTarget(target));
 
-    const available = new Set(targets.map((target) => target.targetId));
     for (const record of this.previews.values()) {
-      if (available.has(record.summary.targetId)) {
+      const target = this.targets.get(record.summary.targetId);
+      if (target) {
+        this.updateTargetMetadata(record, target);
         if (record.summary.state === "disconnected") this.updateState(record, "ready");
       } else if (record.summary.state !== "disconnected") {
         this.stopPreviewViewers(record.summary.previewId, "设备已离线", true);
@@ -170,6 +231,14 @@ export class DevicePreviewManager {
       }
     }
     return targets.map(cloneTarget);
+  }
+
+  private awaitLatestDiscovery(completedGeneration: number): Promise<DevicePreviewTarget[]> {
+    const latest = this.latestDiscovery;
+    if (!latest || latest.generation <= completedGeneration) {
+      throw new Error("设备发现代次异常");
+    }
+    return latest.promise;
   }
 
   list(): DevicePreviewSnapshot {
@@ -182,28 +251,16 @@ export class DevicePreviewManager {
     };
   }
 
-  create(operationId: string, targetId: string): Promise<DevicePreviewSummary> {
+  create(targetId: string, name?: string): Promise<DevicePreviewSummary> {
     this.assertRunning();
-    const existingOperation = [...this.previews.values()].find((record) =>
-      record.operationIds.has(operationId),
-    );
-    if (existingOperation) {
-      this.rememberOperation(existingOperation, operationId);
-      return Promise.resolve(cloneSummary(existingOperation.summary));
-    }
-    const inFlight = this.createOperations.get(operationId);
-    if (inFlight) return inFlight.then(cloneSummary);
-
-    const operation = this.createOnce(operationId, targetId).finally(() => {
-      if (this.createOperations.get(operationId) === operation) {
-        this.createOperations.delete(operationId);
-      }
-    });
-    this.createOperations.set(operationId, operation);
-    return operation.then(cloneSummary);
+    const customName = this.normalizeOptionalName(name);
+    return this.createOnce(targetId, customName).then(cloneSummary);
   }
 
-  private async createOnce(operationId: string, targetId: string): Promise<DevicePreviewSummary> {
+  private async createOnce(
+    targetId: string,
+    customName: string | undefined,
+  ): Promise<DevicePreviewSummary> {
     let target = this.targets.get(targetId);
     if (!target) {
       await this.discoverTargets(true);
@@ -214,30 +271,42 @@ export class DevicePreviewManager {
     const existingTarget = [...this.previews.values()].find(
       (record) => record.summary.targetId === targetId,
     );
-    if (existingTarget) {
-      this.rememberOperation(existingTarget, operationId);
-      return cloneSummary(existingTarget.summary);
-    }
+    if (existingTarget) return cloneSummary(existingTarget.summary);
     if (this.previews.size >= MAX_DEVICE_PREVIEWS) {
-      throw new DevicePreviewOperationError(`最多可保留 ${MAX_DEVICE_PREVIEWS} 个设备预览`);
+      throw new DevicePreviewOperationError(
+        `最多可保留 ${MAX_DEVICE_PREVIEWS} 个设备预览`,
+        ControlErrorCode.RATE_LIMITED,
+      );
     }
 
     const timestamp = this.now();
     const summary: DevicePreviewSummary = {
       previewId: nanoid(),
-      name: target.name,
+      name: customName ?? target.name,
       platform: target.platform,
       targetId: target.targetId,
-      targetName: target.name,
+      model: target.model,
+      osVersion: target.osVersion,
       state: "ready",
       interactive: target.interactive,
       createdAt: timestamp,
       updatedAt: timestamp,
     };
-    const record: PreviewRecord = { summary, operationIds: new Set([operationId]) };
+    const record: PreviewRecord = { summary };
     this.previews.set(summary.previewId, record);
     this.emitState(record);
     return cloneSummary(summary);
+  }
+
+  rename(previewId: string, name: string): DevicePreviewSummary {
+    this.assertRunning();
+    const record = this.previews.get(previewId);
+    if (!record) throw new DevicePreviewOperationError("设备预览不存在");
+    const normalized = this.normalizeRequiredName(name);
+    if (record.summary.name === normalized) return cloneSummary(record.summary);
+    record.summary = { ...record.summary, name: normalized, updatedAt: this.now() };
+    this.emitState(record);
+    return cloneSummary(record.summary);
   }
 
   async startStream(input: DevicePreviewStreamStart): Promise<DevicePreviewStreamStarted> {
@@ -245,38 +314,47 @@ export class DevicePreviewManager {
     const existing = this.viewers.get(input.streamId);
     if (existing) {
       if (existing.leaseId !== input.leaseId || existing.previewId !== input.previewId) {
-        throw new DevicePreviewOperationError("设备画面流标识已被占用");
+        throw new DevicePreviewOperationError(
+          "设备画面流标识已被占用",
+          ControlErrorCode.CONTROL_LEASE_INVALID,
+        );
       }
       const target = this.targets.get(existing.targetId);
-      return {
+      const result = {
         streamId: existing.streamId,
         leaseId: existing.leaseId,
         previewId: existing.previewId,
-        ...(target?.width ? { width: target.width } : {}),
-        ...(target?.height ? { height: target.height } : {}),
+        format: existing.format,
       };
+      return target?.width !== undefined && target.height !== undefined
+        ? { ...result, width: target.width, height: target.height }
+        : result;
     }
 
     const pending = this.pendingStarts.get(input.streamId);
     if (pending) {
       if (pending.leaseId !== input.leaseId || pending.previewId !== input.previewId) {
-        throw new DevicePreviewOperationError("设备画面流标识已被占用");
+        throw new DevicePreviewOperationError(
+          "设备画面流标识已被占用",
+          ControlErrorCode.CONTROL_LEASE_INVALID,
+        );
       }
       return pending.promise!;
     }
 
-    // Both platform adapters intentionally produce one shared 720/70 capture. Reject unsupported
-    // profiles instead of silently pretending that per-viewer width/quality were applied.
-    validateStreamProfile(input);
     if (
       this.leaseViewers.has(input.leaseId) ||
       [...this.pendingStarts.values()].some((start) => start.leaseId === input.leaseId)
     ) {
-      throw new DevicePreviewOperationError("设备控制租约已被占用");
+      throw new DevicePreviewOperationError(
+        "设备控制租约已被占用",
+        ControlErrorCode.CONTROL_LEASE_INVALID,
+      );
     }
     if (this.viewers.size + this.pendingStarts.size >= MAX_DEVICE_VIEWERS) {
       throw new DevicePreviewOperationError(
         `每台开发机最多可同时打开 ${MAX_DEVICE_VIEWERS} 个设备画面`,
+        ControlErrorCode.STREAM_CAPACITY_EXCEEDED,
       );
     }
 
@@ -316,18 +394,23 @@ export class DevicePreviewManager {
       this.updateState(record, "disconnected");
       throw new DevicePreviewOperationError("模拟器没有运行");
     }
+    // Each target has one canonical wire format. Android requires the Scrcpy H.264 pipeline.
+    const format = validateStreamProfile(input, target.platform);
 
     const viewer: Viewer = {
       streamId: input.streamId,
       leaseId: input.leaseId,
       previewId: input.previewId,
       targetId: target.targetId,
-      maxFps: boundedMaxFps(input.maxFps),
+      format,
+      maxFps: boundedMaxFps(input.format === "jpeg" ? input.maxFps : undefined),
       paused: false,
       stopped: false,
       sending: false,
       frameSequence: 0,
       lastSentAt: 0,
+      h264Queue: [],
+      needsKeyframe: format === "h264_annex_b",
       inputAbort: new AbortController(),
     };
     this.viewers.set(viewer.streamId, viewer);
@@ -340,13 +423,15 @@ export class DevicePreviewManager {
     this.addViewerToCapture(viewer);
     if (record.summary.state !== "ready") this.updateState(record, "ready");
 
-    return {
+    const result = {
       streamId: viewer.streamId,
       leaseId: viewer.leaseId,
       previewId: viewer.previewId,
-      ...(target.width ? { width: target.width } : {}),
-      ...(target.height ? { height: target.height } : {}),
+      format: viewer.format,
     };
+    return target.width !== undefined && target.height !== undefined
+      ? { ...result, width: target.width, height: target.height }
+      : result;
   }
 
   stopStream(streamId: string): void {
@@ -377,11 +462,38 @@ export class DevicePreviewManager {
     this.updateState(record, "ready");
   }
 
-  setFlowPaused(streamId: string, paused: boolean): void {
+  setFlowPaused(streamId: string, paused: boolean, resyncRequired: boolean): void {
     const viewer = this.viewers.get(streamId);
-    if (!viewer || viewer.stopped || viewer.paused === paused) return;
-    viewer.paused = paused;
-    if (!paused) this.flushViewer(viewer);
+    if (!viewer || viewer.stopped) return;
+    if (paused) {
+      if (viewer.paused) return;
+      viewer.paused = true;
+      if (viewer.format === "h264_annex_b" && viewer.h264Queue.length > 0) {
+        viewer.h264Queue = [];
+        viewer.needsKeyframe = true;
+      }
+      const capture = this.captures.get(viewer.targetId);
+      if (viewer.format === "h264_annex_b" && capture) {
+        this.cancelSatisfiedKeyframeRequest(capture);
+      }
+      return;
+    }
+
+    if (!viewer.paused && !resyncRequired) return;
+    viewer.paused = false;
+    if (viewer.format === "h264_annex_b" && resyncRequired) {
+      viewer.h264Queue = [];
+      viewer.needsKeyframe = true;
+    }
+    if (viewer.format === "h264_annex_b" && viewer.needsKeyframe) {
+      const capture = this.captures.get(viewer.targetId);
+      if (capture?.h264Configuration) this.requestH264Keyframe(capture);
+    }
+    if (viewer.format === "jpeg") {
+      const capture = this.captures.get(viewer.targetId);
+      if (capture?.latestFrame) viewer.pendingFrame = capture.latestFrame;
+    }
+    this.flushViewer(viewer);
   }
 
   sendInput(leaseId: string, inputSequence: number, input: DevicePreviewInput): Promise<void> {
@@ -389,15 +501,29 @@ export class DevicePreviewManager {
     validateInputSequence(inputSequence);
     const viewer = this.leaseViewers.get(leaseId);
     if (!viewer || viewer.stopped) {
-      return Promise.reject(new DevicePreviewOperationError("设备控制租约已失效"));
+      return Promise.reject(
+        new DevicePreviewOperationError(
+          "设备控制租约已失效",
+          ControlErrorCode.CONTROL_LEASE_INVALID,
+        ),
+      );
     }
     const state = this.leaseInputs.get(leaseId);
-    if (!state) return Promise.reject(new DevicePreviewOperationError("设备控制租约已失效"));
+    if (!state) {
+      return Promise.reject(
+        new DevicePreviewOperationError(
+          "设备控制租约已失效",
+          ControlErrorCode.CONTROL_LEASE_INVALID,
+        ),
+      );
+    }
     const duplicate = state.results.get(inputSequence);
     if (duplicate) return duplicate;
     if (inputSequence <= state.highestSequence) return Promise.resolve();
     if (state.pendingSequences.size >= MAX_OUTSTANDING_INPUTS_PER_LEASE) {
-      return Promise.reject(new DevicePreviewOperationError("设备输入队列已满"));
+      return Promise.reject(
+        new DevicePreviewOperationError("设备输入队列已满", ControlErrorCode.RATE_LIMITED),
+      );
     }
     state.highestSequence = inputSequence;
 
@@ -411,14 +537,56 @@ export class DevicePreviewManager {
           this.leaseViewers.get(leaseId) !== viewer ||
           inputAbort.signal.aborted
         ) {
-          throw new DevicePreviewOperationError("设备控制租约已失效");
+          throw new DevicePreviewOperationError(
+            "设备控制租约已失效",
+            ControlErrorCode.CONTROL_LEASE_INVALID,
+          );
         }
         const record = this.previews.get(viewer.previewId);
         if (!record) throw new DevicePreviewOperationError("设备预览不存在");
         if (!record.summary.interactive) {
           throw new DevicePreviewOperationError("当前设备仅支持查看画面");
         }
-        await this.backend.sendInput(viewer.targetId, input, inputAbort.signal);
+        if (input.kind === "orientation" && this.activeTouches.has(viewer.targetId)) {
+          // Rotation changes the coordinate space. Clear Manager ownership before awaiting the
+          // native all-UP so either release or rotation failure leaves the gesture fail-closed.
+          this.activeTouches.delete(viewer.targetId);
+          await this.backend.releaseInput(viewer.targetId);
+        }
+        if (input.kind === "touch") {
+          const activeTouch = this.activeTouches.get(viewer.targetId);
+          if (input.phase === "down") {
+            if (activeTouch) {
+              throw new DevicePreviewOperationError(
+                activeTouch.leaseId === leaseId
+                  ? "设备触控手势已经开始"
+                  : "设备正在处理另一条触控手势",
+              );
+            }
+            this.activeTouches.set(viewer.targetId, { leaseId });
+          } else if (activeTouch?.leaseId !== leaseId) {
+            throw new DevicePreviewOperationError("设备触控手势尚未开始");
+          }
+        }
+        try {
+          await this.backend.sendInput(viewer.targetId, input, inputAbort.signal);
+        } catch (error) {
+          if (
+            input.kind === "touch" &&
+            this.activeTouches.get(viewer.targetId)?.leaseId === leaseId
+          ) {
+            this.activeTouches.delete(viewer.targetId);
+            await this.releaseInputBestEffort(viewer.targetId);
+          }
+          throw error;
+        }
+        if (
+          input.kind === "touch" &&
+          input.phase === "up" &&
+          this.activeTouches.get(viewer.targetId)?.leaseId === leaseId
+        ) {
+          this.activeTouches.delete(viewer.targetId);
+        }
       });
     this.targetInputQueues.set(viewer.targetId, execution);
     void execution.then(
@@ -445,9 +613,11 @@ export class DevicePreviewManager {
     const viewer = this.leaseViewers.get(leaseId);
     if (!viewer || viewer.stopped) return;
     viewer.inputAbort.abort();
+    this.queueActiveTouchRelease(viewer);
     viewer.inputAbort = new AbortController();
+    const state = this.leaseInputs.get(leaseId);
     this.leaseInputs.set(leaseId, {
-      highestSequence: -1,
+      highestSequence: state?.highestSequence ?? -1,
       results: new Map(),
       pendingSequences: new Set(),
     });
@@ -485,15 +655,20 @@ export class DevicePreviewManager {
     const captures = [...this.captures.values()];
     this.cancelAllPendingStarts();
     for (const viewer of [...this.viewers.values()]) this.removeViewer(viewer);
+    const inputQueues = [...this.targetInputQueues.values()];
+    await Promise.allSettled(inputQueues);
     this.captures.clear();
     for (const capture of captures) {
       capture.latestFrame = undefined;
+      capture.h264Configuration = undefined;
+      this.clearKeyframeRequest(capture);
       capture.abort.abort();
     }
     await Promise.allSettled([
       ...captures.map((capture) => capture.task),
       ...pendingStarts.flatMap((start) => (start.promise ? [start.promise] : [])),
     ]);
+    await Promise.allSettled([...this.targetAvailabilityProbes.values()]);
     await this.backend.dispose();
   }
 
@@ -506,6 +681,10 @@ export class DevicePreviewManager {
         viewers: new Set(),
         abort,
         task: Promise.resolve(),
+        keyframeRequestInFlight: false,
+        keyframeRequestGeneration: 0,
+        lastKeyframeRequestAt: Number.NEGATIVE_INFINITY,
+        keyframeRequestAttempts: 0,
       };
       this.captures.set(viewer.targetId, capture);
       capture.viewers.add(viewer.streamId);
@@ -513,20 +692,42 @@ export class DevicePreviewManager {
       return;
     }
     capture.viewers.add(viewer.streamId);
-    if (capture.latestFrame) this.offerFrame(viewer, capture.latestFrame);
+    if (viewer.format === "jpeg" && capture.latestFrame) {
+      this.offerJpegFrame(viewer, capture.latestFrame);
+    } else if (viewer.format === "h264_annex_b" && capture.h264Configuration) {
+      this.requestH264Keyframe(capture);
+    }
   }
 
   private async runCapture(capture: CaptureGroup): Promise<void> {
     try {
       await this.backend.capture(capture.targetId, capture.abort.signal, (frame) => {
         if (capture.abort.signal.aborted) return;
-        if (frame.jpeg.length === 0 || frame.jpeg.length > DEVICE_PREVIEW_FRAME_MAX_BYTES) {
+        const bytes = frame.format === "h264_annex_b" ? frame.data : frame.jpeg;
+        if (bytes.length === 0 || bytes.length > DEVICE_PREVIEW_FRAME_MAX_BYTES) {
           throw new DevicePreviewOperationError("设备画面超过传输大小限制");
         }
-        capture.latestFrame = frame;
+        if (frame.format === "h264_annex_b") {
+          if (frame.kind === "configuration") {
+            capture.h264Configuration = {
+              ...frame,
+              data: Buffer.from(frame.data),
+            };
+          }
+        } else {
+          capture.latestFrame = frame;
+        }
         for (const streamId of capture.viewers) {
           const viewer = this.viewers.get(streamId);
-          if (viewer) this.offerFrame(viewer, frame);
+          if (!viewer) continue;
+          if (frame.format === "h264_annex_b") {
+            this.offerH264Packet(viewer, capture, frame);
+          } else {
+            this.offerJpegFrame(viewer, frame);
+          }
+        }
+        if (frame.format === "h264_annex_b" && frame.kind === "frame" && frame.keyframe) {
+          this.cancelSatisfiedKeyframeRequest(capture);
         }
       });
       if (!capture.abort.signal.aborted) {
@@ -536,6 +737,8 @@ export class DevicePreviewManager {
       if (!capture.abort.signal.aborted) this.failCapture(capture, error);
     } finally {
       capture.latestFrame = undefined;
+      capture.h264Configuration = undefined;
+      this.clearKeyframeRequest(capture);
       if (this.captures.get(capture.targetId) === capture) {
         this.captures.delete(capture.targetId);
       }
@@ -560,19 +763,190 @@ export class DevicePreviewManager {
       });
       this.removeViewer(viewer);
     }
-    for (const record of this.previews.values()) {
-      if (record.summary.targetId === capture.targetId) this.updateState(record, "failed", message);
-    }
+    this.probeTargetAvailability(capture.targetId);
   }
 
-  private offerFrame(viewer: Viewer, frame: DevicePreviewFrame): void {
-    if (viewer.stopped) return;
+  private probeTargetAvailability(targetId: string): void {
+    if (this.shuttingDown || this.targetAvailabilityProbes.has(targetId)) return;
+    const probe = this.discoverTargets(false)
+      .then(() => undefined)
+      .catch((error: unknown) => {
+        if (this.shuttingDown) return;
+        serviceLogger.warn(
+          { targetId, error: publicError(error) },
+          "Could not refresh device availability after capture failure",
+        );
+      })
+      .finally(() => {
+        if (this.targetAvailabilityProbes.get(targetId) === probe) {
+          this.targetAvailabilityProbes.delete(targetId);
+        }
+      });
+    this.targetAvailabilityProbes.set(targetId, probe);
+  }
+
+  private requestH264Keyframe(capture: CaptureGroup): void {
+    if (
+      capture.abort.signal.aborted ||
+      this.captures.get(capture.targetId) !== capture ||
+      !this.captureNeedsH264Keyframe(capture) ||
+      capture.keyframeRequestInFlight ||
+      capture.keyframeRequestTimer ||
+      capture.keyframeResponseTimer
+    ) {
+      return;
+    }
+    const delay = capture.lastKeyframeRequestAt + H264_KEYFRAME_REQUEST_COOLDOWN_MS - this.now();
+    if (delay > 0) {
+      capture.keyframeRequestTimer = setTimeout(() => {
+        capture.keyframeRequestTimer = undefined;
+        this.requestH264Keyframe(capture);
+      }, Math.ceil(delay));
+      capture.keyframeRequestTimer.unref?.();
+      return;
+    }
+
+    capture.keyframeRequestInFlight = true;
+    capture.keyframeRequestAttempts += 1;
+    capture.lastKeyframeRequestAt = this.now();
+    const requestGeneration = capture.keyframeRequestGeneration;
+    void this.backend.requestKeyframe(capture.targetId).then(
+      () => {
+        if (!this.isCurrentKeyframeRequest(capture, requestGeneration)) return;
+        capture.keyframeRequestInFlight = false;
+        if (
+          capture.abort.signal.aborted ||
+          this.captures.get(capture.targetId) !== capture ||
+          !this.captureNeedsH264Keyframe(capture)
+        ) {
+          this.cancelSatisfiedKeyframeRequest(capture);
+          return;
+        }
+        capture.keyframeResponseTimer = setTimeout(() => {
+          capture.keyframeResponseTimer = undefined;
+          if (
+            !this.isCurrentKeyframeRequest(capture, requestGeneration) ||
+            !this.captureNeedsH264Keyframe(capture)
+          ) {
+            this.cancelSatisfiedKeyframeRequest(capture);
+            return;
+          }
+          if (capture.keyframeRequestAttempts < MAX_H264_KEYFRAME_REQUEST_ATTEMPTS) {
+            this.requestH264Keyframe(capture);
+            return;
+          }
+          this.failH264Recovery(
+            capture,
+            new DevicePreviewOperationError("Android 模拟器画面恢复超时"),
+          );
+        }, H264_KEYFRAME_RESPONSE_TIMEOUT_MS);
+        capture.keyframeResponseTimer.unref?.();
+      },
+      (error: unknown) => {
+        if (!this.isCurrentKeyframeRequest(capture, requestGeneration)) return;
+        capture.keyframeRequestInFlight = false;
+        serviceLogger.warn(
+          { targetId: capture.targetId, error: String(error) },
+          "Could not reset Android device preview video",
+        );
+        this.failH264Recovery(
+          capture,
+          new DevicePreviewOperationError("无法恢复 Android 模拟器画面"),
+        );
+      },
+    );
+  }
+
+  private isCurrentKeyframeRequest(capture: CaptureGroup, generation: number): boolean {
+    return (
+      !capture.abort.signal.aborted &&
+      this.captures.get(capture.targetId) === capture &&
+      capture.keyframeRequestGeneration === generation
+    );
+  }
+
+  private failH264Recovery(capture: CaptureGroup, error: unknown): void {
+    const awaitingViewers = [...capture.viewers]
+      .map((streamId) => this.viewers.get(streamId))
+      .filter(
+        (viewer): viewer is Viewer =>
+          viewer?.format === "h264_annex_b" && !viewer.paused && viewer.needsKeyframe,
+      );
+    this.clearKeyframeRequest(capture);
+    for (const viewer of awaitingViewers) this.failViewer(viewer, error);
+  }
+
+  private captureNeedsH264Keyframe(capture: CaptureGroup): boolean {
+    for (const streamId of capture.viewers) {
+      const viewer = this.viewers.get(streamId);
+      if (viewer?.format === "h264_annex_b" && !viewer.paused && viewer.needsKeyframe) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  private cancelSatisfiedKeyframeRequest(capture: CaptureGroup): void {
+    if (this.captureNeedsH264Keyframe(capture)) return;
+    this.clearKeyframeRequest(capture);
+  }
+
+  private clearKeyframeRequest(capture: CaptureGroup): void {
+    if (capture.keyframeRequestTimer) clearTimeout(capture.keyframeRequestTimer);
+    if (capture.keyframeResponseTimer) clearTimeout(capture.keyframeResponseTimer);
+    capture.keyframeRequestTimer = undefined;
+    capture.keyframeResponseTimer = undefined;
+    capture.keyframeRequestInFlight = false;
+    capture.keyframeRequestAttempts = 0;
+    capture.keyframeRequestGeneration += 1;
+  }
+
+  private offerJpegFrame(viewer: Viewer, frame: DevicePreviewJpegFrame): void {
+    if (viewer.stopped || viewer.format !== "jpeg") return;
     viewer.pendingFrame = frame;
     this.flushViewer(viewer);
   }
 
+  private offerH264Packet(
+    viewer: Viewer,
+    capture: CaptureGroup,
+    packet: DevicePreviewH264Packet,
+  ): void {
+    if (viewer.stopped || viewer.format !== "h264_annex_b") return;
+    if (packet.kind === "configuration") {
+      viewer.needsKeyframe = true;
+      viewer.h264Queue = [];
+      return;
+    }
+    if (viewer.paused) {
+      viewer.needsKeyframe = true;
+      viewer.h264Queue = [];
+      return;
+    }
+    if (viewer.needsKeyframe) {
+      if (!packet.keyframe || !capture.h264Configuration) return;
+      viewer.h264Queue.push(capture.h264Configuration, packet);
+      viewer.needsKeyframe = false;
+      this.flushViewer(viewer);
+      return;
+    }
+    if (viewer.h264Queue.length >= MAX_H264_QUEUE_PACKETS) {
+      viewer.h264Queue = [];
+      viewer.needsKeyframe = true;
+      this.requestH264Keyframe(capture);
+      return;
+    }
+    viewer.h264Queue.push(packet);
+    this.flushViewer(viewer);
+  }
+
   private flushViewer(viewer: Viewer): void {
-    if (viewer.stopped || viewer.paused || viewer.sending || !viewer.pendingFrame) return;
+    if (viewer.stopped || viewer.paused || viewer.sending) return;
+    if (viewer.format === "h264_annex_b") {
+      this.flushH264Viewer(viewer);
+      return;
+    }
+    if (!viewer.pendingFrame) return;
     const minimumInterval = 1_000 / viewer.maxFps;
     const delay = minimumInterval - (this.now() - viewer.lastSentAt);
     if (delay > 0) {
@@ -614,13 +988,48 @@ export class DevicePreviewManager {
     );
   }
 
+  private flushH264Viewer(viewer: Viewer): void {
+    const packet = viewer.h264Queue.shift();
+    if (!packet) return;
+    const sendH264Packet = this.streamTransport.sendH264Packet;
+    viewer.sending = true;
+    const sequence = viewer.frameSequence;
+    viewer.frameSequence = (viewer.frameSequence + 1) >>> 0;
+    void Promise.resolve(
+      sendH264Packet.call(this.streamTransport, viewer.streamId, sequence, packet),
+    ).then(
+      () => {
+        viewer.sending = false;
+        this.flushViewer(viewer);
+      },
+      (error: unknown) => {
+        viewer.sending = false;
+        this.failViewer(viewer, error);
+      },
+    );
+  }
+
+  private failViewer(viewer: Viewer, error: unknown): void {
+    if (viewer.stopped) return;
+    this.streamTransport.sendComplete({
+      streamId: viewer.streamId,
+      leaseId: viewer.leaseId,
+      previewId: viewer.previewId,
+      success: false,
+      error: publicError(error),
+    });
+    this.removeViewer(viewer);
+  }
+
   private removeViewer(viewer: Viewer): void {
     if (viewer.stopped) return;
     viewer.stopped = true;
     viewer.inputAbort.abort();
+    const touchRelease = this.queueActiveTouchRelease(viewer);
     if (viewer.sendTimer) clearTimeout(viewer.sendTimer);
     viewer.sendTimer = undefined;
     viewer.pendingFrame = undefined;
+    viewer.h264Queue = [];
     this.viewers.delete(viewer.streamId);
     if (this.leaseViewers.get(viewer.leaseId) === viewer) {
       this.leaseViewers.delete(viewer.leaseId);
@@ -633,11 +1042,25 @@ export class DevicePreviewManager {
       return;
     }
     capture.viewers.delete(viewer.streamId);
-    if (capture.viewers.size > 0) return;
-    this.captures.delete(viewer.targetId);
-    capture.latestFrame = undefined;
-    capture.abort.abort();
-    this.releaseTargetIfIdle(viewer.targetId);
+    if (capture.viewers.size > 0) {
+      this.cancelSatisfiedKeyframeRequest(capture);
+      return;
+    }
+    const stopCapture = (): void => {
+      if (this.captures.get(viewer.targetId) !== capture || capture.viewers.size > 0) return;
+      this.captures.delete(viewer.targetId);
+      capture.latestFrame = undefined;
+      capture.h264Configuration = undefined;
+      this.clearKeyframeRequest(capture);
+      capture.abort.abort();
+      this.releaseTargetIfIdle(viewer.targetId);
+    };
+    const pendingInput = touchRelease ?? this.targetInputQueues.get(viewer.targetId);
+    if (pendingInput) {
+      void pendingInput.then(stopCapture, stopCapture);
+      return;
+    }
+    stopCapture();
   }
 
   private stopPreviewViewers(previewId: string, reason: string, notify = false): void {
@@ -660,13 +1083,29 @@ export class DevicePreviewManager {
     if (this.targetInputQueues.get(targetId) === queue) this.targetInputQueues.delete(targetId);
   }
 
-  private rememberOperation(record: PreviewRecord, operationId: string): void {
-    record.operationIds.delete(operationId);
-    record.operationIds.add(operationId);
-    while (record.operationIds.size > OPERATION_ID_CACHE_SIZE) {
-      const oldest = record.operationIds.values().next().value as string | undefined;
-      if (oldest === undefined) break;
-      record.operationIds.delete(oldest);
+  private queueActiveTouchRelease(viewer: Viewer): Promise<void> | undefined {
+    if (this.activeTouches.get(viewer.targetId)?.leaseId !== viewer.leaseId) return undefined;
+    this.activeTouches.delete(viewer.targetId);
+    const previous = this.targetInputQueues.get(viewer.targetId) ?? Promise.resolve();
+    const release = previous
+      .catch(() => undefined)
+      .then(() => this.releaseInputBestEffort(viewer.targetId));
+    this.targetInputQueues.set(viewer.targetId, release);
+    void release.then(
+      () => this.cleanupInputQueue(viewer.targetId, release),
+      () => this.cleanupInputQueue(viewer.targetId, release),
+    );
+    return release;
+  }
+
+  private async releaseInputBestEffort(targetId: string): Promise<void> {
+    try {
+      await this.backend.releaseInput(targetId);
+    } catch (error) {
+      serviceLogger.warn(
+        { targetId, error: publicError(error) },
+        "Device preview active touch release failed",
+      );
     }
   }
 
@@ -691,8 +1130,18 @@ export class DevicePreviewManager {
 
   private releaseTargetIfIdle(targetId: string): void {
     if ([...this.viewers.values()].some((viewer) => viewer.targetId === targetId)) return;
+    if (this.pendingTargetReleases.has(targetId)) return;
+    const inputQueue = this.targetInputQueues.get(targetId);
+    if (inputQueue) {
+      this.pendingTargetReleases.add(targetId);
+      void inputQueue.then(
+        () => this.finishPendingTargetRelease(targetId, inputQueue),
+        () => this.finishPendingTargetRelease(targetId, inputQueue),
+      );
+      return;
+    }
     try {
-      this.backend.releaseTarget?.(targetId);
+      this.backend.releaseTarget(targetId);
     } catch (error) {
       serviceLogger.warn(
         { targetId, error: publicError(error) },
@@ -701,19 +1150,33 @@ export class DevicePreviewManager {
     }
   }
 
-  private updateState(
-    record: PreviewRecord,
-    state: DevicePreviewSummary["state"],
-    error?: string,
-  ): void {
-    if (record.summary.state === state && record.summary.error === error) return;
+  private finishPendingTargetRelease(targetId: string, inputQueue: Promise<void>): void {
+    this.pendingTargetReleases.delete(targetId);
+    this.cleanupInputQueue(targetId, inputQueue);
+    this.releaseTargetIfIdle(targetId);
+  }
+
+  private updateState(record: PreviewRecord, state: DevicePreviewSummary["state"]): void {
+    if (record.summary.state === state) return;
+    record.summary = { ...record.summary, state, updatedAt: this.now() };
+    this.emitState(record);
+  }
+
+  private updateTargetMetadata(record: PreviewRecord, target: DevicePreviewTarget): void {
+    if (
+      record.summary.model === target.model &&
+      record.summary.osVersion === target.osVersion &&
+      record.summary.interactive === target.interactive
+    ) {
+      return;
+    }
     record.summary = {
       ...record.summary,
-      state,
+      model: target.model,
+      osVersion: target.osVersion,
+      interactive: target.interactive,
       updatedAt: this.now(),
-      ...(error ? { error } : {}),
     };
-    if (!error) delete record.summary.error;
     this.emitState(record);
   }
 
@@ -729,5 +1192,21 @@ export class DevicePreviewManager {
 
   private assertRunning(): void {
     if (this.shuttingDown) throw new DevicePreviewOperationError("Proxy 正在停止");
+  }
+
+  private normalizeOptionalName(name: string | undefined): string | undefined {
+    try {
+      return normalizeOptionalPreviewName(name);
+    } catch (error) {
+      throw new DevicePreviewOperationError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  private normalizeRequiredName(name: string): string {
+    try {
+      return normalizeRequiredPreviewName(name);
+    } catch (error) {
+      throw new DevicePreviewOperationError(error instanceof Error ? error.message : String(error));
+    }
   }
 }

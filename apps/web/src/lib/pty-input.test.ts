@@ -22,6 +22,24 @@ describe("attachXtermRawInput", () => {
     const textarea = document.createElement("textarea");
     const terminal = {
       textarea,
+      element: undefined as HTMLElement | undefined,
+      cols: undefined as number | undefined,
+      rows: undefined as number | undefined,
+      buffer: undefined as
+        | {
+            active: {
+              baseY: number;
+              cursorX: number;
+              cursorY: number;
+              viewportY: number;
+              getLine: (
+                line: number,
+              ) =>
+                | { getCell: (column: number) => { getWidth: () => number } | undefined }
+                | undefined;
+            };
+          }
+        | undefined,
       onData: vi.fn((next: (data: string) => void) => {
         dataHandler = next;
         return { dispose: disposeSpy };
@@ -658,6 +676,70 @@ describe("attachXtermRawInput", () => {
     expect(shouldContinue).toBe(true);
     expect(sendSpy).toHaveBeenCalledTimes(1);
     expect(sendSpy).toHaveBeenCalledWith("sess-1", "你好");
+  });
+
+  it("resyncs the IME anchor to the latest terminal cursor before composition starts", () => {
+    const { terminal, textarea, emitCompositionStart, emitCompositionEnd } = createTerminal();
+    const element = document.createElement("div");
+    const screen = document.createElement("div");
+    const helpers = document.createElement("div");
+    screen.className = "xterm-screen";
+    helpers.className = "xterm-helpers";
+    Object.defineProperties(screen, {
+      clientWidth: { configurable: true, value: 800 },
+      clientHeight: { configurable: true, value: 400 },
+    });
+    helpers.style.top = "7px";
+    helpers.append(textarea);
+    screen.append(helpers);
+    element.append(screen);
+    terminal.element = element;
+    terminal.cols = 80;
+    terminal.rows = 20;
+    terminal.buffer = {
+      active: {
+        baseY: 100,
+        cursorX: 32,
+        cursorY: 15,
+        viewportY: 96,
+        getLine: (line) =>
+          line === 115
+            ? {
+                getCell: (column) => (column === 32 ? { getWidth: () => 1 } : undefined),
+              }
+            : undefined,
+      },
+    };
+    textarea.style.left = "40px";
+    textarea.style.top = "60px";
+    let anchorSeenByXterm = "";
+    textarea.addEventListener("compositionstart", () => {
+      anchorSeenByXterm = `${textarea.style.left},${textarea.style.top}`;
+    });
+
+    const disposable = attachXtermRawInput(terminal, "sess-1");
+    emitCompositionStart();
+
+    expect(anchorSeenByXterm).toBe("320px,300px");
+    expect(helpers.style.top).toBe("80px");
+    expect(textarea.style.left).toBe("320px");
+    expect(textarea.style.top).toBe("300px");
+    expect(textarea.style.width).toBe("10px");
+    expect(textarea.style.height).toBe("20px");
+    expect(textarea.style.lineHeight).toBe("20px");
+
+    emitCompositionEnd();
+    expect(helpers.style.top).toBe("7px");
+
+    emitCompositionStart();
+    expect(helpers.style.top).toBe("80px");
+    textarea.dispatchEvent(new FocusEvent("blur"));
+    expect(helpers.style.top).toBe("7px");
+
+    emitCompositionStart();
+    expect(helpers.style.top).toBe("80px");
+    disposable.dispose();
+    expect(helpers.style.top).toBe("7px");
   });
 
   it("can map plain Enter to LF for mobile soft-keyboard newline", () => {

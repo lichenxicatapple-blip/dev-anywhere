@@ -1,12 +1,6 @@
 import { homedir } from "node:os";
 import { accessSync, constants, statSync } from "node:fs";
-import {
-  ControlErrorCode,
-  serializeControl,
-  type ControlMessage,
-  type DevicePreviewCapability,
-  type WebPreviewCapability,
-} from "@dev-anywhere/shared";
+import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionManager } from "./session-manager.js";
@@ -22,8 +16,6 @@ interface RelayResourceHandlersDeps {
   getProviderEnv: () => NodeJS.ProcessEnv;
   getAgentCliSuggestions: () => Partial<Record<ProviderId, string[]>>;
   setAgentCliPath: (provider: ProviderId, path: string) => void;
-  getWebPreviewCapability?: (refreshPath: boolean) => Promise<WebPreviewCapability>;
-  getDevicePreviewCapability?: (refreshPath: boolean) => Promise<DevicePreviewCapability>;
 }
 
 function errorMessage(err: unknown): string {
@@ -43,48 +35,6 @@ export class RelayResourceHandlers {
   constructor(private readonly deps: RelayResourceHandlersDeps) {}
 
   async onProxyInfoRequest(msg: ControlMessage<"proxy_info_request">): Promise<void> {
-    let webPreview: WebPreviewCapability | undefined;
-    let devicePreview: DevicePreviewCapability | undefined;
-    if (this.deps.getWebPreviewCapability) {
-      try {
-        webPreview = await this.deps.getWebPreviewCapability(msg.refreshPath === true);
-      } catch (error) {
-        serviceLogger.warn(
-          { error: errorMessage(error) },
-          "Web preview tunnel capability check failed",
-        );
-        webPreview = {
-          supported: true,
-          cloudflared: { available: false, error: "Cloudflare Tunnel 检测失败" },
-          cpolar: { available: false, error: "Cpolar 检测失败" },
-        };
-      }
-    }
-    if (this.deps.getDevicePreviewCapability) {
-      try {
-        devicePreview = await this.deps.getDevicePreviewCapability(msg.refreshPath === true);
-      } catch (error) {
-        serviceLogger.warn(
-          { error: errorMessage(error) },
-          "Device preview capability check failed",
-        );
-        devicePreview = {
-          supported: true,
-          ios: {
-            supported: process.platform === "darwin",
-            available: false,
-            interactive: false,
-            error: "iOS 模拟器预览检测失败",
-          },
-          android: {
-            supported: true,
-            available: false,
-            interactive: false,
-            error: "Android 模拟器预览检测失败",
-          },
-        };
-      }
-    }
     this.deps.relaySend(
       serializeControl({
         type: "proxy_info",
@@ -93,8 +43,6 @@ export class RelayResourceHandlers {
         agentCli: detectAgentCliStatus(this.deps.getProviderEnv(), {
           suggestions: this.deps.getAgentCliSuggestions(),
         }),
-        ...(webPreview ? { webPreview } : {}),
-        ...(devicePreview ? { devicePreview } : {}),
       }),
     );
   }

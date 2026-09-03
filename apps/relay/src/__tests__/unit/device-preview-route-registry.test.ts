@@ -1,10 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
-import { DevicePreviewRouteRegistry } from "#src/device-preview-route-registry.js";
+import {
+  DevicePreviewRouteRegistry,
+  devicePreviewResponseByRequest,
+} from "#src/device-preview-route-registry.js";
 
 function socket(): WebSocket {
-  return {} as WebSocket;
+  return {
+    clientId: "client-1",
+    boundProxyId: "p1",
+    bindingId: "binding-1",
+  } as unknown as WebSocket;
 }
+
+const routeBinding = {
+  clientId: "client-1",
+  scope: { proxyId: "p1", bindingId: "binding-1" },
+} as const;
 
 function upstreamIds(...ids: string[]): () => string {
   let index = 0;
@@ -20,6 +32,12 @@ afterEach(() => {
 });
 
 describe("DevicePreviewRouteRegistry", () => {
+  it("routes device preview rename responses back to the requesting browser", () => {
+    expect(devicePreviewResponseByRequest.device_preview_rename_request).toBe(
+      "device_preview_rename_response",
+    );
+  });
+
   it("isolates colliding browser request IDs by rewriting and exact-socket routing", () => {
     const routes = new DevicePreviewRouteRegistry({
       upstreamRequestIdFactory: upstreamIds("device-up-a", "device-up-b"),
@@ -39,11 +57,13 @@ describe("DevicePreviewRouteRegistry", () => {
       kind: "matched",
       clientWs: clientB,
       clientRequestId: "same",
+      ...routeBinding,
     });
     expect(routes.resolve("p1", "device-up-a", "device_preview_create_response", proxy)).toEqual({
       kind: "matched",
       clientWs: clientA,
       clientRequestId: "same",
+      ...routeBinding,
     });
     routes.dispose();
   });
@@ -68,7 +88,12 @@ describe("DevicePreviewRouteRegistry", () => {
     );
     expect(
       routes.resolve("p1", "device-list", "device_preview_list_response", currentProxy),
-    ).toEqual({ kind: "matched", clientWs: client, clientRequestId: "list-client" });
+    ).toEqual({
+      kind: "matched",
+      clientWs: client,
+      clientRequestId: "list-client",
+      ...routeBinding,
+    });
     routes.dispose();
   });
 

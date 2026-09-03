@@ -1,10 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { WebSocket } from "ws";
-import { WebPreviewRouteRegistry } from "#src/web-preview-route-registry.js";
+import {
+  WebPreviewRouteRegistry,
+  webPreviewResponseByRequest,
+} from "#src/web-preview-route-registry.js";
 
 function socket(): WebSocket {
-  return {} as WebSocket;
+  return {
+    clientId: "client-1",
+    boundProxyId: "p1",
+    bindingId: "binding-1",
+  } as unknown as WebSocket;
 }
+
+const routeBinding = {
+  clientId: "client-1",
+  scope: { proxyId: "p1", bindingId: "binding-1" },
+} as const;
 
 function upstreamIds(...ids: string[]): () => string {
   let index = 0;
@@ -21,6 +33,13 @@ afterEach(() => {
 });
 
 describe("WebPreviewRouteRegistry", () => {
+  it("routes preview rename responses back to the requesting browser", () => {
+    expect(webPreviewResponseByRequest.preview_capability_request).toBe(
+      "preview_capability_response",
+    );
+    expect(webPreviewResponseByRequest.preview_rename_request).toBe("preview_rename_response");
+  });
+
   it("rewrites equal client request IDs and resolves each response to its exact socket", () => {
     const routes = new WebPreviewRouteRegistry({
       upstreamRequestIdFactory: upstreamIds("upstream-a", "upstream-b"),
@@ -40,11 +59,13 @@ describe("WebPreviewRouteRegistry", () => {
       kind: "matched",
       clientWs: clientB,
       clientRequestId: "same-client-id",
+      ...routeBinding,
     });
     expect(routes.resolve("p1", "upstream-a", "preview_create_response", proxy)).toEqual({
       kind: "matched",
       clientWs: clientA,
       clientRequestId: "same-client-id",
+      ...routeBinding,
     });
     routes.dispose();
   });
@@ -65,6 +86,7 @@ describe("WebPreviewRouteRegistry", () => {
       kind: "matched",
       clientWs: client,
       clientRequestId: "list-client",
+      ...routeBinding,
     });
     routes.dispose();
   });
@@ -88,6 +110,7 @@ describe("WebPreviewRouteRegistry", () => {
       kind: "matched",
       clientWs: client,
       clientRequestId: "new",
+      ...routeBinding,
     });
     routes.dispose();
   });

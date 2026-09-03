@@ -5,6 +5,8 @@ import {
   RelayErrorCode,
   RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
+  type PreviewScope,
+  type RelayControlMessage,
 } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
 import type { RelayRegistry } from "../registry.js";
@@ -26,6 +28,93 @@ import type { DevicePreviewBridge } from "../device-preview-bridge.js";
 interface ProxySocket extends WebSocket {
   isAlive: boolean;
   proxyId?: string;
+}
+
+type BoundClientSocket = WebSocket & {
+  clientId?: string;
+  boundProxyId?: string;
+  bindingId?: string;
+};
+
+const PREVIEW_EVENT_TYPES = new Set([
+  "preview_state_event",
+  "preview_removed_event",
+  "device_preview_state_event",
+  "device_preview_removed_event",
+]);
+const PREVIEW_PUSH_TYPES = new Set([
+  "preview_state_push",
+  "preview_removed_push",
+  "device_preview_state_push",
+  "device_preview_removed_push",
+]);
+
+type PreviewEventMessage = Extract<
+  RelayControlMessage,
+  {
+    type:
+      | "preview_state_event"
+      | "preview_removed_event"
+      | "device_preview_state_event"
+      | "device_preview_removed_event";
+  }
+>;
+
+function isPreviewEventMessage(message: RelayControlMessage): message is PreviewEventMessage {
+  return PREVIEW_EVENT_TYPES.has(message.type);
+}
+
+function isPreviewPushType(type: string): boolean {
+  return PREVIEW_PUSH_TYPES.has(type);
+}
+
+function previewPushFromEvent(
+  event: PreviewEventMessage,
+  scope: PreviewScope,
+): RelayControlMessage {
+  switch (event.type) {
+    case "preview_state_event":
+      return { ...event, type: "preview_state_push", scope };
+    case "preview_removed_event":
+      return { ...event, type: "preview_removed_push", scope };
+    case "device_preview_state_event":
+      return { ...event, type: "device_preview_state_push", scope };
+    case "device_preview_removed_event":
+      return { ...event, type: "device_preview_removed_push", scope };
+  }
+}
+
+function broadcastPreviewEvent(
+  proxyId: string,
+  sourceProxyWs: WebSocket,
+  event: PreviewEventMessage,
+  registry: RelayRegistry,
+  chaos?: RelayChaos,
+): number {
+  let delivered = 0;
+  for (const rawClientWs of registry.getClientsForProxy(proxyId)) {
+    const clientWs = rawClientWs as BoundClientSocket;
+    if (!clientWs.clientId || !clientWs.bindingId) continue;
+    const scope = { proxyId, bindingId: clientWs.bindingId };
+    const isCurrentRoute = (): boolean =>
+      registry.getProxy(proxyId) === sourceProxyWs &&
+      registry.isCurrentClientBinding(clientWs.clientId, clientWs, scope);
+    if (!isCurrentRoute()) continue;
+
+    const pushMessage = previewPushFromEvent(event, scope);
+    const push = serializeControl(pushMessage);
+    if (chaos) {
+      chaos.send(clientWs, push, {
+        direction: "proxy_to_client",
+        type: pushMessage.type,
+        guard: isCurrentRoute,
+      });
+    } else if (isCurrentRoute() && clientWs.readyState === WebSocket.OPEN) {
+      clientWs.send(push);
+    }
+    delivered += 1;
+  }
+  return delivered;
 }
 
 // 通知绑定到指定 proxy 的所有客户端 proxy 已离线
@@ -93,9 +182,9 @@ export function handleProxyConnection(
   ptySnapshotRoutes: PtySnapshotRouteRegistry,
   sessionHistoryRoutes: SessionHistoryRouteRegistry,
   webPreviewRoutes: WebPreviewRouteRegistry,
+  devicePreviewBridge: DevicePreviewBridge,
   chaos?: RelayChaos,
   remoteFileBridge?: RemoteFileBridge,
-  devicePreviewBridge?: DevicePreviewBridge,
 ): void {
   const proxyWs = ws as ProxySocket;
   proxyWs.isAlive = true;
@@ -152,7 +241,7 @@ export function handleProxyConnection(
       const { proxyId, name, proxyVersion } = result.message;
       const status = registry.registerProxy(proxyId, proxyWs, name, proxyVersion);
       proxyWs.proxyId = proxyId;
-      const connectionId = devicePreviewBridge?.registerProxyConnection(proxyId, proxyWs);
+      const connectionId = devicePreviewBridge.registerProxyConnection(proxyId, proxyWs);
       if (status === "reconnected") {
         ptySnapshotRoutes.clearProxy(proxyId);
         sessionHistoryRoutes.clearProxy(proxyId);
@@ -165,7 +254,7 @@ export function handleProxyConnection(
           type: "proxy_register_response",
           status,
           relayVersion: RELAY_VERSION,
-          ...(connectionId ? { connectionId } : {}),
+          connectionId,
         }),
       );
 
@@ -182,7 +271,7 @@ export function handleProxyConnection(
         ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
         sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
         webPreviewRoutes.clearProxy(proxyWs.proxyId);
-        devicePreviewBridge?.clearProxy(proxyWs.proxyId);
+        devicePreviewBridge.clearProxy(proxyWs.proxyId);
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info(
@@ -228,10 +317,54 @@ export function handleProxyConnection(
 
     // proxy 发给 client 的控制消息：直接转发给绑定的客户端，不进 session buffer
     if (result.kind === "control") {
-      if (
-        proxyWs.proxyId &&
-        devicePreviewBridge?.handleProxyControl(proxyWs.proxyId, proxyWs, result.message)
-      ) {
+      if (isPreviewEventMessage(result.message) || isPreviewPushType(result.message.type)) {
+        if (!proxyWs.proxyId) {
+          rejectNotRegistered(proxyWs);
+          return;
+        }
+        if (registry.getProxy(proxyWs.proxyId) !== proxyWs) {
+          logger.debug(
+            { proxyId: proxyWs.proxyId, type: result.message.type },
+            "Preview push from superseded Proxy socket dropped",
+          );
+          return;
+        }
+        if (isPreviewPushType(result.message.type)) {
+          logger.warn(
+            { proxyId: proxyWs.proxyId, type: result.message.type },
+            "Relay-scoped Preview push sent by Proxy was dropped",
+          );
+          return;
+        }
+        if (!isPreviewEventMessage(result.message)) return;
+        if (result.message.type === "device_preview_removed_event") {
+          devicePreviewBridge.handlePreviewRemovedEvent(
+            proxyWs.proxyId,
+            proxyWs,
+            result.message.previewId,
+          );
+        }
+        const clientCount = broadcastPreviewEvent(
+          proxyWs.proxyId,
+          proxyWs,
+          result.message,
+          registry,
+          chaos,
+        );
+        logger.info(
+          { proxyId: proxyWs.proxyId, type: result.message.type, clientCount },
+          "Forwarded scoped Preview event to clients",
+        );
+        return;
+      }
+      // Device Preview has a Relay-owned management/data plane. Consume every device message
+      // here so none can accidentally enter the generic Proxy-to-client broadcast path.
+      if (result.message.type.startsWith("device_preview_")) {
+        if (!proxyWs.proxyId) {
+          rejectNotRegistered(proxyWs);
+          return;
+        }
+        devicePreviewBridge.handleProxyControl(proxyWs.proxyId, proxyWs, result.message);
         return;
       }
       if (proxyWs.proxyId && result.message.type === "remote_file_stream_response") {
@@ -343,18 +476,33 @@ export function handleProxyConnection(
           proxyWs,
         );
         if (route.kind === "matched") {
-          if (route.clientWs.readyState !== WebSocket.OPEN) return;
+          const isCurrentRoute = (): boolean =>
+            registry.getProxy(proxyWs.proxyId!) === proxyWs &&
+            registry.isCurrentClientBinding(route.clientId, route.clientWs, route.scope);
+          if (route.clientWs.readyState !== WebSocket.OPEN || !isCurrentRoute()) {
+            logger.debug(
+              {
+                proxyId: proxyWs.proxyId,
+                requestId: result.message.requestId,
+                type: result.message.type,
+              },
+              "Web Preview response for stale client binding dropped",
+            );
+            return;
+          }
           const response = {
             ...result.message,
             requestId: route.clientRequestId,
+            scope: route.scope,
           } as WebPreviewResponseMessage;
           const responseRaw = serializeControl(response);
           if (chaos) {
             chaos.send(route.clientWs, responseRaw, {
               direction: "proxy_to_client",
               type: result.message.type,
+              guard: isCurrentRoute,
             });
-          } else {
+          } else if (isCurrentRoute()) {
             route.clientWs.send(responseRaw);
           }
           return;
@@ -443,7 +591,7 @@ export function handleProxyConnection(
     ptySnapshotRoutes.clearProxy(proxyWs.proxyId);
     sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
     webPreviewRoutes.clearProxy(proxyWs.proxyId);
-    devicePreviewBridge?.clearProxy(proxyWs.proxyId);
+    devicePreviewBridge.clearProxy(proxyWs.proxyId);
     notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
     try {
       registry.transitionProxy(proxyWs.proxyId, "online", "offline");

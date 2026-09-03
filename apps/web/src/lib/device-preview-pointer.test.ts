@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { devicePointerGesture, normalizedPointInDeviceFrame } from "./device-preview-pointer";
+import { clampedPointInDeviceFrame, normalizedPointInDeviceFrame } from "./device-preview-pointer";
 
 describe("normalizedPointInDeviceFrame", () => {
   it("maps portrait frames and excludes horizontal letterboxing", () => {
@@ -27,41 +27,17 @@ describe("normalizedPointInDeviceFrame", () => {
     expect(normalizedPointInDeviceFrame(200, 200, layout)).toEqual({ x: 0.5, y: 0.5 });
     expect(normalizedPointInDeviceFrame(200, 20, layout)).toBeNull();
   });
-});
 
-describe("devicePointerGesture", () => {
-  it("keeps small pointer movement as a tap", () => {
-    expect(
-      devicePointerGesture({
-        start: { x: 0.4, y: 0.4 },
-        end: { x: 0.41, y: 0.41 },
-        startClientX: 100,
-        startClientY: 100,
-        endClientX: 105,
-        endClientY: 104,
-        durationMs: 100,
-      }),
-    ).toEqual({ kind: "tap", x: 0.41, y: 0.41 });
-  });
+  it("clamps a captured pointer after it leaves the frame", () => {
+    const layout = {
+      left: 20,
+      top: 30,
+      width: 200,
+      height: 400,
+      frameWidth: 100,
+      frameHeight: 200,
+    };
 
-  it("creates a bounded swipe for larger movement", () => {
-    expect(
-      devicePointerGesture({
-        start: { x: 0.5, y: 0.8 },
-        end: { x: 0.5, y: 0.2 },
-        startClientX: 100,
-        startClientY: 300,
-        endClientX: 100,
-        endClientY: 100,
-        durationMs: 8_000,
-      }),
-    ).toEqual({
-      kind: "swipe",
-      startX: 0.5,
-      startY: 0.8,
-      endX: 0.5,
-      endY: 0.2,
-      durationMs: 5_000,
-    });
+    expect(clampedPointInDeviceFrame(-500, 600, layout)).toEqual({ x: 0, y: 1 });
   });
 });

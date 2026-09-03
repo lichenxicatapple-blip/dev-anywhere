@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import WebSocket from "ws";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { decodeDevicePreviewFrame } from "@dev-anywhere/shared";
+import { decodeDevicePreviewFrame, decodeDevicePreviewH264ProxyPacket } from "@dev-anywhere/shared";
 import { DevicePreviewStreamConnection } from "#src/serve/device-preview/device-preview-stream-connection.js";
 
 class FakeWebSocket extends EventEmitter {
@@ -78,8 +78,39 @@ describe("DevicePreviewStreamConnection", () => {
       streamId: "stream-1",
       frameSequence: 7,
     });
-    socket.message({ type: "device_preview_stream_flow", streamId: "stream-1", paused: true });
-    expect(onFlow).toHaveBeenCalledWith("stream-1", true);
+    await expect(
+      connection.sendH264Packet("stream-1", 8, {
+        kind: "frame",
+        keyframe: true,
+        durationMs: 33,
+        data: Buffer.from([0, 0, 0, 1, 0x65]),
+      }),
+    ).resolves.toBeUndefined();
+    expect(
+      decodeDevicePreviewH264ProxyPacket(Buffer.from(socket.sent[2]!.data as Buffer)),
+    ).toMatchObject({
+      streamId: "stream-1",
+      packetSequence: 8,
+      configuration: false,
+      keyframe: true,
+      durationMs: 33,
+    });
+    socket.message({
+      type: "device_preview_stream_flow",
+      streamId: "stream-1",
+      paused: true,
+      resyncRequired: false,
+    });
+    socket.message({
+      type: "device_preview_stream_flow",
+      streamId: "stream-1",
+      paused: false,
+      resyncRequired: true,
+    });
+    expect(onFlow.mock.calls).toEqual([
+      ["stream-1", true, false],
+      ["stream-1", false, true],
+    ]);
     connection.close();
   });
 

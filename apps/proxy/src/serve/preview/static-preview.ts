@@ -128,7 +128,6 @@ export async function inspectStaticPreviewPath(path: string): Promise<StaticPrev
     if (!isWithinRoot(rootPath, filePath)) throw new Error("网页文件超出公开目录");
     const entryPath = basename(selectionPath);
     return {
-      path: selectionPath,
       rootPath,
       entryPath,
       htmlEntries: [entryPath],
@@ -146,20 +145,17 @@ export async function inspectStaticPreviewPath(path: string): Promise<StaticPrev
     : htmlEntries.length === 1
       ? htmlEntries[0]
       : undefined;
-  return { path: selectionPath, rootPath, entryPath, htmlEntries };
+  return { rootPath, entryPath, htmlEntries };
 }
 
 export async function resolveStaticPreviewSource(
   path: string,
-  requestedEntryPath?: string,
-): Promise<{ source: StaticPreviewSource; name: string; inspection: StaticPreviewInspection }> {
+  requestedEntryPath: string,
+): Promise<{ source: StaticPreviewSource; name: string }> {
   const inspection = await inspectStaticPreviewPath(path);
   if (inspection.htmlEntries.length === 0) throw new Error("这个文件夹里没有 HTML 文件");
 
-  const entryPath = requestedEntryPath
-    ? validateEntryPath(requestedEntryPath)
-    : inspection.entryPath;
-  if (!entryPath) throw new Error("请选择打开预览时显示的网页");
+  const entryPath = validateEntryPath(requestedEntryPath);
   if (!inspection.htmlEntries.includes(entryPath)) {
     throw new Error("所选入口网页不在这个文件夹中");
   }
@@ -168,6 +164,5 @@ export async function resolveStaticPreviewSource(
   return {
     source: { kind: "static", rootPath: inspection.rootPath, entryPath },
     name: selected.isFile() ? basename(path) : basename(inspection.rootPath) || inspection.rootPath,
-    inspection,
   };
 }

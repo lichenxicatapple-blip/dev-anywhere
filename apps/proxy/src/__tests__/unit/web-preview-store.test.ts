@@ -1,7 +1,6 @@
 import { mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PreviewSummarySchema } from "@dev-anywhere/shared";
 import { afterEach, describe, expect, it } from "vitest";
 import { PreviewStore } from "#src/serve/preview/preview-store.js";
 import type { PersistedPreviewDefinition } from "#src/serve/preview/types.js";
@@ -28,31 +27,46 @@ function definition(
     tunnelProvider: "cloudflare",
     createdAt: 1,
     updatedAt: 2,
+    operationId: "operation-1",
+    operationFingerprint: "a".repeat(64),
     ...overrides,
   };
 }
 
-describe("PreviewStore wire-compatible persistence", () => {
-  it("loads definitions without operationId and saves private wire-safe definitions", async () => {
+describe("PreviewStore persistence", () => {
+  it("rejects definitions without operationId and saves the current strict shape", async () => {
     const path = await fixturePath();
-    await writeFile(path, `${JSON.stringify({ version: 1, previews: [definition()] })}\n`);
+    const incompleteDefinition = { ...definition(), operationId: undefined };
+    await writeFile(path, `${JSON.stringify({ version: 1, previews: [incompleteDefinition] })}\n`);
     const store = new PreviewStore(path);
 
-    const loaded = store.load();
-    expect(loaded).toHaveLength(1);
-    expect(loaded[0]).not.toHaveProperty("operationId");
-    expect(PreviewSummarySchema.safeParse({ ...loaded[0], state: "disconnected" }).success).toBe(
-      true,
-    );
+    expect(store.load()).toEqual([]);
 
-    store.save([{ ...loaded[0]!, operationId: "operation-1" }]);
+    const current = definition();
+    store.save([current]);
     expect(JSON.parse(await readFile(path, "utf8"))).toMatchObject({
       version: 1,
-      previews: [{ previewId: "preview-1", operationId: "operation-1" }],
+      previews: [
+        {
+          previewId: "preview-1",
+          operationId: "operation-1",
+          operationFingerprint: "a".repeat(64),
+        },
+      ],
     });
     if (process.platform !== "win32") {
       expect((await stat(path)).mode & 0o777).toBe(0o600);
     }
+  });
+
+  it("rejects unknown persisted fields instead of interpreting another shape", async () => {
+    const path = await fixturePath();
+    await writeFile(
+      path,
+      `${JSON.stringify({ version: 1, previews: [{ ...definition(), retiredField: true }] })}\n`,
+    );
+
+    expect(new PreviewStore(path).load()).toEqual([]);
   });
 
   it.each([
@@ -65,6 +79,7 @@ describe("PreviewStore wire-compatible persistence", () => {
       }),
     ],
     ["overlong operationId", definition({ operationId: "o".repeat(257) })],
+    ["invalid operation fingerprint", definition({ operationFingerprint: "not-a-fingerprint" })],
   ])(
     "rejects a syntactically valid file with %s before it can reach the wire",
     async (_label, item) => {

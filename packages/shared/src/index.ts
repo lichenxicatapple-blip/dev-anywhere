@@ -1,4 +1,5 @@
 // schemas
+export { IdSchema } from "./schemas/id.js";
 export { MessageEnvelopeSchema } from "./schemas/envelope.js";
 export type { MessageEnvelope, MessageType, MessageSource } from "./schemas/envelope.js";
 export {
@@ -74,6 +75,8 @@ export type {
   VoiceProviderConfig,
   VoiceSummaryReason,
 } from "./schemas/voice.js";
+export { PreviewScopeSchema } from "./schemas/preview-scope.js";
+export type { PreviewScope } from "./schemas/preview-scope.js";
 export {
   PreviewHtmlEntriesSchema,
   PreviewSourceSchema,
@@ -81,6 +84,7 @@ export {
   PreviewSummarySchema,
   TunnelProviderSchema,
   WebPreviewCapabilitySchema,
+  WebPreviewNameSchema,
   WebPreviewPathSchema,
   WebPreviewSourceInputSchema,
   WebPreviewTunnelStatusSchema,
@@ -89,21 +93,29 @@ export {
 } from "./schemas/web-preview.js";
 export {
   DevicePreviewCapabilitySchema,
+  DevicePreviewH264StreamProfileSchema,
   DevicePreviewInputSchema,
+  DevicePreviewJpegStreamProfileSchema,
+  DevicePreviewNameSchema,
   DevicePreviewOrientationSchema,
   DevicePreviewPlatformSchema,
   DevicePreviewStreamFlowSchema,
+  DevicePreviewStreamFormatSchema,
   DevicePreviewStreamProfileSchema,
   DevicePreviewStreamRegisterResponseSchema,
   DevicePreviewStreamRegisterSchema,
   DevicePreviewStreamServerMessageSchema,
   DevicePreviewStreamStopReasonSchema,
   DevicePreviewSummarySchema,
+  DevicePreviewStateSchema,
   DevicePreviewTargetSchema,
+  DevicePreviewTouchPhaseSchema,
   DevicePreviewToolStatusSchema,
   devicePreviewOrientationValues,
   devicePreviewPlatformValues,
+  devicePreviewStreamFormatValues,
   devicePreviewStreamStopReasonValues,
+  devicePreviewTouchPhaseValues,
 } from "./schemas/device-preview.js";
 export type {
   DevicePreviewCapability,
@@ -111,13 +123,16 @@ export type {
   DevicePreviewOrientation,
   DevicePreviewPlatform,
   DevicePreviewStreamFlow,
+  DevicePreviewStreamFormat,
   DevicePreviewStreamProfile,
   DevicePreviewStreamRegister,
   DevicePreviewStreamRegisterResponse,
   DevicePreviewStreamServerMessage,
   DevicePreviewStreamStopReason,
   DevicePreviewSummary,
+  DevicePreviewState,
   DevicePreviewTarget,
+  DevicePreviewTouchPhase,
   DevicePreviewToolStatus,
 } from "./schemas/device-preview.js";
 export type {
@@ -241,15 +256,28 @@ export type { DecodedBinaryFrame, DecodedFileStreamFrame } from "./binary-frame.
 
 export {
   DEVICE_PREVIEW_FRAME_MAX_BYTES,
+  DEVICE_PREVIEW_H264_FLAG_CONFIGURATION,
+  DEVICE_PREVIEW_H264_FLAG_KEYFRAME,
+  DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES,
+  DEVICE_PREVIEW_H264_PACKET_SENTINEL,
+  DEVICE_PREVIEW_H264_PACKET_VERSION,
+  DEVICE_PREVIEW_H264_PROXY_PACKET_FIXED_HEADER_BYTES,
   DEVICE_PREVIEW_HTTP_FRAME_HEADER_BYTES,
   decodeDevicePreviewFrame,
+  decodeDevicePreviewH264HttpPacketHeader,
+  decodeDevicePreviewH264ProxyPacket,
   decodeDevicePreviewHttpFrameHeader,
   encodeDevicePreviewFrame,
+  encodeDevicePreviewH264HttpPacket,
+  encodeDevicePreviewH264ProxyPacket,
   encodeDevicePreviewHttpFrame,
 } from "./device-preview-frame.js";
 export type {
   DecodedDevicePreviewFrame,
+  DecodedDevicePreviewH264HttpPacketHeader,
+  DecodedDevicePreviewH264ProxyPacket,
   DecodedDevicePreviewHttpFrameHeader,
+  DevicePreviewH264Packet,
 } from "./device-preview-frame.js";
 
 export { decodeMuLawToPcm16, encodePcm16ToMuLaw } from "./voice-audio-codec.js";

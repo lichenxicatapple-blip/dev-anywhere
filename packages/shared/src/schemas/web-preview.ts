@@ -8,6 +8,8 @@ const WEB_PREVIEW_NAME_MAX_LENGTH = 256;
 const WEB_PREVIEW_ERROR_MAX_LENGTH = 4_096;
 const WEB_PREVIEW_HTML_ENTRY_MAX_COUNT = 1_000;
 
+export const WebPreviewNameSchema = z.string().trim().min(1).max(WEB_PREVIEW_NAME_MAX_LENGTH);
+
 export const tunnelProviderValues = ["cloudflare", "cpolar"] as const;
 export const TunnelProviderSchema = z.enum(tunnelProviderValues);
 export type TunnelProvider = z.infer<typeof TunnelProviderSchema>;
@@ -57,45 +59,72 @@ const CPOLAR_PUBLIC_HOST_PATTERN = new RegExp(
   "i",
 );
 
-export const WebPreviewTunnelStatusSchema = z.object({
-  available: z.boolean(),
-  command: z.string().min(1).max(WEB_PREVIEW_PATH_MAX_LENGTH).optional(),
-  version: z.string().min(1).max(256).optional(),
-  error: z.string().min(1).max(WEB_PREVIEW_ERROR_MAX_LENGTH).optional(),
-  suggestions: z.array(z.string().min(1).max(WEB_PREVIEW_PATH_MAX_LENGTH)).max(32).optional(),
-});
+const WebPreviewTunnelSuggestionsSchema = z
+  .array(z.string().min(1).max(WEB_PREVIEW_PATH_MAX_LENGTH))
+  .max(32)
+  .optional();
+
+export const WebPreviewTunnelStatusSchema = z.discriminatedUnion("available", [
+  z
+    .object({
+      available: z.literal(true),
+      command: z.string().min(1).max(WEB_PREVIEW_PATH_MAX_LENGTH),
+      version: z.string().min(1).max(256).optional(),
+      error: z.never().optional(),
+      suggestions: WebPreviewTunnelSuggestionsSchema,
+    })
+    .strict(),
+  z
+    .object({
+      available: z.literal(false),
+      command: z.never().optional(),
+      version: z.never().optional(),
+      error: z.string().min(1).max(WEB_PREVIEW_ERROR_MAX_LENGTH),
+      suggestions: WebPreviewTunnelSuggestionsSchema,
+    })
+    .strict(),
+]);
 export type WebPreviewTunnelStatus = z.infer<typeof WebPreviewTunnelStatusSchema>;
 
-export const WebPreviewCapabilitySchema = z.object({
-  supported: z.boolean(),
-  cloudflared: WebPreviewTunnelStatusSchema,
-  cpolar: WebPreviewTunnelStatusSchema,
-});
+export const WebPreviewCapabilitySchema = z
+  .object({
+    cloudflared: WebPreviewTunnelStatusSchema,
+    cpolar: WebPreviewTunnelStatusSchema,
+  })
+  .strict();
 export type WebPreviewCapability = z.infer<typeof WebPreviewCapabilitySchema>;
 
 export const WebPreviewSourceInputSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("local"),
-    url: LoopbackHttpUrlSchema,
-  }),
-  z.object({
-    kind: z.literal("static"),
-    path: WebPreviewPathSchema,
-    entryPath: WebPreviewPathSchema.optional(),
-  }),
+  z
+    .object({
+      kind: z.literal("local"),
+      url: LoopbackHttpUrlSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("static"),
+      path: WebPreviewPathSchema,
+      entryPath: WebPreviewPathSchema,
+    })
+    .strict(),
 ]);
 export type WebPreviewSourceInput = z.infer<typeof WebPreviewSourceInputSchema>;
 
 export const PreviewSourceSchema = z.discriminatedUnion("kind", [
-  z.object({
-    kind: z.literal("local"),
-    url: LoopbackHttpUrlSchema,
-  }),
-  z.object({
-    kind: z.literal("static"),
-    rootPath: WebPreviewPathSchema,
-    entryPath: WebPreviewPathSchema,
-  }),
+  z
+    .object({
+      kind: z.literal("local"),
+      url: LoopbackHttpUrlSchema,
+    })
+    .strict(),
+  z
+    .object({
+      kind: z.literal("static"),
+      rootPath: WebPreviewPathSchema,
+      entryPath: WebPreviewPathSchema,
+    })
+    .strict(),
 ]);
 export type PreviewSource = z.infer<typeof PreviewSourceSchema>;
 
@@ -109,20 +138,47 @@ export const previewStateValues = [
 export const PreviewStateSchema = z.enum(previewStateValues);
 export type PreviewState = z.infer<typeof PreviewStateSchema>;
 
+const PreviewSummaryBaseSchema = z.object({
+  previewId: IdSchema,
+  name: WebPreviewNameSchema,
+  source: PreviewSourceSchema,
+  tunnelProvider: TunnelProviderSchema,
+  createdAt: z.number().int().nonnegative(),
+  updatedAt: z.number().int().nonnegative(),
+});
+
+const PreviewSummaryInactiveShape = {
+  publicUrl: z.never().optional(),
+  error: z.never().optional(),
+};
+
 export const PreviewSummarySchema = z
-  .object({
-    previewId: IdSchema,
-    name: z.string().min(1).max(WEB_PREVIEW_NAME_MAX_LENGTH),
-    source: PreviewSourceSchema,
-    state: PreviewStateSchema,
-    tunnelProvider: TunnelProviderSchema,
-    publicUrl: PublicPreviewUrlSchema.optional(),
-    error: z.string().min(1).max(WEB_PREVIEW_ERROR_MAX_LENGTH).optional(),
-    createdAt: z.number().int().nonnegative(),
-    updatedAt: z.number().int().nonnegative(),
-  })
+  .discriminatedUnion("state", [
+    PreviewSummaryBaseSchema.extend({
+      state: z.literal("starting"),
+      ...PreviewSummaryInactiveShape,
+    }).strict(),
+    PreviewSummaryBaseSchema.extend({
+      state: z.literal("ready"),
+      publicUrl: PublicPreviewUrlSchema,
+      error: z.never().optional(),
+    }).strict(),
+    PreviewSummaryBaseSchema.extend({
+      state: z.literal("disconnected"),
+      ...PreviewSummaryInactiveShape,
+    }).strict(),
+    PreviewSummaryBaseSchema.extend({
+      state: z.literal("failed"),
+      publicUrl: z.never().optional(),
+      error: z.string().min(1).max(WEB_PREVIEW_ERROR_MAX_LENGTH),
+    }).strict(),
+    PreviewSummaryBaseSchema.extend({
+      state: z.literal("stopping"),
+      ...PreviewSummaryInactiveShape,
+    }).strict(),
+  ])
   .superRefine((preview, context) => {
-    if (!preview.publicUrl) return;
+    if (preview.state !== "ready") return;
     const publicUrl = parseUrlSafely(preview.publicUrl);
     // PublicPreviewUrlSchema reports malformed URLs. Do not let cross-field validation turn
     // safeParse into a throwing parser when URL construction itself fails.

@@ -3,7 +3,7 @@ import { Typewriter } from "./typewriter";
 import { BRAND_TEXTS } from "./constants";
 
 interface MobileBrandHeroProps {
-  subtitle: string;
+  subtitle: string | null;
   action?: ReactNode;
 }
 
@@ -19,9 +19,11 @@ export function MobileBrandHero({ subtitle, action }: MobileBrandHeroProps) {
           texts={BRAND_TEXTS}
           className="dev-mobile-brand-typewriter max-w-full overflow-hidden text-ellipsis whitespace-nowrap font-bold tracking-normal"
         />
-        <p className="dev-mobile-brand-subtitle max-w-[34rem] text-sm leading-5 text-muted-foreground">
-          {subtitle}
-        </p>
+        {subtitle ? (
+          <p className="dev-mobile-brand-subtitle max-w-[34rem] text-sm leading-5 text-muted-foreground">
+            {subtitle}
+          </p>
+        ) : null}
         {action ? (
           <div className="dev-mobile-brand-action flex max-w-full min-w-0 pt-1">{action}</div>
         ) : null}

@@ -7,6 +7,7 @@ import { EventEmitter } from "node:events";
 import {
   createFSM,
   RELAY_JSON_MESSAGE_MAX_BYTES,
+  RelayControlSchema,
   serializeControl,
   type MessageEnvelope,
 } from "@dev-anywhere/shared";
@@ -159,6 +160,7 @@ export class RelayConnection extends EventEmitter {
       const base = this.relayUrl.replace(/\/$/, "") + "/proxy";
       const url = this.token ? `${base}?token=${encodeURIComponent(this.token)}` : base;
       this.ws = new WebSocket(url, RELAY_CONNECTION_WEBSOCKET_OPTIONS);
+      const socket = this.ws;
 
       this.ws.on("open", () => {
         // open 属异步回调，若同步 close() 已先切 CLOSED，REGISTERING 会被拒，需跳过后续 register
@@ -201,23 +203,25 @@ export class RelayConnection extends EventEmitter {
         }
         this.clearHeartbeatTimeout();
         if (msg.type === "proxy_register_response") {
-          const relayVersion =
-            typeof msg.relayVersion === "string" && msg.relayVersion.length > 0
-              ? msg.relayVersion
-              : undefined;
-          serviceLogger.info({ status: msg.status, relayVersion }, "Received register response");
+          // CLOSED is absorbing: a response already queued by ws after close() has no effect.
+          if (this.fsm.current() === RelayConnectionState.CLOSED) return;
+          const response = RelayControlSchema.safeParse(msg);
+          if (!response.success || response.data.type !== "proxy_register_response") {
+            serviceLogger.warn(
+              { issues: response.success ? undefined : response.error.issues },
+              "Invalid Proxy registration response; terminating relay connection",
+            );
+            socket.terminate();
+            return;
+          }
+          const { status, relayVersion, connectionId } = response.data;
+          serviceLogger.info({ status, relayVersion }, "Received register response");
           if (!this.fsm.tryTransitionTo(RelayConnectionState.SYNCED)) return;
           this.reconnectAttempt = 0;
           this.startHeartbeat();
           this.flushQueue();
           if (relayVersion) this.emit("relay_version", relayVersion);
-          const connectionId =
-            typeof msg.connectionId === "string" &&
-            msg.connectionId.length > 0 &&
-            msg.connectionId.length <= 256
-              ? msg.connectionId
-              : undefined;
-          if (connectionId) this.emit("stream_connection", connectionId);
+          this.emit("stream_connection", connectionId);
           this.emit("connected");
           return;
         }

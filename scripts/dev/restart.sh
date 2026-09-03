@@ -231,7 +231,9 @@ echo ""
 echo "=== Restarting relay ==="
 kill_port "$RELAY_PORT" "relay"
 RELAY_LOG="$(prepare_run_log "$LOG_DIR/relay-dev.log")"
-start_detached "$ROOT/apps/relay" "$RELAY_LOG" env PORT="$RELAY_PORT" "$ROOT/node_modules/.bin/tsx" src/index.ts
+# 本地开发 Relay 设计为无鉴权。显式丢弃父进程里可能残留的生产 Token，
+# 避免从部署命令或长期存活的终端会话中误继承后，网页突然要求 client token。
+start_detached "$ROOT/apps/relay" "$RELAY_LOG" env -u RELAY_PROXY_TOKEN -u RELAY_CLIENT_TOKEN PORT="$RELAY_PORT" "$ROOT/node_modules/.bin/tsx" src/index.ts
 for _ in $(seq 1 50); do
   if curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$RELAY_PORT/api/status" >/dev/null 2>&1; then
     echo "Relay ready on :$RELAY_PORT (log: $RELAY_LOG)"

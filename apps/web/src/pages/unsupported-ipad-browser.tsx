@@ -10,7 +10,7 @@ export function UnsupportedIpadBrowserPage({ browserName }: { browserName: strin
   const [copyStatus, setCopyStatus] = useState<CopyStatus>("idle");
 
   const handleCopy = async () => {
-    const result = await copyText(window.location.href, { allowLegacyFallback: true });
+    const result = await copyText(window.location.href, { allowUserGestureFallback: true });
     setCopyStatus(result === "failed" ? "failed" : "copied");
   };
 

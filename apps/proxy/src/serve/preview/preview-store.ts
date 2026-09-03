@@ -1,30 +1,36 @@
 import { existsSync, readFileSync } from "node:fs";
 import { z } from "zod";
 import {
+  IdSchema,
   PreviewSourceSchema,
-  PreviewSummarySchema,
   TunnelProviderSchema,
+  WebPreviewNameSchema,
 } from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../../common/atomic-write.js";
 import { serviceLogger } from "../../common/logger.js";
 import type { PersistedPreviewDefinition } from "./types.js";
 
-const PreviewDefinitionSchema = z.object({
-  previewId: PreviewSummarySchema.shape.previewId,
-  name: PreviewSummarySchema.shape.name,
-  source: PreviewSourceSchema,
-  tunnelProvider: TunnelProviderSchema,
-  createdAt: PreviewSummarySchema.shape.createdAt,
-  updatedAt: PreviewSummarySchema.shape.updatedAt,
-  operationId: PreviewSummarySchema.shape.previewId.optional(),
-});
+const PreviewDefinitionSchema = z
+  .object({
+    previewId: IdSchema,
+    name: WebPreviewNameSchema,
+    source: PreviewSourceSchema,
+    tunnelProvider: TunnelProviderSchema,
+    createdAt: z.number().int().nonnegative(),
+    updatedAt: z.number().int().nonnegative(),
+    operationId: IdSchema,
+    operationFingerprint: z.string().regex(/^[0-9a-f]{64}$/u),
+  })
+  .strict();
 
 export const MAX_PERSISTED_PREVIEWS = 100;
 
-const PreviewStoreSchema = z.object({
-  version: z.literal(1),
-  previews: z.array(PreviewDefinitionSchema).max(MAX_PERSISTED_PREVIEWS),
-});
+const PreviewStoreSchema = z
+  .object({
+    version: z.literal(1),
+    previews: z.array(PreviewDefinitionSchema).max(MAX_PERSISTED_PREVIEWS),
+  })
+  .strict();
 
 export class PreviewStore {
   constructor(private readonly path: string) {}

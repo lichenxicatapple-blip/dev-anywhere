@@ -1,12 +1,27 @@
 import {
   DEVICE_PREVIEW_FRAME_MAX_BYTES,
+  DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES,
   DEVICE_PREVIEW_HTTP_FRAME_HEADER_BYTES,
+  decodeDevicePreviewH264HttpPacketHeader,
 } from "@dev-anywhere/shared";
 import { getRelayClientToken } from "@/lib/relay-client-token";
 
-export interface DevicePreviewHttpFrame {
+interface DevicePreviewHttpFrame {
   sequence: number;
   jpeg: Uint8Array;
+}
+
+interface DevicePreviewHttpH264Packet {
+  sequence: number;
+  kind: "configuration" | "frame";
+  keyframe: boolean;
+  durationMs: number;
+  data: Uint8Array;
+}
+
+interface DevicePreviewStreamSize {
+  width: number;
+  height: number;
 }
 
 /**
@@ -69,9 +84,68 @@ export class DevicePreviewHttpFrameParser {
   }
 }
 
-export interface ConsumeDevicePreviewStreamOptions {
+export class DevicePreviewHttpH264PacketParser {
+  private buffer = new Uint8Array(0);
+
+  push(chunk: Uint8Array): DevicePreviewHttpH264Packet[] {
+    if (chunk.byteLength === 0) return [];
+    const next = new Uint8Array(this.buffer.byteLength + chunk.byteLength);
+    next.set(this.buffer);
+    next.set(chunk, this.buffer.byteLength);
+    this.buffer = next;
+
+    const packets: DevicePreviewHttpH264Packet[] = [];
+    let offset = 0;
+    while (this.buffer.byteLength - offset >= DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES) {
+      const headerView = this.buffer.subarray(offset);
+      const header = decodeDevicePreviewH264HttpPacketHeader(headerView);
+      if (!header) {
+        this.buffer = new Uint8Array(0);
+        throw new RangeError("Invalid H.264 device preview packet header");
+      }
+      const recordLength = DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES + header.annexBLength;
+      if (this.buffer.byteLength - offset < recordLength) break;
+      packets.push({
+        sequence: header.packetSequence,
+        kind: header.configuration ? "configuration" : "frame",
+        keyframe: header.keyframe,
+        durationMs: header.durationMs,
+        data: this.buffer.slice(
+          offset + DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES,
+          offset + recordLength,
+        ),
+      });
+      offset += recordLength;
+    }
+
+    if (offset > 0) this.buffer = this.buffer.slice(offset);
+    if (
+      this.buffer.byteLength >
+      DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES + DEVICE_PREVIEW_FRAME_MAX_BYTES
+    ) {
+      this.buffer = new Uint8Array(0);
+      throw new RangeError("H.264 device preview stream buffer exceeded its limit");
+    }
+    return packets;
+  }
+
+  finish(): void {
+    if (this.buffer.byteLength === 0) return;
+    this.buffer = new Uint8Array(0);
+    throw new Error("H.264 device preview stream ended with a truncated packet");
+  }
+}
+
+interface ConsumeDevicePreviewStreamOptions {
   signal: AbortSignal;
   onFrame: (frame: DevicePreviewHttpFrame) => void | Promise<void>;
+  fetch?: typeof globalThis.fetch;
+}
+
+interface ConsumeDevicePreviewH264StreamOptions {
+  signal: AbortSignal;
+  onPacket: (packet: DevicePreviewHttpH264Packet) => void | Promise<void>;
+  onSize?: (size: DevicePreviewStreamSize) => void;
   fetch?: typeof globalThis.fetch;
 }
 
@@ -94,28 +168,49 @@ function assertTrustedDevicePreviewStreamUrl(value: string): void {
   }
 }
 
-export async function consumeDevicePreviewStream(
+function streamSize(response: Response): DevicePreviewStreamSize | null {
+  const width = Number(response.headers.get("X-Device-Width"));
+  const height = Number(response.headers.get("X-Device-Height"));
+  if (!Number.isSafeInteger(width) || width <= 0 || !Number.isSafeInteger(height) || height <= 0) {
+    return null;
+  }
+  return { width, height };
+}
+
+async function fetchDevicePreviewStream(
   url: string,
-  options: ConsumeDevicePreviewStreamOptions,
-): Promise<void> {
-  // The Relay client token authenticates every machine on a Relay. Never attach it to a URL
-  // supplied by a compromised Proxy unless it is the exact same-origin, Relay-owned endpoint.
+  signal: AbortSignal,
+  fetchImpl: typeof globalThis.fetch,
+): Promise<Response> {
   assertTrustedDevicePreviewStreamUrl(url);
-  const fetchImpl = options.fetch ?? globalThis.fetch;
   const clientToken = getRelayClientToken();
   const response = await fetchImpl(url, {
     method: "GET",
     cache: "no-store",
     credentials: "same-origin",
     ...(clientToken ? { headers: { Authorization: `Bearer ${clientToken}` } } : {}),
-    signal: options.signal,
+    signal,
   });
   if (!response.ok || !response.body) {
     throw new Error(`无法打开模拟器画面（${response.status}）`);
   }
+  return response;
+}
+
+export async function consumeDevicePreviewStream(
+  url: string,
+  options: ConsumeDevicePreviewStreamOptions,
+): Promise<void> {
+  // The Relay client token authenticates every machine on a Relay. Never attach it to a URL
+  // supplied by a compromised Proxy unless it is the exact same-origin, Relay-owned endpoint.
+  const fetchImpl = options.fetch ?? globalThis.fetch;
+  const response = await fetchDevicePreviewStream(url, options.signal, fetchImpl);
+  if (response.headers.get("X-Device-Preview-Format") !== "jpeg") {
+    throw new Error("开发机返回了错误的模拟器画面格式");
+  }
 
   const parser = new DevicePreviewHttpFrameParser();
-  const reader = response.body.getReader();
+  const reader = response.body!.getReader();
   try {
     while (true) {
       const { done, value } = await reader.read();
@@ -125,6 +220,32 @@ export async function consumeDevicePreviewStream(
       // only the newest complete frame in this network chunk is worth painting.
       const latest = frames.at(-1);
       if (latest) await options.onFrame(latest);
+    }
+    parser.finish();
+  } finally {
+    reader.releaseLock();
+  }
+}
+
+export async function consumeDevicePreviewH264Stream(
+  url: string,
+  options: ConsumeDevicePreviewH264StreamOptions,
+): Promise<void> {
+  const fetchImpl = options.fetch ?? globalThis.fetch;
+  const response = await fetchDevicePreviewStream(url, options.signal, fetchImpl);
+  if (response.headers.get("X-Device-Preview-Format") !== "h264_annex_b") {
+    throw new Error("开发机没有返回 H.264 模拟器画面");
+  }
+  const size = streamSize(response);
+  if (size) options.onSize?.(size);
+
+  const parser = new DevicePreviewHttpH264PacketParser();
+  const reader = response.body!.getReader();
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      for (const packet of parser.push(value)) await options.onPacket(packet);
     }
     parser.finish();
   } finally {

@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -266,6 +267,54 @@ describe("SettingsDialog", () => {
           },
         };
       }),
+    );
+  });
+
+  it("retains the active subview while closing and resets it on reopen", () => {
+    const getComputedStyle = window.getComputedStyle.bind(window);
+    vi.spyOn(window, "getComputedStyle").mockImplementation((element, pseudoElement) => {
+      const styles = getComputedStyle(element, pseudoElement);
+      Object.defineProperty(styles, "animationName", {
+        configurable: true,
+        get: () =>
+          element.getAttribute("data-state") === "closed"
+            ? "settings-dialog-close"
+            : "settings-dialog-open",
+      });
+      return styles;
+    });
+
+    function Harness() {
+      const [open, setOpen] = useState(true);
+      return (
+        <>
+          <button
+            type="button"
+            data-slot="toggle-settings-harness"
+            onClick={() => setOpen((current) => !current)}
+          />
+          <SettingsDialog open={open} onOpenChange={setOpen} />
+        </>
+      );
+    }
+
+    render(<Harness />);
+    fireEvent.click(screen.getByRole("button", { name: "版本" }));
+    expect(document.querySelector('[data-slot="settings-dialog"]')).toHaveAttribute(
+      "data-view",
+      "version",
+    );
+
+    fireEvent.click(document.querySelector('[data-slot="toggle-settings-harness"]')!);
+    expect(document.querySelector('[data-slot="settings-dialog"]')).toHaveAttribute(
+      "data-view",
+      "version",
+    );
+
+    fireEvent.click(document.querySelector('[data-slot="toggle-settings-harness"]')!);
+    expect(document.querySelector('[data-slot="settings-dialog"]')).toHaveAttribute(
+      "data-view",
+      "menu",
     );
   });
 

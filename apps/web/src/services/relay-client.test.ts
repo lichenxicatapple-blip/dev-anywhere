@@ -1,4 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { PreviewScope } from "@dev-anywhere/shared";
 import { RelayClient } from "./relay-client";
 
 class FakeWebSocketManager {
@@ -47,6 +48,23 @@ function createClient(): { relay: RelayClient; ws: FakeWebSocketManager } {
   };
 }
 
+function restorePreviewScope(
+  relay: RelayClient,
+  ws: FakeWebSocketManager,
+  proxyId = "proxy-a",
+  bindingId = "binding-a-1",
+): PreviewScope {
+  ws.emit({
+    type: "client_register_response",
+    status: "restored",
+    proxyId,
+    bindingId,
+  });
+  const scope = relay.getPreviewScope();
+  if (!scope) throw new Error("expected restored preview scope");
+  return scope;
+}
+
 describe("RelayClient request handling", () => {
   afterEach(() => {
     vi.unstubAllGlobals();
@@ -72,6 +90,99 @@ describe("RelayClient request handling", () => {
       osName: "iPad",
       deviceKind: "tablet",
     });
+  });
+
+  it("preserves an envelope when its type also exists in the control protocol", () => {
+    const { relay, ws } = createClient();
+    const handler = vi.fn();
+    relay.onMessage(handler);
+
+    ws.emit({
+      type: "session_list",
+      seq: 0,
+      timestamp: 1,
+      source: "proxy",
+      version: "1.0",
+      payload: { sessions: [] },
+    });
+
+    expect(handler).toHaveBeenCalledWith({
+      type: "session_list",
+      seq: 0,
+      timestamp: 1,
+      source: "proxy",
+      version: "1.0",
+      payload: { sessions: [] },
+    });
+  });
+
+  it("drops an old unscoped preview push before it can be buffered or dispatched", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { relay, ws } = createClient();
+
+      ws.emit({
+        type: "preview_state_push",
+        epoch: "preview-epoch",
+        revision: 1,
+        preview: {
+          previewId: "preview-one",
+          name: "Docs",
+          source: { kind: "local", url: "http://localhost:5173" },
+          state: "starting",
+          tunnelProvider: "cloudflare",
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      });
+
+      const handler = vi.fn();
+      relay.onMessage(handler);
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "RelayClient: malformed inbound message dropped",
+        expect.objectContaining({ type: "preview_state_push" }),
+      );
+      expect(JSON.stringify(warn.mock.calls[0]).length).toBeLessThan(1_000);
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("does not resolve a pending request from a malformed success payload", async () => {
+    vi.useFakeTimers();
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { relay, ws } = createClient();
+      const scope = restorePreviewScope(relay, ws);
+      const operationId = "malformed-create-operation";
+      const promise = relay.createWebPreview(
+        scope,
+        { kind: "local", url: "http://localhost:5173" },
+        { tunnelProvider: "cloudflare", operationId, timeoutMs: 100 },
+      );
+      const assertion = expect(promise).rejects.toThrow("创建网页预览超时");
+      const requestId = sentRequestId(ws);
+
+      ws.emit({
+        type: "preview_create_response",
+        requestId,
+        scope,
+        operationId,
+        accepted: true,
+      });
+
+      expect(warn).toHaveBeenCalledWith(
+        "RelayClient: malformed inbound message dropped",
+        expect.objectContaining({ type: "preview_create_response" }),
+      );
+      await vi.advanceTimersByTimeAsync(100);
+      await assertion;
+    } finally {
+      warn.mockRestore();
+      vi.useRealTimers();
+    }
   });
 
   it("resolves proxy list requests from the matching response", async () => {
@@ -171,12 +282,22 @@ describe("RelayClient request handling", () => {
           clientId: "client-1",
           connectedAt: 1760000000000,
           current: true,
+          browserName: "Safari",
+          osName: "macOS",
+          deviceKind: "desktop",
         },
       ],
     });
 
     await expect(promise).resolves.toEqual([
-      { clientId: "client-1", connectedAt: 1760000000000, current: true },
+      {
+        clientId: "client-1",
+        connectedAt: 1760000000000,
+        current: true,
+        browserName: "Safari",
+        osName: "macOS",
+        deviceKind: "desktop",
+      },
     ]);
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
       type: "relay_client_list_request",
@@ -465,10 +586,23 @@ describe("RelayClient request handling", () => {
       codex: { available: false, error: "codex not found" },
     };
 
-    ws.emit({ type: "proxy_info", requestId: "other-request", homePath: "/tmp", agentCli });
-    ws.emit({ type: "proxy_info", requestId, homePath: "/home/dev", agentCli });
+    ws.emit({
+      type: "proxy_info",
+      requestId: "other-request",
+      homePath: "/tmp",
+      agentCli,
+    });
+    ws.emit({
+      type: "proxy_info",
+      requestId,
+      homePath: "/home/dev",
+      agentCli,
+    });
 
-    await expect(promise).resolves.toEqual({ homePath: "/home/dev", agentCli });
+    await expect(promise).resolves.toEqual({
+      homePath: "/home/dev",
+      agentCli,
+    });
   });
 
   it("updates an Agent CLI path through the selected proxy", async () => {
@@ -1112,92 +1246,173 @@ describe("RelayClient request handling", () => {
     });
   });
 
-  it("refreshes the login-shell PATH through proxy_info when rechecking preview support", async () => {
+  it("requests scoped Web preview capability with explicit PATH refresh", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.requestWebPreviewCapabilities(true);
+    const scope = restorePreviewScope(relay, ws);
+    const promise = relay.requestWebPreviewCapability(scope, true);
     const requestId = sentRequestId(ws);
 
     expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
-      type: "proxy_info_request",
+      type: "preview_capability_request",
       requestId,
+      scope,
       refreshPath: true,
     });
 
     ws.emit({
-      type: "proxy_info",
+      type: "preview_capability_response",
       requestId,
-      homePath: "/home/dev",
-      agentCli: {
-        claude: { available: true },
-        codex: { available: true },
-      },
-      webPreview: {
-        supported: true,
+      scope,
+      success: true,
+      capability: {
         cloudflared: { available: true, command: "/opt/homebrew/bin/cloudflared" },
+        cpolar: { available: false, error: "cpolar not found" },
       },
     });
 
-    await expect(promise).resolves.toMatchObject({
-      homePath: "/home/dev",
-      webPreview: { supported: true, cloudflared: { available: true } },
+    await expect(promise).resolves.toEqual({
+      success: true,
+      capability: {
+        cloudflared: { available: true, command: "/opt/homebrew/bin/cloudflared" },
+        cpolar: { available: false, error: "cpolar not found" },
+      },
     });
   });
 
-  it("inspects static previews with request correlation", async () => {
+  it("returns strict capability failures and cancels scoped capability requests", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.inspectStaticWebPreview("/home/dev/site");
+    const scope = restorePreviewScope(relay, ws);
+    const failed = relay.requestWebPreviewCapability(scope, false);
+    const failedRequestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
+      type: "preview_capability_request",
+      scope,
+      refreshPath: false,
+    });
+    ws.emit({
+      type: "preview_capability_response",
+      requestId: failedRequestId,
+      scope,
+      success: false,
+      error: "detection failed",
+      errorCode: "UNKNOWN",
+    });
+    await expect(failed).resolves.toEqual({
+      success: false,
+      error: "detection failed",
+      errorCode: "UNKNOWN",
+    });
+
+    const abort = new AbortController();
+    const cancelled = relay.requestWebPreviewCapability(scope, false, { signal: abort.signal });
+    abort.abort();
+    await expect(cancelled).rejects.toMatchObject({ name: "AbortError" });
+  });
+
+  it("requests Device preview capability with the same strict result contract", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const promise = relay.requestDevicePreviewCapability(scope, false);
+    const requestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "device_preview_capability_request",
+      requestId,
+      scope,
+      refreshPath: false,
+    });
+    ws.emit({
+      type: "device_preview_capability_response",
+      requestId,
+      scope,
+      success: true,
+      capability: {
+        ios: {
+          supported: true,
+          available: true,
+          interactive: true,
+          command: "/usr/bin/xcrun",
+        },
+        android: {
+          supported: true,
+          available: false,
+          interactive: false,
+          error: "scrcpy not found",
+        },
+      },
+    });
+    await expect(promise).resolves.toMatchObject({
+      success: true,
+      capability: { ios: { available: true } },
+    });
+  });
+
+  it("inspects static previews in the active scope with request correlation", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const promise = relay.inspectStaticWebPreview(scope, "/home/dev/site");
     const requestId = sentRequestId(ws);
 
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "preview_static_inspect_request",
+      requestId,
+      scope,
+      path: "/home/dev/site",
+    });
     ws.emit({
       type: "preview_static_inspect_response",
       requestId: "other-request",
+      scope,
       success: true,
-      rootPath: "/wrong",
       entryPath: "wrong.html",
       htmlEntries: ["wrong.html"],
     });
     ws.emit({
       type: "preview_static_inspect_response",
       requestId,
+      scope,
       success: true,
-      rootPath: "/home/dev/site",
       htmlEntries: ["home.html", "pages/docs.html"],
     });
 
     await expect(promise).resolves.toEqual({
       success: true,
-      rootPath: "/home/dev/site",
       entryPath: undefined,
       htmlEntries: ["home.html", "pages/docs.html"],
-      error: undefined,
-      errorCode: undefined,
-    });
-    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
-      type: "preview_static_inspect_request",
-      path: "/home/dev/site",
     });
   });
 
-  it("creates a preview with an idempotency operation and returns the fast ACK", async () => {
+  it("creates a web preview with a required operation id and echoes the matching ACK", async () => {
     const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const operationId = "web-create-operation-1";
     const promise = relay.createWebPreview(
+      scope,
       { kind: "local", url: "http://localhost:5173/admin" },
-      { tunnelProvider: "cloudflare" },
+      { tunnelProvider: "cloudflare", name: "Project docs", operationId },
     );
     const requestId = sentRequestId(ws);
-    const sent = JSON.parse(ws.sent[0] ?? "{}") as {
-      operationId?: string;
-      source?: unknown;
-      tunnelProvider?: string;
-    };
 
-    expect(sent.operationId).toMatch(/^preview-operation-cloudflare-/);
-    expect(sent.source).toEqual({ kind: "local", url: "http://localhost:5173/admin" });
-    expect(sent.tunnelProvider).toBe("cloudflare");
-
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "preview_create_request",
+      requestId,
+      scope,
+      operationId,
+      source: { kind: "local", url: "http://localhost:5173/admin" },
+      tunnelProvider: "cloudflare",
+      name: "Project docs",
+    });
     ws.emit({
       type: "preview_create_response",
       requestId,
+      scope: { ...scope, bindingId: `${scope.bindingId}-stale` },
+      operationId,
+      accepted: true,
+      previewId: "stale-preview",
+    });
+    ws.emit({
+      type: "preview_create_response",
+      requestId,
+      scope,
       operationId: "wrong-operation",
       accepted: true,
       previewId: "wrong-preview",
@@ -1205,53 +1420,183 @@ describe("RelayClient request handling", () => {
     ws.emit({
       type: "preview_create_response",
       requestId,
-      operationId: sent.operationId,
+      scope,
+      operationId,
       accepted: true,
       previewId: "preview-1",
     });
 
     await expect(promise).resolves.toEqual({
-      operationId: sent.operationId,
+      operationId,
       accepted: true,
       previewId: "preview-1",
-      error: undefined,
-      errorCode: undefined,
     });
   });
 
-  it("uses a caller-provided preview operation id for safe request retries", async () => {
+  it("preserves a caller operation id for an idempotent web preview retry", async () => {
     const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const operationId = "preview-operation-cpolar-stable";
     const promise = relay.createWebPreview(
+      scope,
       { kind: "local", url: "http://localhost:4173" },
-      { tunnelProvider: "cpolar", operationId: "preview-operation-cpolar-stable" },
+      { tunnelProvider: "cpolar", operationId },
     );
     const requestId = sentRequestId(ws);
-    const sent = JSON.parse(ws.sent[0] ?? "{}") as { operationId?: string };
 
-    expect(sent.operationId).toBe("preview-operation-cpolar-stable");
-    expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({ tunnelProvider: "cpolar" });
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "preview_create_request",
+      requestId,
+      scope,
+      operationId,
+      source: { kind: "local", url: "http://localhost:4173" },
+      tunnelProvider: "cpolar",
+    });
     ws.emit({
       type: "preview_create_response",
       requestId,
-      operationId: "preview-operation-cpolar-stable",
+      scope,
+      operationId,
       accepted: true,
       previewId: "preview-stable",
     });
 
     await expect(promise).resolves.toMatchObject({
-      operationId: "preview-operation-cpolar-stable",
+      operationId,
       accepted: true,
       previewId: "preview-stable",
     });
   });
 
-  it("loads, reconnects, and closes previews through request-scoped messages", async () => {
+  it("renames a web preview only from the matching operation response", async () => {
     const { relay, ws } = createClient();
-    const listPromise = relay.requestWebPreviewList();
+    const scope = restorePreviewScope(relay, ws);
+    const operationId = "web-rename-operation-1";
+    const promise = relay.renameWebPreview(scope, "preview-1", "Project docs", { operationId });
+    const requestId = sentRequestId(ws);
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "preview_rename_request",
+      requestId,
+      scope,
+      operationId,
+      previewId: "preview-1",
+      name: "Project docs",
+    });
+    ws.emit({
+      type: "preview_rename_response",
+      requestId,
+      scope,
+      operationId: "wrong-operation",
+      previewId: "preview-1",
+      success: true,
+    });
+    ws.emit({
+      type: "preview_rename_response",
+      requestId,
+      scope,
+      operationId,
+      previewId: "preview-1",
+      success: true,
+    });
+
+    await expect(promise).resolves.toEqual({
+      operationId,
+      previewId: "preview-1",
+      success: true,
+    });
+  });
+
+  it("creates and renames a device preview with scope and operation correlation", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const createOperationId = "device-create-operation-1";
+    const createPromise = relay.createDevicePreview(scope, "emulator-5554", {
+      name: "Pixel checkout",
+      operationId: createOperationId,
+    });
+    const createRequestId = sentRequestId(ws);
+
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "device_preview_create_request",
+      requestId: createRequestId,
+      scope,
+      operationId: createOperationId,
+      targetId: "emulator-5554",
+      name: "Pixel checkout",
+    });
+    ws.emit({
+      type: "device_preview_create_response",
+      requestId: createRequestId,
+      scope,
+      operationId: "wrong-operation",
+      accepted: true,
+      previewId: "wrong-preview",
+    });
+    ws.emit({
+      type: "device_preview_create_response",
+      requestId: createRequestId,
+      scope,
+      operationId: createOperationId,
+      accepted: true,
+      previewId: "device-preview-1",
+    });
+    await expect(createPromise).resolves.toMatchObject({
+      operationId: createOperationId,
+      accepted: true,
+      previewId: "device-preview-1",
+    });
+
+    const renameOperationId = "device-rename-operation-1";
+    const renamePromise = relay.renameDevicePreview(scope, "device-preview-1", "Checkout phone", {
+      operationId: renameOperationId,
+    });
+    const renameRequestId = sentRequestId(ws, 1);
+    expect(JSON.parse(ws.sent[1] ?? "{}")).toEqual({
+      type: "device_preview_rename_request",
+      requestId: renameRequestId,
+      scope,
+      operationId: renameOperationId,
+      previewId: "device-preview-1",
+      name: "Checkout phone",
+    });
+    ws.emit({
+      type: "device_preview_rename_response",
+      requestId: renameRequestId,
+      scope,
+      operationId: "wrong-operation",
+      previewId: "device-preview-1",
+      success: true,
+    });
+    ws.emit({
+      type: "device_preview_rename_response",
+      requestId: renameRequestId,
+      scope,
+      operationId: renameOperationId,
+      previewId: "device-preview-1",
+      success: true,
+    });
+    await expect(renamePromise).resolves.toEqual({
+      operationId: renameOperationId,
+      previewId: "device-preview-1",
+      success: true,
+    });
+  });
+
+  it("loads and mutates web previews through scoped, operation-correlated messages", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const listPromise = relay.requestWebPreviewList(scope);
     const listRequestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "preview_list_request",
+      requestId: listRequestId,
+      scope,
+    });
     ws.emit({
       type: "preview_list_response",
       requestId: listRequestId,
+      scope,
       epoch: "epoch-a",
       revision: 3,
       previews: [],
@@ -1262,42 +1607,346 @@ describe("RelayClient request handling", () => {
       previews: [],
     });
 
-    const reconnectPromise = relay.reconnectWebPreview("preview-1");
+    const reconnectOperationId = "web-reconnect-operation-1";
+    const reconnectPromise = relay.reconnectWebPreview(scope, "preview-1", {
+      operationId: reconnectOperationId,
+    });
     const reconnectRequestId = sentRequestId(ws, 1);
-    ws.emit({
-      type: "preview_reconnect_response",
+    expect(JSON.parse(ws.sent[1] ?? "{}")).toEqual({
+      type: "preview_reconnect_request",
       requestId: reconnectRequestId,
-      previewId: "wrong-preview",
-      success: true,
+      scope,
+      operationId: reconnectOperationId,
+      previewId: "preview-1",
     });
     ws.emit({
       type: "preview_reconnect_response",
       requestId: reconnectRequestId,
+      scope,
+      operationId: "wrong-operation",
       previewId: "preview-1",
       success: true,
     });
-    await expect(reconnectPromise).resolves.toMatchObject({
+    ws.emit({
+      type: "preview_reconnect_response",
+      requestId: reconnectRequestId,
+      scope,
+      operationId: reconnectOperationId,
+      previewId: "preview-1",
+      success: true,
+    });
+    await expect(reconnectPromise).resolves.toEqual({
+      operationId: reconnectOperationId,
       previewId: "preview-1",
       success: true,
     });
 
-    const closePromise = relay.closeWebPreview("preview-1");
+    const closeOperationId = "web-close-operation-1";
+    const closePromise = relay.closeWebPreview(scope, "preview-1", {
+      operationId: closeOperationId,
+    });
     const closeRequestId = sentRequestId(ws, 2);
+    expect(JSON.parse(ws.sent[2] ?? "{}")).toEqual({
+      type: "preview_close_request",
+      requestId: closeRequestId,
+      scope,
+      operationId: closeOperationId,
+      previewId: "preview-1",
+    });
     ws.emit({
       type: "preview_close_response",
       requestId: closeRequestId,
-      previewId: "wrong-preview",
+      scope,
+      operationId: "wrong-operation",
+      previewId: "preview-1",
       success: true,
     });
     ws.emit({
       type: "preview_close_response",
       requestId: closeRequestId,
+      scope,
+      operationId: closeOperationId,
       previewId: "preview-1",
       success: true,
     });
-    await expect(closePromise).resolves.toMatchObject({
+    await expect(closePromise).resolves.toEqual({
+      operationId: closeOperationId,
       previewId: "preview-1",
       success: true,
     });
+  });
+
+  it("loads and mutates device previews through scoped, operation-correlated messages", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const listPromise = relay.requestDevicePreviewList(scope);
+    const listRequestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "device_preview_list_request",
+      requestId: listRequestId,
+      scope,
+    });
+    ws.emit({
+      type: "device_preview_list_response",
+      requestId: listRequestId,
+      scope,
+      epoch: "device-epoch-a",
+      revision: 3,
+      previews: [],
+    });
+    await expect(listPromise).resolves.toEqual({
+      epoch: "device-epoch-a",
+      revision: 3,
+      previews: [],
+    });
+
+    const reconnectOperationId = "device-reconnect-operation-1";
+    const reconnectPromise = relay.reconnectDevicePreview(scope, "device-preview-1", {
+      operationId: reconnectOperationId,
+    });
+    const reconnectRequestId = sentRequestId(ws, 1);
+    expect(JSON.parse(ws.sent[1] ?? "{}")).toEqual({
+      type: "device_preview_reconnect_request",
+      requestId: reconnectRequestId,
+      scope,
+      operationId: reconnectOperationId,
+      previewId: "device-preview-1",
+    });
+    ws.emit({
+      type: "device_preview_reconnect_response",
+      requestId: reconnectRequestId,
+      scope,
+      operationId: "wrong-operation",
+      previewId: "device-preview-1",
+      success: true,
+    });
+    ws.emit({
+      type: "device_preview_reconnect_response",
+      requestId: reconnectRequestId,
+      scope,
+      operationId: reconnectOperationId,
+      previewId: "device-preview-1",
+      success: true,
+    });
+    await expect(reconnectPromise).resolves.toEqual({
+      operationId: reconnectOperationId,
+      previewId: "device-preview-1",
+      success: true,
+    });
+
+    const closeOperationId = "device-close-operation-1";
+    const closePromise = relay.closeDevicePreview(scope, "device-preview-1", {
+      operationId: closeOperationId,
+    });
+    const closeRequestId = sentRequestId(ws, 2);
+    expect(JSON.parse(ws.sent[2] ?? "{}")).toEqual({
+      type: "device_preview_close_request",
+      requestId: closeRequestId,
+      scope,
+      operationId: closeOperationId,
+      previewId: "device-preview-1",
+    });
+    ws.emit({
+      type: "device_preview_close_response",
+      requestId: closeRequestId,
+      scope,
+      operationId: "wrong-operation",
+      previewId: "device-preview-1",
+      success: true,
+    });
+    ws.emit({
+      type: "device_preview_close_response",
+      requestId: closeRequestId,
+      scope,
+      operationId: closeOperationId,
+      previewId: "device-preview-1",
+      success: true,
+    });
+    await expect(closePromise).resolves.toEqual({
+      operationId: closeOperationId,
+      previewId: "device-preview-1",
+      success: true,
+    });
+  });
+
+  it("scopes Device Preview stream, input, and control traffic to one binding", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const signal = new AbortController().signal;
+    const streamPromise = relay.requestDevicePreviewStream(
+      scope,
+      "device-preview-1",
+      { format: "jpeg", maxFps: 15 },
+      { timeoutMs: 500, signal },
+    );
+    const streamRequestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "device_preview_stream_url_request",
+      requestId: streamRequestId,
+      scope,
+      previewId: "device-preview-1",
+      profile: { format: "jpeg", maxFps: 15 },
+    });
+    ws.emit({
+      type: "device_preview_stream_url_response",
+      requestId: streamRequestId,
+      scope,
+      previewId: "device-preview-1",
+      success: true,
+      url: "/api/device-preview-streams/token-1",
+      leaseId: "lease-1",
+      expiresAt: Date.now() + 20_000,
+      controlMode: "controller",
+    });
+    await expect(streamPromise).resolves.toMatchObject({ success: true, leaseId: "lease-1" });
+
+    const inputPromise = relay.sendDevicePreviewInput(
+      scope,
+      "lease-1",
+      { kind: "button", button: "home" },
+      { timeoutMs: 500, signal },
+    );
+    expect(JSON.parse(ws.sent[1] ?? "{}")).toEqual({
+      type: "device_preview_input",
+      scope,
+      leaseId: "lease-1",
+      inputSeq: 1,
+      input: { kind: "button", button: "home" },
+    });
+    ws.emit({
+      type: "device_preview_input_ack",
+      scope,
+      leaseId: "lease-1",
+      inputSeq: 1,
+      success: true,
+    });
+    await expect(inputPromise).resolves.toMatchObject({ success: true, leaseId: "lease-1" });
+
+    const claimPromise = relay.claimDevicePreviewControl(scope, "lease-1", {
+      timeoutMs: 500,
+      signal,
+    });
+    const claimRequestId = sentRequestId(ws, 2);
+    expect(JSON.parse(ws.sent[2] ?? "{}")).toEqual({
+      type: "device_preview_control_claim_request",
+      requestId: claimRequestId,
+      scope,
+      leaseId: "lease-1",
+    });
+    ws.emit({
+      type: "device_preview_control_claim_response",
+      requestId: claimRequestId,
+      scope,
+      leaseId: "lease-1",
+      success: true,
+      controlMode: "controller",
+    });
+    await expect(claimPromise).resolves.toMatchObject({
+      success: true,
+      controlMode: "controller",
+    });
+  });
+
+  it("rejects all Device Preview data-plane calls from an obsolete binding", async () => {
+    const { relay, ws } = createClient();
+    const oldScope = restorePreviewScope(relay, ws, "proxy-a", "binding-a-1");
+    restorePreviewScope(relay, ws, "proxy-a", "binding-a-2");
+    const signal = new AbortController().signal;
+
+    await expect(
+      relay.requestDevicePreviewStream(
+        oldScope,
+        "device-preview-1",
+        { format: "jpeg" },
+        { signal },
+      ),
+    ).rejects.toThrow("预览上下文已失效");
+    await expect(
+      relay.sendDevicePreviewInput(
+        oldScope,
+        "lease-1",
+        { kind: "button", button: "home" },
+        { signal },
+      ),
+    ).rejects.toThrow("预览上下文已失效");
+    await expect(relay.claimDevicePreviewControl(oldScope, "lease-1", { signal })).rejects.toThrow(
+      "预览上下文已失效",
+    );
+    expect(ws.sent).toEqual([]);
+  });
+
+  it("cancels a pending Device Preview stream URL request", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const abort = new AbortController();
+    const pending = relay.requestDevicePreviewStream(
+      scope,
+      "device-preview-1",
+      { format: "jpeg" },
+      { signal: abort.signal },
+    );
+    expect(ws.sent).toHaveLength(1);
+
+    abort.abort();
+
+    await expect(pending).rejects.toMatchObject({ name: "AbortError", message: "请求已取消" });
+  });
+
+  it("rejects an obsolete binding after A -> B -> A and sends only the current scope", async () => {
+    const { relay, ws } = createClient();
+    const oldAScope = restorePreviewScope(relay, ws, "proxy-a", "binding-a-1");
+    restorePreviewScope(relay, ws, "proxy-b", "binding-b-1");
+    const currentAScope = restorePreviewScope(relay, ws, "proxy-a", "binding-a-2");
+
+    await expect(relay.requestWebPreviewList(oldAScope)).rejects.toThrow("预览上下文已失效");
+    expect(ws.sent).toEqual([]);
+
+    const promise = relay.requestWebPreviewList(currentAScope);
+    const requestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent[0] ?? "{}")).toEqual({
+      type: "preview_list_request",
+      requestId,
+      scope: { proxyId: "proxy-a", bindingId: "binding-a-2" },
+    });
+    ws.emit({
+      type: "preview_list_response",
+      requestId,
+      scope: currentAScope,
+      epoch: "current-a",
+      revision: 1,
+      previews: [],
+    });
+    await expect(promise).resolves.toMatchObject({ epoch: "current-a", revision: 1 });
+  });
+
+  it("cancels an in-flight scoped preview request with AbortSignal", async () => {
+    const { relay, ws } = createClient();
+    const scope = restorePreviewScope(relay, ws);
+    const controller = new AbortController();
+    const cancelled = relay.requestWebPreviewList(scope, { signal: controller.signal });
+    const cancelledRequestId = sentRequestId(ws);
+
+    controller.abort();
+    await expect(cancelled).rejects.toMatchObject({ name: "AbortError", message: "请求已取消" });
+
+    ws.emit({
+      type: "preview_list_response",
+      requestId: cancelledRequestId,
+      scope,
+      epoch: "stale",
+      revision: 99,
+      previews: [],
+    });
+    const current = relay.requestWebPreviewList(scope);
+    const currentRequestId = sentRequestId(ws, 1);
+    ws.emit({
+      type: "preview_list_response",
+      requestId: currentRequestId,
+      scope,
+      epoch: "current",
+      revision: 1,
+      previews: [],
+    });
+    await expect(current).resolves.toMatchObject({ epoch: "current", revision: 1 });
   });
 });

@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { Button } from "@/components/ui/button";
+import { createClientOperationId } from "@/lib/client-operation-id";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { wsManagerRef, relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
@@ -75,7 +76,7 @@ export function PtyTest() {
       }
     });
     unsubBinaryRef.current = unsub;
-    const requestId = crypto.randomUUID();
+    const requestId = createClientOperationId("pty-test-subscribe");
 
     // 监听 session_snapshot JSON 响应
     const unsubSnapshot = relayClientRef.onMessage((msg) => {

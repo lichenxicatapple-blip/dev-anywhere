@@ -14,6 +14,8 @@ import { useChatStore } from "@/stores/chat-store";
 import { useCommandStore } from "@/stores/command-store";
 import { router } from "@/lib/router";
 import { getPendingProxyRemovals, markPendingProxyRemoval } from "@/services/proxy-removal-state";
+import { previewController } from "@/services/preview-controller";
+import { createPreviewScope } from "@/services/preview-scope";
 
 vi.mock("@/lib/router", () => ({
   router: { navigate: vi.fn() },
@@ -21,6 +23,7 @@ vi.mock("@/lib/router", () => ({
 
 const toastError = vi.fn();
 const toastWarning = vi.fn();
+const previewScope = createPreviewScope("proxy-1", "binding-1");
 vi.mock("@/components/toast", () => ({
   toast: {
     error: (...args: unknown[]) => toastError(...args),
@@ -30,6 +33,7 @@ vi.mock("@/components/toast", () => ({
 }));
 
 function resetAppStore(): void {
+  previewController.dispose();
   useAppStore.setState({
     phase: "chatting",
     phaseBeforeDisconnect: null,
@@ -53,6 +57,28 @@ function reconnectTimers(): Timers {
   const timers = createPhaseMachineTimers();
   timers.coldStartDone = true;
   return timers;
+}
+
+function emptyPreviewSnapshotMethods() {
+  return {
+    requestWebPreviewList: vi.fn().mockResolvedValue({
+      epoch: "web-epoch",
+      revision: 0,
+      previews: [],
+    }),
+    requestDevicePreviewList: vi.fn().mockResolvedValue({
+      epoch: "device-epoch",
+      revision: 0,
+      previews: [],
+    }),
+  };
+}
+
+function proxyStateInfo(homePath: string, agentCli: object = {}) {
+  return {
+    homePath,
+    agentCli,
+  };
 }
 
 describe("phase-machine reconnect timers", () => {
@@ -128,18 +154,46 @@ describe("phase-machine reconnect timers", () => {
     expect(router.navigate).toHaveBeenCalledWith("/");
   });
 
+  it("activates a restored registration scope and disposes it on disconnect", async () => {
+    const relay = {
+      getPreviewScope: vi.fn(() => previewScope),
+      listProxies: vi.fn(),
+    } as unknown as RelayClient;
+    const timers = reconnectTimers();
+    useAppStore.setState({ phase: "registering" });
+
+    await handleRelayMessage(
+      {
+        type: "client_register_response",
+        status: "restored",
+        proxyId: previewScope.proxyId,
+        bindingId: previewScope.bindingId,
+      },
+      timers,
+      relay,
+    );
+
+    expect(previewController.getActiveScope()).toEqual(previewScope);
+    expect(useAppStore.getState().phase).toBe("proxy_selecting");
+
+    handleWsStatusChange(false, timers, relay);
+    expect(previewController.getActiveScope()).toBeNull();
+  });
+
   it("keeps proxy input offline while reconnect binding is still pending", async () => {
     let resolveSelect!: (value: { success: true; proxyId: string }) => void;
     const selectResult = new Promise<{ success: true; proxyId: string }>((resolve) => {
       resolveSelect = resolve;
     });
     const relay = {
+      ...emptyPreviewSnapshotMethods(),
       register: vi.fn(),
       listProxies: vi.fn(),
       getBoundProxyId: vi.fn(() => null),
+      getPreviewScope: vi.fn(() => previewScope),
       selectProxy: vi.fn(() => selectResult),
       sendControl: vi.fn(),
-      requestProxyInfo: vi.fn().mockResolvedValue({ homePath: "/h", agentCli: {} }),
+      requestProxyInfo: vi.fn().mockResolvedValue(proxyStateInfo("/h")),
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
       requestSessionHistory: vi.fn().mockResolvedValue([]),
     } as unknown as RelayClient;
@@ -169,11 +223,13 @@ describe("phase-machine reconnect timers", () => {
   it("retries a transient reconnect binding failure without another proxy list push", async () => {
     let boundProxyId: string | null = null;
     const relay = {
+      ...emptyPreviewSnapshotMethods(),
       register: vi.fn(() => {
         boundProxyId = null;
       }),
       listProxies: vi.fn(),
       getBoundProxyId: vi.fn(() => boundProxyId),
+      getPreviewScope: vi.fn(() => previewScope),
       selectProxy: vi
         .fn()
         .mockResolvedValueOnce({ success: false, error: "weak network" })
@@ -182,7 +238,7 @@ describe("phase-machine reconnect timers", () => {
           return { success: true, proxyId };
         }),
       sendControl: vi.fn(),
-      requestProxyInfo: vi.fn().mockResolvedValue({ homePath: "/h", agentCli: {} }),
+      requestProxyInfo: vi.fn().mockResolvedValue(proxyStateInfo("/h")),
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
       requestSessionHistory: vi.fn().mockResolvedValue([]),
     } as unknown as RelayClient;
@@ -257,6 +313,7 @@ describe("phase-machine reconnect timers", () => {
       register: vi.fn(),
       listProxies: vi.fn(),
       getBoundProxyId: vi.fn(() => null),
+      getPreviewScope: vi.fn(() => previewScope),
       selectProxy: vi.fn(() => selectResult),
       sendControl: vi.fn(),
       requestProxyInfo: vi.fn(),
@@ -322,19 +379,20 @@ describe("phase-machine reconnect timers", () => {
   it("reselects the current proxy when it returns after a graceful proxy restart", async () => {
     let boundProxyId: string | null = "proxy-1";
     const relay = {
+      ...emptyPreviewSnapshotMethods(),
       clearBoundProxy: vi.fn((proxyId?: string) => {
         if (!proxyId || proxyId === boundProxyId) boundProxyId = null;
       }),
       getBoundProxyId: vi.fn(() => boundProxyId),
+      getPreviewScope: vi.fn(() => previewScope),
       listProxies: vi.fn(),
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
-      requestProxyInfo: vi.fn().mockResolvedValue({
-        homePath: "/Users/catli",
-        agentCli: {
+      requestProxyInfo: vi.fn().mockResolvedValue(
+        proxyStateInfo("/Users/catli", {
           claude: { available: true, command: "claude" },
           codex: { available: true, command: "codex" },
-        },
-      }),
+        }),
+      ),
       requestSessionHistory: vi.fn().mockResolvedValue([]),
       selectProxy: vi.fn().mockImplementation(async (proxyId: string) => {
         boundProxyId = proxyId;
@@ -358,6 +416,59 @@ describe("phase-machine reconnect timers", () => {
     expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list" });
     expect(useAppStore.getState().phase).toBe("chatting");
     expect(useAppStore.getState().proxyOnline).toBe(true);
+  });
+
+  it("resynchronizes both preview kinds when an offline restored binding comes online", async () => {
+    const requestWebPreviewList = vi.fn().mockResolvedValue({
+      epoch: "web-epoch",
+      revision: 0,
+      previews: [],
+    });
+    const requestDevicePreviewList = vi.fn().mockResolvedValue({
+      epoch: "device-epoch",
+      revision: 0,
+      previews: [],
+    });
+    const relay = {
+      getBoundProxyId: vi.fn(() => "proxy-1"),
+      getPreviewScope: vi.fn(() => previewScope),
+      listProxies: vi.fn(),
+      sendControl: vi.fn(),
+      requestProxyInfo: vi.fn().mockResolvedValue({
+        homePath: "/h",
+        agentCli: {},
+      }),
+      requestWebPreviewList,
+      requestDevicePreviewList,
+      requestAgentStatuses: vi.fn().mockResolvedValue([]),
+      requestSessionHistory: vi.fn().mockResolvedValue([]),
+    } as unknown as RelayClient;
+    const timers = reconnectTimers();
+
+    await handleRelayMessage(
+      {
+        type: "client_register_response",
+        status: "proxy_offline",
+        proxyId: previewScope.proxyId,
+        bindingId: previewScope.bindingId,
+      },
+      timers,
+      relay,
+    );
+    await handleRelayMessage({ type: "proxy_online", proxyId: "proxy-1" }, timers, relay);
+
+    await vi.waitFor(() => {
+      expect(requestWebPreviewList).toHaveBeenCalledWith(
+        previewScope,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(requestDevicePreviewList).toHaveBeenCalledWith(
+        previewScope,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+    });
+    expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list" });
+    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000);
   });
 
   it("does not resync proxy state when a proxy list confirms an existing binding", async () => {
@@ -404,11 +515,14 @@ describe("phase-machine request failure handling", () => {
   it("surfaces requestProxyInfo failure via toast and does not crash subsequent flow", async () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let boundProxyId: string | null = "proxy-1";
+    const previewSnapshots = emptyPreviewSnapshotMethods();
     const relay = {
+      ...previewSnapshots,
       clearBoundProxy: vi.fn((proxyId?: string) => {
         if (!proxyId || proxyId === boundProxyId) boundProxyId = null;
       }),
       getBoundProxyId: vi.fn(() => boundProxyId),
+      getPreviewScope: vi.fn(() => previewScope),
       listProxies: vi.fn(),
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
       requestProxyInfo: vi.fn().mockRejectedValue(new Error("relay timeout")),
@@ -433,6 +547,14 @@ describe("phase-machine request failure handling", () => {
 
     await vi.waitFor(() => {
       expect(toastError).toHaveBeenCalledWith("无法获取开发机信息");
+      expect(previewSnapshots.requestWebPreviewList).toHaveBeenCalledWith(
+        previewScope,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
+      expect(previewSnapshots.requestDevicePreviewList).toHaveBeenCalledWith(
+        previewScope,
+        expect.objectContaining({ signal: expect.any(AbortSignal) }),
+      );
     });
     // 失败不应阻断后续 phase 推进
     expect(useAppStore.getState().phase).toBe("chatting");
@@ -443,19 +565,20 @@ describe("phase-machine request failure handling", () => {
     const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
     let boundProxyId: string | null = "proxy-1";
     const relay = {
+      ...emptyPreviewSnapshotMethods(),
       clearBoundProxy: vi.fn((proxyId?: string) => {
         if (!proxyId || proxyId === boundProxyId) boundProxyId = null;
       }),
       getBoundProxyId: vi.fn(() => boundProxyId),
+      getPreviewScope: vi.fn(() => previewScope),
       listProxies: vi.fn(),
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
-      requestProxyInfo: vi.fn().mockResolvedValue({
-        homePath: "/h",
-        agentCli: {
+      requestProxyInfo: vi.fn().mockResolvedValue(
+        proxyStateInfo("/h", {
           claude: { available: true, command: "c" },
           codex: { available: true, command: "c" },
-        },
-      }),
+        }),
+      ),
       requestSessionHistory: vi.fn().mockRejectedValue(new Error("relay down")),
       selectProxy: vi.fn().mockImplementation(async (proxyId: string) => {
         boundProxyId = proxyId;
@@ -493,16 +616,17 @@ describe("phase-machine request failure handling", () => {
     });
     let boundProxyId: string | null = "proxy-1";
     const relay = {
+      ...emptyPreviewSnapshotMethods(),
       getBoundProxyId: vi.fn(() => boundProxyId),
+      getPreviewScope: vi.fn(() => previewScope),
       listProxies: vi.fn(),
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
-      requestProxyInfo: vi.fn().mockResolvedValue({
-        homePath: "/h",
-        agentCli: {
+      requestProxyInfo: vi.fn().mockResolvedValue(
+        proxyStateInfo("/h", {
           claude: { available: true, command: "c" },
           codex: { available: true, command: "c" },
-        },
-      }),
+        }),
+      ),
       requestSessionHistory: vi.fn(() => historyRequest),
       selectProxy: vi.fn().mockImplementation(async (proxyId: string) => {
         boundProxyId = proxyId;
@@ -569,10 +693,12 @@ describe("phase-machine cold-start history", () => {
       },
     ];
     const relay = {
+      ...emptyPreviewSnapshotMethods(),
       requestProxyList: vi.fn().mockResolvedValue(proxies),
+      getPreviewScope: vi.fn(() => previewScope),
       selectProxy: vi.fn().mockResolvedValue({ success: true, proxyId: "proxy-1" }),
       sendControl: vi.fn(),
-      requestProxyInfo: vi.fn().mockResolvedValue({ homePath: "/h", agentCli: {} }),
+      requestProxyInfo: vi.fn().mockResolvedValue(proxyStateInfo("/h")),
       requestAgentStatuses: vi.fn().mockResolvedValue([]),
       requestSessionHistory: vi.fn().mockResolvedValue(history),
     } as unknown as RelayClient;
@@ -695,12 +821,17 @@ describe("phase-machine explicit proxy removal", () => {
   });
 
   it("clears every selected-proxy snapshot and returns all tabs to proxy selection", async () => {
-    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+    const relay = {
+      clearBoundProxy: vi.fn(),
+      getPreviewScope: vi.fn(() => previewScope),
+    } as unknown as RelayClient;
     const timers = reconnectTimers();
+    previewController.activate(relay, previewScope);
 
     await handleRelayMessage({ type: "proxy_removed", proxyId: "proxy-1" }, timers, relay);
 
     expect(relay.clearBoundProxy).toHaveBeenCalledWith("proxy-1");
+    expect(previewController.getActiveScope()).toBeNull();
     expect(useAppStore.getState()).toMatchObject({
       phase: "proxy_selecting",
       selectedProxyId: null,
@@ -738,7 +869,11 @@ describe("phase-machine explicit proxy removal", () => {
     useSessionStore.setState({
       ptyAutoYesBySessionKey: { [currentGrant]: true, [removedGrant]: true },
     });
-    const relay = { clearBoundProxy: vi.fn() } as unknown as RelayClient;
+    const relay = {
+      clearBoundProxy: vi.fn(),
+      getPreviewScope: vi.fn(() => previewScope),
+    } as unknown as RelayClient;
+    previewController.activate(relay, previewScope);
 
     await handleRelayMessage(
       { type: "proxy_removed", proxyId: "proxy-2" },
@@ -758,6 +893,7 @@ describe("phase-machine explicit proxy removal", () => {
     });
     expect(useSessionStore.getState().sessions.map((session) => session.sessionId)).toEqual(["s1"]);
     expect(relay.clearBoundProxy).toHaveBeenCalledWith("proxy-2");
+    expect(previewController.getActiveScope()).toEqual(previewScope);
     expect(router.navigate).not.toHaveBeenCalled();
   });
 
