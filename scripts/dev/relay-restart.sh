@@ -156,7 +156,7 @@ wait_relay() {
 
 kill_port "$RELAY_PORT"
 RELAY_LOG="$(prepare_run_log "$LOG_DIR/relay-dev.log")"
-start_detached "$ROOT/apps/relay" "$RELAY_LOG" env PORT="$RELAY_PORT" \
+start_detached "$ROOT/apps/relay" "$RELAY_LOG" env -u RELAY_PROXY_TOKEN -u RELAY_CLIENT_TOKEN -u ALLOWED_ORIGINS PORT="$RELAY_PORT" \
   "$ROOT/node_modules/.bin/tsx" src/index.ts
 wait_relay
 echo "Relay restarted on :$RELAY_PORT (log: $RELAY_LOG)"

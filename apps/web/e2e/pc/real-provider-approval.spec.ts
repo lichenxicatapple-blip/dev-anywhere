@@ -4,6 +4,10 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
+import {
+  requireE2ERelayRestartConfig,
+  type E2ERelayRestartConfig,
+} from "../fixtures/real-backend-config";
 import { openCreateAgentSessionDialog, selectAgentCli } from "../helpers";
 
 type Provider = "claude" | "codex";
@@ -13,7 +17,6 @@ const smokeCwd =
 const approvalTimeoutMs = Number(
   process.env.DEV_ANYWHERE_REAL_PROVIDER_APPROVAL_TIMEOUT_MS ?? 60_000,
 );
-const relayPort = "3100";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const codexReadyPattern = /Do you trust|Ready|Find and fix a bug|OpenAI Codex|Run \/review/i;
@@ -33,7 +36,10 @@ test.skip(
   "set DEV_ANYWHERE_REAL_PROVIDER_APPROVAL=1 to run against locally authed CLI",
 );
 
+let backendConfig: E2ERelayRestartConfig | undefined;
+
 test.beforeAll(() => {
+  backendConfig = requireE2ERelayRestartConfig();
   mkdirSync(smokeCwd, { recursive: true });
 });
 
@@ -418,11 +424,16 @@ async function terminateSession(page: Page, sessionId: string): Promise<void> {
 }
 
 async function restartRelayOnly(): Promise<void> {
-  await execFileAsync("bash", ["scripts/dev/relay-restart.sh", "--relay-port", relayPort], {
-    cwd: repoRoot,
-    timeout: 30_000,
-    env: process.env,
-  });
+  const config = backendConfig ?? requireE2ERelayRestartConfig();
+  await execFileAsync(
+    "bash",
+    ["scripts/dev/relay-restart.sh", "--relay-port", config.relayPort, "--log-dir", config.logDir],
+    {
+      cwd: repoRoot,
+      timeout: 30_000,
+      env: process.env,
+    },
+  );
 }
 
 for (const provider of ["claude", "codex"] as const) {

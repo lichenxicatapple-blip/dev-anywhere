@@ -2,6 +2,9 @@
 # 本地开发环境一键重启：relay dev server + web dev server + proxy serve daemon。
 # 不自动启动 Claude/Codex 交互终端；脚本完成后在当前 shell 里运行：
 #   pnpm proxy -- claude
+#
+# 发布/E2E 可以显式传 --profile，并通过 RELAY_URL 直接指向一次性 Relay。
+# 这种模式不解析也不修改用户 config.json 里的 relay 名称。
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
@@ -23,9 +26,13 @@ usage:
 
 Defaults:
   --profile  auto-resolved from config (whichever profile points at the local relay URL)
-  --relay    auto-resolved from config (whichever relay url == ws://localhost:<relay-port>)
+  --relay    follows an explicit profile's config; auto-resolved when profile is omitted
   --relay-port 3100
   --web-port 5173
+
+Environment:
+  RELAY_URL                  Direct Proxy at an isolated Relay without a config entry
+  DEV_ANYWHERE_HOOK_PORT     Override the Proxy hook port (useful for parallel E2E runs)
 EOF
 }
 
@@ -107,7 +114,7 @@ for port in "$RELAY_PORT" "$WEB_PORT"; do
   fi
 done
 
-if [[ -z "$DEV_PROFILE" || -z "$DEV_RELAY" ]]; then
+if [[ -z "$DEV_PROFILE" ]]; then
   resolved="$(node "$ROOT/scripts/lib/resolve-dev-profile.mjs" --relay-url "ws://localhost:$RELAY_PORT")" || exit $?
   eval "$resolved"
   : "${DEV_PROFILE:=$RESOLVED_PROFILE}"
@@ -233,7 +240,7 @@ kill_port "$RELAY_PORT" "relay"
 RELAY_LOG="$(prepare_run_log "$LOG_DIR/relay-dev.log")"
 # 本地开发 Relay 设计为无鉴权。显式丢弃父进程里可能残留的生产 Token，
 # 避免从部署命令或长期存活的终端会话中误继承后，网页突然要求 client token。
-start_detached "$ROOT/apps/relay" "$RELAY_LOG" env -u RELAY_PROXY_TOKEN -u RELAY_CLIENT_TOKEN PORT="$RELAY_PORT" "$ROOT/node_modules/.bin/tsx" src/index.ts
+start_detached "$ROOT/apps/relay" "$RELAY_LOG" env -u RELAY_PROXY_TOKEN -u RELAY_CLIENT_TOKEN -u ALLOWED_ORIGINS PORT="$RELAY_PORT" "$ROOT/node_modules/.bin/tsx" src/index.ts
 for _ in $(seq 1 50); do
   if curl --noproxy '*' -fsS --max-time 1 "http://127.0.0.1:$RELAY_PORT/api/status" >/dev/null 2>&1; then
     echo "Relay ready on :$RELAY_PORT (log: $RELAY_LOG)"
@@ -252,13 +259,20 @@ echo ""
 echo "=== Restarting web ==="
 kill_port "$WEB_PORT" "web"
 WEB_LOG="$(prepare_run_log "$LOG_DIR/web-dev.log")"
-start_detached "$ROOT/apps/web" "$WEB_LOG" env DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:$RELAY_PORT" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT"
+start_detached "$ROOT/apps/web" "$WEB_LOG" env DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:$RELAY_PORT" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT" --strictPort
 wait_port "$WEB_PORT" "Web" "$WEB_LOG"
 
 echo ""
-echo "=== Restarting proxy serve daemon (profile=$DEV_PROFILE, relay=$DEV_RELAY) ==="
+if [[ -n "$DEV_RELAY" ]]; then
+  PROXY_RELAY_ARGS=(--relay "$DEV_RELAY")
+  PROXY_RELAY_DESCRIPTION="$DEV_RELAY"
+else
+  PROXY_RELAY_ARGS=()
+  PROXY_RELAY_DESCRIPTION="${RELAY_URL:-environment}"
+fi
+echo "=== Restarting proxy serve daemon (profile=$DEV_PROFILE, relay=$PROXY_RELAY_DESCRIPTION) ==="
 INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
-  --profile "$DEV_PROFILE" serve restart --relay "$DEV_RELAY"
+  --profile "$DEV_PROFILE" serve restart ${PROXY_RELAY_ARGS[@]+"${PROXY_RELAY_ARGS[@]}"}
 
 echo ""
 echo "=== All services restarted ==="
@@ -266,7 +280,7 @@ echo "  Log run: $LOG_RUN_ID"
 echo "  Relay: http://localhost:$RELAY_PORT"
 echo "  Web:   $WEB_SCHEME://localhost:$WEB_PORT"
 echo "  Proxy profile: $DEV_PROFILE"
-echo "  Proxy relay: $DEV_RELAY"
+echo "  Proxy relay: $PROXY_RELAY_DESCRIPTION"
 echo ""
 echo "Check local chain health:"
 echo "  pnpm dev:health -- --profile $DEV_PROFILE --relay-port $RELAY_PORT --web-port $WEB_PORT"

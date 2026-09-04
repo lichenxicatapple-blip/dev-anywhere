@@ -39,6 +39,33 @@ grep -q 'run_timed_stage "real-file-chain"' <<<"$deep_script"
 grep -q 'run_timed_stage "process-chaos"' <<<"$deep_script"
 grep -q 'run_timed_stage "android-e2e"' <<<"$deep_script"
 grep -q 'RELEASE_DEEP_SCOPE' <<<"$deep_script"
+grep -q 'mktemp -d "$profile_root/release-e2e.XXXXXX"' <<<"$deep_script"
+grep -q 'allocate_isolated_ports' <<<"$deep_script"
+grep -q 'export RELAY_URL="ws://127.0.0.1:$ISOLATED_RELAY_PORT"' <<<"$deep_script"
+grep -q 'export DEV_ANYWHERE_HOOK_PORT="$ISOLATED_HOOK_PORT"' <<<"$deep_script"
+grep -q 'export DEV_ANYWHERE_E2E_LOG_DIR="$ISOLATED_LOG_DIR"' <<<"$deep_script"
+grep -q 'DEV_ANYWHERE_E2E_OWNER_TOKEN' <<<"$deep_script"
+grep -q 'export DATA_DIR="$ISOLATED_PROFILE_DIR/relay-data"' <<<"$deep_script"
+grep -q -- '--ephemeral-profile-dir "$ISOLATED_PROFILE_DIR"' <<<"$deep_script"
+grep -q 'MOBILE_STARTED' <<<"$deep_script"
+if grep -qE -- '--profile local|--relay local|--relay-port 3100|--web-port 5173' <<<"$deep_script"; then
+  echo "deep release checks must not reuse the developer's local runtime" >&2
+  exit 1
+fi
+grep -q 'PROXY_RELAY_ARGS' <<<"$restart_script"
+grep -q 'PROXY_RELAY_ARGS' <<<"$chaos_script"
+grep -q 'PROXY_LOG_DIR' <<<"$chaos_script"
+grep -q '.release-e2e-owner' <<<"$chaos_script"
+if grep -q -- 'serve restart --relay "$DEV_RELAY"' <<<"$restart_script$chaos_script"; then
+  echo "environment-backed E2E profiles must not receive a named relay argument" >&2
+  exit 1
+fi
+relay_restart_script="$(cat scripts/dev/relay-restart.sh)"
+for local_relay_script in "$restart_script" "$chaos_script" "$relay_restart_script"; do
+  grep -q -- '-u RELAY_PROXY_TOKEN' <<<"$local_relay_script"
+  grep -q -- '-u RELAY_CLIENT_TOKEN' <<<"$local_relay_script"
+  grep -q -- '-u ALLOWED_ORIGINS' <<<"$local_relay_script"
+done
 grep -q 'RELEASE_MOBILE_BASE_PORT="${DEV_ANYWHERE_MOBILE_BASE_PORT:-5570}"' <<<"$deep_script"
 grep -q 'RELEASE_MOBILE_SERIAL="emulator-${RELEASE_MOBILE_BASE_PORT}"' <<<"$deep_script"
 grep -q 'DEV_ANYWHERE_MOBILE_BASE_PORT="$RELEASE_MOBILE_BASE_PORT"' <<<"$deep_script"
@@ -56,17 +83,35 @@ main_workflow="$(cat .github/workflows/main.yml)"
 grep -q 'verify-chaos:' <<<"$main_workflow"
 grep -q 'RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep' <<<"$main_workflow"
 grep -q 'Configure isolated local runtime' <<<"$main_workflow"
-grep -q 'ws://localhost:3100' <<<"$main_workflow"
+grep -q 'profiles: {}' <<<"$main_workflow"
+grep -q 'relays: {}' <<<"$main_workflow"
 grep -q 'group: main-verification-' <<<"$main_workflow"
 grep -q 'cancel-in-progress: true' <<<"$main_workflow"
-grep -q 'path: ~/.dev-anywhere' <<<"$main_workflow"
+grep -q '~/.dev-anywhere' <<<"$main_workflow"
 grep -q 'include-hidden-files: true' <<<"$main_workflow"
 if grep -q 'service_status | grep -q' <<<"$chaos_script"; then
   echo "Chaos status probes must not use grep -q under pipefail" >&2
   exit 1
 fi
+
+real_backend_config="$(cat apps/web/e2e/fixtures/real-backend-config.ts)"
+real_backend_specs="$(cat \
+  apps/web/e2e/pc/chaos/integration/real-local-pty-chaos.spec.ts \
+  apps/web/e2e/pc/chaos/integration/real-json-worker-chaos.spec.ts \
+  apps/web/e2e/pc/real-clipboard-image.spec.ts \
+  apps/web/e2e/pc/real-provider-approval.spec.ts)"
+grep -q 'DEV_ANYWHERE_E2E_PROFILE' <<<"$real_backend_config"
+grep -q 'DEV_ANYWHERE_E2E_RELAY_PORT' <<<"$real_backend_config"
+grep -q 'DEV_ANYWHERE_E2E_LOG_DIR' <<<"$real_backend_config"
+grep -q 'requireE2EBackendConfig' <<<"$real_backend_specs"
+grep -q 'requireE2ERelayRestartConfig' <<<"$real_backend_specs"
+if grep -qE 'proxyProfile = "local"|proxyRelay = "local"|relayPort = "3100"' <<<"$real_backend_specs"; then
+  echo "real backend E2E specs must not fall back to the developer's local runtime" >&2
+  exit 1
+fi
 grep -q 'Upload Chaos service logs' <<<"$main_workflow"
 grep -q 'process-chaos-service-logs-' <<<"$main_workflow"
+grep -q 'artifacts/release-deep' <<<"$main_workflow"
 if grep -qE 'verify-android:|android-emulator-runner|pnpm test:mobile' <<<"$main_workflow"; then
   echo "GitHub main verification must not run the local Android emulator gate" >&2
   exit 1

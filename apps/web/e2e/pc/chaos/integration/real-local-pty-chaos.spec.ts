@@ -3,6 +3,10 @@ import { mkdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
+import {
+  requireE2EBackendConfig,
+  type E2EBackendConfig,
+} from "../../../fixtures/real-backend-config";
 
 type Provider = "claude" | "codex";
 
@@ -12,9 +16,9 @@ const provider: Provider =
 const chaosBin = process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN;
 const chaosRoot =
   process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/local-pty";
-const proxyProfile = "local";
-const proxyRelay = "local";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
+const tsxBin = resolve(repoRoot, "node_modules/.bin/tsx");
+const proxyEntry = resolve(repoRoot, "apps/proxy/src/index.ts");
 
 test.setTimeout(120_000);
 
@@ -55,7 +59,11 @@ async function runProcess(file: string, args: string[], timeout: number): Promis
   });
 }
 
-async function startLocalRuntime(cwd: string, screenName: string): Promise<void> {
+async function startLocalRuntime(
+  cwd: string,
+  screenName: string,
+  config: E2EBackendConfig,
+): Promise<void> {
   if (!chaosBin) throw new Error("DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN is required");
   const providerBinEnv = provider === "codex" ? `CODEX_BIN=${chaosBin}` : `CLAUDE_BIN=${chaosBin}`;
   await runProcess(
@@ -67,16 +75,10 @@ async function startLocalRuntime(cwd: string, screenName: string): Promise<void>
       `DEV_ANYWHERE_CWD=${cwd}`,
       "TERM=xterm-256color",
       providerBinEnv,
-      "pnpm",
-      "--dir",
-      repoRoot,
-      "--filter",
-      "@dev-anywhere/proxy",
-      "run",
-      "dev",
-      "--",
+      tsxBin,
+      proxyEntry,
       "--profile",
-      proxyProfile,
+      config.profile,
       provider,
     ],
     10_000,
@@ -87,24 +89,20 @@ async function stopLocalRuntime(screenName: string): Promise<void> {
   await runProcess("screen", ["-S", screenName, "-X", "quit"], 5_000).catch(() => undefined);
 }
 
-async function restartServeOnly(): Promise<void> {
-  await runProcess(
-    "pnpm",
-    [
-      "--filter",
-      "@dev-anywhere/proxy",
-      "run",
-      "dev",
-      "--",
-      "--profile",
-      proxyProfile,
-      "serve",
-      "restart",
-      "--relay",
-      proxyRelay,
-    ],
-    30_000,
-  );
+async function restartServeOnly(config: E2EBackendConfig): Promise<void> {
+  const args = [
+    "--filter",
+    "@dev-anywhere/proxy",
+    "run",
+    "dev",
+    "--",
+    "--profile",
+    config.profile,
+    "serve",
+    "restart",
+  ];
+  if (config.relay) args.push("--relay", config.relay);
+  await runProcess("pnpm", args, 30_000);
 }
 
 async function terminalText(page: Page, sessionId: string): Promise<string> {
@@ -174,12 +172,14 @@ test.describe("real local runtime PTY chaos", () => {
       "integration chaos: 需要 `pnpm dev:chaos` 编排起 local PTY runtime 并注入 chaos provider (DEV_ANYWHERE_LOCAL_PTY_CHAOS=1 + DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN)",
     );
     test.skip(!chaosBin, "DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN missing");
+    const backendConfig = requireE2EBackendConfig();
 
     const uniqueName = `dev-anywhere-local-pty-${provider}-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
-    const screenName = `dev-anywhere-local-pty-${provider}-${Date.now()}`;
+    const screenName = `dev-anywhere-local-pty-${backendConfig.profile}-${provider}-${Date.now()}`;
     mkdirSync(cwd, { recursive: true });
-    await test.step("start local terminal runtime", () => startLocalRuntime(cwd, screenName));
+    await test.step("start local terminal runtime", () =>
+      startLocalRuntime(cwd, screenName, backendConfig));
 
     try {
       const sessionId = await test.step("open local terminal session", async () => {
@@ -193,7 +193,7 @@ test.describe("real local runtime PTY chaos", () => {
       await test.step("send input before serve restart", () =>
         sendRemoteLine(page, sessionId, "before-serve-restart"));
 
-      await test.step("restart serve daemon", restartServeOnly);
+      await test.step("restart serve daemon", () => restartServeOnly(backendConfig));
       await test.step("reopen reconnected terminal session", async () => {
         await page.goto("/#/sessions", { waitUntil: "domcontentloaded", timeout: 20_000 });
         await selectFirstProxy(page);

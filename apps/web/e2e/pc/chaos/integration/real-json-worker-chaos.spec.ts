@@ -4,14 +4,15 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Page } from "@playwright/test";
+import {
+  requireE2ERelayRestartConfig,
+  type E2ERelayRestartConfig,
+} from "../../../fixtures/real-backend-config";
 import { openCreateAgentSessionDialog } from "../../../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS === "1";
 const chaosRoot =
   process.env.DEV_ANYWHERE_JSON_WORKER_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/json-worker";
-const relayPort = "3100";
-const proxyProfile = "local";
-const proxyRelay = "local";
 const execFileAsync = promisify(execFile);
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
 
@@ -25,40 +26,40 @@ async function selectFirstProxy(page: Page): Promise<void> {
   await firstProxy.click();
 }
 
-async function restartRelayOnly(): Promise<void> {
-  await execFileAsync("bash", ["scripts/dev/relay-restart.sh", "--relay-port", relayPort], {
-    cwd: repoRoot,
-    timeout: 30_000,
-    env: process.env,
-  });
-}
-
-async function restartProxyServeWithFixture(): Promise<void> {
+async function restartRelayOnly(config: E2ERelayRestartConfig): Promise<void> {
   await execFileAsync(
-    "pnpm",
-    [
-      "--filter",
-      "@dev-anywhere/proxy",
-      "run",
-      "dev",
-      "--",
-      "--profile",
-      proxyProfile,
-      "serve",
-      "restart",
-      "--relay",
-      proxyRelay,
-    ],
+    "bash",
+    ["scripts/dev/relay-restart.sh", "--relay-port", config.relayPort, "--log-dir", config.logDir],
     {
       cwd: repoRoot,
       timeout: 30_000,
-      env: {
-        ...process.env,
-        INIT_CWD: repoRoot,
-        CLAUDE_BIN: resolve(repoRoot, "apps/web/e2e/fixtures/json-worker-chaos-agent.mjs"),
-      },
+      env: process.env,
     },
   );
+}
+
+async function restartProxyServeWithFixture(config: E2ERelayRestartConfig): Promise<void> {
+  const args = [
+    "--filter",
+    "@dev-anywhere/proxy",
+    "run",
+    "dev",
+    "--",
+    "--profile",
+    config.profile,
+    "serve",
+    "restart",
+  ];
+  if (config.relay) args.push("--relay", config.relay);
+  await execFileAsync("pnpm", args, {
+    cwd: repoRoot,
+    timeout: 30_000,
+    env: {
+      ...process.env,
+      INIT_CWD: repoRoot,
+      CLAUDE_BIN: resolve(repoRoot, "apps/web/e2e/fixtures/json-worker-chaos-agent.mjs"),
+    },
+  });
 }
 
 async function createJsonSession(page: Page, cwd: string): Promise<string> {
@@ -136,7 +137,7 @@ function waitForRelayMessage<T extends Record<string, unknown>>(
   });
 }
 
-async function terminateSessionByControl(sessionId: string): Promise<void> {
+async function terminateSessionByControl(sessionId: string, relayPort: string): Promise<void> {
   const ws = new WebSocket(`ws://localhost:${relayPort}/client`);
   await new Promise<void>((resolve, reject) => {
     ws.addEventListener("open", () => resolve(), { once: true });
@@ -211,7 +212,7 @@ async function terminateSessionByControl(sessionId: string): Promise<void> {
   }
 }
 
-async function terminateSession(page: Page, sessionId: string): Promise<void> {
+async function terminateSession(page: Page, sessionId: string, relayPort: string): Promise<void> {
   await page.goto("/#/sessions");
   const row = page.locator(`[data-slot="session-row"][data-session-id="${sessionId}"]:visible`);
   if ((await row.count()) > 0) {
@@ -221,7 +222,7 @@ async function terminateSession(page: Page, sessionId: string): Promise<void> {
     await expect(row).toHaveCount(0, { timeout: 10_000 });
     return;
   }
-  await terminateSessionByControl(sessionId);
+  await terminateSessionByControl(sessionId, relayPort);
 }
 
 test.describe("real JSON worker chaos", () => {
@@ -232,6 +233,7 @@ test.describe("real JSON worker chaos", () => {
       !enabled,
       "integration chaos: 需要 `pnpm dev:chaos` 编排起 backend 并注入 JSON worker chaos provider (DEV_ANYWHERE_JSON_WORKER_CHAOS=1)",
     );
+    const backendConfig = requireE2ERelayRestartConfig();
 
     const uniqueName = `dev-anywhere-json-worker-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
@@ -269,7 +271,7 @@ test.describe("real JSON worker chaos", () => {
         },
       );
 
-      await restartRelayOnly();
+      await restartRelayOnly(backendConfig);
       await expectPendingApprovalCount(page, 1, 30_000);
 
       const deny = page.locator('[data-slot="tool-approval-card"] [data-action="deny"]');
@@ -285,7 +287,7 @@ test.describe("real JSON worker chaos", () => {
         },
       );
     } finally {
-      await terminateSession(page, sessionId);
+      await terminateSession(page, sessionId, backendConfig.relayPort);
     }
   });
 
@@ -296,6 +298,7 @@ test.describe("real JSON worker chaos", () => {
       !enabled,
       "integration chaos: 需要 `pnpm dev:chaos` 编排起 backend 并注入 JSON worker chaos provider (DEV_ANYWHERE_JSON_WORKER_CHAOS=1)",
     );
+    const backendConfig = requireE2ERelayRestartConfig();
 
     const uniqueName = `dev-anywhere-json-proxy-restart-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
@@ -312,7 +315,7 @@ test.describe("real JSON worker chaos", () => {
         { timeout: 15_000 },
       );
 
-      await restartProxyServeWithFixture();
+      await restartProxyServeWithFixture(backendConfig);
       await page.reload();
       await expectPendingApprovalCount(page, 0, 45_000);
 
@@ -329,7 +332,7 @@ test.describe("real JSON worker chaos", () => {
         )
         .toBe(true);
     } finally {
-      await terminateSession(page, sessionId);
+      await terminateSession(page, sessionId, backendConfig.relayPort);
     }
   });
 });

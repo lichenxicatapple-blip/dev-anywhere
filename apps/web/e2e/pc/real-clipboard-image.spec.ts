@@ -5,12 +5,13 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Download, type Locator, type Page } from "@playwright/test";
+import {
+  requireE2ERelayRestartConfig,
+  type E2ERelayRestartConfig,
+} from "../fixtures/real-backend-config";
 import { openCreateAgentSessionDialog, selectAgentCli } from "../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE === "1";
-const relayPort = "3100";
-const proxyProfile = "local";
-const proxyRelay = "local";
 const proxyName = "DEV Anywhere Clipboard Smoke";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../..");
 const fixtureRoot = resolve(repoRoot, "apps/web/e2e/fixtures");
@@ -40,61 +41,55 @@ async function run(command: string, args: string[], env: NodeJS.ProcessEnv = {})
   });
 }
 
-async function restartRelay(): Promise<void> {
-  await run("bash", ["scripts/dev/relay-restart.sh", "--relay-port", relayPort]);
+async function restartRelay(config: E2ERelayRestartConfig): Promise<void> {
+  await run("bash", [
+    "scripts/dev/relay-restart.sh",
+    "--relay-port",
+    config.relayPort,
+    "--log-dir",
+    config.logDir,
+  ]);
 }
 
-async function ensureProxyInitialized(): Promise<void> {
-  await run("pnpm", ["--filter", "@dev-anywhere/proxy", "run", "dev", "--", "init"]);
+async function restartProxyWithFixtures(config: E2ERelayRestartConfig): Promise<void> {
+  const args = [
+    "--filter",
+    "@dev-anywhere/proxy",
+    "run",
+    "dev",
+    "--",
+    "--profile",
+    config.profile,
+    "serve",
+    "restart",
+  ];
+  if (config.relay) args.push("--relay", config.relay);
+  await run("pnpm", args, {
+    INIT_CWD: repoRoot,
+    DEV_ANYWHERE_PROXY_NAME: proxyName,
+    CLAUDE_BIN: jsonFixture,
+    CODEX_BIN: ptyFixture,
+  });
+  await waitForProxyRelayConnected(config);
 }
 
-async function restartProxyWithFixtures(): Promise<void> {
-  await run(
-    "pnpm",
-    [
-      "--filter",
-      "@dev-anywhere/proxy",
-      "run",
-      "dev",
-      "--",
-      "--profile",
-      proxyProfile,
-      "serve",
-      "restart",
-      "--relay",
-      proxyRelay,
-    ],
-    {
-      INIT_CWD: repoRoot,
-      DEV_ANYWHERE_PROXY_NAME: proxyName,
-      CLAUDE_BIN: jsonFixture,
-      CODEX_BIN: ptyFixture,
-    },
-  );
-  await waitForProxyRelayConnected();
+async function restartNormalProxyProfile(config: E2ERelayRestartConfig): Promise<void> {
+  const args = [
+    "--filter",
+    "@dev-anywhere/proxy",
+    "run",
+    "dev",
+    "--",
+    "--profile",
+    config.profile,
+    "serve",
+    "restart",
+  ];
+  if (config.relay) args.push("--relay", config.relay);
+  await run("pnpm", args, { INIT_CWD: repoRoot });
 }
 
-async function restartNormalProxyProfile(): Promise<void> {
-  await run(
-    "pnpm",
-    [
-      "--filter",
-      "@dev-anywhere/proxy",
-      "run",
-      "dev",
-      "--",
-      "--profile",
-      proxyProfile,
-      "serve",
-      "restart",
-      "--relay",
-      proxyRelay,
-    ],
-    { INIT_CWD: repoRoot },
-  );
-}
-
-async function waitForProxyRelayConnected(): Promise<void> {
+async function waitForProxyRelayConnected(config: E2ERelayRestartConfig): Promise<void> {
   for (let i = 0; i < 60; i += 1) {
     const { stdout } = await execFileAsync(
       "pnpm",
@@ -105,7 +100,7 @@ async function waitForProxyRelayConnected(): Promise<void> {
         "dev",
         "--",
         "--profile",
-        proxyProfile,
+        config.profile,
         "serve",
         "status",
       ],
@@ -253,8 +248,11 @@ async function expectActivePtyReady(page: Page, sessionId: string): Promise<Loca
   return entry;
 }
 
-function proxyDataRoot(): string {
-  return join(homedir(), ".dev-anywhere", "profiles", proxyProfile, "data");
+function proxyDataRoot(config: E2ERelayRestartConfig): string {
+  const appRoot = join(homedir(), ".dev-anywhere");
+  return config.profile === "default"
+    ? join(appRoot, "data")
+    : join(appRoot, "profiles", config.profile, "data");
 }
 
 // 上传文件统一落 os.tmpdir()/dev-anywhere/, 平铺单层, 跟 sessionId 解耦, 跟 user
@@ -291,8 +289,8 @@ function expectUploadedBytes(path: string, expected: number[] | Buffer): void {
   expect([...readFileSync(path)]).toEqual([...expected]);
 }
 
-function cleanupSessionData(sessionId: string): void {
-  rmSync(join(proxyDataRoot(), sessionId), { recursive: true, force: true });
+function cleanupSessionData(config: E2ERelayRestartConfig, sessionId: string): void {
+  rmSync(join(proxyDataRoot(config), sessionId), { recursive: true, force: true });
 }
 
 function cleanupUploadedFile(path: string | undefined): void {
@@ -353,19 +351,24 @@ test.describe("real clipboard image chain", () => {
   test.describe.configure({ mode: "serial" });
   test.skip(!enabled, "set DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE=1 to run real relay/proxy");
 
+  let backendConfig: E2ERelayRestartConfig | undefined;
+
   test.beforeAll(async () => {
-    await restartRelay();
-    await ensureProxyInitialized();
-    await restartProxyWithFixtures();
+    backendConfig = requireE2ERelayRestartConfig();
+    await restartRelay(backendConfig);
+    await restartProxyWithFixtures(backendConfig);
   });
 
   test.afterAll(async () => {
-    await restartNormalProxyProfile().catch(() => undefined);
+    if (backendConfig) {
+      await restartNormalProxyProfile(backendConfig).catch(() => undefined);
+    }
   });
 
   test("uploads JSON and PTY pasted images through real relay/proxy and writes real files", async ({
     page,
   }) => {
+    const config = backendConfig ?? requireE2ERelayRestartConfig();
     const jsonCwd = join(smokeRoot, `json-${Date.now()}`);
     const ptyCwd = join(smokeRoot, `pty-${Date.now()}`);
     mkdirSync(jsonCwd, { recursive: true });
@@ -418,18 +421,19 @@ test.describe("real clipboard image chain", () => {
       cleanupUploadedFile(ptyUpload);
       if (jsonSessionId) {
         await terminateSession(page, jsonSessionId).catch(() => undefined);
-        cleanupSessionData(jsonSessionId);
+        cleanupSessionData(config, jsonSessionId);
       }
       rmSync(jsonCwd, { recursive: true, force: true });
       if (ptySessionId) {
         await terminateSession(page, ptySessionId).catch(() => undefined);
-        cleanupSessionData(ptySessionId);
+        cleanupSessionData(config, ptySessionId);
       }
       rmSync(ptyCwd, { recursive: true, force: true });
     }
   });
 
   test("PTY chat menu uploads picked file and inserts the @<path> token", async ({ page }) => {
+    const config = backendConfig ?? requireE2ERelayRestartConfig();
     const ptyCwd = join(smokeRoot, `pty-file-${Date.now()}`);
     mkdirSync(ptyCwd, { recursive: true });
     writeFileSync(join(ptyCwd, ".gitignore"), "node_modules/\n");
@@ -462,7 +466,7 @@ test.describe("real clipboard image chain", () => {
       cleanupUploadedFile(uploadedAbs);
       if (ptySessionId) {
         await terminateSession(page, ptySessionId).catch(() => undefined);
-        cleanupSessionData(ptySessionId);
+        cleanupSessionData(config, ptySessionId);
       }
       rmSync(ptyCwd, { recursive: true, force: true });
     }
@@ -471,6 +475,7 @@ test.describe("real clipboard image chain", () => {
   test("downloads JSON inline file paths through real relay/proxy HTTP streaming", async ({
     page,
   }) => {
+    const config = backendConfig ?? requireE2ERelayRestartConfig();
     const jsonCwd = join(smokeRoot, `json-download-${Date.now()}`);
     mkdirSync(jsonCwd, { recursive: true });
     writeFileSync(join(jsonCwd, ".gitignore"), "node_modules\n");
@@ -490,7 +495,7 @@ test.describe("real clipboard image chain", () => {
     } finally {
       if (jsonSessionId) {
         await terminateSession(page, jsonSessionId).catch(() => undefined);
-        cleanupSessionData(jsonSessionId);
+        cleanupSessionData(config, jsonSessionId);
       }
       rmSync(jsonCwd, { recursive: true, force: true });
     }

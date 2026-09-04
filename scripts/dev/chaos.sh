@@ -25,20 +25,28 @@ RELAY_CHAOS_DUPLICATE_DELAY_MS="20"
 RELAY_CHAOS_REORDER="1"
 RELAY_CHAOS_REORDER_DELAY_MS="60"
 CHAOS_WORKDIR="${TMPDIR:-/tmp}/dev-anywhere-chaos"
+EPHEMERAL_PROFILE_DIR=""
 
 usage() {
   cat >&2 <<'EOF'
 usage:
   scripts/dev/chaos.sh [--profile <name>] [--relay <name>] [--relay-port <port>] [--web-port <port>] [--base-url <url>] [--workdir <path>]
+                       [--ephemeral-profile-dir <path>]
                        [--relay-chaos-types <csv>] [--relay-chaos-delay-ms <ms>]
                        [--relay-chaos-duplicate 0|1] [--relay-chaos-duplicate-delay-ms <ms>]
                        [--relay-chaos-reorder 0|1] [--relay-chaos-reorder-delay-ms <ms>]
 
 Defaults:
   --profile  auto-resolved from config (whichever profile points at the local relay URL)
-  --relay    auto-resolved from config (whichever relay url == ws://localhost:<relay-port>)
+  --relay    follows an explicit profile's config; auto-resolved when profile is omitted
   --relay-port 3100
   --web-port 5173
+
+Release isolation:
+  Pass a freshly-created directory directly below ~/.dev-anywhere/profiles as
+  --ephemeral-profile-dir. The directory name must equal --profile and start
+  with "release-e2e.". The runner stops its daemon, frees its ports, and removes
+  only that directory on both success and failure.
 EOF
 }
 
@@ -117,6 +125,15 @@ while [[ "$#" -gt 0 ]]; do
       ;;
     --workdir=*)
       CHAOS_WORKDIR="${1#--workdir=}"
+      shift
+      ;;
+    --ephemeral-profile-dir)
+      EPHEMERAL_PROFILE_DIR="${2:-}"
+      [[ -n "$EPHEMERAL_PROFILE_DIR" ]] || { echo "ERROR: missing value for --ephemeral-profile-dir" >&2; exit 2; }
+      shift 2
+      ;;
+    --ephemeral-profile-dir=*)
+      EPHEMERAL_PROFILE_DIR="${1#--ephemeral-profile-dir=}"
       shift
       ;;
     --relay-chaos-types)
@@ -198,7 +215,7 @@ for bool_value in "$RELAY_CHAOS_DUPLICATE" "$RELAY_CHAOS_REORDER"; do
   fi
 done
 
-if [[ -z "$DEV_PROFILE" || -z "$DEV_RELAY" ]]; then
+if [[ -z "$DEV_PROFILE" ]]; then
   resolved="$(node "$ROOT/scripts/lib/resolve-dev-profile.mjs" --relay-url "ws://localhost:$RELAY_PORT")" || exit $?
   eval "$resolved"
   : "${DEV_PROFILE:=$RESOLVED_PROFILE}"
@@ -206,8 +223,52 @@ if [[ -z "$DEV_PROFILE" || -z "$DEV_RELAY" ]]; then
   unset RESOLVED_PROFILE RESOLVED_RELAY
 fi
 
+if [[ -n "$EPHEMERAL_PROFILE_DIR" ]]; then
+  PROFILE_ROOT="$HOME/.dev-anywhere/profiles"
+  if [[ "$(dirname "$EPHEMERAL_PROFILE_DIR")" != "$PROFILE_ROOT" || "$(basename "$EPHEMERAL_PROFILE_DIR")" != "$DEV_PROFILE" || "$DEV_PROFILE" != release-e2e.* ]]; then
+    echo "ERROR: ephemeral profile must be an exact release-e2e.* directory directly below $PROFILE_ROOT" >&2
+    exit 2
+  fi
+  if [[ ! -d "$EPHEMERAL_PROFILE_DIR" ]]; then
+    echo "ERROR: ephemeral profile directory does not exist: $EPHEMERAL_PROFILE_DIR" >&2
+    exit 2
+  fi
+  if [[ -z "${DEV_ANYWHERE_E2E_OWNER_TOKEN:-}" || -L "$EPHEMERAL_PROFILE_DIR/.release-e2e-owner" || ! -f "$EPHEMERAL_PROFILE_DIR/.release-e2e-owner" ]]; then
+    echo "ERROR: ephemeral profile ownership marker is missing or unsafe: $EPHEMERAL_PROFILE_DIR" >&2
+    exit 2
+  fi
+  if [[ "$(tr -d '\r\n' <"$EPHEMERAL_PROFILE_DIR/.release-e2e-owner")" != "$DEV_ANYWHERE_E2E_OWNER_TOKEN" ]]; then
+    echo "ERROR: ephemeral profile ownership marker does not match: $EPHEMERAL_PROFILE_DIR" >&2
+    exit 2
+  fi
+  if [[ "${DATA_DIR:-}" != "$EPHEMERAL_PROFILE_DIR/relay-data" ]]; then
+    echo "ERROR: ephemeral Relay DATA_DIR must be inside its owned profile directory" >&2
+    exit 2
+  fi
+fi
+
+if [[ -n "$DEV_RELAY" ]]; then
+  PROXY_RELAY_ARGS=(--relay "$DEV_RELAY")
+else
+  PROXY_RELAY_ARGS=()
+fi
+
+# Real-backend Playwright specs must operate on the same isolated runtime as this
+# shell orchestrator. Keep one generic contract for the real-file and Chaos gates.
+export DEV_ANYWHERE_E2E_PROFILE="$DEV_PROFILE"
+export DEV_ANYWHERE_E2E_RELAY="$DEV_RELAY"
+export DEV_ANYWHERE_E2E_RELAY_PORT="$RELAY_PORT"
+export DEV_ANYWHERE_E2E_HOOK_PORT="${DEV_ANYWHERE_HOOK_PORT:-}"
+export DEV_ANYWHERE_E2E_RELAY_URL="${RELAY_URL:-}"
+export DEV_ANYWHERE_E2E_LOG_DIR="$LOG_DIR"
+
 WEB_BASE_URL="${WEB_BASE_URL:-http://localhost:$WEB_PORT}"
 mkdir -p "$LOG_DIR"
+if [[ "$DEV_PROFILE" == "default" ]]; then
+  PROXY_LOG_DIR="$HOME/.dev-anywhere/logs"
+else
+  PROXY_LOG_DIR="$HOME/.dev-anywhere/profiles/$DEV_PROFILE/logs"
+fi
 SERVICE_LOG_CURSOR=0
 STARTED_PROXY_PID=""
 HOSTED_PTY_CHAOS_BIN=""
@@ -231,9 +292,9 @@ fail() {
   echo "--- proxy serve status ---" >&2
   service_status >&2 || true
   echo "--- proxy service log ---" >&2
-  tail -n 120 "$HOME/.dev-anywhere/profiles/$DEV_PROFILE/logs/service.log" >&2 2>/dev/null || true
+  tail -n 120 "$PROXY_LOG_DIR/service.log" >&2 2>/dev/null || true
   echo "--- proxy terminal log ---" >&2
-  tail -n 120 "$HOME/.dev-anywhere/profiles/$DEV_PROFILE/logs/terminal.log" >&2 2>/dev/null || true
+  tail -n 120 "$PROXY_LOG_DIR/terminal.log" >&2 2>/dev/null || true
   exit 1
 }
 
@@ -242,12 +303,145 @@ run() {
   "$@"
 }
 
+restart_dev_services() {
+  pnpm dev:restart -- \
+    --profile "$DEV_PROFILE" \
+    ${PROXY_RELAY_ARGS[@]+"${PROXY_RELAY_ARGS[@]}"} \
+    --relay-port "$RELAY_PORT" \
+    --web-port "$WEB_PORT" \
+    --log-dir "$LOG_DIR" \
+    --log-retention "$LOG_RETENTION"
+}
+
+check_dev_health() {
+  pnpm dev:health -- \
+    --profile "$DEV_PROFILE" \
+    --relay-port "$RELAY_PORT" \
+    --web-port "$WEB_PORT" \
+    --log-dir "$LOG_DIR" \
+    --proxy-log-dir "$PROXY_LOG_DIR"
+}
+
+proxy_serve_action() {
+  local action="$1"
+  pnpm --filter @dev-anywhere/proxy run dev -- \
+    --profile "$DEV_PROFILE" serve "$action" ${PROXY_RELAY_ARGS[@]+"${PROXY_RELAY_ARGS[@]}"}
+}
+
+ephemeral_pty_screens() {
+  local screen_session screen_name
+  if ! command -v screen >/dev/null 2>&1; then
+    return 0
+  fi
+  while IFS= read -r screen_session; do
+    screen_name="${screen_session#*.}"
+    case "$screen_name" in
+      "dev-anywhere-local-pty-${DEV_PROFILE}-"*) printf '%s\n' "$screen_session" ;;
+    esac
+  done < <(screen -ls 2>/dev/null | awk '$1 ~ /^[0-9]+\./ { print $1 }' || true)
+}
+
+stop_ephemeral_pty_screens() {
+  local screen_session remaining=""
+  while IFS= read -r screen_session; do
+    [[ -n "$screen_session" ]] || continue
+    screen -S "$screen_session" -X quit >/dev/null 2>&1 || true
+  done < <(ephemeral_pty_screens)
+  for _ in $(seq 1 20); do
+    remaining="$(ephemeral_pty_screens)"
+    [[ -z "$remaining" ]] && return
+    sleep 0.1
+  done
+  echo "ERROR: isolated local PTY screen did not stop: $remaining" >&2
+  return 1
+}
+
+cleanup_ephemeral_profile() {
+  [[ -n "$EPHEMERAL_PROFILE_DIR" ]] || return
+  local source_name source_path
+
+  local stop_output stop_ok=1 pid="" profile_root_real profile_dir_real owner_token
+
+  # The real-local-PTY spec owns these detached screens. End them before stopping
+  # the daemon so no surviving test terminal can race to auto-start it again.
+  if ! stop_ephemeral_pty_screens; then
+    stop_ok=0
+  fi
+
+  if ! stop_output="$(INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
+    --profile "$DEV_PROFILE" serve stop 2>&1)"; then
+    stop_ok=0
+    echo "ERROR: failed to stop isolated Proxy profile $DEV_PROFILE:" >&2
+    printf '%s\n' "$stop_output" >&2
+  fi
+  if [[ -f "$EPHEMERAL_PROFILE_DIR/run/dev-anywhere.pid" ]]; then
+    pid="$(tr -d '[:space:]' <"$EPHEMERAL_PROFILE_DIR/run/dev-anywhere.pid")"
+    if [[ "$pid" =~ ^[0-9]+$ ]] && kill -0 "$pid" 2>/dev/null; then
+      stop_ok=0
+      echo "ERROR: isolated Proxy PID $pid is still alive; retaining $EPHEMERAL_PROFILE_DIR" >&2
+    fi
+  fi
+
+  kill_port "$WEB_PORT" "ephemeral web" || stop_ok=0
+  kill_port "$RELAY_PORT" "ephemeral relay" || stop_ok=0
+  if [[ -n "${DEV_ANYWHERE_HOOK_PORT:-}" ]]; then
+    kill_port "$DEV_ANYWHERE_HOOK_PORT" "ephemeral hook" || stop_ok=0
+  fi
+
+  for source_name in service terminal; do
+    source_path="$PROXY_LOG_DIR/$source_name.log"
+    if [[ -f "$source_path" ]]; then
+      if ! cp "$source_path" "$LOG_DIR/proxy-${source_name}-${LOG_RUN_ID}.log"; then
+        stop_ok=0
+        echo "ERROR: failed to preserve isolated Proxy $source_name log" >&2
+      fi
+    fi
+  done
+
+  if [[ "$stop_ok" != "1" ]]; then
+    return 1
+  fi
+  if [[ ! -e "$EPHEMERAL_PROFILE_DIR" ]]; then
+    return
+  fi
+  if [[ -L "$EPHEMERAL_PROFILE_DIR" ]]; then
+    echo "ERROR: refusing to remove symlinked ephemeral profile: $EPHEMERAL_PROFILE_DIR" >&2
+    return 1
+  fi
+  if [[ -L "$EPHEMERAL_PROFILE_DIR/.release-e2e-owner" || ! -f "$EPHEMERAL_PROFILE_DIR/.release-e2e-owner" ]]; then
+    echo "ERROR: refusing to remove an unowned ephemeral profile: $EPHEMERAL_PROFILE_DIR" >&2
+    return 1
+  fi
+  owner_token="$(tr -d '\r\n' <"$EPHEMERAL_PROFILE_DIR/.release-e2e-owner")"
+  if [[ -z "${DEV_ANYWHERE_E2E_OWNER_TOKEN:-}" || "$owner_token" != "$DEV_ANYWHERE_E2E_OWNER_TOKEN" ]]; then
+    echo "ERROR: refusing to remove an ephemeral profile with a different owner: $EPHEMERAL_PROFILE_DIR" >&2
+    return 1
+  fi
+  profile_root_real="$(realpath "$HOME/.dev-anywhere/profiles")"
+  profile_dir_real="$(realpath "$EPHEMERAL_PROFILE_DIR")"
+  if [[ "$(dirname "$profile_dir_real")" == "$profile_root_real" && "$(basename "$profile_dir_real")" == "$DEV_PROFILE" && "$DEV_PROFILE" == release-e2e.* ]]; then
+    rm -rf -- "$profile_dir_real"
+    return
+  fi
+  echo "ERROR: refusing to remove unexpected ephemeral profile path: $EPHEMERAL_PROFILE_DIR" >&2
+  return 1
+}
+
 recover_on_failure() {
   local code=$?
-  if [ "$code" -ne 0 ]; then
+  trap - EXIT
+  if [[ -n "$EPHEMERAL_PROFILE_DIR" ]]; then
+    echo ""
+    echo "=== Cleaning isolated release runtime ==="
+    local cleanup_code=0
+    cleanup_ephemeral_profile || cleanup_code=$?
+    if [[ "$code" == "0" && "$cleanup_code" != "0" ]]; then
+      code="$cleanup_code"
+    fi
+  elif [ "$code" -ne 0 ]; then
     echo ""
     echo "=== Chaos failed; restoring dev services ===" >&2
-    pnpm dev:restart -- --profile "$DEV_PROFILE" --relay "$DEV_RELAY" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR" --log-retention "$LOG_RETENTION" || true
+    restart_dev_services || true
   fi
   exit "$code"
 }
@@ -452,6 +646,13 @@ kill_port() {
   fi
   echo "Killing $label on :$port (PID: $(echo "$pids" | tr '\n' ' '))"
   kill -9 $pids 2>/dev/null || true
+  for _ in $(seq 1 20); do
+    pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
+    [[ -z "$pids" ]] && return
+    sleep 0.1
+  done
+  echo "ERROR: $label listener on :$port did not stop (PID: $(echo "$pids" | tr '\n' ' '))" >&2
+  return 1
 }
 
 service_status() {
@@ -459,7 +660,7 @@ service_status() {
 }
 
 mark_service_log() {
-  local service_log="$LOG_DIR/service.log"
+  local service_log="$PROXY_LOG_DIR/service.log"
   if [ -f "$service_log" ]; then
     SERVICE_LOG_CURSOR="$(wc -l <"$service_log" | tr -d ' ')"
   else
@@ -468,7 +669,7 @@ mark_service_log() {
 }
 
 service_log_since_marker() {
-  local service_log="$LOG_DIR/service.log"
+  local service_log="$PROXY_LOG_DIR/service.log"
   [ -f "$service_log" ] || return 1
   tail -n +"$((SERVICE_LOG_CURSOR + 1))" "$service_log"
 }
@@ -538,10 +739,7 @@ start_proxy_serve() {
   local code
   for attempt in 1 2 3; do
     set +e
-    output="$(
-      env INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
-        --profile "$DEV_PROFILE" serve start --relay "$DEV_RELAY" 2>&1
-    )"
+    output="$(INIT_CWD="$ROOT" proxy_serve_action start 2>&1)"
     code=$?
     set -e
     printf '%s\n' "$output"
@@ -561,7 +759,7 @@ start_relay_only() {
   local chaos="${1:-0}"
   local relay_log
   relay_log="$(prepare_run_log "$LOG_DIR/relay-dev.log")"
-  start_detached "$ROOT/apps/relay" "$relay_log" env PORT="$RELAY_PORT" \
+  start_detached "$ROOT/apps/relay" "$relay_log" env -u RELAY_PROXY_TOKEN -u RELAY_CLIENT_TOKEN -u ALLOWED_ORIGINS PORT="$RELAY_PORT" \
     DEV_ANYWHERE_RELAY_CHAOS="$chaos" \
     DEV_ANYWHERE_RELAY_CHAOS_TYPES="$RELAY_CHAOS_TYPES" \
     DEV_ANYWHERE_RELAY_CHAOS_DELAY_MS="$RELAY_CHAOS_DELAY_MS" \
@@ -576,13 +774,13 @@ start_relay_only() {
 start_web_only() {
   local web_log
   web_log="$(prepare_run_log "$LOG_DIR/web-dev.log")"
-  start_detached "$ROOT/apps/web" "$web_log" env DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:$RELAY_PORT" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT"
+  start_detached "$ROOT/apps/web" "$web_log" env DEV_ANYWHERE_WEB_RELAY_TARGET="http://127.0.0.1:$RELAY_PORT" "$ROOT/apps/web/node_modules/.bin/vite" --host 0.0.0.0 --port "$WEB_PORT" --strictPort
   wait_until "web HTTP responds" 10 web_http_ok
 }
 
 section "Baseline restart"
-run pnpm dev:restart -- --profile "$DEV_PROFILE" --relay "$DEV_RELAY" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR" --log-retention "$LOG_RETENTION"
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run restart_dev_services
+run check_dev_health
 
 section "Chaos 1: relay process crash and reconnect"
 mark_service_log
@@ -592,7 +790,7 @@ run_relay_down_ui_smoke
 wait_until "proxy observes relay disconnected" 30 proxy_relay_disconnect_observed
 start_relay_only
 wait_until "proxy reconnects to restarted relay" 30 proxy_relay_connected_observed
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 run_real_ui_smoke "after relay restart"
 
 section "Chaos 2: proxy serve crash and daemon restart"
@@ -607,14 +805,14 @@ mark_service_log
 run start_proxy_serve
 wait_until "proxy serve is running" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay" 30 proxy_relay_connected_observed
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 run_real_ui_smoke "after proxy serve restart"
 
 section "Chaos 3: web dev server crash and restart"
 kill_port "$WEB_PORT" "web"
 wait_until "web HTTP is down" 10 web_http_down
 start_web_only
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 run_real_ui_smoke "after web restart"
 
 section "Chaos 4: relay duplicate/reorder/delay with real UI"
@@ -624,7 +822,7 @@ mark_service_log
 start_relay_only 1
 wait_until "proxy reconnects to chaos relay" 30 proxy_relay_connected_observed
 run_real_ui_smoke "under relay duplicate/reorder/delay"
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 
 section "Chaos 5: PTY render-time stale snapshot and duplicate frames"
 run_render_chaos_smoke
@@ -642,38 +840,40 @@ run_real_provider_approval_smoke
 section "Chaos 9: hosted Claude PTY provider exit while Web is attached"
 create_hosted_pty_chaos_provider
 mark_service_log
-run env CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- --profile "$DEV_PROFILE" serve restart --relay "$DEV_RELAY"
+CLAUDE_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" run proxy_serve_action restart
 wait_until "proxy serve is running with hosted PTY chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after hosted PTY chaos provider swap" 30 proxy_relay_connected_observed
 run_hosted_pty_exit_chaos_smoke claude
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 
 section "Chaos 10: hosted Codex PTY provider exit while Web is attached"
 mark_service_log
-run env CODEX_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- --profile "$DEV_PROFILE" serve restart --relay "$DEV_RELAY"
+CODEX_BIN="$HOSTED_PTY_CHAOS_BIN" INIT_CWD="$ROOT" run proxy_serve_action restart
 wait_until "proxy serve is running with hosted Codex PTY chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after hosted Codex PTY chaos provider swap" 30 proxy_relay_connected_observed
 run_hosted_pty_exit_chaos_smoke codex
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 
 section "Chaos 11: local runtime Claude/Codex PTY across serve restart"
 create_local_pty_chaos_provider
 run_local_runtime_pty_chaos_smoke claude
 run_local_runtime_pty_chaos_smoke codex
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 
 section "Chaos 12: real Claude JSON worker approval across relay restart"
 create_json_worker_chaos_provider
 mark_service_log
-run env CLAUDE_BIN="$JSON_WORKER_CHAOS_BIN" INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- --profile "$DEV_PROFILE" serve restart --relay "$DEV_RELAY"
+CLAUDE_BIN="$JSON_WORKER_CHAOS_BIN" INIT_CWD="$ROOT" run proxy_serve_action restart
 wait_until "proxy serve is running with JSON worker chaos provider" 15 proxy_service_running_observed
 wait_until "proxy serve reconnects to relay after JSON worker provider swap" 30 proxy_relay_connected_observed
 run_json_worker_chaos_smoke
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+run check_dev_health
 
-section "Restore normal dev services"
-run pnpm dev:restart -- --profile "$DEV_PROFILE" --relay "$DEV_RELAY" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR" --log-retention "$LOG_RETENTION"
-run pnpm dev:health -- --profile "$DEV_PROFILE" --relay-port "$RELAY_PORT" --web-port "$WEB_PORT" --log-dir "$LOG_DIR"
+if [[ -z "$EPHEMERAL_PROFILE_DIR" ]]; then
+  section "Restore normal dev services"
+  run restart_dev_services
+  run check_dev_health
+fi
 
 section "Chaos completed"
 ok "real local relay/web/proxy chaos scenarios passed"

@@ -189,6 +189,31 @@ describe("managed session process identity", () => {
     ).toBe(false);
   });
 
+  it("recognizes a local Agent terminal launched from an absolute development entry", () => {
+    expect(
+      processArgvMatchesManagedSession(
+        [
+          "/usr/local/bin/node",
+          "--require",
+          "/workspace/dev-anywhere/node_modules/tsx/dist/preflight.cjs",
+          "--import",
+          "file:///workspace/dev-anywhere/node_modules/tsx/dist/loader.mjs",
+          "/workspace/dev-anywhere/apps/proxy/src/index.ts",
+          "--",
+          "--profile",
+          "chaos-run",
+          "codex",
+        ],
+        {
+          id: "terminal-1",
+          mode: "pty",
+          provider: "codex",
+          ptyOwner: "local-terminal",
+        },
+      ),
+    ).toBe(true);
+  });
+
   it("parses the local Agent command instead of matching a provider name anywhere in argv", () => {
     const entry = "/workspace/dev-anywhere/apps/proxy/dist/index.js";
     expect(
