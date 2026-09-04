@@ -19,6 +19,11 @@ import { loadFontCSS } from "@/lib/font-assets";
 import { checkRelayClientAuth } from "@/lib/relay-client-auth";
 import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
 import {
+  createRelayReconnectLoop,
+  RelayReconnectAttemptTimeoutError,
+  type RelayReconnectLoop,
+} from "@/services/relay-reconnect-loop";
+import {
   clearRelayClientToken,
   consumeRelayClientTokenFromFragment,
   getRelayClientToken,
@@ -41,6 +46,9 @@ function relayRuntime(): RelayRuntime {
 
 export let wsManagerRef: WebSocketManager | null = relayRuntime().wsManagerRef;
 export let relayClientRef: RelayClient | null = relayRuntime().relayClientRef;
+let relayReconnectGeneration = 0;
+let activeRelayReconnectController: AbortController | null = null;
+let activeRelayReconnectLoop: RelayReconnectLoop | null = null;
 
 function setRuntimeRefs(refs: RelayRuntime): void {
   const runtime = relayRuntime();
@@ -54,6 +62,7 @@ function applyRelayClientAuthIssue(authIssue: RelayClientAuthIssue): void {
   if (authIssue === "invalid_client_token") clearRelayClientToken();
   const store = useAppStore.getState();
   store.setRelayClientAuthIssue(authIssue);
+  store.setRelayConnectionIssue(null);
   store.setConnected(false);
   store.setProxyOnline(false);
   store.setProxy(null, null);
@@ -80,22 +89,73 @@ function prepareRelayReconnect(): void {
 export async function reconnectRelayClient(signal?: AbortSignal): Promise<void> {
   const ws = wsManagerRef;
   if (!ws) return;
+  const generation = ++relayReconnectGeneration;
+  activeRelayReconnectController?.abort(
+    new DOMException("Superseded by a newer Relay connection attempt", "AbortError"),
+  );
+  const attemptController = new AbortController();
+  activeRelayReconnectController = attemptController;
+  const abortFromParent = (): void => attemptController.abort(signal?.reason);
+  if (signal?.aborted) {
+    abortFromParent();
+  } else {
+    signal?.addEventListener("abort", abortFromParent, { once: true });
+  }
+  const attemptSignal = attemptController.signal;
+  const ownTimeout = signal
+    ? null
+    : setTimeout(() => {
+        const error = new RelayReconnectAttemptTimeoutError();
+        attemptController.abort(error);
+      }, 5_000);
+  const isCurrent = (): boolean => generation === relayReconnectGeneration;
   const relayUrl = useAppStore.getState().relayUrl || window.location.origin;
   const token = getRelayClientToken();
   let authIssue: RelayClientAuthIssue | null;
   try {
-    authIssue = await checkRelayClientAuth(relayUrl, token, signal);
+    authIssue = await checkRelayClientAuth(relayUrl, token, attemptSignal);
   } catch (err) {
-    if (err instanceof DOMException && err.name === "AbortError") return;
+    if (
+      !isCurrent() ||
+      (signal?.aborted && !(signal.reason instanceof RelayReconnectAttemptTimeoutError))
+    ) {
+      return;
+    }
+    useAppStore.getState().setRelayConnectionIssue("unreachable");
+    // A manual attempt has no owning retry cycle. Hand recovery back to the restartable startup
+    // supervisor so the unavailable screen never claims to retry while no retry is scheduled.
+    if (!signal) activeRelayReconnectLoop?.start();
+    if (attemptSignal.reason instanceof RelayReconnectAttemptTimeoutError) {
+      throw attemptSignal.reason;
+    }
     throw err;
+  } finally {
+    if (ownTimeout) clearTimeout(ownTimeout);
+    signal?.removeEventListener("abort", abortFromParent);
+    if (activeRelayReconnectController === attemptController) {
+      activeRelayReconnectController = null;
+    }
   }
+  if (!isCurrent()) return;
+  if (attemptSignal.aborted) {
+    if (attemptSignal.reason instanceof RelayReconnectAttemptTimeoutError) {
+      useAppStore.getState().setRelayConnectionIssue("unreachable");
+      throw attemptSignal.reason;
+    }
+    return;
+  }
+  useAppStore.getState().setRelayConnectionIssue(null);
   if (authIssue) {
     applyRelayClientAuthIssue(authIssue);
+    if (!signal) activeRelayReconnectLoop?.stop();
     return;
   }
   useAppStore.getState().setRelayClientAuthIssue(null);
   prepareRelayReconnect();
   ws.connect(toClientWsUrl(relayUrl));
+  // A successful user-triggered reconnect supersedes any retry which the cold-start loop already
+  // scheduled. Attempts owned by that loop carry its signal and stop naturally after success.
+  if (!signal) activeRelayReconnectLoop?.stop();
 }
 
 export function useRelaySetup(): void {
@@ -104,8 +164,6 @@ export function useRelaySetup(): void {
   const timersRef = useRef<Timers | null>(null);
 
   useEffect(() => {
-    const abort = new AbortController();
-    let disposed = false;
     // dev 经 vite.config.ts server.proxy 把 /client /fonts 反代到 localhost:3100, prod 同域部署走 nginx 分流
     const relayUrl = window.location.origin;
     useAppStore.getState().setRelayUrl(relayUrl);
@@ -123,8 +181,13 @@ export function useRelaySetup(): void {
     const timers = createPhaseMachineTimers();
     timersRef.current = timers;
 
-    const unsubStatus = ws.onStatusChange((connected) => {
-      handleWsStatusChange(connected, timersRef.current!, relayRef.current!);
+    const unsubStatus = ws.onStatusChange((connected, status) => {
+      handleWsStatusChange(
+        connected,
+        timersRef.current!,
+        relayRef.current!,
+        status?.willReconnect ?? true,
+      );
     });
 
     const unsubRelay = relay.onMessage((msg) => {
@@ -147,13 +210,22 @@ export function useRelaySetup(): void {
     // 网页和设备预览共享同一条按 Relay binding 隔离的事件分发链路。
     const unregisterPreview = registerPreviewDispatcher();
 
-    void reconnectRelayClient(abort.signal).finally(() => {
-      if (disposed) ws.close();
-    });
+    const reconnectLoop = createRelayReconnectLoop((signal) => reconnectRelayClient(signal));
+    activeRelayReconnectLoop = reconnectLoop;
+    reconnectLoop.start();
 
     return () => {
-      disposed = true;
-      abort.abort();
+      reconnectLoop.stop();
+      if (activeRelayReconnectLoop === reconnectLoop) activeRelayReconnectLoop = null;
+      // Invalidate an in-flight manual preflight before tearing down its WebSocket runtime. A late
+      // successful /health response must not reconnect a socket whose handlers were just removed.
+      if (wsManagerRef === ws) {
+        relayReconnectGeneration += 1;
+        activeRelayReconnectController?.abort(
+          new DOMException("Relay runtime disposed", "AbortError"),
+        );
+        activeRelayReconnectController = null;
+      }
       unsubStatus();
       unsubRelay();
       unregisterChat();
@@ -163,7 +235,9 @@ export function useRelaySetup(): void {
       previewController.dispose();
       disposePhaseMachineTimers(timers);
       ws.close();
-      setRuntimeRefs({ wsManagerRef: null, relayClientRef: null });
+      if (wsManagerRef === ws) {
+        setRuntimeRefs({ wsManagerRef: null, relayClientRef: null });
+      }
     };
   }, []);
 }

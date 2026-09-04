@@ -1,4 +1,4 @@
-import { cleanup, render, waitFor } from "@testing-library/react";
+import { act, cleanup, render, screen, waitFor } from "@testing-library/react";
 import { createMemoryRouter, RouterProvider } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { SessionInfo } from "@dev-anywhere/shared";
@@ -66,6 +66,10 @@ function renderAppShell(initialEntry: string) {
         element: <AppShell />,
         children: [
           { path: "chat/:id", element: <div data-testid="chat-route" /> },
+          {
+            path: "preview/device/:id",
+            element: <div data-testid="device-preview-route" />,
+          },
           { path: "sessions", element: <div data-testid="sessions-route" /> },
         ],
       },
@@ -93,6 +97,7 @@ describe("AppShell PTY Always yes controller", () => {
       proxyListLoaded: true,
       pendingToast: null,
       relayClientAuthIssue: null,
+      relayConnectionIssue: null,
     });
     useSessionStore.setState({
       sessions: [makePtySession("s1"), makePtySession("s2")],
@@ -161,4 +166,46 @@ describe("AppShell PTY Always yes controller", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(sendRawSpy).not.toHaveBeenCalled();
   });
+
+  it("shows a semantic unavailable state and restores the route in place", async () => {
+    useAppStore.setState({ connected: false, relayConnectionIssue: "unreachable" });
+    renderAppShell("/sessions");
+
+    const unavailable = document.querySelector(
+      '[data-slot="relay-connection-state"][data-state="unavailable"]',
+    );
+    expect(unavailable).toBeVisible();
+    expect(screen.getByTestId("sessions-route")).toBeInTheDocument();
+    expect(document.querySelector('[data-slot="app-shell"]')).toHaveAttribute("inert");
+
+    act(() => useAppStore.getState().setRelayConnectionIssue(null));
+
+    await waitFor(() => expect(screen.getByTestId("sessions-route")).toBeVisible());
+    expect(document.querySelector('[data-slot="relay-connection-state"]')).toBeNull();
+    expect(document.querySelector('[data-slot="app-shell"]')).not.toHaveAttribute("inert");
+  });
+
+  it("does not claim to retry after the relay permanently disconnects this client", () => {
+    useAppStore.setState({ connected: false, relayConnectionIssue: "disconnected" });
+    renderAppShell("/sessions");
+
+    expect(screen.getByText("连接已断开")).toBeVisible();
+    expect(document.querySelector('[data-slot="relay-connection-state"] svg')).toBeNull();
+  });
+
+  it.each([
+    ["chat", "/chat/s1?mode=pty", "chat-route"],
+    ["device preview", "/preview/device/device-1", "device-preview-route"],
+  ])(
+    "uses the permanent relay disconnect state on an open %s route without promising a retry",
+    (_routeName, entry, routeTestId) => {
+      useAppStore.setState({ connected: false, relayConnectionIssue: "disconnected" });
+      renderAppShell(entry);
+
+      expect(screen.getByTestId(routeTestId)).toBeInTheDocument();
+      expect(screen.getByText("连接已断开")).toBeVisible();
+      expect(screen.queryByText(/正在继续尝试|网络恢复后|自动.*(?:返回|恢复)/)).toBeNull();
+      expect(document.querySelector('[data-slot="app-shell"]')).toHaveAttribute("inert");
+    },
+  );
 });

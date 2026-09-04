@@ -5,6 +5,7 @@ import { XIcon } from "lucide-react";
 import { Dialog as SheetPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
+import { useRelayInteractionBlocked } from "@/components/shell/relay-interaction-boundary";
 
 function Sheet({ ...props }: React.ComponentProps<typeof SheetPrimitive.Root>) {
   return <SheetPrimitive.Root data-slot="sheet" {...props} />;
@@ -46,6 +47,8 @@ function SheetContent({
   showCloseButton = true,
   focusSurfaceOnOpen = false,
   onOpenAutoFocus,
+  inert,
+  "aria-disabled": ariaDisabled,
   ...props
 }: React.ComponentProps<typeof SheetPrimitive.Content> & {
   side?: "top" | "right" | "bottom" | "left";
@@ -53,6 +56,7 @@ function SheetContent({
   overlayClassName?: string;
   focusSurfaceOnOpen?: boolean;
 }) {
+  const relayInteractionBlocked = useRelayInteractionBlocked();
   return (
     <SheetPortal>
       <SheetOverlay className={overlayClassName} />
@@ -76,6 +80,9 @@ function SheetContent({
           event.preventDefault();
           (event.currentTarget as HTMLElement).focus({ preventScroll: true });
         }}
+        inert={relayInteractionBlocked || inert ? true : undefined}
+        aria-disabled={relayInteractionBlocked ? true : ariaDisabled}
+        data-relay-interaction-blocked={relayInteractionBlocked ? "true" : undefined}
         {...props}
       >
         {children}

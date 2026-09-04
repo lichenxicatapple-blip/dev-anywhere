@@ -4,7 +4,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Page, type TestInfo } from "@playwright/test";
-import { openCreateAgentSessionDialog } from "../helpers";
+import { openCreateAgentSessionDialog, selectAgentCli } from "../helpers";
 
 type Provider = "claude" | "codex";
 
@@ -75,10 +75,7 @@ async function createHostedPtySession(
     .getByLabel("交互方式")
     .getByRole("button", { name: /终端模式/ })
     .click({ timeout: 15_000 });
-  await page
-    .getByLabel("Agent CLI")
-    .getByRole("button", { name: provider === "claude" ? /Claude Code/ : /Codex/ })
-    .click({ timeout: 15_000 });
+  await selectAgentCli(page, provider === "claude" ? "Claude Code" : "Codex");
   if (permissionModeLabel) {
     await choosePermissionMode(page, permissionModeLabel);
   }
@@ -112,10 +109,7 @@ async function createJsonSession(
     .getByLabel("交互方式")
     .getByRole("button", { name: /聊天模式/ })
     .click({ timeout: 15_000 });
-  await page
-    .getByLabel("Agent CLI")
-    .getByRole("button", { name: provider === "claude" ? /Claude Code/ : /Codex/ })
-    .click({ timeout: 15_000 });
+  await selectAgentCli(page, provider === "claude" ? "Claude Code" : "Codex");
   if (permissionModeLabel) {
     await choosePermissionMode(page, permissionModeLabel);
   }

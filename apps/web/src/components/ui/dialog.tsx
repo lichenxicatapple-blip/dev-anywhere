@@ -4,6 +4,7 @@ import { Dialog as DialogPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
+import { useRelayInteractionBlocked } from "@/components/shell/relay-interaction-boundary";
 
 function Dialog({ ...props }: React.ComponentProps<typeof DialogPrimitive.Root>) {
   return <DialogPrimitive.Root data-slot="dialog" {...props} />;
@@ -43,11 +44,14 @@ function DialogContent({
   showCloseButton = true,
   focusSurfaceOnOpen = false,
   onOpenAutoFocus,
+  inert,
+  "aria-disabled": ariaDisabled,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   showCloseButton?: boolean;
   focusSurfaceOnOpen?: boolean;
 }) {
+  const relayInteractionBlocked = useRelayInteractionBlocked();
   return (
     <DialogPortal data-slot="dialog-portal">
       <DialogOverlay />
@@ -63,6 +67,9 @@ function DialogContent({
           event.preventDefault();
           (event.currentTarget as HTMLElement).focus({ preventScroll: true });
         }}
+        inert={relayInteractionBlocked || inert ? true : undefined}
+        aria-disabled={relayInteractionBlocked ? true : ariaDisabled}
+        data-relay-interaction-blocked={relayInteractionBlocked ? "true" : undefined}
         {...props}
       >
         {children}

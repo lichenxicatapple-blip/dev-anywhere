@@ -4,6 +4,19 @@ import { expect } from "@playwright/test";
 // 本地 Vite 默认端口 5173；CI 或外部 relay-served 部署可通过 WEB_BASE_URL 覆盖
 export const BASE_URL = process.env.WEB_BASE_URL ?? "http://localhost:5173";
 
+export async function selectAgentCli(
+  page: Page,
+  name: "Claude Code" | "Codex" | "Kimi Code",
+): Promise<void> {
+  const trigger = page
+    .getByRole("dialog", { name: "新建会话" })
+    .getByRole("combobox", { name: "Agent CLI" });
+  await trigger.focus();
+  await trigger.press("Enter");
+  await page.getByRole("option", { name, exact: true }).click();
+  await expect(trigger).toHaveText(name);
+}
+
 // 清理 DEV Anywhere 写入的 localStorage key 并刷新页面，恢复到首次访问状态.
 // emu Chrome over CDP 上 evaluate 期间偶发 "Execution context was destroyed",
 // 等 page idle 再 evaluate, evaluate 失败时容忍重试.

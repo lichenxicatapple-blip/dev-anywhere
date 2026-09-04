@@ -44,6 +44,7 @@ function resetAppStore(): void {
     proxies: [{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: ["s1"] }],
     proxyListLoaded: true,
     relayClientAuthIssue: null,
+    relayConnectionIssue: null,
     pendingToast: null,
   });
   useSessionStore.setState({
@@ -111,7 +112,23 @@ describe("phase-machine reconnect timers", () => {
     unsubscribe();
 
     expect(observed).not.toContainEqual({ proxiesLength: 0, proxyListLoaded: true });
-    expect(useAppStore.getState()).toMatchObject({ proxies: [], proxyListLoaded: false });
+    expect(useAppStore.getState()).toMatchObject({
+      proxies: [],
+      proxyListLoaded: false,
+      relayConnectionIssue: "unreachable",
+    });
+  });
+
+  it("distinguishes a permanent client disconnect from an automatic retry", () => {
+    const relay = {
+      register: vi.fn(),
+      listProxies: vi.fn(),
+    } as unknown as RelayClient;
+    const timers = reconnectTimers();
+
+    handleWsStatusChange(false, timers, relay, false);
+
+    expect(useAppStore.getState().relayConnectionIssue).toBe("disconnected");
   });
 
   it("keeps one reconnect fallback timer across repeated disconnect notifications", () => {
@@ -169,6 +186,7 @@ describe("phase-machine reconnect timers", () => {
 
     expect(useAppStore.getState().phase).toBe("reconnecting");
     expect(useAppStore.getState().proxyOnline).toBe(false);
+    expect(useAppStore.getState().relayConnectionIssue).toBeNull();
 
     vi.advanceTimersByTime(30_000);
     expect(useAppStore.getState().phase).toBe("connecting");

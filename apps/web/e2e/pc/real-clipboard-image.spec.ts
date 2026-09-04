@@ -5,7 +5,7 @@ import { basename, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { promisify } from "node:util";
 import { expect, test, type Download, type Locator, type Page } from "@playwright/test";
-import { openCreateAgentSessionDialog } from "../helpers";
+import { openCreateAgentSessionDialog, selectAgentCli } from "../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_CLIPBOARD_IMAGE_SMOKE === "1";
 const relayPort = "3100";
@@ -156,7 +156,7 @@ async function createSession(
   }
 
   if (options.provider === "codex") {
-    await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();
+    await selectAgentCli(page, "Codex");
   }
 
   await page

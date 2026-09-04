@@ -5,6 +5,7 @@ import { CheckIcon, ChevronDownIcon, ChevronUpIcon } from "lucide-react";
 import { Select as SelectPrimitive } from "radix-ui";
 
 import { cn } from "@/lib/utils";
+import { useRelayInteractionBlocked } from "@/components/shell/relay-interaction-boundary";
 
 function Select({ ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
   return <SelectPrimitive.Root data-slot="select" {...props} />;
@@ -49,8 +50,11 @@ function SelectContent({
   children,
   position = "item-aligned",
   align = "center",
+  inert,
+  "aria-disabled": ariaDisabled,
   ...props
 }: React.ComponentProps<typeof SelectPrimitive.Content>) {
+  const relayInteractionBlocked = useRelayInteractionBlocked();
   return (
     <SelectPrimitive.Portal>
       <SelectPrimitive.Content
@@ -63,6 +67,9 @@ function SelectContent({
         )}
         position={position}
         align={align}
+        inert={relayInteractionBlocked || inert ? true : undefined}
+        aria-disabled={relayInteractionBlocked ? true : ariaDisabled}
+        data-relay-interaction-blocked={relayInteractionBlocked ? "true" : undefined}
         {...props}
       >
         <SelectScrollUpButton />

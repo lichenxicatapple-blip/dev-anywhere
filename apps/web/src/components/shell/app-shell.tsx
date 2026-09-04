@@ -6,6 +6,8 @@ import { SettingsDialog } from "./settings-dialog";
 import { MobileBrandHero } from "@/components/brand/mobile-brand-hero";
 import { LatencyMonitor } from "@/components/diagnostics/latency-monitor";
 import { BrowserStateDumpController } from "@/components/diagnostics/browser-state-dump-controller";
+import { RelayUnavailableState } from "@/components/shell/relay-unavailable-state";
+import { RelayInteractionBoundary } from "@/components/shell/relay-interaction-boundary";
 import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { PtyAutoYesController } from "@/components/chat/pty-auto-yes-controller";
@@ -41,6 +43,7 @@ export function AppShell() {
   const proxiesLength = useAppStore((s) => s.proxies.length);
   const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
+  const relayConnectionIssue = useAppStore((s) => s.relayConnectionIssue);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const selectedProxyName = useAppStore((s) => s.selectedProxyName);
@@ -48,6 +51,7 @@ export function AppShell() {
   const pendingToast = useAppStore((s) => s.pendingToast);
   const setPendingToast = useAppStore((s) => s.setPendingToast);
   const topLevelRoute = location.pathname === "/" ? "proxy-select" : "sessions";
+  const showRelayUnavailable = relayConnectionIssue !== null && relayClientAuthIssue === null;
   const mobileSubtitle = getTopLevelSubtitle({
     route: topLevelRoute,
     surface: "mobile",
@@ -139,60 +143,71 @@ export function AppShell() {
   }, [isChatRoute, location.pathname, location.search]);
 
   return (
-    <div
-      className="flex flex-col bg-background text-foreground"
-      style={{
-        height:
-          "var(--dev-app-shell-height, max(100dvh, var(--dev-visual-viewport-height, 100dvh)))",
-      }}
-      data-slot="app-shell"
-      data-standalone-display={standaloneDisplay ? "true" : undefined}
-    >
-      {!isFocusRoute && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="dev-mobile-settings-trigger group fixed right-4 z-30 size-11 rounded-full border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground md:hidden"
-          aria-label="设置"
-          data-slot="mobile-settings-trigger"
-          onClick={() => setSettingsOpen(true)}
-        >
-          <span
-            data-slot="mobile-settings-trigger-visual"
-            className="flex size-7 items-center justify-center rounded-full border border-border/80 bg-card/90 shadow-lg backdrop-blur transition-colors group-hover:border-primary/45 group-hover:bg-accent"
+    <RelayInteractionBoundary blocked={showRelayUnavailable}>
+      <div
+        className="flex flex-col bg-background text-foreground"
+        style={{
+          height:
+            "var(--dev-app-shell-height, max(100dvh, var(--dev-visual-viewport-height, 100dvh)))",
+        }}
+        data-slot="app-shell"
+        data-standalone-display={standaloneDisplay ? "true" : undefined}
+        inert={showRelayUnavailable ? true : undefined}
+        aria-hidden={showRelayUnavailable ? true : undefined}
+      >
+        {!isFocusRoute && (
+          <Button
+            variant="ghost"
+            size="icon"
+            className="dev-mobile-settings-trigger group fixed right-4 z-30 size-11 rounded-full border-0 bg-transparent p-0 text-muted-foreground shadow-none hover:bg-transparent hover:text-foreground md:hidden"
+            aria-label="设置"
+            data-slot="mobile-settings-trigger"
+            onClick={() => setSettingsOpen(true)}
           >
-            <Settings className="size-4" aria-hidden="true" />
-          </span>
-        </Button>
-      )}
-
-      {!isFocusRoute && <MobileBrandHero subtitle={mobileSubtitle} action={mobileHeroAction} />}
-
-      <PtyAutoYesController />
-
-      <div className="flex flex-1 overflow-hidden">
-        <Sidebar className="hidden md:flex" />
-        <main className="relative flex-1 overflow-hidden" role="main">
-          <PtyKeepAliveProvider>
-            {/* 顶层移动页保留 hero 常驻；chat/session 切换仍保留轻量 fade。 */}
-            <div
-              key={isTopLevelRoute ? "top-level" : location.pathname}
-              className={cn(
-                "h-full",
-                !isTopLevelRoute && "animate-in fade-in-0 duration-200 motion-reduce:animate-none",
-              )}
+            <span
+              data-slot="mobile-settings-trigger-visual"
+              className="flex size-7 items-center justify-center rounded-full border border-border/80 bg-card/90 shadow-lg backdrop-blur transition-colors group-hover:border-primary/45 group-hover:bg-accent"
             >
-              <Outlet />
-            </div>
-          </PtyKeepAliveProvider>
-        </main>
-      </div>
+              <Settings className="size-4" aria-hidden="true" />
+            </span>
+          </Button>
+        )}
 
-      <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
-      <CodexActiveWriterDialog />
-      <BrowserStateDumpController />
-      <LatencyMonitor />
-      <Toaster />
-    </div>
+        {!isFocusRoute && <MobileBrandHero subtitle={mobileSubtitle} action={mobileHeroAction} />}
+
+        <PtyAutoYesController />
+
+        <div className="flex flex-1 overflow-hidden">
+          <Sidebar className="hidden md:flex" />
+          <main className="relative flex-1 overflow-hidden" role="main">
+            <PtyKeepAliveProvider>
+              {/* 顶层移动页保留 hero 常驻；chat/session 切换仍保留轻量 fade。 */}
+              <div
+                key={isTopLevelRoute ? "top-level" : location.pathname}
+                className={cn(
+                  "h-full",
+                  !isTopLevelRoute &&
+                    "animate-in fade-in-0 duration-200 motion-reduce:animate-none",
+                )}
+                data-slot="route-content"
+              >
+                <Outlet />
+              </div>
+            </PtyKeepAliveProvider>
+          </main>
+        </div>
+
+        <SettingsDialog open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <CodexActiveWriterDialog />
+        <BrowserStateDumpController />
+        <LatencyMonitor />
+        <Toaster />
+      </div>
+      {showRelayUnavailable && relayConnectionIssue ? (
+        <div className="fixed inset-0 z-[60] bg-background">
+          <RelayUnavailableState issue={relayConnectionIssue} />
+        </div>
+      ) : null}
+    </RelayInteractionBoundary>
   );
 }

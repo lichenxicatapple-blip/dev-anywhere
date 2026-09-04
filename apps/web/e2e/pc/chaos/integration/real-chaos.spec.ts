@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { openCreateAgentSessionDialog } from "../../../helpers";
+import { openCreateAgentSessionDialog, selectAgentCli } from "../../../helpers";
 
 const expectRelayDown = process.env.DEV_ANYWHERE_EXPECT_RELAY_DOWN === "1";
 
@@ -43,10 +43,7 @@ test.describe("real local chaos UI", () => {
     await page.getByRole("heading", { name: "新建会话" }).click();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
 
-    await page
-      .getByLabel("Agent CLI")
-      .getByRole("button", { name: /Claude Code/ })
-      .click();
+    await selectAgentCli(page, "Claude Code");
 
     await page.getByRole("button", { name: "取消" }).click();
     await expect(page.getByRole("heading", { name: "新建会话" })).toHaveCount(0);
@@ -67,10 +64,7 @@ test.describe("real local chaos UI", () => {
 
     await expect(
       page
-        .locator("h1:visible,h2:visible,p:visible,span:visible,button:visible")
-        .filter({
-          hasText: /在开发机上启动 DEV Anywhere|暂无可连接开发机|请先连接开发机|选择要连接的开发机/,
-        })
+        .locator('[data-slot="relay-connection-state"][data-state="unavailable"]:visible')
         .first(),
     ).toBeVisible({ timeout: 15_000 });
     await expect(page.locator('[data-slot="session-row"]').first()).toHaveCount(0);

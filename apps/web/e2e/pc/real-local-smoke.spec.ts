@@ -40,10 +40,7 @@ test.describe("real local smoke", () => {
     });
 
     await expect(
-      page
-        .getByLabel("Agent CLI")
-        .getByRole("button", { name: /Claude Code|Codex/ })
-        .first(),
+      page.getByRole("dialog", { name: "新建会话" }).getByRole("combobox", { name: "Agent CLI" }),
     ).toBeVisible();
     await page.getByRole("button", { name: "取消" }).click();
     await expect(heading).toHaveCount(0);

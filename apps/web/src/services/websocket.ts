@@ -25,6 +25,11 @@ interface WebSocketManagerOptions {
   probeConnectionAfterBackground?: boolean;
 }
 
+export interface WebSocketStatusDetails {
+  willReconnect: boolean;
+  closeCode?: number;
+}
+
 interface ConnectionProbe {
   socket: WebSocket;
   requestId: string;
@@ -40,7 +45,9 @@ export class WebSocketManager {
   private reconnectAttempt = 0;
   private messageHandlers = new Set<(data: string) => void>();
   private binarySubscribers = new Map<string, Set<(data: Uint8Array, outputSeq: number) => void>>();
-  private statusHandlers = new Set<(connected: boolean) => void>();
+  private statusHandlers = new Set<
+    (connected: boolean, details?: WebSocketStatusDetails) => void
+  >();
   private pendingQueue: string[] = [];
   private wakeListenersAttached = false;
   private backgroundedAt: number | null = null;
@@ -271,7 +278,9 @@ export class WebSocketManager {
     // 先摘掉 active 引用，previousWs.close() 同步/异步触发的 close 都会被 stale guard 忽略。
     this.ws = null;
     this.connected = false;
-    if (wasConnected) this.statusHandlers.forEach((handler) => handler(false));
+    if (wasConnected) {
+      this.statusHandlers.forEach((handler) => handler(false, { willReconnect: true }));
+    }
     if (previousWs) {
       try {
         previousWs.close();
@@ -321,7 +330,9 @@ export class WebSocketManager {
     return () => this.messageHandlers.delete(handler);
   }
 
-  onStatusChange(handler: (connected: boolean) => void): () => void {
+  onStatusChange(
+    handler: (connected: boolean, details?: WebSocketStatusDetails) => void,
+  ): () => void {
     this.statusHandlers.add(handler);
     return () => this.statusHandlers.delete(handler);
   }
@@ -366,7 +377,7 @@ export class WebSocketManager {
       this.reconnectAttempt = 0;
       this.lastInboundAt = Date.now();
       this.armForegroundWatchdog();
-      this.statusHandlers.forEach((h) => h(true));
+      this.statusHandlers.forEach((h) => h(true, { willReconnect: false }));
       this.flushPendingQueue();
     });
 
@@ -394,8 +405,11 @@ export class WebSocketManager {
       }
       this.connected = false;
       this.ws = null;
-      this.statusHandlers.forEach((h) => h(false));
-      if (!this.closed) this.scheduleReconnect();
+      const willReconnect = !this.closed;
+      this.statusHandlers.forEach((h) =>
+        h(false, { willReconnect, ...(event.code ? { closeCode: event.code } : {}) }),
+      );
+      if (willReconnect) this.scheduleReconnect();
     });
 
     ws.addEventListener("error", () => {

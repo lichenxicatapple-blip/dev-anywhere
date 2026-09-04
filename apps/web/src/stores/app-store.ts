@@ -41,6 +41,7 @@ interface ProxySwitchTarget {
 }
 
 export type InputModePreference = "auto" | "touch" | "hardware";
+export type RelayConnectionIssue = "unreachable" | "disconnected";
 type AdaptiveInputModality = "unknown" | "touch" | "hardware";
 
 interface AppStoreState {
@@ -58,6 +59,7 @@ interface AppStoreState {
   clientId: string;
   relayUrl: string;
   relayClientAuthIssue: RelayClientAuthIssue | null;
+  relayConnectionIssue: RelayConnectionIssue | null;
   ptyFontSize: number;
   chatContentFontSize: number;
   sidebarCollapsed: boolean;
@@ -76,6 +78,7 @@ interface AppStoreState {
   setProxyOnline: (online: boolean) => void;
   setRelayUrl: (url: string) => void;
   setRelayClientAuthIssue: (issue: RelayClientAuthIssue | null) => void;
+  setRelayConnectionIssue: (issue: RelayConnectionIssue | null) => void;
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
   invalidateProxyList: () => void;
@@ -177,6 +180,7 @@ export const useAppStore = create<AppStoreState>()(
       clientId: loadClientId(),
       relayUrl: "",
       relayClientAuthIssue: null,
+      relayConnectionIssue: null,
       ptyFontSize: loadPtyFontSize(),
       chatContentFontSize: loadChatContentFontSize(),
       sidebarCollapsed: loadSidebarCollapsed(),
@@ -196,6 +200,7 @@ export const useAppStore = create<AppStoreState>()(
       setProxyOnline: (online) => set({ proxyOnline: online }),
       setRelayUrl: (url) => set({ relayUrl: url }),
       setRelayClientAuthIssue: (issue) => set({ relayClientAuthIssue: issue }),
+      setRelayConnectionIssue: (issue) => set({ relayConnectionIssue: issue }),
       setPtyFontSize: (fontSize) => {
         const next = clampChatFontSize(fontSize);
         writeStorageValue("local", STORAGE_KEYS.ptyFontSize, String(next));

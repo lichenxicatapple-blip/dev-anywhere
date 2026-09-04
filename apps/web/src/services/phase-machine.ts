@@ -282,11 +282,17 @@ function bindingErrorMessage(code: string): string {
   }
 }
 
-export function handleWsStatusChange(connected: boolean, timers: Timers, relay: RelayClient): void {
+export function handleWsStatusChange(
+  connected: boolean,
+  timers: Timers,
+  relay: RelayClient,
+  willReconnect = true,
+): void {
   if (timers.disposed) return;
   useAppStore.getState().setConnected(connected);
   const s = useAppStore.getState();
   if (connected) {
+    useAppStore.getState().setRelayConnectionIssue(null);
     // A new raw socket invalidates any proxy_select still pending on the previous transport.
     // Input stays disabled until the selected proxy binding is acknowledged below.
     invalidateBindingRecovery(timers);
@@ -303,6 +309,7 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
       relay.listProxies();
     }
   } else {
+    useAppStore.getState().setRelayConnectionIssue(willReconnect ? "unreachable" : "disconnected");
     invalidateBindingRecovery(timers);
     previewController.dispose();
     useAppStore.getState().setProxyOnline(false);

@@ -2,6 +2,7 @@ import { test, expect, type Page } from "@playwright/test";
 import {
   installFakeRelay,
   openCreateAgentSessionDialog,
+  selectAgentCli,
   selectFakeProxy,
   sentFakeRelayMessages,
 } from "../helpers";
@@ -14,19 +15,6 @@ async function terminateSessionFromList(page: Page, sessionId: string): Promise<
   await page.locator('[data-slot="session-row-terminate-item"]').click();
   await page.locator('[data-slot="session-termination-confirm"]').click();
   await expect(row).toHaveCount(0);
-}
-
-async function selectAgentCli(
-  page: Page,
-  name: "Claude Code" | "Codex" | "Kimi Code",
-): Promise<void> {
-  const trigger = page
-    .getByRole("dialog", { name: "新建会话" })
-    .getByRole("combobox", { name: "Agent CLI" });
-  await trigger.focus();
-  await trigger.press("Enter");
-  await page.getByRole("option", { name, exact: true }).click();
-  await expect(trigger).toHaveText(name);
 }
 
 test.describe("functional browser walkthrough", () => {

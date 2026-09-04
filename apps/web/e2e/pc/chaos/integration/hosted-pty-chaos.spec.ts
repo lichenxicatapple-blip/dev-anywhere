@@ -1,5 +1,5 @@
 import { expect, test, type Page } from "@playwright/test";
-import { openCreateAgentSessionDialog } from "../../../helpers";
+import { openCreateAgentSessionDialog, selectAgentCli } from "../../../helpers";
 
 const enabled = process.env.DEV_ANYWHERE_HOSTED_PTY_CHAOS === "1";
 const chaosCwd =
@@ -36,7 +36,7 @@ test.describe("hosted PTY real chaos", () => {
     await openCreateAgentSessionDialog(page);
     await page.getByLabel("工作目录").fill(chaosCwd);
     if (provider === "codex") {
-      await page.getByRole("button", { name: /Codex/ }).click();
+      await selectAgentCli(page, "Codex");
     }
     await page
       .getByRole("dialog", { name: "新建会话" })

@@ -574,6 +574,10 @@ describe("WebSocketManager", () => {
     vi.useFakeTimers();
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     const manager = new WebSocketManager();
+    const statuses: Array<{ connected: boolean; willReconnect?: boolean; closeCode?: number }> = [];
+    manager.onStatusChange((connected, details) => {
+      statuses.push({ connected, ...details });
+    });
     manager.connect("ws://relay/client");
     const ws = sockets[0]!;
     ws.open();
@@ -583,6 +587,11 @@ describe("WebSocketManager", () => {
 
     expect(sockets).toHaveLength(1);
     expect(manager.isConnected()).toBe(false);
+    expect(statuses.at(-1)).toEqual({
+      connected: false,
+      willReconnect: false,
+      closeCode: RelayCloseCode.CLIENT_KICKED,
+    });
   });
 
   it("removes wake listeners on close so document/window do not retain the manager", () => {
