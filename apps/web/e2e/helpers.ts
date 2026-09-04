@@ -487,7 +487,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
             }
             break;
           case "proxy_list_request":
-            this.emitProxyList(String(msg.requestId ?? ""));
+            this.emitProxyList(typeof msg.requestId === "string" ? msg.requestId : undefined);
             break;
           case "proxy_remove":
             if (proxyOnlineState && !proxyRemovedState) {
@@ -619,6 +619,19 @@ export async function installFakeRelay(page: Page): Promise<void> {
               },
             });
             break;
+          case "preview_static_inspect_request": {
+            const path = String(msg.path);
+            const selectedHtml = /\.html?$/i.test(path) ? path.split("/").pop() : undefined;
+            this.emitJson({
+              type: "preview_static_inspect_response",
+              requestId: msg.requestId,
+              scope: msg.scope,
+              success: true,
+              entryPath: selectedHtml ?? "index.html",
+              htmlEntries: selectedHtml ? [selectedHtml] : ["index.html", "pages/docs.html"],
+            });
+            break;
+          }
           case "device_preview_capability_request":
             this.emitJson({
               type: "device_preview_capability_response",
@@ -696,6 +709,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
               type: "dir_list_response",
               requestId: msg.requestId,
               path: String(msg.path),
+              includeHidden: msg.includeHidden === true,
               entries:
                 msg.path === "/home/dev"
                   ? [

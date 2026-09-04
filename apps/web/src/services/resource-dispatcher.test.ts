@@ -8,7 +8,7 @@ function command(name: string): CommandEntry {
   return { name, description: name, source: "test" };
 }
 
-describe("resource-dispatcher command scoping", () => {
+describe("resource-dispatcher", () => {
   beforeEach(() => {
     useCommandStore.setState(useCommandStore.getInitialState(), true);
     useFileStore.setState(useFileStore.getInitialState(), true);
@@ -63,5 +63,42 @@ describe("resource-dispatcher command scoping", () => {
 
     expect(useCommandStore.getState().commands).toEqual([]);
     expect(useCommandStore.getState().commandsBySessionId.s2[0].name).toBe("/late-s2");
+  });
+
+  it("leaves requested directory responses to the requesting loader", () => {
+    dispatchResourceMessage({
+      type: "dir_list_response",
+      requestId: "normal-list",
+      path: "/workspace",
+      includeHidden: false,
+      entries: [{ name: "src", isDir: true }],
+    });
+    dispatchResourceMessage({
+      type: "dir_list_response",
+      requestId: "hidden-list",
+      path: "/workspace",
+      includeHidden: true,
+      entries: [
+        { name: ".git", isDir: true },
+        { name: "src", isDir: true },
+      ],
+    });
+
+    const state = useFileStore.getState();
+    expect(state.tree.has("/workspace")).toBe(false);
+    expect(state.treeWithHidden.has("/workspace")).toBe(false);
+  });
+
+  it("writes file-tree snapshots only to the normal cache", () => {
+    useFileStore.getState().setDirEntries("/workspace", [{ name: ".env", isDir: false }], true);
+
+    dispatchResourceMessage({
+      type: "file_tree_push",
+      groups: [{ path: "/workspace", entries: [{ name: "src", isDir: true }] }],
+    });
+
+    const state = useFileStore.getState();
+    expect(state.tree.get("/workspace")).toEqual([{ name: "src", isDir: true }]);
+    expect(state.treeWithHidden.get("/workspace")).toEqual([{ name: ".env", isDir: false }]);
   });
 });

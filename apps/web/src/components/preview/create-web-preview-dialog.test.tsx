@@ -73,6 +73,28 @@ const bothProvidersAvailable = {
   },
 } satisfies WebPreviewCapability;
 
+type TestViewport = "desktop" | "mobile";
+let testViewport: TestViewport = "desktop";
+
+function testMatchMedia(query: string): MediaQueryList {
+  const matches =
+    query === "(min-width: 768px)"
+      ? testViewport === "desktop"
+      : query === "(pointer: coarse), (hover: none)"
+        ? testViewport === "mobile"
+        : false;
+  return {
+    matches,
+    media: query,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  } as MediaQueryList;
+}
+
 function capabilityResult(capability: WebPreviewCapability = availableCapability) {
   return { success: true as const, capability };
 }
@@ -149,6 +171,8 @@ function activateScope(proxyId: string, bindingId: string): typeof scopeState.cu
 
 describe("CreateWebPreviewDialog", () => {
   beforeEach(() => {
+    testViewport = "desktop";
+    vi.spyOn(window, "matchMedia").mockImplementation(testMatchMedia);
     const scope = activateScope("proxy-a", "binding-a-1");
     localStorage.clear();
     requestWebPreviewCapability.mockReset();
@@ -156,7 +180,13 @@ describe("CreateWebPreviewDialog", () => {
     inspectStaticWebPreview.mockReset();
     createWebPreview.mockReset();
     requestDirectoryList.mockReset();
-    requestDirectoryList.mockResolvedValue({ path: "/home/dev", entries: [] });
+    requestDirectoryList.mockImplementation(
+      async (path: string, options?: { includeHidden?: boolean }) => ({
+        path,
+        entries: [],
+        includeHidden: options?.includeHidden ?? false,
+      }),
+    );
     getActiveScope.mockReset();
     getActiveScope.mockImplementation(() => scopeState.current);
     isActive.mockReset();
@@ -167,6 +197,7 @@ describe("CreateWebPreviewDialog", () => {
     toastError.mockReset();
     useFileStore.setState({
       tree: new Map(),
+      treeWithHidden: new Map(),
       cwd: "",
       homePath: "/home/dev",
       agentCli: null,
@@ -174,7 +205,10 @@ describe("CreateWebPreviewDialog", () => {
     expect(usePreviewStore.getState().authoritative?.scope).toEqual(scope);
   });
 
-  afterEach(() => cleanup());
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
 
   it("waits for an authoritative update after a scoped local create ACK", async () => {
     createWebPreview.mockResolvedValue({
@@ -242,7 +276,7 @@ describe("CreateWebPreviewDialog", () => {
     expect(createWebPreview).not.toHaveBeenCalled();
   });
 
-  it("inspects a folder and asks for an entry only when multiple HTML files lack index.html", async () => {
+  it("lets a desktop user type a web path and submit the selected HTML entry", async () => {
     inspectStaticWebPreview.mockResolvedValue({
       success: true,
       htmlEntries: ["home.html", "pages/docs.html"],
@@ -256,7 +290,11 @@ describe("CreateWebPreviewDialog", () => {
     await waitForCapability(baseElement, "ready");
 
     fireEvent.click(getSlot(baseElement, "web-preview-source-static"));
-    fireEvent.change(getSlot<HTMLInputElement>(baseElement, "web-preview-static-path"), {
+    const pathInput = getSlot<HTMLInputElement>(baseElement, "web-preview-static-path");
+    expect(pathInput).toBeInstanceOf(HTMLInputElement);
+    expect(pathInput).toHaveAttribute("type", "text");
+    expect(pathInput).toHaveAttribute("data-path-control", "input");
+    fireEvent.change(pathInput, {
       target: { value: "/home/dev/site/" },
     });
 
@@ -422,12 +460,20 @@ describe("CreateWebPreviewDialog", () => {
       entryPath: "index.html",
       htmlEntries: ["index.html"],
     });
+    createWebPreview.mockResolvedValue({
+      operationId: "operation-browser-directory",
+      accepted: true,
+      previewId: "preview-browser-directory",
+    });
     const { baseElement } = render(<CreateWebPreviewDialog open onOpenChange={vi.fn()} />);
     await waitForCapability(baseElement, "ready");
 
     fireEvent.click(getSlot(baseElement, "web-preview-source-static"));
     fireEvent.focus(getSlot(baseElement, "web-preview-static-path"));
     fireEvent.click(baseElement.querySelector('[data-slot="file-entry"][data-entry-name="site"]')!);
+    await act(async () => {
+      await new Promise((resolve) => window.setTimeout(resolve, 350));
+    });
     expect(inspectStaticWebPreview).not.toHaveBeenCalled();
     fireEvent.click(getSlot(baseElement, "select-current-directory"));
 
@@ -438,6 +484,132 @@ describe("CreateWebPreviewDialog", () => {
       expect(getSlot(baseElement, "web-preview-static-inspection")).toHaveAttribute(
         "data-entry-path",
         "index.html",
+      );
+    });
+    fireEvent.click(getSlot(baseElement, "create-web-preview-submit"));
+    await waitFor(() => {
+      expect(createWebPreview).toHaveBeenCalledWith(
+        scopeState.current,
+        {
+          kind: "static",
+          path: "/home/dev/site/",
+          entryPath: "index.html",
+        },
+        {
+          tunnelProvider: "cloudflare",
+          operationId: expect.stringMatching(/^preview-operation-cloudflare-/),
+        },
+      );
+    });
+  });
+
+  it("does not create a static preview with an inspection from a previous path", async () => {
+    const nextInspection = deferred<{
+      success: boolean;
+      entryPath: string;
+      htmlEntries: string[];
+    }>();
+    inspectStaticWebPreview
+      .mockResolvedValueOnce({
+        success: true,
+        entryPath: "old.html",
+        htmlEntries: ["old.html"],
+      })
+      .mockReturnValueOnce(nextInspection.promise);
+    const { baseElement } = render(<CreateWebPreviewDialog open onOpenChange={vi.fn()} />);
+    await waitForCapability(baseElement, "ready");
+
+    fireEvent.click(getSlot(baseElement, "web-preview-source-static"));
+    const pathInput = getSlot<HTMLInputElement>(baseElement, "web-preview-static-path");
+    fireEvent.change(pathInput, { target: { value: "/home/dev/old-site/" } });
+    await waitFor(() => {
+      expect(getSlot(baseElement, "web-preview-static-inspection")).toHaveAttribute(
+        "data-entry-path",
+        "old.html",
+      );
+    });
+
+    fireEvent.change(pathInput, { target: { value: "/home/dev/new-site/" } });
+    const submit = getSlot(baseElement, "create-web-preview-submit");
+    expect(submit).toBeDisabled();
+    fireEvent.click(submit);
+    expect(createWebPreview).not.toHaveBeenCalled();
+    await waitFor(() => expect(inspectStaticWebPreview).toHaveBeenCalledTimes(2));
+
+    await act(async () => {
+      nextInspection.resolve({
+        success: true,
+        entryPath: "new.html",
+        htmlEntries: ["new.html"],
+      });
+      await nextInspection.promise;
+    });
+    await waitFor(() => expect(submit).toBeEnabled());
+  });
+
+  it("lets a phone user browse to an HTML file and submits its absolute path", async () => {
+    testViewport = "mobile";
+    useFileStore.setState({
+      tree: new Map([
+        [
+          "/home/dev",
+          [
+            { name: "landing.html", isDir: false },
+            { name: "styles.css", isDir: false },
+          ],
+        ],
+      ]),
+      treeWithHidden: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: null,
+    });
+    inspectStaticWebPreview.mockResolvedValue({
+      success: true,
+      entryPath: "landing.html",
+      htmlEntries: ["landing.html"],
+    });
+    createWebPreview.mockResolvedValue({
+      operationId: "operation-mobile-file",
+      accepted: true,
+      previewId: "preview-mobile-file",
+    });
+    const { baseElement, getByRole, queryByRole } = render(
+      <CreateWebPreviewDialog open onOpenChange={vi.fn()} />,
+    );
+    await waitForCapability(baseElement, "ready");
+
+    fireEvent.click(getSlot(baseElement, "web-preview-source-static"));
+    const pathButton = getByRole("button", { name: "网页位置" });
+    expect(pathButton).toHaveAttribute("data-path-control", "button");
+    expect(queryByRole("textbox", { name: "网页位置" })).not.toBeInTheDocument();
+
+    fireEvent.click(pathButton);
+    fireEvent.click(
+      baseElement.querySelector('[data-slot="file-entry"][data-entry-name="landing.html"]')!,
+    );
+    expect(pathButton).toHaveTextContent("/home/dev/landing.html");
+
+    await waitFor(() => {
+      expect(inspectStaticWebPreview).toHaveBeenCalledWith(
+        scopeState.current,
+        "/home/dev/landing.html",
+        { signal: expect.any(AbortSignal) },
+      );
+    });
+    fireEvent.click(getSlot(baseElement, "create-web-preview-submit"));
+    await waitFor(() => {
+      expect(createWebPreview).toHaveBeenCalledWith(
+        scopeState.current,
+        {
+          kind: "static",
+          path: "/home/dev/landing.html",
+          entryPath: "landing.html",
+        },
+        {
+          tunnelProvider: "cloudflare",
+          operationId: expect.stringMatching(/^preview-operation-cloudflare-/),
+        },
       );
     });
   });

@@ -1,6 +1,6 @@
 // 新建会话入口：选择工作目录、交互方式和开发机上的 Agent CLI。
 // 终端模式由开发机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
-import { type FocusEvent, useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
@@ -23,7 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FilePathPicker } from "@/components/chat/file-path-picker";
+import { RemotePathSelector } from "@/components/path/remote-path-selector";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { AgentCliPicker } from "./agent-cli-picker";
 import { BypassPermissionWarning } from "./bypass-permission-warning";
@@ -54,11 +54,9 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const [confirmingBypass, setConfirmingBypass] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [missingCwd, setMissingCwd] = useState<string | null>(null);
-  const [cwdPickerOpen, setCwdPickerOpen] = useState(false);
-  const [editingCliProvider, setEditingCliProvider] = useState<ProviderId | null>(null);
-  const [cliPathInput, setCliPathInput] = useState("");
+  const [cliPathDraftProvider, setCliPathDraftProvider] = useState<ProviderId | null>(null);
+  const [cliPathDraft, setCliPathDraft] = useState("");
   const [savingCliPath, setSavingCliPath] = useState(false);
-  const cwdFieldRef = useRef<HTMLDivElement>(null);
   // open=false 时把 latestOpen.current 同步翻 false，submitSessionCreate 在 await 后据此跳过
   // 路由跳转——否则用户在创建中关掉弹窗会被强制带去 /chat/<id>，等同界面被劫持。
   const latestOpen = useRef(open);
@@ -91,30 +89,16 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       });
   }, [open, homePath, agentCli]);
 
-  useEffect(() => {
-    if (!cwdPickerOpen) return;
-
-    function closePickerOnOutsidePointer(event: PointerEvent) {
-      const target = event.target;
-      if (target instanceof Node && cwdFieldRef.current?.contains(target)) return;
-      window.setTimeout(() => setCwdPickerOpen(false), 0);
-    }
-
-    document.addEventListener("pointerdown", closePickerOnOutsidePointer, true);
-    return () => document.removeEventListener("pointerdown", closePickerOnOutsidePointer, true);
-  }, [cwdPickerOpen]);
-
   function resetForm() {
     setName("");
     setCwd("");
-    setCwdPickerOpen(false);
     setProvider("claude");
     setMode("pty");
     setPermissionMode("default");
     setConfirmingBypass(false);
     setMissingCwd(null);
-    setEditingCliProvider(null);
-    setCliPathInput("");
+    setCliPathDraftProvider(null);
+    setCliPathDraft("");
     setSavingCliPath(false);
   }
 
@@ -138,7 +122,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         ? KIMI_PERMISSION_MODE_OPTIONS
         : PERMISSION_MODE_OPTIONS;
   const selectedStatus = providerStatus(provider, agentCli);
-  const createDisabled = submitting || savingCliPath || selectedStatus.disabled;
+  const cliPathChanged =
+    cliPathDraftProvider === provider &&
+    cliPathDraft.trim() !== (agentCli?.[provider]?.command ?? "");
+  const createDisabled = submitting || savingCliPath || selectedStatus.disabled || cliPathChanged;
 
   function normalizePermissionMode(nextProvider: ProviderId) {
     const normalized = normalizePermissionModeForProvider(nextProvider, permissionMode);
@@ -197,7 +184,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         toast.error(`目录创建失败：${result.error ?? "未知错误"}`);
         return null;
       }
-      setCwd(result.path);
       setMissingCwd(null);
       toast.success("目录已创建");
       return result.path;
@@ -207,17 +193,17 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
   }
 
-  function openCliPathEditor(targetProvider: ProviderId) {
-    const status = agentCli?.[targetProvider];
-    setEditingCliProvider(targetProvider);
-    setCliPathInput(status?.command ?? status?.suggestions?.[0] ?? "");
+  function changeCliPath(targetProvider: ProviderId, path: string) {
+    setCliPathDraftProvider(targetProvider);
+    setCliPathDraft(path);
   }
 
   async function saveCliPath() {
-    if (!editingCliProvider) return;
-    const path = cliPathInput.trim();
+    if (!cliPathDraftProvider) return;
+    const targetProvider = cliPathDraftProvider;
+    const path = cliPathDraft.trim();
     if (!path) {
-      toast.error("请输入 Agent CLI 路径");
+      toast.error("请选择 Agent CLI 可执行文件");
       return;
     }
     const relay = relayClientRef;
@@ -227,15 +213,15 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
     setSavingCliPath(true);
     try {
-      const result = await relay.updateAgentCliPath(editingCliProvider, path);
+      const result = await relay.updateAgentCliPath(targetProvider, path);
       if (result.error || !result.agentCli) {
         toast.error(`路径保存失败：${result.error ?? "未知错误"}`);
         return;
       }
       useFileStore.getState().setAgentCli(result.agentCli);
-      toast.success(`${PROVIDER_LABEL[editingCliProvider]} 路径已保存`);
-      setEditingCliProvider(null);
-      setCliPathInput("");
+      toast.success(`${PROVIDER_LABEL[targetProvider]} 路径已保存`);
+      setCliPathDraftProvider(null);
+      setCliPathDraft("");
     } catch (err) {
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
@@ -246,12 +232,6 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   function handleModeChange(nextMode: SessionMode) {
     setMode(nextMode);
     normalizePermissionMode(provider);
-  }
-
-  function handleCwdFieldBlur(event: FocusEvent<HTMLDivElement>) {
-    const nextFocus = event.relatedTarget;
-    if (nextFocus instanceof Node && cwdFieldRef.current?.contains(nextFocus)) return;
-    window.setTimeout(() => setCwdPickerOpen(false), 0);
   }
 
   const form = confirmingBypass ? (
@@ -303,46 +283,20 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           placeholder="自动生成"
         />
       </label>
-      <div
-        ref={cwdFieldRef}
-        className="relative flex min-w-0 flex-col gap-2"
-        onBlur={handleCwdFieldBlur}
-      >
-        <span id="create-session-cwd-label" className="text-sm">
-          工作目录
-        </span>
-        <input
-          id="create-session-cwd"
-          type="text"
-          aria-labelledby="create-session-cwd-label"
-          name="dev-anywhere-session-cwd"
-          autoComplete="off"
-          autoCorrect="off"
-          spellCheck={false}
-          value={cwd}
-          onFocus={() => setCwdPickerOpen(true)}
-          onChange={(e) => {
-            setCwd(e.target.value);
-            setMissingCwd(null);
-          }}
-          placeholder="输入绝对路径"
-          className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring md:h-9 md:min-h-0 md:text-sm"
-        />
-        {cwdPickerOpen ? (
-          <FilePathPicker
-            mode="select"
-            dirsOnly
-            filter={cwd}
-            title="选择下一级目录"
-            onCreateDirectory={handleCreateDirectory}
-            onSelect={(path) => {
-              setCwd(path);
-              setMissingCwd(null);
-              setCwdPickerOpen(true);
-            }}
-          />
-        ) : null}
-      </div>
+      <RemotePathSelector
+        id="create-session-cwd"
+        name="dev-anywhere-session-cwd"
+        data-slot="create-session-cwd"
+        label="工作目录"
+        value={cwd}
+        selectionKind="directory"
+        placeholder="选择工作目录"
+        onCreateDirectory={handleCreateDirectory}
+        onValueChange={(path) => {
+          setCwd(path);
+          setMissingCwd(null);
+        }}
+      />
       {missingCwd ? (
         <section
           role="status"
@@ -385,19 +339,19 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       <AgentCliPicker
         agentCli={agentCli}
         provider={provider}
-        isDesktop={isDesktop}
-        editingCliProvider={editingCliProvider}
-        cliPathInput={cliPathInput}
+        cliPathDraftProvider={cliPathDraftProvider}
+        cliPathDraft={cliPathDraft}
         savingCliPath={savingCliPath}
         onProviderChange={(nextProvider) => {
           setProvider(nextProvider);
           normalizePermissionMode(nextProvider);
+          setCliPathDraftProvider(null);
+          setCliPathDraft("");
         }}
-        onOpenCliPathEditor={openCliPathEditor}
-        onCliPathInputChange={setCliPathInput}
-        onCancelCliPathEditor={() => {
-          setEditingCliProvider(null);
-          setCliPathInput("");
+        onCliPathDraftChange={changeCliPath}
+        onDiscardCliPathDraft={() => {
+          setCliPathDraftProvider(null);
+          setCliPathDraft("");
         }}
         onSaveCliPath={() => void saveCliPath()}
       />

@@ -17,18 +17,19 @@ describe("control-messages: path traversal defense", () => {
 
   it("rejects relative path", async () => {
     const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
-    await handlers.handleDirListRequest({ path: "relative/path" });
+    await handlers.handleDirListRequest({ path: "relative/path", includeHidden: false });
 
     const response = JSON.parse(sent[0]);
     expect(response.type).toBe("dir_list_response");
     expect(response.errorCode).toBe("INVALID_PATH");
     expect(response.error).toContain("Invalid path");
     expect(response.entries).toEqual([]);
+    expect(response.includeHidden).toBe(false);
   });
 
   it("rejects relative path with .. traversal", async () => {
     const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
-    await handlers.handleDirListRequest({ path: "../../../etc/passwd" });
+    await handlers.handleDirListRequest({ path: "../../../etc/passwd", includeHidden: false });
 
     const response = JSON.parse(sent[0]);
     expect(response.error).toContain("Invalid path");
@@ -37,7 +38,10 @@ describe("control-messages: path traversal defense", () => {
   it("normalizes absolute path with .. but still allows it (resolved to valid path)", async () => {
     const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
     // normalize resolves this to /etc/passwd which is a valid absolute path
-    await handlers.handleDirListRequest({ path: "/home/user/../../../etc" });
+    await handlers.handleDirListRequest({
+      path: "/home/user/../../../etc",
+      includeHidden: false,
+    });
 
     const response = JSON.parse(sent[0]);
     // 不会被 isPathSafe 拒绝，但 readdir 可能因权限或不存在而失败
@@ -51,7 +55,7 @@ describe("control-messages: path traversal defense", () => {
     await mkdir(join(tmpDir, "subdir"));
 
     const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
-    await handlers.handleDirListRequest({ path: tmpDir });
+    await handlers.handleDirListRequest({ path: tmpDir, includeHidden: false });
 
     const response = JSON.parse(sent[0]);
     expect(response.error).toBeUndefined();
@@ -67,7 +71,10 @@ describe("control-messages: path traversal defense", () => {
 
   it("returns error for nonexistent path", async () => {
     const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
-    await handlers.handleDirListRequest({ path: "/nonexistent/path/xyz" });
+    await handlers.handleDirListRequest({
+      path: "/nonexistent/path/xyz",
+      includeHidden: false,
+    });
 
     const response = JSON.parse(sent[0]);
     expect(response.entries).toEqual([]);
@@ -80,14 +87,35 @@ describe("control-messages: path traversal defense", () => {
   it("hides dotfiles in listing", async () => {
     const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-test-"));
     await writeFile(join(tmpDir, ".hidden"), "secret");
+    await mkdir(join(tmpDir, "node_modules"));
     await writeFile(join(tmpDir, "visible.txt"), "content");
 
     const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
-    await handlers.handleDirListRequest({ path: tmpDir });
+    await handlers.handleDirListRequest({ path: tmpDir, includeHidden: false });
 
     const response = JSON.parse(sent[0]);
     expect(response.entries.length).toBe(1);
     expect(response.entries[0].name).toBe("visible.txt");
+
+    await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("returns hidden entries when explicitly requested", async () => {
+    const tmpDir = await mkdtemp(join(tmpdir(), "ctrl-test-"));
+    await mkdir(join(tmpDir, ".local"));
+    await mkdir(join(tmpDir, "node_modules"));
+    await writeFile(join(tmpDir, "visible.txt"), "content");
+
+    const handlers = createControlMessageHandlers((d) => sent.push(d), createMockSessionManager());
+    await handlers.handleDirListRequest({ path: tmpDir, includeHidden: true });
+
+    const response = JSON.parse(sent[0]);
+    expect(response.includeHidden).toBe(true);
+    expect(response.entries.map((entry: { name: string }) => entry.name)).toEqual([
+      ".local",
+      "node_modules",
+      "visible.txt",
+    ]);
 
     await rm(tmpDir, { recursive: true, force: true });
   });

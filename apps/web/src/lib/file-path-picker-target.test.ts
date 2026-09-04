@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { resolvePickerTarget } from "./file-path-picker-target";
 
 describe("resolvePickerTarget", () => {
+  it("starts an empty select-mode picker from the absolute home path", () => {
+    expect(
+      resolvePickerTarget("", "select", {
+        baseCwd: "/home/dev",
+        knownDirs: new Set(),
+      }),
+    ).toEqual({ currentPath: "/home/dev/", query: "" });
+  });
+
   it("treats the configured home path as the directory to browse", () => {
     expect(
       resolvePickerTarget("/home/dev", "select", {
@@ -27,6 +36,15 @@ describe("resolvePickerTarget", () => {
         knownDirs: new Set(["/home/dev/projects"]),
       }),
     ).toEqual({ currentPath: "/home/dev/", query: "work" });
+  });
+
+  it("resolves relative select input against the absolute home path", () => {
+    expect(
+      resolvePickerTarget("./projects/app", "select", {
+        baseCwd: "/home/dev",
+        knownDirs: new Set(),
+      }),
+    ).toEqual({ currentPath: "/home/dev/projects/", query: "app" });
   });
 
   it("keeps insert mode anchored to the @ path segment", () => {

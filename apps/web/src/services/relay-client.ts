@@ -484,19 +484,22 @@ export class RelayClient {
 
   requestDirectoryList(
     path: string,
-    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
-  ): Promise<{ path: string; entries: DirEntry[] } & RequestError> {
+    options: { includeHidden?: boolean; timeoutMs?: number } = {},
+  ): Promise<{ path: string; entries: DirEntry[]; includeHidden: boolean } & RequestError> {
     const requestId = nextRequestId("dir-list");
+    const includeHidden = options.includeHidden ?? false;
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "dir_list_response" }> =>
         msg.type === "dir_list_response" && msg.requestId === requestId,
-      () => this.ws.send(JSON.stringify({ type: "dir_list_request", requestId, path })),
+      () =>
+        this.ws.send(JSON.stringify({ type: "dir_list_request", requestId, path, includeHidden })),
       "读取目录超时",
-      timeoutMs,
+      options.timeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS,
       requestId,
     ).then((resp) => ({
       path: resp.path,
       entries: resp.entries,
+      includeHidden: resp.includeHidden,
       error: resp.error,
       errorCode: resp.errorCode,
     }));

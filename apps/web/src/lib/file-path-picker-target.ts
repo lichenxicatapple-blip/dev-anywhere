@@ -22,6 +22,26 @@ function extractInsertPath(filter: string): string {
   return lastSlash >= 0 ? afterAt.slice(0, lastSlash + 1) : "";
 }
 
+function normalizeAbsolutePath(path: string): string {
+  if (!path.startsWith("/")) return "";
+  const parts: string[] = [];
+  for (const part of path.split("/")) {
+    if (!part || part === ".") continue;
+    if (part === "..") {
+      parts.pop();
+      continue;
+    }
+    parts.push(part);
+  }
+  return `/${parts.join("/")}`;
+}
+
+function resolveSelectPath(filter: string, baseCwd: string): string {
+  if (filter.startsWith("/")) return normalizeAbsolutePath(filter);
+  if (!baseCwd) return "";
+  return normalizeAbsolutePath(`${baseCwd}/${filter}`);
+}
+
 export function resolvePickerTarget(
   filter: string,
   mode: PickerMode,
@@ -37,20 +57,22 @@ export function resolvePickerTarget(
     };
   }
 
+  const baseCwd = normalizeAbsolutePath(options?.baseCwd ?? "");
   if (!filter) {
-    return { currentPath: "./", query: "" };
+    return { currentPath: baseCwd ? withTrailingSlash(baseCwd) : "", query: "" };
   }
 
-  const normalized = filter.replace(/\/+$/, "") || "/";
+  const normalized = resolveSelectPath(filter.replace(/\/+$/, "") || "/", baseCwd);
+  if (!normalized) return { currentPath: "", query: "" };
   const isKnownDir =
-    filter.endsWith("/") || normalized === options?.baseCwd || options?.knownDirs?.has(normalized);
+    filter.endsWith("/") || normalized === baseCwd || options?.knownDirs?.has(normalized);
   if (isKnownDir) {
     return { currentPath: withTrailingSlash(normalized), query: "" };
   }
 
-  const lastSlash = filter.lastIndexOf("/");
+  const lastSlash = normalized.lastIndexOf("/");
   return {
-    currentPath: lastSlash >= 0 ? filter.slice(0, lastSlash + 1) : "./",
-    query: lastSlash >= 0 ? filter.slice(lastSlash + 1).toLowerCase() : filter.toLowerCase(),
+    currentPath: normalized.slice(0, lastSlash + 1) || "/",
+    query: normalized.slice(lastSlash + 1).toLowerCase(),
   };
 }

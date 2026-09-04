@@ -142,7 +142,8 @@ export function useRelaySetup(): void {
     // Session 生命周期 dispatcher: session_list / session_status / agent_status → session-store。
     // request-scoped session_history_response 由对应 loader 独占处理。
     const unregisterSession = registerSessionDispatcher();
-    // 资源 dispatcher: command_list_push / dir_list_response / file_tree_push → command-store / file-store
+    // 资源 dispatcher: command_list_push / file_tree_push → command-store / file-store。
+    // dir_list_response 由发起请求的 FilePathPicker 接管响应和缓存。
     const unregisterResource = registerResourceDispatcher();
     // 网页和设备预览共享同一条按 Relay binding 隔离的事件分发链路。
     const unregisterPreview = registerPreviewDispatcher();

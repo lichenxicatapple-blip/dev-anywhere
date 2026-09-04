@@ -9,7 +9,11 @@ import { classifyPathError } from "../path-errors.js";
 import { HISTORY_METADATA_PATH } from "../../common/paths.js";
 
 export interface ControlMessageHandlers {
-  handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void>;
+  handleDirListRequest(msg: {
+    path: string;
+    requestId?: string;
+    includeHidden: boolean;
+  }): Promise<void>;
   handleDirCreateRequest(msg: { path: string; requestId?: string }): Promise<void>;
   handleSessionHistoryRequest(msg: { requestId: string }): Promise<void>;
   handleSessionResourcesRequest(msg: {
@@ -44,8 +48,7 @@ function isPathSafe(path: string): boolean {
   return true;
 }
 
-// picker 展示忽略规则: dotfile + node_modules
-// listDirectory (按需) 与 getFileTree (预热) 必须共用, 否则逐层下钻会暴露 node_modules
+// 默认 picker 忽略 dotfile + node_modules；CLI 可执行文件浏览会显式请求完整目录。
 const HIDDEN_ENTRY_NAMES = new Set(["node_modules"]);
 function isPickerVisible(name: string): boolean {
   return !name.startsWith(".") && !HIDDEN_ENTRY_NAMES.has(name);
@@ -60,10 +63,13 @@ function sortEntries(
   return a.name.localeCompare(b.name);
 }
 
-async function scanDir(dirPath: string): Promise<Array<{ name: string; isDir: boolean }>> {
+async function scanDir(
+  dirPath: string,
+  options: { includeHidden: boolean },
+): Promise<Array<{ name: string; isDir: boolean }>> {
   const entries = await readdir(dirPath, { withFileTypes: true });
   return entries
-    .filter((e) => isPickerVisible(e.name))
+    .filter((entry) => options.includeHidden || isPickerVisible(entry.name))
     .map((e) => ({ name: e.name, isDir: e.isDirectory() }))
     .sort(sortEntries);
 }
@@ -79,7 +85,7 @@ async function getFileTree(rootPath: string): Promise<FileTreeGroup[]> {
 
   let rootEntries: Array<{ name: string; isDir: boolean }>;
   try {
-    rootEntries = await scanDir(rootPath);
+    rootEntries = await scanDir(rootPath, { includeHidden: false });
   } catch {
     return groups;
   }
@@ -89,7 +95,7 @@ async function getFileTree(rootPath: string): Promise<FileTreeGroup[]> {
     if (!sub.isDir) continue;
     const subPath = join(rootPath, sub.name);
     try {
-      const subEntries = await scanDir(subPath);
+      const subEntries = await scanDir(subPath, { includeHidden: false });
       groups.push({ path: subPath, entries: subEntries });
     } catch {
       // 无法读取子目录, 跳过这一层分组 (picker 会在点击时触发 dir_list_request 补齐)
@@ -151,7 +157,11 @@ export function createControlMessageHandlers(
   }
 
   return {
-    async handleDirListRequest(msg: { path: string; requestId?: string }): Promise<void> {
+    async handleDirListRequest(msg: {
+      path: string;
+      requestId?: string;
+      includeHidden: boolean;
+    }): Promise<void> {
       if (!isPathSafe(msg.path)) {
         send(
           serializeControl({
@@ -159,6 +169,7 @@ export function createControlMessageHandlers(
             requestId: msg.requestId,
             path: msg.path,
             entries: [],
+            includeHidden: msg.includeHidden,
             errorCode: ControlErrorCode.INVALID_PATH,
             error: "Invalid path: must be absolute and must not contain path traversal",
           }),
@@ -168,13 +179,14 @@ export function createControlMessageHandlers(
       }
 
       try {
-        const entries = await scanDir(msg.path);
+        const entries = await scanDir(msg.path, { includeHidden: msg.includeHidden });
         send(
           serializeControl({
             type: "dir_list_response",
             requestId: msg.requestId,
             path: msg.path,
             entries,
+            includeHidden: msg.includeHidden,
           }),
         );
         serviceLogger.debug({ path: msg.path, count: entries.length }, "Dir list response sent");
@@ -185,6 +197,7 @@ export function createControlMessageHandlers(
             requestId: msg.requestId,
             path: msg.path,
             entries: [],
+            includeHidden: msg.includeHidden,
             errorCode: classifyPathError(err),
             error: String(err),
           }),

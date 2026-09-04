@@ -99,6 +99,7 @@ export class RelayResourceHandlers {
     this.deps.controlHandlers.handleDirListRequest({
       path: msg.path ?? "",
       requestId: msg.requestId,
+      includeHidden: msg.includeHidden,
     });
   }
 

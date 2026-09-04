@@ -809,6 +809,7 @@ describe("RelayControlSchema", () => {
       path: "/home/user/project",
       errorCode: "PATH_ACCESS_DENIED",
       error: "permission denied",
+      includeHidden: true,
       entries: [
         { name: "src", isDir: true },
         { name: "README.md", isDir: false },
@@ -819,9 +820,38 @@ describe("RelayControlSchema", () => {
       expect(result.path).toBe("/home/user/project");
       expect(result.requestId).toBe("dir-list-1");
       expect(result.errorCode).toBe("PATH_ACCESS_DENIED");
+      expect(result.includeHidden).toBe(true);
       expect(result.entries).toHaveLength(2);
       expect(result.entries[0]).toEqual({ name: "src", isDir: true });
     }
+  });
+
+  it("requires an explicit hidden-entry policy for directory requests and responses", () => {
+    expect(
+      RelayControlSchema.parse({
+        type: "dir_list_request",
+        requestId: "dir-list-2",
+        path: "/home/user/project",
+        includeHidden: false,
+      }),
+    ).toMatchObject({ type: "dir_list_request", includeHidden: false });
+
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "dir_list_request",
+        requestId: "dir-list-3",
+        path: "/home/user/project",
+      }),
+    ).toThrow();
+
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "dir_list_response",
+        requestId: "dir-list-4",
+        path: "/home/user/project",
+        entries: [],
+      }),
+    ).toThrow();
   });
 
   it("parses proxy_info request/response requestId correlation", () => {

@@ -1,4 +1,4 @@
-import { type FocusEvent, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { AlertCircle, CheckCircle2, Cloud, Loader2, RefreshCw } from "lucide-react";
 import type {
   TunnelProvider,
@@ -33,7 +33,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { FilePathPicker } from "@/components/chat/file-path-picker";
+import { RemotePathSelector } from "@/components/path/remote-path-selector";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { readStorageValue, STORAGE_KEYS, writeStorageValue } from "@/lib/storage-keys";
 import { cn } from "@/lib/utils";
@@ -51,7 +51,7 @@ type InspectionState =
   | { status: "idle" }
   | { status: "loading" }
   | { status: "error"; message: string }
-  | { status: "ready"; result: WebPreviewStaticInspection };
+  | { status: "ready"; path: string; result: WebPreviewStaticInspection };
 
 const LOOPBACK_HOSTS = new Set(["localhost", "127.0.0.1", "[::1]"]);
 const TUNNEL_PROVIDER_META: Record<
@@ -119,12 +119,9 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
   const [sourceKind, setSourceKind] = useState<PreviewSourceKind>("local");
   const [localUrl, setLocalUrl] = useState("");
   const [staticPath, setStaticPath] = useState("");
-  const [staticInspectionPath, setStaticInspectionPath] = useState("");
   const [selectedEntryPath, setSelectedEntryPath] = useState("");
   const [inspection, setInspection] = useState<InspectionState>(resetInspection);
-  const [pathPickerOpen, setPathPickerOpen] = useState(false);
   const [submitting, setSubmitting] = useState(false);
-  const pathFieldRef = useRef<HTMLDivElement>(null);
   const capabilityAbortRef = useRef<AbortController | null>(null);
   const inspectionAbortRef = useRef<AbortController | null>(null);
   const pendingCreateRef = useRef<{ sourceKey: string; operationId: string } | null>(null);
@@ -154,10 +151,8 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
     setSourceKind("local");
     setLocalUrl("");
     setStaticPath("");
-    setStaticInspectionPath("");
     setSelectedEntryPath("");
     setInspection(resetInspection());
-    setPathPickerOpen(false);
     setSubmitting(false);
     capabilityAbortRef.current?.abort();
     capabilityAbortRef.current = null;
@@ -219,21 +214,10 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
   }, [detectCapability, open, previewScopeKey]);
 
   useEffect(() => {
-    if (!pathPickerOpen) return;
-    function closePickerOnOutsidePointer(event: PointerEvent): void {
-      const target = event.target;
-      if (target instanceof Node && pathFieldRef.current?.contains(target)) return;
-      window.setTimeout(() => setPathPickerOpen(false), 0);
-    }
-    document.addEventListener("pointerdown", closePickerOnOutsidePointer, true);
-    return () => document.removeEventListener("pointerdown", closePickerOnOutsidePointer, true);
-  }, [pathPickerOpen]);
-
-  useEffect(() => {
     if (!open || sourceKind !== "static") return;
     inspectionAbortRef.current?.abort();
     inspectionAbortRef.current = null;
-    const path = staticInspectionPath.trim();
+    const path = staticPath.trim();
     if (!path) {
       setInspection(resetInspection());
       setSelectedEntryPath("");
@@ -278,7 +262,7 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
             entryPath: result.entryPath,
             htmlEntries,
           };
-          setInspection({ status: "ready", result: inspected });
+          setInspection({ status: "ready", path, result: inspected });
           setSelectedEntryPath(result.entryPath ?? "");
         })
         .catch((error: unknown) => {
@@ -301,18 +285,13 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
       abort.abort();
       if (inspectionAbortRef.current === abort) inspectionAbortRef.current = null;
     };
-  }, [open, previewScopeKey, selectedProxyId, sourceKind, staticInspectionPath]);
-
-  function handlePathFieldBlur(event: FocusEvent<HTMLDivElement>): void {
-    const nextFocus = event.relatedTarget;
-    if (nextFocus instanceof Node && pathFieldRef.current?.contains(nextFocus)) return;
-    window.setTimeout(() => setPathPickerOpen(false), 0);
-  }
+  }, [open, previewScopeKey, selectedProxyId, sourceKind, staticPath]);
 
   const localUrlError = sourceKind === "local" ? validateLocalPreviewUrl(localUrl) : null;
   const staticReady =
     sourceKind === "static" &&
     inspection.status === "ready" &&
+    inspection.path === staticPath.trim() &&
     !!(inspection.result.entryPath || selectedEntryPath);
   const capabilityReady =
     capabilityStatus === "loaded" && providerAvailable(capability, tunnelProvider);
@@ -331,10 +310,10 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
     if (sourceKind === "local") {
       source = { kind: "local", url: localUrl.trim() };
     } else {
-      if (inspection.status !== "ready") return;
+      if (inspection.status !== "ready" || inspection.path !== staticPath.trim()) return;
       const entryPath = inspection.result.entryPath ?? selectedEntryPath;
       if (!entryPath) return;
-      source = { kind: "static", path: staticInspectionPath.trim(), entryPath };
+      source = { kind: "static", path: inspection.path, entryPath };
     }
 
     setSubmitting(true);
@@ -546,59 +525,19 @@ export function CreateWebPreviewDialog({ open, onOpenChange }: CreateWebPreviewD
           ) : null}
         </label>
       ) : (
-        <div
-          ref={pathFieldRef}
-          className="relative flex min-w-0 flex-col gap-1"
-          onBlur={handlePathFieldBlur}
-        >
-          <label htmlFor="create-web-preview-path" className="text-sm">
-            网页位置
-          </label>
-          <input
+        <div className="flex min-w-0 flex-col gap-1">
+          <RemotePathSelector
             id="create-web-preview-path"
-            type="text"
-            data-slot="web-preview-static-path"
             name="dev-anywhere-preview-static-path"
-            autoComplete="off"
-            autoCorrect="off"
-            spellCheck={false}
-            disabled={submitting}
+            data-slot="web-preview-static-path"
+            label="网页位置"
             value={staticPath}
-            onFocus={() => setPathPickerOpen(true)}
-            onChange={(event) => {
-              const path = event.target.value;
-              setStaticPath(path);
-              setStaticInspectionPath(path);
-            }}
+            selectionKind="file-or-directory"
+            fileExtensions={[".html", ".htm"]}
+            disabled={submitting}
             placeholder="选择 HTML 网页文件或目录"
-            className="min-h-11 min-w-0 rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 md:h-9 md:min-h-0 md:text-sm"
+            onValueChange={setStaticPath}
           />
-          {pathPickerOpen && !submitting ? (
-            <FilePathPicker
-              mode="select"
-              filter={staticPath}
-              fileExtensions={[".html", ".htm"]}
-              title="选择 HTML 网页文件或目录"
-              onSelect={(path) => {
-                setStaticPath(path);
-                if (path.endsWith("/")) {
-                  inspectionAbortRef.current?.abort();
-                  inspectionAbortRef.current = null;
-                  setStaticInspectionPath("");
-                  setInspection(resetInspection());
-                  setSelectedEntryPath("");
-                  return;
-                }
-                setStaticInspectionPath(path);
-                setPathPickerOpen(false);
-              }}
-              onSelectCurrentDirectory={(path) => {
-                setStaticPath(path);
-                setStaticInspectionPath(path);
-                setPathPickerOpen(false);
-              }}
-            />
-          ) : null}
           <StaticInspectionStatus
             inspection={inspection}
             selectedEntryPath={selectedEntryPath}

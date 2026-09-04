@@ -257,6 +257,7 @@ describe("Message routing integration", () => {
         requestId: "r1",
         path: "/etc",
         proxyId: "p2",
+        includeHidden: false,
       }),
     );
 
@@ -585,10 +586,18 @@ describe("Message routing integration", () => {
     const { proxy, client } = await setupBoundPair();
 
     const proxyMsgPromise = waitForMessage(proxy);
-    client.send(JSON.stringify({ type: "dir_list_request", proxyId: "p1", path: "/home" }));
+    client.send(
+      JSON.stringify({
+        type: "dir_list_request",
+        proxyId: "p1",
+        path: "/home",
+        includeHidden: true,
+      }),
+    );
 
     const proxyReceived = JSON.parse(await proxyMsgPromise);
     expect(proxyReceived.type).toBe("dir_list_request");
+    expect(proxyReceived.includeHidden).toBe(true);
 
     const clientMsgPromise = waitForMessage(client);
     proxy.send(
@@ -596,11 +605,13 @@ describe("Message routing integration", () => {
         type: "dir_list_response",
         path: "/home",
         entries: [{ name: "src", isDir: true }],
+        includeHidden: true,
       }),
     );
 
     const clientReceived = JSON.parse(await clientMsgPromise);
     expect(clientReceived.type).toBe("dir_list_response");
+    expect(clientReceived.includeHidden).toBe(true);
     expect(clientReceived.entries[0].name).toBe("src");
   });
 

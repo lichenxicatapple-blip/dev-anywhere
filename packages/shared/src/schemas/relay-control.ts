@@ -1244,12 +1244,19 @@ const relayControlDefinitions = [
       proxyId: IdSchema.optional(),
       ...RequestIdShape,
       path: z.string(),
+      includeHidden: z.boolean(),
     },
     "client_to_proxy",
   ),
   control(
     "dir_list_response",
-    { ...RequestIdShape, ...RequestErrorShape, entries: z.array(DirEntrySchema), path: z.string() },
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      entries: z.array(DirEntrySchema),
+      path: z.string(),
+      includeHidden: z.boolean(),
+    },
     "proxy_to_client",
   ),
 
@@ -1278,8 +1285,8 @@ const relayControlDefinitions = [
     "proxy_to_client",
   ),
 
-  // 文件树推送: 按目录分组, 首组 path 即为 session cwd
-  // 前端直接把每组写入 tree[path], 与 dir_list_response 共享 cache slot
+  // 文件树推送: 按目录分组, 首组 path 即为 session cwd。
+  // 前端把它写入普通目录树；includeHidden=true 的按需响应使用独立缓存。
   control(
     "file_tree_push",
     {

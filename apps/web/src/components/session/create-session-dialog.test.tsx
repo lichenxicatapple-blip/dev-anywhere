@@ -98,6 +98,28 @@ const sessionCreatePermissionCases = [
   ["Kimi Code", "json", "kimi", "全自动", "bypassPermissions"],
 ] as const;
 
+type TestViewport = "desktop" | "mobile";
+let testViewport: TestViewport = "desktop";
+
+function testMatchMedia(query: string): MediaQueryList {
+  const matches =
+    query === "(min-width: 768px)"
+      ? testViewport === "desktop"
+      : query === "(pointer: coarse), (hover: none)"
+        ? testViewport === "mobile"
+        : false;
+  return {
+    matches,
+    media: query,
+    onchange: null,
+    addListener: () => undefined,
+    removeListener: () => undefined,
+    addEventListener: () => undefined,
+    removeEventListener: () => undefined,
+    dispatchEvent: () => false,
+  } as MediaQueryList;
+}
+
 function renderDialog() {
   return render(
     <MemoryRouter>
@@ -116,16 +138,25 @@ function selectAgentCli(label: "Claude Code" | "Codex" | "Kimi Code"): void {
 describe("CreateSessionDialog", () => {
   afterEach(() => {
     cleanup();
+    vi.restoreAllMocks();
   });
 
   beforeEach(() => {
+    testViewport = "desktop";
+    vi.spyOn(window, "matchMedia").mockImplementation(testMatchMedia);
     sendControl.mockClear();
     onMessage.mockReset();
     onMessage.mockReturnValue(vi.fn());
     createSession.mockReset();
     createDirectory.mockReset();
     requestDirectoryList.mockReset();
-    requestDirectoryList.mockResolvedValue({ path: "/home/dev", entries: [] });
+    requestDirectoryList.mockImplementation(
+      async (path: string, options?: { includeHidden?: boolean }) => ({
+        path,
+        entries: [],
+        includeHidden: options?.includeHidden ?? false,
+      }),
+    );
     requestProxyInfo.mockReset();
     requestProxyInfo.mockResolvedValue({ homePath: "/home/dev", agentCli: availableAgentCli });
     updateAgentCliPath.mockReset();
@@ -134,6 +165,7 @@ describe("CreateSessionDialog", () => {
     navigateMock.mockClear();
     useFileStore.setState({
       tree: new Map(),
+      treeWithHidden: new Map([["/home/dev/.local/bin", [{ name: "claude", isDir: false }]]]),
       cwd: "",
       homePath: "",
       agentCli: null,
@@ -193,22 +225,6 @@ describe("CreateSessionDialog", () => {
     });
   });
 
-  it("describes chat mode as bubble-style and Voice Pilot capable", () => {
-    useFileStore.setState({
-      tree: new Map(),
-      cwd: "",
-      homePath: "/home/dev",
-      agentCli: availableAgentCli,
-    });
-
-    const { getByRole, getByText, queryByText } = renderDialog();
-
-    getByText("气泡式对话，支持 Voice Pilot");
-    expect(queryByText("完整终端")).not.toBeInTheDocument();
-    fireEvent.click(getByRole("button", { name: /聊天模式/ }));
-    expect(queryByText("聊天消息")).not.toBeInTheDocument();
-  });
-
   it("lets the user create a Codex chat session", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
@@ -256,7 +272,7 @@ describe("CreateSessionDialog", () => {
       agentCli: availableAgentCli,
     });
 
-    const { getByRole, getByText } = renderDialog();
+    const { getByRole } = renderDialog();
 
     fireEvent.click(getByRole("button", { name: /聊天模式/ }));
     selectAgentCli("Kimi Code");
@@ -265,7 +281,6 @@ describe("CreateSessionDialog", () => {
     expect(chatMode.disabled).toBe(false);
     expect(chatMode).toHaveAttribute("aria-pressed", "true");
     expect(getByRole("button", { name: /^终端模式/ })).toHaveAttribute("aria-pressed", "false");
-    getByText("气泡式对话，支持 Voice Pilot");
     expect(getByRole("combobox", { name: "权限模式" })).toHaveTextContent("手工审批");
 
     fireEvent.click(getByRole("button", { name: "创建" }));
@@ -283,7 +298,7 @@ describe("CreateSessionDialog", () => {
     });
   });
 
-  it("creates a PTY session without overriding the provider terminal theme", async () => {
+  it("submits a manually entered working directory without overriding the terminal theme", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       sessionId: "claude-pty-1",
@@ -298,6 +313,11 @@ describe("CreateSessionDialog", () => {
     });
 
     const { getByRole } = renderDialog();
+    const cwdInput = getByRole("textbox", { name: "工作目录" });
+    expect(cwdInput).toBeInstanceOf(HTMLInputElement);
+    expect(cwdInput).toHaveAttribute("type", "text");
+    expect(cwdInput).toHaveAttribute("data-path-control", "input");
+    fireEvent.change(cwdInput, { target: { value: "/srv/projects/dev-anywhere" } });
 
     fireEvent.click(getByRole("button", { name: "创建" }));
 
@@ -305,7 +325,7 @@ describe("CreateSessionDialog", () => {
       expect(createSession).toHaveBeenCalledWith(
         {
           kind: "agent",
-          cwd: "/home/dev",
+          cwd: "/srv/projects/dev-anywhere",
           name: undefined,
           mode: "pty",
           provider: "claude",
@@ -464,21 +484,24 @@ describe("CreateSessionDialog", () => {
       agentCli: availableAgentCli,
     });
 
-    const { getByLabelText, getByPlaceholderText } = renderDialog();
+    const { getByLabelText } = renderDialog();
 
     const cwdInput = getByLabelText("工作目录") as HTMLInputElement;
     await waitFor(() => {
       expect(cwdInput.value).toBe("/home/dev");
     });
     fireEvent.focusIn(cwdInput);
-    let picker: HTMLElement | null = null;
-    await waitFor(() => {
-      picker = document.querySelector<HTMLElement>('[data-slot="file-path-picker"]');
-      expect(picker).toBeTruthy();
+    const picker = await waitFor(() => {
+      const current = document.querySelector<HTMLElement>('[data-slot="file-path-picker"]');
+      expect(current).toBeTruthy();
+      return current as HTMLElement;
     });
-    if (!picker) throw new Error("directory picker did not open");
     fireEvent.click(within(picker).getByRole("button", { name: "新建目录" }));
-    fireEvent.change(getByPlaceholderText("目录名称"), {
+    const directoryName = picker.querySelector<HTMLInputElement>(
+      '[data-slot="file-path-picker-create-directory-name"]',
+    );
+    if (!directoryName) throw new Error("directory name input did not open");
+    fireEvent.change(directoryName, {
       target: { value: "new-project" },
     });
     fireEvent.click(within(picker).getByRole("button", { name: "创建目录" }));
@@ -512,6 +535,116 @@ describe("CreateSessionDialog", () => {
     expect(document.querySelector('[data-slot="file-path-picker"]')).toBeNull();
   });
 
+  it("lets a phone user browse to an absolute working directory and create the session", async () => {
+    testViewport = "mobile";
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      sessionId: "mobile-workspace",
+      mode: "pty",
+      provider: "claude",
+    });
+    useFileStore.setState({
+      tree: new Map([
+        ["/home/dev", [{ name: "projects", isDir: true }]],
+        ["/home/dev/projects", []],
+      ]),
+      treeWithHidden: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { baseElement, getByRole, queryByRole } = renderDialog();
+    const cwdButton = await waitFor(() => {
+      const control = getByRole("button", { name: "工作目录" });
+      expect(control).toHaveTextContent("/home/dev");
+      return control;
+    });
+    expect(cwdButton).toHaveAttribute("data-path-control", "button");
+    expect(queryByRole("textbox", { name: "工作目录" })).not.toBeInTheDocument();
+
+    fireEvent.click(cwdButton);
+    fireEvent.click(
+      baseElement.querySelector('[data-slot="file-entry"][data-entry-name="projects"]')!,
+    );
+    expect(createSession).not.toHaveBeenCalled();
+    fireEvent.click(baseElement.querySelector('[data-slot="select-current-directory"]')!);
+    expect(cwdButton).toHaveTextContent("/home/dev/projects/");
+
+    fireEvent.click(getByRole("button", { name: "创建" }));
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: "/home/dev/projects/" }),
+        expect.any(Number),
+      );
+    });
+  });
+
+  it("uses a button browser instead of a text field for CLI paths on phones", async () => {
+    testViewport = "mobile";
+    updateAgentCliPath.mockResolvedValueOnce({
+      provider: "claude",
+      agentCli: {
+        ...availableAgentCli,
+        claude: {
+          available: true,
+          command: "/usr/local/bin/claude-custom",
+          suggestions: availableAgentCli.claude.suggestions,
+        },
+      },
+    });
+    useFileStore.setState({
+      tree: new Map(),
+      treeWithHidden: new Map([["/usr/local/bin", [{ name: "claude-custom", isDir: false }]]]),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole, queryByRole } = renderDialog();
+    const pathButton = getByRole("button", { name: "CLI 路径" });
+    expect(pathButton).toHaveAttribute("data-path-control", "button");
+    expect(queryByRole("textbox", { name: "CLI 路径" })).not.toBeInTheDocument();
+    expect(queryByRole("button", { name: "指定路径" })).not.toBeInTheDocument();
+
+    expect(pathButton).toHaveAttribute("aria-expanded", "false");
+    fireEvent.click(pathButton);
+    expect(pathButton).toHaveAttribute("aria-expanded", "true");
+    fireEvent.click(getByRole("button", { name: "claude-custom" }));
+    expect(pathButton).toHaveTextContent("/usr/local/bin/claude-custom");
+    fireEvent.click(getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(updateAgentCliPath).toHaveBeenCalledWith("claude", "/usr/local/bin/claude-custom");
+    });
+  });
+
+  it("does not create with an unsaved CLI path and can discard the draft", async () => {
+    useFileStore.setState({
+      tree: new Map(),
+      treeWithHidden: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole, queryByRole } = renderDialog();
+    const pathInput = getByRole("textbox", { name: "CLI 路径" });
+    const createButton = getByRole("button", { name: "创建" });
+
+    expect(createButton).toBeEnabled();
+    fireEvent.change(pathInput, { target: { value: "/opt/bin/claude" } });
+    expect(createButton).toBeDisabled();
+
+    const actions = document.querySelector<HTMLElement>('[data-slot="agent-cli-path-actions"]');
+    if (!actions) throw new Error("Expected CLI path draft actions");
+    fireEvent.click(within(actions).getByRole("button", { name: "取消" }));
+
+    await waitFor(() => expect(pathInput).toHaveValue("/usr/local/bin/claude"));
+    await waitFor(() => expect(createButton).toBeEnabled());
+    expect(queryByRole("button", { name: "保存" })).not.toBeInTheDocument();
+  });
+
   it("disables an unavailable Agent CLI before creating a session", async () => {
     requestProxyInfo.mockResolvedValueOnce({
       homePath: "/home/dev",
@@ -535,6 +668,7 @@ describe("CreateSessionDialog", () => {
   it("keeps working with an older AgentCliStatus that does not contain Kimi", () => {
     useFileStore.setState({
       tree: new Map(),
+      treeWithHidden: new Map([["/home/dev/.local/bin", [{ name: "claude", isDir: false }]]]),
       cwd: "",
       homePath: "/home/dev",
       agentCli: {
@@ -543,13 +677,14 @@ describe("CreateSessionDialog", () => {
       },
     });
 
-    const { getByPlaceholderText, getByRole } = renderDialog();
+    const { getByRole } = renderDialog();
 
     selectAgentCli("Kimi Code");
     expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
 
-    fireEvent.click(getByRole("button", { name: "指定路径" }));
-    getByPlaceholderText("/path/to/kimi");
+    const pathInput = getByRole("textbox", { name: "CLI 路径" });
+    expect(pathInput).toBeInstanceOf(HTMLInputElement);
+    expect(pathInput).toHaveAttribute("data-path-control", "input");
   });
 
   it("lets the user set a missing Agent CLI path from the dialog", async () => {
@@ -572,14 +707,18 @@ describe("CreateSessionDialog", () => {
       },
     });
 
-    const { getByLabelText, getByRole, getByText } = renderDialog();
+    const { getByLabelText, getByRole, getByText, queryByRole } = renderDialog();
 
     await waitFor(() => getByText("claude not found in PATH"));
-    fireEvent.click(getByRole("button", { name: "指定路径" }));
-    fireEvent.change(getByLabelText("CLI 路径"), {
+    const pathInput = getByLabelText("CLI 路径");
+    expect(pathInput).toBeInstanceOf(HTMLInputElement);
+    expect(pathInput).toHaveAttribute("type", "text");
+    expect(pathInput).toHaveAttribute("data-path-control", "input");
+    expect(queryByRole("button", { name: "指定路径" })).not.toBeInTheDocument();
+    fireEvent.change(pathInput, {
       target: { value: "/home/dev/.local/bin/claude" },
     });
-    fireEvent.click(getByRole("button", { name: "保存路径" }));
+    fireEvent.click(getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
       expect(updateAgentCliPath).toHaveBeenCalledWith("claude", "/home/dev/.local/bin/claude");
@@ -591,25 +730,44 @@ describe("CreateSessionDialog", () => {
     expect(toastSuccess).toHaveBeenCalledWith("Claude Code 路径已保存");
   });
 
-  it("lets the user choose from discovered Agent CLI path suggestions", async () => {
+  it("saves an Agent CLI path selected from the remote browser", async () => {
+    updateAgentCliPath.mockResolvedValueOnce({
+      provider: "claude",
+      agentCli: {
+        ...availableAgentCli,
+        claude: {
+          available: true,
+          command: "/usr/local/bin/claude",
+          suggestions: availableAgentCli.claude.suggestions,
+        },
+      },
+    });
     useFileStore.setState({
       tree: new Map(),
+      treeWithHidden: new Map([["/usr/local/bin", [{ name: "claude", isDir: false }]]]),
       cwd: "",
       homePath: "/home/dev",
-      agentCli: availableAgentCli,
+      agentCli: {
+        ...availableAgentCli,
+        claude: {
+          ...availableAgentCli.claude,
+          command: "/usr/local/bin/claude-old",
+        },
+      },
     });
 
     const { getByLabelText, getByRole } = renderDialog();
 
-    fireEvent.click(getByRole("button", { name: "指定路径" }));
-
     await waitFor(() => {
       getByLabelText("CLI 路径");
     });
-    const options = Array.from(document.querySelectorAll("datalist option")).map((option) =>
-      option.getAttribute("value"),
-    );
-    expect(options).toEqual(["/usr/local/bin/claude", "/home/dev/.local/bin/claude"]);
+    fireEvent.focus(getByLabelText("CLI 路径"));
+    fireEvent.click(getByRole("button", { name: "claude" }));
+    fireEvent.click(getByRole("button", { name: "保存" }));
+
+    await waitFor(() => {
+      expect(updateAgentCliPath).toHaveBeenCalledWith("claude", "/usr/local/bin/claude");
+    });
   });
 
   it("persists a user supplied title through session_create and locks it like rename", async () => {

@@ -21,10 +21,12 @@ test.describe("L4 mobile / error UI states", () => {
     const dialog = emuPage.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible({ timeout: 15_000 });
 
-    // 输入一个 fakeRelay directories 集合外的路径 → PATH_NOT_FOUND error.
-    await emuPage.getByLabel("工作目录").fill("/this/path/does/not/exist");
-    // 关 file picker (focus 工作目录会自动弹).
-    await emuPage.getByRole("heading", { name: "新建会话" }).click();
+    // 选择一个 fakeRelay 会列出、但不在其可创建会话目录集合中的路径。
+    const cwdControl = dialog.getByLabel("工作目录");
+    await cwdControl.click();
+    await dialog.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
+    await dialog.locator('[data-slot="select-current-directory"]').click();
+    await expect(cwdControl).toContainText("/home/dev/sample-app/");
     await dialog.getByRole("button", { name: "创建" }).click();
 
     // 错误文案出现; dialog 不关闭, 用户仍能编辑.
@@ -54,21 +56,21 @@ test.describe("L4 mobile / error UI states", () => {
     const dialog = emuPage.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible({ timeout: 15_000 });
 
-    // 触发 agent CLI 自定义路径输入; 灌一条很长的伪路径, 验证 dialog 不水平溢出.
-    // emu Chrome 默认显示底部 chrome 工具栏, visual viewport 高度 (~428px) 远小于
-    // layout viewport (789px), dialog 底部按钮在 layout viewport 内 (button.top≈631) 但
-    // 落在 visual viewport 之外。playwright click 用 visual viewport 判定 actionability,
-    // 即便 force: true 也拒绝在 visual viewport 之外的 element rect 上 dispatch click。
-    // 改用 evaluate 调 native click(): 跟 user tap 等效, 不依赖 viewport intersect, 把
-    // dialog UX 验证 (横向溢出) 跟 emu Chrome chrome bar 占空间这层无关问题剥离。
+    // 手机端常显路径按钮而非文本框；逐层进入目录后选中文件，构造长路径草稿。
     const cliPathCard = dialog.locator('[data-slot="agent-cli-path-card"]');
-    const cliPathButton = cliPathCard.getByRole("button", { name: "指定路径" });
-    await cliPathButton.evaluate((btn) => (btn as HTMLButtonElement).click());
-    const cliPathInput = cliPathCard.locator('input[list^="agent-cli-path-"]');
-    await expect(cliPathInput).toBeVisible();
-    await cliPathInput.fill(
-      "/very/very/very/long/agent/cli/path/that/might/break/mobile/dialog/layout/if/clipped",
+    const cliPathControl = cliPathCard.getByLabel("CLI 路径");
+    await expect(cliPathControl).toHaveAttribute("data-path-control", "button");
+    await expect(cliPathCard.getByRole("button", { name: "指定路径" })).toHaveCount(0);
+    await expect(cliPathCard.locator('[data-slot="agent-cli-path-actions"]')).toHaveCount(0);
+    await cliPathControl.click();
+    for (let depth = 0; depth < 8; depth += 1) {
+      await cliPathCard.locator('[data-slot="file-entry"][data-entry-name="src"]').click();
+    }
+    await cliPathCard.locator('[data-slot="file-entry"][data-entry-name="README.md"]').click();
+    await expect(cliPathControl).toContainText(
+      "/home/dev/.local/bin/src/src/src/src/src/src/src/src/README.md",
     );
+    await expect(cliPathCard.locator('[data-slot="agent-cli-path-actions"]')).toBeVisible();
     await expectNoHorizontalDocumentOverflow(emuPage);
     await expect(dialog).toBeVisible();
   });

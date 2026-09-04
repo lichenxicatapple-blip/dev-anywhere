@@ -378,27 +378,60 @@ describe("RelayClient request handling", () => {
 
   it("waits for the matching directory list response", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.requestDirectoryList("/home/dev");
+    const promise = relay.requestDirectoryList("/home/dev", { includeHidden: true });
     const requestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent.at(-1) ?? "{}")).toMatchObject({
+      type: "dir_list_request",
+      path: "/home/dev",
+      includeHidden: true,
+    });
 
     ws.emit({
       type: "dir_list_response",
       requestId: "other-request",
       path: "/home/dev",
+      includeHidden: true,
       entries: [{ name: "wrong", isDir: true }],
     });
     ws.emit({
       type: "dir_list_response",
       requestId,
       path: "/home/dev",
+      includeHidden: true,
       entries: [{ name: "workspace", isDir: true }],
     });
 
     await expect(promise).resolves.toEqual({
       path: "/home/dev",
+      includeHidden: true,
       entries: [{ name: "workspace", isDir: true }],
       error: undefined,
       errorCode: undefined,
+    });
+  });
+
+  it("sends the normal-tree policy explicitly when hidden entries are not requested", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestDirectoryList("/home/dev");
+    const requestId = sentRequestId(ws);
+
+    expect(JSON.parse(ws.sent.at(-1) ?? "{}")).toMatchObject({
+      type: "dir_list_request",
+      path: "/home/dev",
+      includeHidden: false,
+    });
+    ws.emit({
+      type: "dir_list_response",
+      requestId,
+      path: "/home/dev",
+      includeHidden: false,
+      entries: [{ name: "workspace", isDir: true }],
+    });
+
+    await expect(promise).resolves.toMatchObject({
+      path: "/home/dev",
+      includeHidden: false,
+      entries: [{ name: "workspace", isDir: true }],
     });
   });
 

@@ -52,7 +52,8 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     const dialog = page.locator('[data-slot="create-session-dialog"]');
     const form = page.locator('[data-slot="create-session-form"]');
     await expect(dialog).toBeVisible();
-    await expect(page.getByText("/home/dev/.local/bin/claude")).toBeVisible();
+    const cliPathInput = dialog.getByLabel("CLI 路径");
+    await expect(cliPathInput).toHaveValue("/home/dev/.local/bin/claude");
 
     async function expectFormContained() {
       const overflowing = await form.evaluate((formNode) => {
@@ -77,8 +78,104 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     }
 
     await expectFormContained();
-    await page.getByRole("button", { name: "指定路径" }).click();
+    await expect(dialog.getByRole("button", { name: "指定路径" })).toHaveCount(0);
+    await expect(dialog.locator('[data-slot="agent-cli-path-actions"]')).toHaveCount(0);
+    await cliPathInput.fill(
+      "/very/very/very/long/agent/cli/path/that/must/stay/inside/the/create/session/dialog/claude",
+    );
+    await expect(dialog.locator('[data-slot="agent-cli-path-actions"]')).toBeVisible();
+    await cliPathInput.press("Escape");
     await expectFormContained();
+  });
+
+  test("桌面端保留可编辑的工作目录和 CLI 路径输入", async ({ page }) => {
+    const dialog = await openCreateAgentSessionDialog(page);
+    const cwdInput = dialog.getByLabel("工作目录");
+
+    await expect(cwdInput).toHaveAttribute("data-path-control", "input");
+    await expect(cwdInput).toHaveAttribute("type", "text");
+    await cwdInput.fill("/home/dev/projects/");
+    const pathPicker = dialog.locator('[data-slot="file-path-picker"]');
+    await expect(pathPicker).toBeVisible();
+    const pathLabel = pathPicker.locator('[data-slot="file-path-picker-title"]');
+    const currentPath = pathPicker.locator('[data-slot="file-path-picker-current-directory"]');
+    const actions = pathPicker.locator('[data-slot="file-path-picker-actions"]');
+    const parentAction = actions.locator('[data-slot="file-path-picker-parent"]');
+    const [labelBox, pathBox, actionsBox, parentBox] = await Promise.all([
+      pathLabel.boundingBox(),
+      currentPath.boundingBox(),
+      actions.boundingBox(),
+      parentAction.boundingBox(),
+    ]);
+    expect(labelBox).not.toBeNull();
+    expect(pathBox).not.toBeNull();
+    expect(actionsBox).not.toBeNull();
+    expect(parentBox).not.toBeNull();
+    expect(Math.abs(pathBox!.x - parentBox!.x)).toBeLessThanOrEqual(1);
+    expect(pathBox!.y - (labelBox!.y + labelBox!.height)).toBeGreaterThan(
+      actionsBox!.y - (pathBox!.y + pathBox!.height),
+    );
+    const actionVisuals = await Promise.all(
+      [
+        parentAction,
+        actions.locator('[data-slot="file-path-picker-create-directory-toggle"]'),
+        actions.locator('[data-slot="select-current-directory"]'),
+      ].map((action) =>
+        action.evaluate((node) => {
+          const reference = document.createElement("span");
+          reference.className = "text-primary";
+          document.body.append(reference);
+          const primaryColor = getComputedStyle(reference).color;
+          reference.remove();
+          const style = getComputedStyle(node);
+          return {
+            backgroundColor: style.backgroundColor,
+            borderWidth: style.borderWidth,
+            boxShadow: style.boxShadow,
+            color: style.color,
+            primaryColor,
+          };
+        }),
+      ),
+    );
+    expect(actionVisuals).toEqual(
+      Array.from({ length: 3 }, () => ({
+        backgroundColor: "rgba(0, 0, 0, 0)",
+        borderWidth: "0px",
+        boxShadow: "none",
+        color: actionVisuals[0].primaryColor,
+        primaryColor: actionVisuals[0].primaryColor,
+      })),
+    );
+
+    await pathPicker.locator('[data-slot="file-entry"][data-entry-name="src"]').click();
+    await expect(cwdInput).toHaveValue("/home/dev/projects/");
+    await expect(currentPath).toHaveText("/home/dev/projects/src");
+    await pathPicker.locator('[data-slot="select-current-directory"]').click();
+    await expect(cwdInput).toHaveValue("/home/dev/projects/src/");
+
+    const cliPathInput = dialog.getByLabel("CLI 路径");
+    await expect(cliPathInput).toHaveAttribute("data-path-control", "input");
+    await expect(cliPathInput).toHaveValue("/home/dev/.local/bin/claude");
+    await expect(dialog.getByRole("button", { name: "指定路径" })).toHaveCount(0);
+    const cliPathActions = dialog.locator('[data-slot="agent-cli-path-actions"]');
+    await expect(cliPathActions).toHaveCount(0);
+    await cliPathInput.fill("/opt/homebrew/bin/claude");
+    await expect(cliPathInput).toHaveValue("/opt/homebrew/bin/claude");
+    await expect(cliPathActions).toBeVisible();
+    await expect(dialog.getByRole("button", { name: "创建" })).toBeDisabled();
+    await expect
+      .poll(async () => {
+        const messages = await sentFakeRelayMessages(page);
+        return messages.some(
+          (message) => message.type === "dir_list_request" && message.includeHidden === true,
+        );
+      })
+      .toBe(true);
+    await cliPathActions.getByRole("button", { name: "取消" }).click();
+    await expect(cliPathInput).toHaveValue("/home/dev/.local/bin/claude");
+    await expect(cliPathActions).toHaveCount(0);
+    await expect(dialog.getByRole("button", { name: "创建" })).toBeEnabled();
   });
 
   test("桌面底部终端按钮可以创建纯终端", async ({ page }) => {
