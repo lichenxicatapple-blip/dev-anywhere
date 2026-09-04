@@ -74,7 +74,11 @@ describe("HistoryList", () => {
     createSession.mockReset();
     createSession.mockResolvedValue({
       type: "session_create_response",
+      success: true,
       sessionId: "restored-session",
+      cwd: "/Users/dev/project",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "claude",
     });
@@ -260,6 +264,7 @@ describe("HistoryList", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
+        kind: "agent",
         cwd: "/Users/dev/project",
         mode: "json",
         provider: "claude",
@@ -273,7 +278,11 @@ describe("HistoryList", () => {
   it("restores Codex JSON history with its supported approval policy by default", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "codex-json-session",
+      cwd: "/Users/dev/project",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "codex",
     });
@@ -302,6 +311,7 @@ describe("HistoryList", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
+        kind: "agent",
         cwd: "/Users/dev/project",
         mode: "json",
         provider: "codex",
@@ -315,7 +325,11 @@ describe("HistoryList", () => {
   it("restores Kimi ACP history in chat mode with Kimi permission choices", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "kimi-json-session",
+      cwd: "/Users/dev/project",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "kimi",
     });
@@ -345,6 +359,7 @@ describe("HistoryList", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
+        kind: "agent",
         cwd: "/Users/dev/project",
         mode: "json",
         provider: "kimi",
@@ -358,6 +373,7 @@ describe("HistoryList", () => {
   it("shows a blocking PID-aware explanation when an external Codex writer owns the session", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: false,
       errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
       error: "另一个 Codex 进程正在使用此会话",
       activeWriterPid: 46559,
@@ -387,7 +403,11 @@ describe("HistoryList", () => {
   it("enters an already managed DEV Anywhere Codex session without another prompt", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "managed-codex-session",
+      cwd: "/Users/dev/project",
+      lastActive: 1,
+      kind: "agent",
       mode: "pty",
       provider: "codex",
       ptyOwner: "local-terminal",
@@ -412,10 +432,13 @@ describe("HistoryList", () => {
     });
     expect(useSessionStore.getState().sessions).toContainEqual({
       sessionId: "managed-codex-session",
+      kind: "agent",
       state: "idle",
       mode: "pty",
       provider: "codex",
       ptyOwner: "local-terminal",
+      cwd: "/Users/dev/project",
+      lastActive: 1,
     });
     expect(useSessionStore.getState().codexActiveWriterConflict).toBeNull();
     expect(screen.queryByRole("heading", { name: "该 Codex 会话仍在运行" })).toBeNull();
@@ -424,9 +447,14 @@ describe("HistoryList", () => {
   it("keeps permission choices visible when switching from Chat to Terminal", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "pty-bypass-session",
+      cwd: "/Users/dev/project",
+      lastActive: 1,
+      kind: "agent",
       mode: "pty",
       provider: "claude",
+      ptyOwner: "proxy-hosted",
     });
     const { container } = renderHistoryList([
       {
@@ -461,6 +489,7 @@ describe("HistoryList", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
+        kind: "agent",
         cwd: "/Users/dev/project",
         mode: "pty",
         provider: "claude",
@@ -492,6 +521,7 @@ describe("HistoryList", () => {
 
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith({
+        kind: "agent",
         cwd: "/Users/dev/project",
         mode: "json",
         provider: "claude",

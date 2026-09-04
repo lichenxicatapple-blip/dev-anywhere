@@ -1,5 +1,6 @@
 import type { Socket } from "node:net";
 import { serviceLogger } from "../common/logger.js";
+import { isManagedSessionProcess } from "../common/managed-session-process.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { SessionManager } from "./session-manager.js";
@@ -17,6 +18,7 @@ interface TerminateSessionDeps {
   workerRegistry: WorkerRegistry;
   terminalSockets: Map<string, Socket>;
   hostedPtyRegistry: HostedPtyRegistry;
+  isManagedSessionProcess?: typeof isManagedSessionProcess;
 }
 
 export function terminateSessionByOwnership(
@@ -34,12 +36,25 @@ export function terminateSessionByOwnership(
     if (terminalSocket?.writable) {
       terminalSocket.write(serializeIpc({ type: "pty_terminate", sessionId }));
     } else if (session.pid) {
-      try {
-        process.kill(session.pid, "SIGTERM");
-      } catch (err) {
+      const ownsPid = (deps.isManagedSessionProcess ?? isManagedSessionProcess)(session.pid, {
+        id: session.id,
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+      });
+      if (ownsPid) {
+        try {
+          process.kill(session.pid, "SIGTERM");
+        } catch (err) {
+          serviceLogger.warn(
+            { sessionId, pid: session.pid, error: String(err) },
+            "Terminal worker kill failed",
+          );
+        }
+      } else {
         serviceLogger.warn(
-          { sessionId, pid: session.pid, error: String(err) },
-          "Terminal worker kill failed",
+          { sessionId, pid: session.pid },
+          "Terminal worker PID identity could not be verified; signal skipped",
         );
       }
     }

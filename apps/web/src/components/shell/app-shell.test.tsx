@@ -43,10 +43,13 @@ import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 function makePtySession(sessionId: string): SessionInfo {
   return {
     sessionId,
+    kind: "agent",
     mode: "pty",
     provider: "codex",
     state: "idle",
     ptyOwner: "local-terminal",
+    cwd: "/tmp/project",
+    lastActive: 1,
   };
 }
 

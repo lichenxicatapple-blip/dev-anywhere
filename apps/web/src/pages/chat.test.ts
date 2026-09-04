@@ -12,9 +12,13 @@ import { useCommandStore } from "@/stores/command-store";
 
 const baseSession: SessionInfo = {
   sessionId: "s1",
+  kind: "agent",
   mode: "pty",
   provider: "claude",
   state: "idle",
+  ptyOwner: "proxy-hosted",
+  cwd: "/tmp/project",
+  lastActive: 1,
 };
 
 function status(overrides: Partial<AgentStatusPayload>): AgentStatusPayload {
@@ -44,7 +48,7 @@ describe("ChatPage session lifecycle derivation", () => {
         routeSessionEnded: true,
         session: undefined,
         agentStatus: status({ phase: "tool_use" }),
-        ptyState: { state: "approval_wait", tool: "Write" },
+        ptyState: { state: "approval_wait", seq: 1, tool: "Write" },
         hasPendingApproval: true,
       }),
     ).toBe("terminated");
@@ -86,7 +90,7 @@ describe("ChatPage session lifecycle derivation", () => {
         routeSessionEnded: false,
         session: baseSession,
         agentStatus: undefined,
-        ptyState: { state: "approval_wait", tool: "Write" },
+        ptyState: { state: "approval_wait", seq: 1, tool: "Write" },
         hasPendingApproval: false,
       }),
     ).toBe("idle");

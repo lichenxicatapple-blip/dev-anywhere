@@ -22,18 +22,33 @@ describe("SessionManager", () => {
     const dir = makeTmpDir();
     persistPath = join(dir, "sessions.json");
     historyMetadataPath = join(dir, "history-metadata.json");
-    manager = new SessionManager({ persistPath, historyMetadataPath });
+    manager = new SessionManager({
+      allowSessionRuntimeHandover: true,
+      persistPath,
+      historyMetadataPath,
+    });
   });
 
   afterEach(() => {
     manager.stopReaper();
+    vi.useRealTimers();
   });
 
   describe("createSession", () => {
     it("creates a PTY session with unique id and idle state", () => {
-      const info = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const info = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       expect(typeof info.id).toBe("string");
       expect(info.id.length).toBeGreaterThan(0);
+      expect(info.kind).toBe("agent");
       expect(info.mode).toBe("pty");
       expect(info.provider).toBe("claude");
       expect(info.state).toBe(SessionState.IDLE);
@@ -42,7 +57,7 @@ describe("SessionManager", () => {
     });
 
     it("creates a JSON session with unique id and idle state", () => {
-      const info = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const info = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       expect(typeof info.id).toBe("string");
       expect(info.id.length).toBeGreaterThan(0);
       expect(info.mode).toBe("json");
@@ -51,18 +66,28 @@ describe("SessionManager", () => {
     });
 
     it("stores optional name in SessionInfo", () => {
-      const info = manager.createSession("pty", "/tmp/test", ALIVE_PID, "my-session");
+      const info = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        "my-session",
+        undefined,
+        "local-terminal",
+      );
       expect(info.name).toBe("my-session");
     });
 
     it("stores a locked title when session_create receives an explicit user title", () => {
       const info = manager.createSession(
+        "agent",
         "json",
+        "claude",
         "/tmp/test",
         ALIVE_PID,
         "Release checklist",
         undefined,
-        "claude",
         undefined,
         true,
       );
@@ -70,7 +95,11 @@ describe("SessionManager", () => {
         name: "Release checklist",
         nameLocked: true,
       });
-      const manager2 = new SessionManager({ persistPath });
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
+      });
       expect(manager2.getSession(info.id)).toMatchObject({
         name: "Release checklist",
         nameLocked: true,
@@ -80,24 +109,28 @@ describe("SessionManager", () => {
 
     it("stores provider in SessionInfo", () => {
       const info = manager.createSession(
+        "agent",
         "pty",
+        "codex",
         "/tmp/test",
         ALIVE_PID,
         undefined,
         undefined,
-        "codex",
+        "local-terminal",
       );
       expect(info.provider).toBe("codex");
     });
 
     it("stores Kimi as a first-class PTY provider", () => {
       const info = manager.createSession(
+        "agent",
         "pty",
+        "kimi",
         "/tmp/test",
         ALIVE_PID,
         undefined,
         undefined,
-        "kimi",
+        "local-terminal",
       );
       expect(info.provider).toBe("kimi");
       expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toContainEqual(
@@ -107,48 +140,79 @@ describe("SessionManager", () => {
 
     it("stores PTY owner only for PTY sessions", () => {
       const pty = manager.createSession(
+        "agent",
         "pty",
+        "claude",
         "/tmp/test",
         ALIVE_PID,
         undefined,
         undefined,
-        "claude",
         "local-terminal",
       );
-      const json = manager.createSession(
-        "json",
-        "/tmp/test",
-        ALIVE_PID,
-        undefined,
-        undefined,
-        "claude",
-        "proxy-hosted",
-      );
+      const json = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
 
       expect(pty.ptyOwner).toBe("local-terminal");
       expect(json.ptyOwner).toBeUndefined();
     });
 
     it("generates unique IDs for each session", () => {
-      const s1 = manager.createSession("pty", "/tmp/test", ALIVE_PID);
-      const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s1 = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
+      const s2 = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       expect(s1.id).not.toBe(s2.id);
     });
 
     it("persists session to file after creation", () => {
-      manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       expect(existsSync(persistPath)).toBe(true);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       expect(data).toHaveLength(1);
+      expect(data[0].kind).toBe("agent");
       expect(data[0].provider).toBe("claude");
+    });
+
+    it("rejects incomplete runtime identity before mutating the registry", () => {
+      expect(() => manager.createSession("agent", "json", "claude", "/tmp/test", 0)).toThrow(
+        "Session PID must be a positive safe integer",
+      );
+      expect(() => manager.createSession("agent", "json", "claude", "", ALIVE_PID)).toThrow(
+        "Session cwd cannot be empty",
+      );
+      expect(manager.listSessions()).toEqual([]);
     });
   });
 
   describe("listSessions", () => {
     it("returns sessions sorted by createdAt descending", () => {
-      const s1 = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s1 = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.getSession(s1.id)!.createdAt = 1000;
-      const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s2 = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.getSession(s2.id)!.createdAt = 2000;
       const list = manager.listSessions();
       expect(list).toHaveLength(2);
@@ -163,7 +227,16 @@ describe("SessionManager", () => {
 
   describe("getSession", () => {
     it("returns SessionInfo for existing session", () => {
-      const created = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const created = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       const found = manager.getSession(created.id);
       expect(found?.id).toBe(created.id);
     });
@@ -175,26 +248,53 @@ describe("SessionManager", () => {
 
   describe("updateState", () => {
     it("transitions idle -> working", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.WORKING);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WORKING);
     });
 
     it("transitions working -> waiting_approval", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
     });
 
     it("PTY session allows idle -> waiting_approval for provider hook PermissionRequest", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       expect(manager.updateState(s.id, SessionState.WAITING_APPROVAL)).toBe(true);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.WAITING_APPROVAL);
     });
 
     it("JSON session transitions waiting_approval -> idle directly (粒度丢失：proxy 观察不到审批后的 WORKING 中间态)", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       manager.updateState(s.id, SessionState.IDLE);
@@ -202,7 +302,16 @@ describe("SessionManager", () => {
     });
 
     it("PTY session allows waiting_approval -> idle when provider ends the turn after approval", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       expect(manager.updateState(s.id, SessionState.IDLE)).toBe(true);
@@ -210,20 +319,29 @@ describe("SessionManager", () => {
     });
 
     it("transitions working -> idle", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.IDLE);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
     it("JSON session transitions idle -> error (observer channel lost)", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.ERROR);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.ERROR);
     });
 
     it("JSON session transitions idle -> compacting -> idle for native /compact", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       expect(manager.updateState(s.id, SessionState.COMPACTING)).toBe(true);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.COMPACTING);
       expect(manager.updateState(s.id, SessionState.IDLE)).toBe(true);
@@ -231,47 +349,92 @@ describe("SessionManager", () => {
     });
 
     it("PTY session rejects compacting because native /compact is JSON-only", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       expect(manager.updateState(s.id, SessionState.COMPACTING)).toBe(false);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
     it("PTY session rejects transition into error and returns false (no ERROR state for PTY)", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       expect(manager.updateState(s.id, SessionState.ERROR)).toBe(false);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.IDLE);
     });
 
     it("transitions any state -> terminated", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.TERMINATED);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
     });
 
     it("rejects terminated -> any state (absorbing) and returns false", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.TERMINATED);
       expect(manager.updateState(s.id, SessionState.IDLE)).toBe(false);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
     });
 
     it("JSON session rejects error -> idle and returns false (error only goes to terminated)", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.ERROR);
       expect(manager.updateState(s.id, SessionState.IDLE)).toBe(false);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.ERROR);
     });
 
     it("JSON session allows error -> terminated", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.ERROR);
       manager.updateState(s.id, SessionState.TERMINATED);
       expect(manager.getSession(s.id)!.state).toBe(SessionState.TERMINATED);
     });
 
     it("PTY session allows waiting_approval -> working (approval resolved, claude resumes)", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       manager.updateState(s.id, SessionState.WORKING);
@@ -279,7 +442,7 @@ describe("SessionManager", () => {
     });
 
     it("JSON session allows waiting_approval -> working after approval is resolved", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
       expect(manager.updateState(s.id, SessionState.WORKING)).toBe(true);
@@ -291,7 +454,16 @@ describe("SessionManager", () => {
     });
 
     it("does not persist runtime state to file (state is observation, not identity)", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.WORKING);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       const saved = data.find((d: { id: string }) => d.id === s.id);
@@ -301,14 +473,23 @@ describe("SessionManager", () => {
 
   describe("terminateSession", () => {
     it("removes PTY session from registry", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       const result = manager.terminateSession(s.id);
       expect(result.success).toBe(true);
       expect(manager.getSession(s.id)).toBeUndefined();
     });
 
     it("returns pid for JSON sessions", () => {
-      const s = manager.createSession("json", "/tmp/test", 12345);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", 12345);
       const result = manager.terminateSession(s.id);
       expect(result.success).toBe(true);
       expect(result.pid).toBe(12345);
@@ -322,10 +503,20 @@ describe("SessionManager", () => {
     it("passes remove context to lifecycle cleanup", () => {
       const contexts: unknown[] = [];
       const scoped = new SessionManager({
+        allowSessionRuntimeHandover: true,
         persistPath,
         onSessionRemoved: (_id, context) => contexts.push(context),
       });
-      const s = scoped.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = scoped.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
 
       scoped.terminateSession(s.id, { preserveProviderHooks: true });
 
@@ -339,12 +530,22 @@ describe("SessionManager", () => {
     // web 看到 session 残留。
     it("does not propagate exceptions from onSessionRemoved callback", () => {
       const scoped = new SessionManager({
+        allowSessionRuntimeHandover: true,
         persistPath,
         onSessionRemoved: () => {
           throw new Error("hook unregister boom");
         },
       });
-      const s = scoped.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = scoped.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
 
       expect(() => scoped.terminateSession(s.id)).not.toThrow();
       expect(scoped.getSession(s.id)).toBeUndefined();
@@ -354,23 +555,41 @@ describe("SessionManager", () => {
 
   describe("terminateAll", () => {
     it("removes all sessions and returns JSON PIDs", () => {
-      manager.createSession("pty", "/tmp/test", ALIVE_PID);
-      manager.createSession("json", "/tmp/test", 55555);
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
+      manager.createSession("agent", "json", "claude", "/tmp/test", 55555);
       const pids = manager.terminateAll();
       expect(manager.listSessions()).toHaveLength(0);
       expect(pids).toEqual([55555]);
     });
 
     it("returns pids for JSON sessions", () => {
-      manager.createSession("json", "/tmp/test", 111);
-      manager.createSession("json", "/tmp/test", 222);
+      manager.createSession("agent", "json", "claude", "/tmp/test", 111);
+      manager.createSession("agent", "json", "claude", "/tmp/test", 222);
       const pids = manager.terminateAll();
       expect(pids).toContain(111);
       expect(pids).toContain(222);
     });
 
     it("skips already terminated sessions", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.updateState(s.id, SessionState.TERMINATED);
       const pids = manager.terminateAll();
       expect(pids).toEqual([]);
@@ -379,13 +598,20 @@ describe("SessionManager", () => {
 
   describe("setClaudeSessionId", () => {
     it("stores claudeSessionId on session", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.setClaudeSessionId(s.id, "claude-abc");
       expect(manager.getSession(s.id)!.claudeSessionId).toBe("claude-abc");
     });
 
     it("records restore metadata for JSON sessions when Claude session ID is captured", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID, "chat session");
+      const s = manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        "chat session",
+      );
 
       manager.setClaudeSessionId(s.id, "claude-json-abc");
 
@@ -403,7 +629,14 @@ describe("SessionManager", () => {
     });
 
     it("stores resumed history session separately from the active Claude session", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID, "chat session");
+      const s = manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        "chat session",
+      );
 
       manager.setHistorySessionId(s.id, "claude-resume-abc");
       manager.setClaudeSessionId(s.id, "claude-active-def");
@@ -418,61 +651,20 @@ describe("SessionManager", () => {
         claudeSessionId: "claude-active-def",
       });
     });
-
-    it("infers missing resumed history session from metadata for pre-fix active sessions", () => {
-      writeFileSync(
-        persistPath,
-        JSON.stringify([
-          {
-            id: "s1",
-            mode: "json",
-            provider: "claude",
-            createdAt: 1,
-            updatedAt: 1,
-            cwd: "/tmp/test",
-            pid: ALIVE_PID,
-            name: "chat session",
-            claudeSessionId: "claude-active-def",
-          },
-        ]),
-      );
-      writeFileSync(
-        historyMetadataPath,
-        JSON.stringify([
-          {
-            nativeSessionId: "claude-active-def",
-            devAnywhereSessionId: "s1",
-            provider: "claude",
-            mode: "json",
-            cwd: "/tmp/test",
-            title: "chat session",
-            updatedAt: 200,
-          },
-          {
-            nativeSessionId: "claude-resume-abc",
-            devAnywhereSessionId: "s1",
-            provider: "claude",
-            mode: "json",
-            cwd: "/tmp/test",
-            title: "chat session",
-            updatedAt: 100,
-          },
-        ]),
-      );
-
-      const manager2 = new SessionManager({ persistPath, historyMetadataPath });
-
-      expect(manager2.getSession("s1")).toMatchObject({
-        historySessionId: "claude-resume-abc",
-        claudeSessionId: "claude-active-def",
-      });
-      manager2.stopReaper();
-    });
   });
 
   describe("setPid", () => {
     it("updates pid on session for PTY reconnection", () => {
-      const s = manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       manager.setPid(s.id, 9999);
       expect(manager.getSession(s.id)!.pid).toBe(9999);
     });
@@ -481,15 +673,14 @@ describe("SessionManager", () => {
   describe("updateTerminalCwd", () => {
     it("updates and persists an absolute working directory for a pure terminal", () => {
       const session = manager.createSession(
+        "terminal",
         "pty",
+        "claude",
         "/Users/dev",
         ALIVE_PID,
         undefined,
         undefined,
-        "claude",
         "local-terminal",
-        undefined,
-        "terminal",
       );
 
       expect(manager.updateTerminalCwd(session.id, "/Users/dev/My Project/../repo")).toBe(true);
@@ -501,17 +692,25 @@ describe("SessionManager", () => {
 
     it("ignores relative paths, unchanged paths, and agent sessions", () => {
       const terminal = manager.createSession(
+        "terminal",
         "pty",
+        "claude",
         "/Users/dev",
         ALIVE_PID,
         undefined,
         undefined,
-        "claude",
         "local-terminal",
-        undefined,
-        "terminal",
       );
-      const agent = manager.createSession("pty", "/Users/dev", ALIVE_PID);
+      const agent = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/Users/dev",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
 
       expect(manager.updateTerminalCwd(terminal.id, "relative/path")).toBe(false);
       expect(manager.updateTerminalCwd(terminal.id, "/Users/dev")).toBe(false);
@@ -523,7 +722,14 @@ describe("SessionManager", () => {
 
   describe("renameSession", () => {
     it("stores a user locked display name and persists it", () => {
-      const s = manager.createSession("json", "/tmp/project", ALIVE_PID, "~/project");
+      const s = manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/project",
+        ALIVE_PID,
+        "~/project",
+      );
 
       const renamed = manager.renameSession(s.id, "  Release checklist  ");
 
@@ -534,7 +740,11 @@ describe("SessionManager", () => {
         cwd: "/tmp/project",
       });
 
-      const manager2 = new SessionManager({ persistPath });
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
+      });
       expect(manager2.getSession(s.id)).toMatchObject({
         name: "Release checklist",
         nameLocked: true,
@@ -544,7 +754,14 @@ describe("SessionManager", () => {
     });
 
     it("rejects empty rename titles without changing the session", () => {
-      const s = manager.createSession("json", "/tmp/project", ALIVE_PID, "~/project");
+      const s = manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/project",
+        ALIVE_PID,
+        "~/project",
+      );
 
       const renamed = manager.renameSession(s.id, "   ");
 
@@ -558,26 +775,62 @@ describe("SessionManager", () => {
 
   describe("persistence", () => {
     it("loads sessions from existing file on construction", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID, "persisted");
-      const manager2 = new SessionManager({ persistPath });
+      const s = manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        "persisted",
+      );
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
+      });
       expect(manager2.getSession(s.id)?.name).toBe("persisted");
+      expect(manager2.getSession(s.id)?.kind).toBe("agent");
       manager2.stopReaper();
     });
 
     it("terminated sessions do not reappear on load", () => {
-      const s1 = manager.createSession("json", "/tmp/test", ALIVE_PID);
-      const s2 = manager.createSession("json", "/tmp/test", ALIVE_PID, "kept");
+      const s1 = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
+      const s2 = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID, "kept");
       manager.terminateSession(s1.id);
-      const manager2 = new SessionManager({ persistPath });
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
+      });
       expect(manager2.getSession(s1.id)).toBeUndefined();
       expect(manager2.getSession(s2.id)?.name).toBe("kept");
       manager2.stopReaper();
     });
 
     it("skips PTY sessions on restore when terminal process is dead", () => {
-      const pty = manager.createSession("pty", "/tmp/test", DEAD_PID);
-      const json = manager.createSession("json", "/tmp/test", ALIVE_PID, "alive");
-      const manager2 = new SessionManager({ persistPath });
+      const pty = manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        DEAD_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
+      const json = manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        "alive",
+      );
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
+      });
       expect(manager2.getSession(pty.id)).toBeUndefined();
       expect(manager2.getSession(json.id)?.name).toBe("alive");
       manager2.stopReaper();
@@ -585,34 +838,49 @@ describe("SessionManager", () => {
 
     it("starts with empty map when file does not exist", () => {
       const freshPath = join(makeTmpDir(), "fresh.json");
-      const fresh = new SessionManager({ persistPath: freshPath });
+      const fresh = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath: freshPath,
+      });
       expect(fresh.listSessions()).toEqual([]);
       fresh.stopReaper();
     });
 
     it("fails soft on corrupt persistence file (warn + empty state, daemon still boots)", () => {
       // 抛错路径会让 proxy daemon 起不来, 用户必须手删文件才能恢复——不友好。
-      // fail-soft: 警告 + 退化为空 session 列表, 还活着的 worker 通过 reconnectAll 走
-      // worker.sock 探活补回, 仅丢失元数据 (name / cwd 等)。
+      // fail-soft: 警告 + 退化为空 session 列表；没有权威记录的 worker 随后会被拒绝。
       writeFileSync(persistPath, "not-valid-json{{{", "utf-8");
-      const mgr = new SessionManager({ persistPath });
+      const mgr = new SessionManager({ allowSessionRuntimeHandover: true, persistPath });
       expect(mgr.listSessions()).toEqual([]);
       mgr.stopReaper();
     });
 
     it("uses atomic write (temp + rename)", () => {
-      manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
       expect(existsSync(persistPath)).toBe(true);
       const data = JSON.parse(readFileSync(persistPath, "utf-8"));
       expect(Array.isArray(data)).toBe(true);
     });
 
     it("any in-memory state resets to IDLE on load (state is observation, discarded across restart)", () => {
-      const s = manager.createSession("json", "/tmp/test", ALIVE_PID);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
       manager.updateState(s.id, SessionState.WORKING);
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
 
-      const manager2 = new SessionManager({ persistPath });
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
+      });
       const restored = manager2.getSession(s.id);
       expect(restored?.state).toBe(SessionState.IDLE);
       expect(restored?.provider).toBe("claude");
@@ -628,6 +896,7 @@ describe("SessionManager", () => {
         JSON.stringify([
           {
             id: badId,
+            kind: "agent",
             mode: "json",
             provider: "claude",
             cwd: "/tmp/test",
@@ -638,6 +907,7 @@ describe("SessionManager", () => {
           },
           {
             id: goodId,
+            kind: "agent",
             mode: "json",
             provider: "claude",
             cwd: "/tmp/test",
@@ -650,7 +920,10 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
         persistPath,
+        isManagedSessionProcess: () => true,
+        terminateManagedSession: vi.fn(),
         onSessionRemoved: (id) => removedIds.push(id),
       });
       expect(manager2.getSession(goodId)?.state).toBe(SessionState.IDLE);
@@ -666,6 +939,7 @@ describe("SessionManager", () => {
         JSON.stringify([
           {
             id: "invalid",
+            kind: "agent",
             mode: "json",
             cwd: "/tmp/test",
             pid: ALIVE_PID,
@@ -677,6 +951,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
         persistPath,
         onSessionRemoved: (id) => removedIds.push(id),
       });
@@ -684,15 +959,452 @@ describe("SessionManager", () => {
       expect(removedIds).toEqual(["invalid"]);
       manager2.stopReaper();
     });
+
+    it("cleans persisted sessions without a kind", () => {
+      const removedIds: string[] = [];
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "missing-kind",
+            mode: "json",
+            provider: "claude",
+            cwd: "/tmp/test",
+            pid: ALIVE_PID,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
+
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      expect(manager2.listSessions()).toEqual([]);
+      expect(removedIds).toEqual(["missing-kind"]);
+      manager2.stopReaper();
+    });
+
+    it("cleans persisted sessions without a mode", () => {
+      const removedIds: string[] = [];
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "missing-mode",
+            kind: "agent",
+            provider: "claude",
+            cwd: "/tmp/test",
+            pid: ALIVE_PID,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
+
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+      expect(manager2.listSessions()).toEqual([]);
+      expect(removedIds).toEqual(["missing-mode"]);
+      manager2.stopReaper();
+    });
   });
 
   describe("PTY session cleanup on load()", () => {
-    it("does not delete data when PTY session PID is alive", () => {
+    it("stops and removes a foreign-generation local PTY before validating required fields", () => {
+      const terminateManagedSession = vi.fn();
       const removedIds: string[] = [];
-      manager.createSession("pty", "/tmp/test", ALIVE_PID);
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "foreign-local-terminal",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "local-terminal",
+            cwd: "/tmp/test",
+            pid: 4242,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
 
       const manager2 = new SessionManager({
         persistPath,
+        allowSessionRuntimeHandover: false,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: () => true,
+        terminateManagedSession,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+
+      expect(terminateManagedSession).toHaveBeenCalledOnce();
+      expect(terminateManagedSession).toHaveBeenCalledWith(4242);
+      expect(removedIds).toEqual(["foreign-local-terminal"]);
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      manager2.stopReaper();
+    });
+
+    it("stops and removes a foreign-generation JSON worker before validating required fields", () => {
+      const terminateManagedSession = vi.fn();
+      const inspectManagedProcess = vi.fn(() => true);
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "foreign-json-worker",
+            mode: "json",
+            provider: "codex",
+            cwd: "/tmp/test",
+            pid: 5252,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
+
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: false,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: inspectManagedProcess,
+        terminateManagedSession,
+      });
+
+      expect(inspectManagedProcess).toHaveBeenCalledWith(
+        5252,
+        expect.objectContaining({
+          id: "foreign-json-worker",
+          mode: "json",
+          provider: "codex",
+          workerSocketPath: expect.stringContaining("/foreign-json-worker/worker.sock"),
+        }),
+      );
+      expect(terminateManagedSession).toHaveBeenCalledWith(5252);
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      manager2.stopReaper();
+    });
+
+    it("removes a foreign-generation proxy-hosted PTY without retaining it for handover", () => {
+      const terminateManagedSession = vi.fn();
+      const inspectManagedProcess = vi.fn(() => true);
+      const removedIds: string[] = [];
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "foreign-proxy-hosted-terminal",
+            kind: "agent",
+            mode: "pty",
+            provider: "kimi",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/test",
+            pid: 5353,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
+
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: false,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: inspectManagedProcess,
+        terminateManagedSession,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+
+      expect(inspectManagedProcess).not.toHaveBeenCalled();
+      expect(terminateManagedSession).not.toHaveBeenCalled();
+      expect(removedIds).toEqual(["foreign-proxy-hosted-terminal"]);
+      expect(manager2.listSessions()).toEqual([]);
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      manager2.stopReaper();
+    });
+
+    it("does not signal a reused PID that fails managed-process identity checks", () => {
+      const terminateManagedSession = vi.fn();
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "stale-json-worker",
+            mode: "json",
+            provider: "claude",
+            cwd: "/tmp/test",
+            pid: 6262,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
+
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: false,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: () => false,
+        terminateManagedSession,
+      });
+
+      expect(terminateManagedSession).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      manager2.stopReaper();
+    });
+
+    it("keeps same-generation local PTYs available for reconnect handover", () => {
+      const terminateManagedSession = vi.fn();
+      const inspectManagedProcess = vi.fn(() => true);
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        4242,
+        "same generation",
+        "same-generation-terminal",
+        "local-terminal",
+      );
+
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: true,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: inspectManagedProcess,
+        terminateManagedSession,
+      });
+      const reconnected = manager2.claimLocalPtySession({
+        kind: "agent",
+        provider: "claude",
+        cwd: "/tmp/test",
+        pid: 4242,
+        name: "same generation",
+        sessionId: "same-generation-terminal",
+      });
+
+      expect(terminateManagedSession).not.toHaveBeenCalled();
+      expect(inspectManagedProcess).toHaveBeenCalledWith(4242, {
+        id: "same-generation-terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+      });
+      expect(reconnected.source).toBe("pending");
+      expect(reconnected.session.id).toBe("same-generation-terminal");
+      manager2.stopReaper();
+    });
+
+    it("cleans an alive same-generation local PTY whose process identity is unverified", () => {
+      const removedIds: string[] = [];
+      const terminateManagedSession = vi.fn();
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        4242,
+        "unverified",
+        "unverified-terminal",
+        "local-terminal",
+      );
+
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: true,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: () => false,
+        terminateManagedSession,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+
+      expect(manager2.listSessions()).toEqual([]);
+      expect(removedIds).toEqual(["unverified-terminal"]);
+      expect(terminateManagedSession).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      manager2.stopReaper();
+    });
+
+    it("expires an unclaimed local PTY handover without signalling its process", () => {
+      vi.useFakeTimers();
+      const removedIds: string[] = [];
+      const terminateManagedSession = vi.fn();
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        4242,
+        "pending",
+        "expiring-terminal",
+        "local-terminal",
+      );
+
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: true,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: () => true,
+        terminateManagedSession,
+        localPtyReconnectTimeoutMs: 1_000,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toHaveLength(1);
+      vi.advanceTimersByTime(1_001);
+      expect(removedIds).toEqual(["expiring-terminal"]);
+      expect(terminateManagedSession).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      manager2.stopReaper();
+      vi.useRealTimers();
+    });
+
+    it("only lets the same PID reclaim an active local PTY", () => {
+      const active = manager.createSession(
+        "agent",
+        "pty",
+        "kimi",
+        "/tmp/project",
+        4242,
+        "active",
+        "active-terminal",
+        "local-terminal",
+      );
+
+      const claimed = manager.claimLocalPtySession({
+        kind: "agent",
+        provider: "kimi",
+        cwd: "/tmp/project",
+        pid: 4242,
+        sessionId: active.id,
+      });
+      expect(claimed).toEqual({ session: active, source: "active" });
+      expect(() =>
+        manager.claimLocalPtySession({
+          kind: "agent",
+          provider: "kimi",
+          cwd: "/tmp/project",
+          pid: 4243,
+          sessionId: active.id,
+        }),
+      ).toThrow("PTY reconnect identity does not match the session owner");
+      expect(manager.getSession(active.id)?.pid).toBe(4242);
+    });
+
+    it("rejects an unknown caller-supplied local PTY session id", () => {
+      expect(() =>
+        manager.claimLocalPtySession({
+          kind: "agent",
+          provider: "claude",
+          cwd: "/tmp/project",
+          pid: 4242,
+          sessionId: "not-active-or-pending",
+        }),
+      ).toThrow("PTY reconnect session is not available for handover");
+      expect(manager.getSession("not-active-or-pending")).toBeUndefined();
+    });
+
+    it("removes same-generation proxy-hosted PTYs instead of waiting for an impossible reconnect", () => {
+      const removedIds: string[] = [];
+      writeFileSync(
+        persistPath,
+        JSON.stringify([
+          {
+            id: "same-generation-proxy-hosted",
+            kind: "agent",
+            mode: "pty",
+            provider: "kimi",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/test",
+            pid: 5353,
+            createdAt: Date.now(),
+            updatedAt: Date.now(),
+          },
+        ]),
+        "utf-8",
+      );
+
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: true,
+        isProcessAlive: () => true,
+        terminateManagedSession: vi.fn(),
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+
+      expect(manager2.listSessions()).toEqual([]);
+      expect(removedIds).toEqual(["same-generation-proxy-hosted"]);
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      manager2.stopReaper();
+    });
+
+    it.each([
+      ["provider", "codex", 4242],
+      ["pid", "claude", 4243],
+    ] as const)(
+      "rejects a PTY reconnect whose %s differs from the persisted identity",
+      (_field, provider, pid) => {
+        manager.createSession(
+          "agent",
+          "pty",
+          "claude",
+          "/tmp/test",
+          4242,
+          "same generation",
+          "current-terminal",
+          "local-terminal",
+        );
+
+        const manager2 = new SessionManager({
+          persistPath,
+          allowSessionRuntimeHandover: true,
+          isProcessAlive: () => true,
+          isManagedSessionProcess: () => true,
+        });
+        expect(() =>
+          manager2.claimLocalPtySession({
+            kind: "agent",
+            provider,
+            cwd: "/tmp/test",
+            pid,
+            name: "same generation",
+            sessionId: "current-terminal",
+          }),
+        ).toThrow("PTY reconnect identity does not match the session owner");
+        expect(manager2.getSession("current-terminal")).toBeUndefined();
+        manager2.stopReaper();
+      },
+    );
+
+    it("does not delete data when PTY session PID is alive", () => {
+      const removedIds: string[] = [];
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
+
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
         onSessionRemoved: (id) => removedIds.push(id),
       });
       // PTY 会话不加载到内存（即使进程存活），但也不触发 onSessionRemoved
@@ -701,21 +1413,33 @@ describe("SessionManager", () => {
     });
 
     it("keeps a user locked PTY name authoritative when the terminal reconnects after proxy restart", () => {
-      const pty = manager.createSession("pty", "/tmp/project", ALIVE_PID, "~/project");
-      manager.renameSession(pty.id, "Release checklist");
-
-      const manager2 = new SessionManager({ persistPath });
-      expect(manager2.getSession(pty.id)).toBeUndefined();
-
-      const reconnected = manager2.createSession(
+      const pty = manager.createSession(
+        "agent",
         "pty",
+        "claude",
         "/tmp/project",
         ALIVE_PID,
         "~/project",
-        pty.id,
-        "claude",
+        undefined,
         "local-terminal",
       );
+      manager.renameSession(pty.id, "Release checklist");
+
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isManagedSessionProcess: () => true,
+      });
+      expect(manager2.getSession(pty.id)).toBeUndefined();
+
+      const reconnected = manager2.claimLocalPtySession({
+        kind: "agent",
+        provider: "claude",
+        cwd: "/tmp/project",
+        pid: ALIVE_PID,
+        name: "~/project",
+        sessionId: pty.id,
+      }).session;
 
       expect(reconnected).toMatchObject({
         id: pty.id,
@@ -731,10 +1455,21 @@ describe("SessionManager", () => {
 
     it("deletes data when PTY session PID is dead", () => {
       const removedIds: string[] = [];
-      manager.createSession("pty", "/tmp/test", DEAD_PID);
+      manager.createSession(
+        "agent",
+        "pty",
+        "claude",
+        "/tmp/test",
+        DEAD_PID,
+        undefined,
+        undefined,
+        "local-terminal",
+      );
 
       const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
         persistPath,
+        isManagedSessionProcess: () => true,
         onSessionRemoved: (id) => removedIds.push(id),
       });
       expect(removedIds).toHaveLength(1);
@@ -743,9 +1478,10 @@ describe("SessionManager", () => {
 
     it("cleans JSON sessions with dead PID on load", () => {
       const removedIds: string[] = [];
-      manager.createSession("json", "/tmp/test", DEAD_PID, "dead-pid");
+      manager.createSession("agent", "json", "claude", "/tmp/test", DEAD_PID, "dead-pid");
 
       const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
         persistPath,
         onSessionRemoved: (id) => removedIds.push(id),
       });
@@ -755,16 +1491,63 @@ describe("SessionManager", () => {
 
     it("restores JSON sessions with alive PID on load", () => {
       const removedIds: string[] = [];
-      const json = manager.createSession("json", "/tmp/test", ALIVE_PID, "alive");
+      const inspectManagedProcess = vi.fn(() => true);
+      const json = manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/test",
+        ALIVE_PID,
+        "alive",
+      );
 
       const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
         persistPath,
+        isManagedSessionProcess: inspectManagedProcess,
         onSessionRemoved: (id) => removedIds.push(id),
       });
       const restored = manager2.getSession(json.id);
       expect(restored?.name).toBe("alive");
       expect(restored?.mode).toBe("json");
       expect(removedIds).not.toContain(json.id);
+      expect(inspectManagedProcess).toHaveBeenCalledWith(
+        ALIVE_PID,
+        expect.objectContaining({
+          id: json.id,
+          mode: "json",
+          provider: "claude",
+          workerSocketPath: expect.stringContaining(json.id),
+        }),
+      );
+      manager2.stopReaper();
+    });
+
+    it("cleans an alive JSON record whose worker process identity is unverified", () => {
+      const removedIds: string[] = [];
+      const terminateManagedSession = vi.fn();
+      const json = manager.createSession(
+        "agent",
+        "json",
+        "kimi",
+        "/tmp/test",
+        ALIVE_PID,
+        "unverified",
+      );
+
+      const manager2 = new SessionManager({
+        allowSessionRuntimeHandover: true,
+        persistPath,
+        isProcessAlive: () => true,
+        isManagedSessionProcess: () => false,
+        terminateManagedSession,
+        onSessionRemoved: (id) => removedIds.push(id),
+      });
+
+      expect(manager2.getSession(json.id)).toBeUndefined();
+      expect(removedIds).toContain(json.id);
+      expect(terminateManagedSession).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
       manager2.stopReaper();
     });
   });
@@ -776,7 +1559,7 @@ describe("SessionManager", () => {
         throw new Error("ESRCH");
       });
 
-      const s = manager.createSession("json", "/tmp/test", 99999);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", 99999);
       manager.updateState(s.id, SessionState.WORKING);
 
       manager.startReaper(1000);
@@ -794,7 +1577,7 @@ describe("SessionManager", () => {
         return true;
       });
 
-      const s = manager.createSession("json", "/tmp/test", 99999);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", 99999);
       manager.updateState(s.id, SessionState.WORKING);
 
       manager.startReaper(1000);
@@ -809,7 +1592,7 @@ describe("SessionManager", () => {
     it("stopReaper clears the interval", () => {
       vi.useFakeTimers();
 
-      const s = manager.createSession("json", "/tmp/test", 99999);
+      const s = manager.createSession("agent", "json", "claude", "/tmp/test", 99999);
       manager.updateState(s.id, SessionState.WORKING);
 
       manager.startReaper(1000);

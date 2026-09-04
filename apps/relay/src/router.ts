@@ -21,14 +21,14 @@ export function parseMessage(data: string): ParseResult {
     return { kind: "invalid", error: "Invalid JSON" };
   }
 
-  const controlResult = RelayControlSchema.safeParse(parsed);
-  if (controlResult.success) {
-    return { kind: "control", message: controlResult.data };
-  }
-
   const envelopeResult = MessageEnvelopeSchema.safeParse(parsed);
   if (envelopeResult.success) {
     return { kind: "envelope", message: envelopeResult.data, raw: data };
+  }
+
+  const controlResult = RelayControlSchema.safeParse(parsed);
+  if (controlResult.success) {
+    return { kind: "control", message: controlResult.data };
   }
 
   return { kind: "invalid", error: "Message matches neither RelayControl nor MessageEnvelope" };

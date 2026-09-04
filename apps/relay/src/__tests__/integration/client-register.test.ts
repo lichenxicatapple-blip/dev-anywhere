@@ -1,7 +1,11 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
-import { RelayCloseCode } from "@dev-anywhere/shared";
+import {
+  MESSAGE_ENVELOPE_VERSION,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  RelayCloseCode,
+} from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import {
   waitForOpen,
@@ -52,10 +56,20 @@ describe("client_register protocol", () => {
   function clientRegister(clientId: string): Record<string, unknown> {
     return {
       type: "client_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
       clientId,
       browserName: "Chrome",
       osName: "macOS",
       deviceKind: "desktop",
+    };
+  }
+
+  function proxyRegister(proxyId = "p1"): Record<string, unknown> {
+    return {
+      type: "proxy_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      proxyId,
+      proxyVersion: "0.9.0",
     };
   }
 
@@ -68,6 +82,7 @@ describe("client_register protocol", () => {
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("client_register_response");
+    expect(response.protocolVersion).toBe(RELAY_CONTROL_PROTOCOL_VERSION);
     expect(response.status).toBe("new");
     expect(response.proxyId).toBeUndefined();
     expect(response.bindingId).toBeUndefined();
@@ -81,7 +96,13 @@ describe("client_register protocol", () => {
     const closePromise = new Promise<number>((resolve) => {
       client.once("close", (code) => resolve(code));
     });
-    client.send(JSON.stringify({ type: "client_register", clientId: "old-client" }));
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId: "incomplete-client",
+      }),
+    );
 
     const response = JSON.parse(await msgPromise);
     expect(response).toMatchObject({
@@ -91,10 +112,77 @@ describe("client_register protocol", () => {
     expect(await closePromise).toBe(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
   });
 
+  it.each([
+    ["missing", undefined],
+    ["mismatched", 0],
+  ])("rejects a client with a %s control protocol", async (_label, protocolVersion) => {
+    const client = connectClient();
+    await waitForOpen(client);
+    const message = clientRegister(`rejected-client-${String(protocolVersion)}`);
+    if (protocolVersion === undefined) delete message.protocolVersion;
+    else message.protocolVersion = protocolVersion;
+    const errorPromise = waitForMessageType(client, "relay_error");
+    const closePromise = new Promise<number>((resolve) => {
+      client.once("close", (code) => resolve(code));
+    });
+
+    client.send(JSON.stringify(message));
+
+    expect(JSON.parse(await errorPromise)).toMatchObject({ code: "INVALID_MESSAGE" });
+    expect(await closePromise).toBe(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
+    expect(relay.registry.getClientDetails()).not.toEqual(
+      expect.arrayContaining([expect.objectContaining({ clientId: message.clientId })]),
+    );
+  });
+
+  it("rejects an envelope before the current client handshake", async () => {
+    const client = connectClient();
+    await waitForOpen(client);
+    const errorPromise = waitForMessageType(client, "relay_error");
+    const closePromise = new Promise<number>((resolve) => {
+      client.once("close", (code) => resolve(code));
+    });
+
+    client.send(
+      JSON.stringify({
+        type: "heartbeat",
+        seq: 0,
+        timestamp: 1,
+        source: "client",
+        version: MESSAGE_ENVELOPE_VERSION,
+        payload: {},
+      }),
+    );
+
+    expect(JSON.parse(await errorPromise)).toMatchObject({ code: "NOT_REGISTERED" });
+    expect(await closePromise).toBe(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["mismatched", 0],
+  ])("rejects a Proxy with a %s control protocol", async (_label, protocolVersion) => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    const message = proxyRegister(`rejected-proxy-${String(protocolVersion)}`);
+    if (protocolVersion === undefined) delete message.protocolVersion;
+    else message.protocolVersion = protocolVersion;
+    const errorPromise = waitForMessageType(proxy, "relay_error");
+    const closePromise = new Promise<number>((resolve) => {
+      proxy.once("close", (code) => resolve(code));
+    });
+
+    proxy.send(JSON.stringify(message));
+
+    expect(JSON.parse(await errorPromise)).toMatchObject({ code: "NOT_REGISTERED" });
+    expect(await closePromise).toBe(RelayCloseCode.PROXY_PROTOCOL_REJECTED);
+    expect(relay.registry.hasProxy(String(message.proxyId))).toBe(false);
+  });
+
   it("lists connected relay clients and lets one client kick another", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     const client1 = connectClient();
@@ -109,6 +197,7 @@ describe("client_register protocol", () => {
     client2.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "c2",
         userAgent:
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
@@ -183,7 +272,7 @@ describe("client_register protocol", () => {
     // 注册 proxy
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     // 第一个客户端连接并绑定
@@ -223,7 +312,7 @@ describe("client_register protocol", () => {
     // 注册 proxy
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     // 客户端连接、注册并绑定
@@ -280,7 +369,7 @@ describe("client_register protocol", () => {
   it("keeps the replacement socket bound when the previous socket closes late", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     const previousClient = connectClient();
@@ -339,7 +428,7 @@ describe("client_register protocol", () => {
     // 注册 proxy
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     // 客户端绑定
@@ -375,7 +464,7 @@ describe("client_register protocol", () => {
     // 注册 proxy
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     // 客户端绑定
@@ -412,7 +501,7 @@ describe("client_register protocol", () => {
   it("client receives proxy_offline on proxy graceful disconnect", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     const client = connectClient();
@@ -434,7 +523,7 @@ describe("client_register protocol", () => {
   it("client receives proxy_online when proxy reconnects after grace period", async () => {
     const proxy1 = connectProxy();
     await waitForOpen(proxy1);
-    proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy1.send(JSON.stringify(proxyRegister()));
     await settle();
 
     const client = connectClient();
@@ -454,7 +543,7 @@ describe("client_register protocol", () => {
     const onlinePromise = waitForMessageType(client, "proxy_online");
     const proxy2 = connectProxy();
     await waitForOpen(proxy2);
-    proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy2.send(JSON.stringify(proxyRegister()));
 
     const onlineMsg = JSON.parse(await onlinePromise);
     expect(onlineMsg.type).toBe("proxy_online");
@@ -464,7 +553,7 @@ describe("client_register protocol", () => {
   it("proxy_select returns proxy_select_response with success true", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     const client = connectClient();
@@ -485,7 +574,7 @@ describe("client_register protocol", () => {
   it("proxy_list_response includes sessions per proxy", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await waitForMessage(proxy); // consume register response
     await settle();
 
@@ -494,8 +583,23 @@ describe("client_register protocol", () => {
       JSON.stringify({
         type: "session_sync",
         sessions: [
-          { id: "s1", mode: "pty", provider: "claude", state: "idle" },
-          { id: "s2", mode: "json", provider: "claude", state: "working" },
+          {
+            id: "s1",
+            kind: "agent",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/project",
+            state: "idle",
+          },
+          {
+            id: "s2",
+            kind: "agent",
+            mode: "json",
+            provider: "claude",
+            cwd: "/tmp/project",
+            state: "working",
+          },
         ],
       }),
     );
@@ -503,6 +607,8 @@ describe("client_register protocol", () => {
 
     const client = connectClient();
     await waitForOpen(client);
+    client.send(JSON.stringify(clientRegister("session-list-client")));
+    await waitForMessage(client);
 
     const msgPromise = waitForMessage(client);
     client.send(JSON.stringify({ type: "proxy_list_request" }));
@@ -516,7 +622,7 @@ describe("client_register protocol", () => {
   it("rejects proxy_select before client_register", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
     await settle();
 
     const client = connectClient();
@@ -540,10 +646,11 @@ describe("client_register protocol", () => {
     await waitForOpen(proxy);
 
     const msgPromise = waitForMessage(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister()));
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
+    expect(response.protocolVersion).toBe(RELAY_CONTROL_PROTOCOL_VERSION);
     expect(response.status).toBe("new");
     expect(response.relayVersion).toMatch(/^\d+\.\d+\.\d+$/);
     expect(response.connectionId).toEqual(expect.any(String));
@@ -552,7 +659,7 @@ describe("client_register protocol", () => {
   it("proxy receives proxy_register_response with status 'reconnected' on second register with same proxyId", async () => {
     const proxy1 = connectProxy();
     await waitForOpen(proxy1);
-    proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy1.send(JSON.stringify(proxyRegister()));
     const firstResponse = JSON.parse(await waitForMessage(proxy1));
     await settle();
 
@@ -565,10 +672,11 @@ describe("client_register protocol", () => {
     await waitForOpen(proxy2);
 
     const msgPromise = waitForMessage(proxy2);
-    proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy2.send(JSON.stringify(proxyRegister()));
 
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_register_response");
+    expect(response.protocolVersion).toBe(RELAY_CONTROL_PROTOCOL_VERSION);
     expect(response.status).toBe("reconnected");
     expect(response.connectionId).toEqual(expect.any(String));
     expect(response.connectionId).not.toBe(firstResponse.connectionId);

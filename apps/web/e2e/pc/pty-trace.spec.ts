@@ -6,7 +6,14 @@ const SESSION_ID = "pty-trace";
 
 test.describe("PTY scroll trace diagnostics", () => {
   test("enables PTY scroll trace from settings without reloading the chat", async ({ page }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
     await expect(page.locator('[data-slot="pty-scroll-trace-copy"]')).toHaveCount(0);
 

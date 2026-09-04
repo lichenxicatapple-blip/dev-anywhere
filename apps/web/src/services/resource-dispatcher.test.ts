@@ -40,31 +40,6 @@ describe("resource-dispatcher", () => {
     expect(useCommandStore.getState().commands.map((entry) => entry.name)).toEqual(["/active"]);
   });
 
-  it("continues to display legacy unscoped pushes", () => {
-    useCommandStore.getState().setActiveSession("s1");
-
-    dispatchResourceMessage({
-      type: "command_list_push",
-      commands: [command("/legacy")],
-    });
-
-    expect(useCommandStore.getState().commands.map((entry) => entry.name)).toEqual(["/legacy"]);
-  });
-
-  it("writes unsolicited resource snapshots to their specified session cache", () => {
-    useCommandStore.getState().setActiveSession("s1");
-
-    dispatchResourceMessage({
-      type: "session_resources_response",
-      sessionId: "s2",
-      commands: [command("/late-s2")],
-      groups: [],
-    });
-
-    expect(useCommandStore.getState().commands).toEqual([]);
-    expect(useCommandStore.getState().commandsBySessionId.s2[0].name).toBe("/late-s2");
-  });
-
   it("leaves requested directory responses to the requesting loader", () => {
     dispatchResourceMessage({
       type: "dir_list_response",

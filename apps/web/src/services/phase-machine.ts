@@ -72,7 +72,7 @@ function previewBindingIsCurrent(relay: RelayClient, scope: PreviewScope): boole
 
 function requestProxyState(relay: RelayClient, scope: PreviewScope): void {
   if (!previewBindingIsCurrent(relay, scope)) return;
-  relay.sendControl({ type: "session_list" });
+  relay.sendControl({ type: "session_list_request" });
   void previewController.syncWebSnapshot(scope).catch((error: unknown) => {
     if (error instanceof Error && error.name === "AbortError") return;
     console.error("[phase-machine] requestWebPreviewList failed", error);

@@ -4,18 +4,20 @@ import { nanoid } from "nanoid";
 import { defineFSM, SessionState } from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
-import type { ProviderId } from "../providers/index.js";
 import {
-  readSessionHistoryMetadata,
-  upsertSessionHistoryMetadata,
-} from "./session-history-metadata.js";
+  isManagedSessionProcess,
+  type ManagedSessionProcessIdentity,
+} from "../common/managed-session-process.js";
+import { sessionPaths } from "../common/paths.js";
+import {
+  PersistedSessionRecordSchema,
+  type PersistedSessionRecord,
+} from "../common/persisted-session.js";
+import type { ProviderId } from "../providers/index.js";
+import { upsertSessionHistoryMetadata } from "./session-history-metadata.js";
 
-export interface SessionInfo {
+interface SessionInfoCommon {
   id: string;
-  kind?: "agent" | "terminal";
-  mode: "pty" | "json";
-  provider: ProviderId;
-  ptyOwner?: "local-terminal" | "proxy-hosted";
   state: SessionState;
   createdAt: number;
   updatedAt: number;
@@ -26,23 +28,70 @@ export interface SessionInfo {
   // 用途：定位 ~/.claude/projects/<encoded-cwd>/<claudeSessionId>.jsonl 历史文件 / 支持 --resume
   claudeSessionId?: string;
   // JSON 会话通过 --resume 启动时，Claude 可能立刻生成新的 session_id。
-  // 旧会话仍是初始历史的来源，不能被新 session_id 覆盖。
+  // 被恢复的会话仍是初始历史的来源，不能被新 session_id 覆盖。
   historySessionId?: string;
   pid: number;
 }
 
+export type SessionInfo =
+  | (SessionInfoCommon & {
+      kind: "agent";
+      mode: "json";
+      provider: ProviderId;
+      ptyOwner?: never;
+    })
+  | (SessionInfoCommon & {
+      kind: "agent";
+      mode: "pty";
+      provider: ProviderId;
+      ptyOwner: "local-terminal" | "proxy-hosted";
+    })
+  | (SessionInfoCommon & {
+      kind: "terminal";
+      mode: "pty";
+      provider: "claude";
+      ptyOwner: "local-terminal";
+    });
+
+type LocalPtySessionClaimCommon = {
+  cwd: string;
+  pid: number;
+  name?: string;
+  sessionId?: string;
+};
+
+export type LocalPtySessionClaim =
+  | (LocalPtySessionClaimCommon & {
+      kind: "agent";
+      provider: ProviderId;
+    })
+  | (LocalPtySessionClaimCommon & {
+      kind: "terminal";
+      provider: "claude";
+    });
+
+export interface LocalPtySessionClaimResult {
+  session: SessionInfo;
+  source: "created" | "active" | "pending";
+}
+
+type PersistedPtySessionRecord = Extract<PersistedSessionRecord, { mode: "pty" }>;
+
 interface SessionManagerOptions {
   persistPath: string;
+  allowSessionRuntimeHandover: boolean;
   historyMetadataPath?: string;
   reaperIntervalMs?: number;
+  localPtyReconnectTimeoutMs?: number;
   onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
+  isProcessAlive?: (pid: number) => boolean;
+  isManagedSessionProcess?: (pid: number, identity: ManagedSessionProcessIdentity) => boolean;
+  terminateManagedSession?: (pid: number) => void;
 }
 
 interface SessionRemoveContext {
   preserveProviderHooks?: boolean;
 }
-
-type PersistedSessionRecord = Omit<SessionInfo, "state">;
 
 // 两个观察通道的合法转换表分离：PTY 看 OSC 信号、JSON 看 stream-json 事件，各自的状态空间和规则不同。
 // terminated 是终态，不允许任何转出。
@@ -143,46 +192,126 @@ function isProviderId(value: unknown): value is ProviderId {
 
 export class SessionManager {
   private sessions: Map<string, SessionInfo> = new Map();
-  private pendingPtyReconnectMetadata: Map<string, PersistedSessionRecord> = new Map();
+  private pendingPtyReconnectMetadata: Map<string, PersistedPtySessionRecord> = new Map();
+  private pendingPtyReconnectDeadlines: Map<string, number> = new Map();
+  private pendingPtyReconnectTimer: NodeJS.Timeout | null = null;
   private reaperTimer: NodeJS.Timeout | null = null;
   private readonly persistPath: string;
   private readonly historyMetadataPath?: string;
   private readonly reaperIntervalMs: number;
+  private readonly localPtyReconnectTimeoutMs: number;
   private readonly onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
+  private readonly allowSessionRuntimeHandover: boolean;
+  private readonly processAlive: (pid: number) => boolean;
+  private readonly managedSessionProcess: (
+    pid: number,
+    identity: ManagedSessionProcessIdentity,
+  ) => boolean;
+  private readonly terminateManagedSession: (pid: number) => void;
 
   constructor(options: SessionManagerOptions) {
     this.persistPath = options.persistPath;
     this.historyMetadataPath = options.historyMetadataPath;
     this.reaperIntervalMs = options.reaperIntervalMs ?? 60000;
+    this.localPtyReconnectTimeoutMs = options.localPtyReconnectTimeoutMs ?? 30_000;
     this.onSessionRemoved = options.onSessionRemoved;
+    this.allowSessionRuntimeHandover = options.allowSessionRuntimeHandover;
+    this.processAlive =
+      options.isProcessAlive ??
+      ((pid) => {
+        try {
+          process.kill(pid, 0);
+          return true;
+        } catch {
+          return false;
+        }
+      });
+    this.managedSessionProcess = options.isManagedSessionProcess ?? isManagedSessionProcess;
+    this.terminateManagedSession =
+      options.terminateManagedSession ?? ((pid) => process.kill(pid, "SIGTERM"));
     this.load();
   }
 
   createSession(
-    mode: "pty" | "json",
+    kind: "agent",
+    mode: "json",
+    provider: ProviderId,
     cwd: string,
     pid: number,
     name?: string,
     id?: string,
-    provider: ProviderId = "claude",
+    ptyOwner?: undefined,
+    nameLocked?: boolean,
+  ): SessionInfo;
+  createSession(
+    kind: "agent",
+    mode: "pty",
+    provider: ProviderId,
+    cwd: string,
+    pid: number,
+    name: string | undefined,
+    id: string | undefined,
+    ptyOwner: "local-terminal" | "proxy-hosted",
+    nameLocked?: boolean,
+  ): SessionInfo;
+  createSession(
+    kind: "terminal",
+    mode: "pty",
+    provider: "claude",
+    cwd: string,
+    pid: number,
+    name: string | undefined,
+    id: string | undefined,
+    ptyOwner: "local-terminal",
+    nameLocked?: boolean,
+  ): SessionInfo;
+  createSession(
+    kind: "agent" | "terminal",
+    mode: "pty" | "json",
+    provider: ProviderId,
+    cwd: string,
+    pid: number,
+    name?: string,
+    id?: string,
     ptyOwner?: "local-terminal" | "proxy-hosted",
     nameLocked?: boolean,
-    kind?: "agent" | "terminal",
   ): SessionInfo {
+    if (mode === "pty" && ptyOwner === undefined) {
+      throw new TypeError("PTY session owner is required");
+    }
+    if (mode === "json" && ptyOwner !== undefined) {
+      throw new TypeError("JSON session cannot have a PTY owner");
+    }
+    if (
+      kind === "terminal" &&
+      (mode !== "pty" || provider !== "claude" || ptyOwner !== "local-terminal")
+    ) {
+      throw new TypeError("Terminal sessions require a local Claude PTY");
+    }
+    if (!Number.isSafeInteger(pid) || pid <= 0) {
+      throw new TypeError("Session PID must be a positive safe integer");
+    }
+    if (cwd.length === 0) throw new TypeError("Session cwd cannot be empty");
+    if (id !== undefined && id.length === 0) throw new TypeError("Session id cannot be empty");
     const now = Date.now();
     const pendingPtyMetadata =
       mode === "pty" && id !== undefined ? this.pendingPtyReconnectMetadata.get(id) : undefined;
+    if (
+      pendingPtyMetadata !== undefined &&
+      (pendingPtyMetadata.kind !== kind ||
+        pendingPtyMetadata.provider !== provider ||
+        pendingPtyMetadata.ptyOwner !== ptyOwner ||
+        pendingPtyMetadata.pid !== pid)
+    ) {
+      throw new TypeError("PTY reconnect identity does not match persisted session");
+    }
     const resolvedName =
       pendingPtyMetadata?.nameLocked && pendingPtyMetadata.name !== undefined
         ? pendingPtyMetadata.name
         : name;
     const resolvedNameLocked = pendingPtyMetadata?.nameLocked ?? (nameLocked ? true : undefined);
-    const info: SessionInfo = {
+    const common: SessionInfoCommon = {
       id: id ?? nanoid(),
-      ...(kind !== undefined && kind !== "agent" ? { kind } : {}),
-      mode,
-      provider,
-      ...(mode === "pty" && ptyOwner !== undefined ? { ptyOwner } : {}),
       state: SessionState.IDLE,
       createdAt: pendingPtyMetadata?.createdAt ?? now,
       updatedAt: pendingPtyMetadata?.updatedAt ?? now,
@@ -197,14 +326,103 @@ export class SessionManager {
         ? { historySessionId: pendingPtyMetadata.historySessionId }
         : {}),
     };
+    let info: SessionInfo;
+    if (kind === "terminal") {
+      info = {
+        ...common,
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+      };
+    } else if (mode === "json") {
+      info = { ...common, kind: "agent", mode: "json", provider };
+    } else {
+      if (ptyOwner === undefined) throw new TypeError("PTY session owner is required");
+      info = {
+        ...common,
+        kind: "agent",
+        mode: "pty",
+        provider,
+        ptyOwner,
+      };
+    }
     this.sessions.set(info.id, info);
     this.pendingPtyReconnectMetadata.delete(info.id);
+    this.pendingPtyReconnectDeadlines.delete(info.id);
     this.save();
+    this.schedulePendingPtyReconnectCleanup();
     serviceLogger.info(
       { sessionId: info.id, kind: info.kind, mode, provider, ptyOwner, name },
       "Session created",
     );
     return info;
+  }
+
+  /**
+   * Atomically creates or reclaims the local PTY identity presented by a terminal IPC client.
+   * A caller-supplied id is never a request to create arbitrary state: it must already be active
+   * under the same process identity, or be an exact persisted handover waiting to reconnect.
+   */
+  claimLocalPtySession(claim: LocalPtySessionClaim): LocalPtySessionClaimResult {
+    const sessionId = claim.sessionId;
+    if (sessionId === undefined) {
+      return { session: this.createLocalPtySession(claim), source: "created" };
+    }
+
+    const active = this.sessions.get(sessionId);
+    if (active !== undefined) {
+      this.assertLocalPtyClaimIdentity(active, claim);
+      return { session: active, source: "active" };
+    }
+
+    const pending = this.pendingPtyReconnectMetadata.get(sessionId);
+    if (pending === undefined) {
+      throw new TypeError("PTY reconnect session is not available for handover");
+    }
+    this.assertLocalPtyClaimIdentity(pending, claim);
+    return { session: this.createLocalPtySession(claim), source: "pending" };
+  }
+
+  private createLocalPtySession(claim: LocalPtySessionClaim): SessionInfo {
+    if (claim.kind === "terminal") {
+      return this.createSession(
+        "terminal",
+        "pty",
+        "claude",
+        claim.cwd,
+        claim.pid,
+        claim.name,
+        claim.sessionId,
+        "local-terminal",
+      );
+    }
+    return this.createSession(
+      "agent",
+      "pty",
+      claim.provider,
+      claim.cwd,
+      claim.pid,
+      claim.name,
+      claim.sessionId,
+      "local-terminal",
+    );
+  }
+
+  private assertLocalPtyClaimIdentity(
+    session: SessionInfo | PersistedPtySessionRecord,
+    claim: LocalPtySessionClaim,
+  ): void {
+    if (
+      session.kind !== claim.kind ||
+      session.mode !== "pty" ||
+      session.provider !== claim.provider ||
+      session.ptyOwner !== "local-terminal" ||
+      session.pid !== claim.pid ||
+      session.cwd !== claim.cwd
+    ) {
+      throw new TypeError("PTY reconnect identity does not match the session owner");
+    }
   }
 
   listSessions(): SessionInfo[] {
@@ -373,8 +591,9 @@ export class SessionManager {
   }
 
   startReaper(intervalMs: number = this.reaperIntervalMs): void {
-    this.stopReaper();
+    if (this.reaperTimer) clearInterval(this.reaperTimer);
     this.reaperTimer = setInterval(() => this.reap(), intervalMs);
+    this.schedulePendingPtyReconnectCleanup();
   }
 
   stopReaper(): void {
@@ -382,6 +601,57 @@ export class SessionManager {
       clearInterval(this.reaperTimer);
       this.reaperTimer = null;
     }
+    if (this.pendingPtyReconnectTimer) {
+      clearTimeout(this.pendingPtyReconnectTimer);
+      this.pendingPtyReconnectTimer = null;
+    }
+  }
+
+  private schedulePendingPtyReconnectCleanup(): void {
+    if (this.pendingPtyReconnectTimer) {
+      clearTimeout(this.pendingPtyReconnectTimer);
+      this.pendingPtyReconnectTimer = null;
+    }
+    let earliestDeadline: number | undefined;
+    for (const deadline of this.pendingPtyReconnectDeadlines.values()) {
+      earliestDeadline =
+        earliestDeadline === undefined ? deadline : Math.min(earliestDeadline, deadline);
+    }
+    if (earliestDeadline === undefined) return;
+    this.pendingPtyReconnectTimer = setTimeout(
+      () => this.expirePendingPtyReconnects(),
+      Math.max(0, earliestDeadline - Date.now()),
+    );
+    this.pendingPtyReconnectTimer.unref?.();
+  }
+
+  private expirePendingPtyReconnects(): void {
+    this.pendingPtyReconnectTimer = null;
+    const now = Date.now();
+    const expiredIds: string[] = [];
+    for (const [sessionId, deadline] of this.pendingPtyReconnectDeadlines) {
+      if (deadline > now) continue;
+      this.pendingPtyReconnectDeadlines.delete(sessionId);
+      if (this.pendingPtyReconnectMetadata.delete(sessionId)) expiredIds.push(sessionId);
+    }
+    if (expiredIds.length > 0) {
+      this.save();
+      for (const sessionId of expiredIds) {
+        try {
+          this.onSessionRemoved?.(sessionId);
+        } catch (err) {
+          serviceLogger.warn(
+            { sessionId, error: String(err) },
+            "Pending PTY cleanup callback failed",
+          );
+        }
+        serviceLogger.warn(
+          { sessionId, timeoutMs: this.localPtyReconnectTimeoutMs },
+          "Pending PTY handover expired and was removed",
+        );
+      }
+    }
+    this.schedulePendingPtyReconnectCleanup();
   }
 
   private reap(): void {
@@ -406,12 +676,7 @@ export class SessionManager {
   }
 
   private isProcessAlive(pid: number): boolean {
-    try {
-      process.kill(pid, 0);
-      return true;
-    } catch {
-      return false;
-    }
+    return this.processAlive(pid);
   }
 
   private save(): void {
@@ -427,12 +692,8 @@ export class SessionManager {
   }
 
   private toPersistedRecord(s: PersistedSessionRecord | SessionInfo): PersistedSessionRecord {
-    return {
+    const common = {
       id: s.id,
-      ...(s.kind !== undefined && s.kind !== "agent" ? { kind: s.kind } : {}),
-      mode: s.mode,
-      provider: s.provider,
-      ...(s.mode === "pty" && s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
       createdAt: s.createdAt,
       updatedAt: s.updatedAt,
       cwd: s.cwd,
@@ -442,6 +703,86 @@ export class SessionManager {
       ...(s.claudeSessionId !== undefined ? { claudeSessionId: s.claudeSessionId } : {}),
       ...(s.historySessionId !== undefined ? { historySessionId: s.historySessionId } : {}),
     };
+    if (s.kind === "terminal") {
+      return PersistedSessionRecordSchema.parse({
+        ...common,
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+      });
+    }
+    if (s.mode === "pty") {
+      return PersistedSessionRecordSchema.parse({
+        ...common,
+        kind: "agent",
+        mode: "pty",
+        provider: s.provider,
+        ptyOwner: s.ptyOwner,
+      });
+    }
+    return PersistedSessionRecordSchema.parse({
+      ...common,
+      kind: "agent",
+      mode: "json",
+      provider: s.provider,
+    });
+  }
+
+  private discardManagedSessionProcess(item: unknown, reason: string): boolean {
+    if (item === null || typeof item !== "object") return false;
+    const candidate = item as {
+      id?: unknown;
+      mode?: unknown;
+      provider?: unknown;
+      ptyOwner?: unknown;
+      pid?: unknown;
+    };
+    if (
+      candidate.mode !== "json" &&
+      !(candidate.mode === "pty" && candidate.ptyOwner === "local-terminal")
+    ) {
+      return false;
+    }
+
+    const sessionId = typeof candidate.id === "string" ? candidate.id : undefined;
+    const pid = candidate.pid;
+    let processAction: "not-running" | "terminated" | "unverified" | "signal-failed" =
+      "not-running";
+    if (
+      sessionId !== undefined &&
+      typeof pid === "number" &&
+      Number.isSafeInteger(pid) &&
+      pid > 0 &&
+      this.isProcessAlive(pid)
+    ) {
+      const identity: ManagedSessionProcessIdentity = {
+        id: sessionId,
+        mode: candidate.mode,
+        ...(isProviderId(candidate.provider) ? { provider: candidate.provider } : {}),
+        ...(candidate.ptyOwner === "local-terminal" ? { ptyOwner: candidate.ptyOwner } : {}),
+        ...(candidate.mode === "json"
+          ? { workerSocketPath: sessionPaths(sessionId).workerSock }
+          : {}),
+      };
+      if (this.managedSessionProcess(pid, identity)) {
+        try {
+          this.terminateManagedSession(pid);
+          processAction = "terminated";
+        } catch (err) {
+          processAction = "signal-failed";
+          serviceLogger.warn(
+            { sessionId, pid, error: String(err) },
+            "Failed to stop managed session process",
+          );
+        }
+      } else {
+        processAction = "unverified";
+      }
+    }
+    if (sessionId !== undefined) this.onSessionRemoved?.(sessionId);
+    serviceLogger.warn({ sessionId, pid, mode: candidate.mode, processAction }, reason);
+    return true;
   }
 
   private load(): void {
@@ -454,8 +795,8 @@ export class SessionManager {
       parsed = JSON.parse(raw);
     } catch (err) {
       // 文件被截断 / 部分写入 / 手改成非法 JSON: 抛错会让 daemon 起不来, 用户没法 self-serve。
-      // fail-soft 到空状态——已运行的 session 通过 reconnectAll 走 worker.sock 探活恢复, 还活着的
-      // worker 仍能被 attach。失败仅意味着 session 名字 / cwd 等元数据丢失, 不至于阻塞启动。
+      // fail-soft 到空状态，避免单个损坏文件阻塞 daemon 启动。后续 reconnectAll 会拒绝并
+      // 断开没有权威 session 记录的 worker，不会从无法校验的进程反向重建状态。
       serviceLogger.warn(
         { path: this.persistPath, error: String(err) },
         "Session persistence file unparseable, starting with empty state",
@@ -469,56 +810,79 @@ export class SessionManager {
       );
       return;
     }
-    const historyMetadata = readSessionHistoryMetadata(this.historyMetadataPath);
     for (const item of parsed) {
-      // state 字段不该落盘（见 save 注释）。遇到说明 schema 不匹配（旧版本数据 / 手改文件 / save bug）；
-      // 跳过该条而不是 throw，否则一条坏数据让所有 session 都加载不了，serve 起不来。
-      if (item && typeof item === "object" && "state" in item) {
-        const sessionId = String((item as { id?: unknown }).id);
-        serviceLogger.warn(
-          { sessionId },
-          "Session persistence record has unexpected state field, skipping",
+      // A daemon may only inherit managed session processes from the same IPC generation. Run
+      // this against the raw record before strict field validation: a record from any other
+      // generation may be incomplete yet still refer to a live process that would otherwise be
+      // orphaned or keep retrying forever.
+      if (!this.allowSessionRuntimeHandover) {
+        const sessionId =
+          item !== null &&
+          typeof item === "object" &&
+          typeof (item as { id?: unknown }).id === "string"
+            ? (item as { id: string }).id
+            : undefined;
+        const managedProcessDiscarded = this.discardManagedSessionProcess(
+          item,
+          "Foreign-generation managed session process cleaned",
         );
-        this.onSessionRemoved?.(sessionId);
+        if (!managedProcessDiscarded) {
+          if (sessionId !== undefined) this.onSessionRemoved?.(sessionId);
+          serviceLogger.warn({ sessionId }, "Foreign-generation session record cleaned");
+        }
         continue;
       }
-      const info = item as Omit<SessionInfo, "state"> & { state?: SessionState };
-      if (info.kind !== undefined && info.kind !== "agent" && info.kind !== "terminal") {
-        const sessionId = String(info.id);
-        this.onSessionRemoved?.(sessionId);
+      const parsedRecord = PersistedSessionRecordSchema.safeParse(item);
+      if (!parsedRecord.success) {
+        const sessionId =
+          item !== null &&
+          typeof item === "object" &&
+          typeof (item as { id?: unknown }).id === "string"
+            ? (item as { id: string }).id
+            : undefined;
+        const managedProcessDiscarded = this.discardManagedSessionProcess(
+          item,
+          "Invalid managed session record cleaned",
+        );
+        if (!managedProcessDiscarded && sessionId !== undefined) this.onSessionRemoved?.(sessionId);
         serviceLogger.warn(
-          { sessionId, kind: info.kind },
-          "Session persistence file has invalid kind; cleaning session",
+          { sessionId, issues: parsedRecord.error.issues },
+          "Session persistence record failed strict validation; cleaning session",
         );
         continue;
       }
-      if (!isProviderId(info.provider)) {
-        const sessionId = String(info.id);
-        this.onSessionRemoved?.(sessionId);
-        serviceLogger.warn(
-          { sessionId, provider: info.provider },
-          "Session persistence file has invalid provider; cleaning session",
-        );
-        continue;
-      }
-      const inferredHistorySessionId =
-        info.mode === "json" && info.historySessionId === undefined && info.claudeSessionId
-          ? historyMetadata.find(
-              (record) =>
-                record.devAnywhereSessionId === info.id &&
-                record.provider === info.provider &&
-                record.mode === "json" &&
-                record.nativeSessionId !== info.claudeSessionId,
-            )?.nativeSessionId
-          : undefined;
-      const hydratedInfo =
-        inferredHistorySessionId !== undefined
-          ? { ...info, historySessionId: inferredHistorySessionId }
-          : info;
+      const info = parsedRecord.data;
       if (info.mode === "pty") {
-        if (info.pid && this.isProcessAlive(info.pid)) {
+        if (info.ptyOwner === "proxy-hosted") {
+          // A hosted PTY belongs to the daemon's in-memory node-pty registry and cannot be
+          // adopted by a replacement daemon.  Never expose it as pending handover.  We also do
+          // not signal the persisted PID here: after an ungraceful exit it may already have been
+          // reused, and a hosted Agent process has no session id in argv with which to prove
+          // ownership.  Graceful shutdown kills it through HostedPtyRegistry before removing this
+          // record.
+          this.onSessionRemoved?.(info.id);
+          serviceLogger.info(
+            { sessionId: info.id, pid: info.pid },
+            "Proxy-hosted PTY cleaned on load; runtime cannot be handed over",
+          );
+          continue;
+        }
+        const processAlive = this.isProcessAlive(info.pid);
+        const identityVerified =
+          processAlive &&
+          this.managedSessionProcess(info.pid, {
+            id: info.id,
+            mode: "pty",
+            provider: info.provider,
+            ptyOwner: "local-terminal",
+          });
+        if (identityVerified) {
           // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存
-          this.pendingPtyReconnectMetadata.set(info.id, this.toPersistedRecord(hydratedInfo));
+          this.pendingPtyReconnectMetadata.set(info.id, info);
+          this.pendingPtyReconnectDeadlines.set(
+            info.id,
+            Date.now() + this.localPtyReconnectTimeoutMs,
+          );
           serviceLogger.info(
             { sessionId: info.id, pid: info.pid },
             "PTY session skipped on load, terminal alive",
@@ -527,26 +891,36 @@ export class SessionManager {
           // terminal 进程已死，清理数据
           this.onSessionRemoved?.(info.id);
           serviceLogger.info(
-            { sessionId: info.id, pid: info.pid },
-            "PTY session cleaned on load, terminal dead",
+            { sessionId: info.id, pid: info.pid, processAlive, identityVerified },
+            "PTY session cleaned on load because its process identity is unavailable",
           );
         }
         continue;
       }
       // JSON 会话：检查 worker 进程是否存活，无 PID 或进程已死则清理
-      if (info.pid && this.isProcessAlive(info.pid)) {
+      const processAlive = this.isProcessAlive(info.pid);
+      const identityVerified =
+        processAlive &&
+        this.managedSessionProcess(info.pid, {
+          id: info.id,
+          mode: "json",
+          provider: info.provider,
+          workerSocketPath: sessionPaths(info.id).workerSock,
+        });
+      if (identityVerified) {
         // 加载回内存时 state 重置为 IDLE，等后续观察通道信号刷新
-        this.sessions.set(info.id, { ...hydratedInfo, state: SessionState.IDLE });
+        this.sessions.set(info.id, { ...info, state: SessionState.IDLE });
       } else {
         this.onSessionRemoved?.(info.id);
         serviceLogger.info(
-          { sessionId: info.id, pid: info.pid },
-          "JSON session cleaned on load, worker dead",
+          { sessionId: info.id, pid: info.pid, processAlive, identityVerified },
+          "JSON session cleaned on load because its process identity is unavailable",
         );
       }
     }
     // 清理后回写磁盘，避免已清理的会话在下次启动时重复处理
     this.save();
+    this.schedulePendingPtyReconnectCleanup();
     if (this.sessions.size > 0) {
       serviceLogger.info({ count: this.sessions.size }, "Sessions restored from persistence");
     }

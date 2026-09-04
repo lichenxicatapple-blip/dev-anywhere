@@ -30,7 +30,7 @@ function envelope(overrides: Partial<MessageEnvelope>): MessageEnvelope {
     seq: 1,
     timestamp: Date.now(),
     source: "proxy",
-    version: "1",
+    version: "1.0",
     payload: {
       toolId: "req-1",
       toolName: "Bash",
@@ -375,7 +375,17 @@ describe("chat-dispatcher permission flow", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", state: "idle", provider: "claude", mode: "json" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          state: "idle",
+          provider: "claude",
+          mode: "json",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
 
     handler({
@@ -423,7 +433,17 @@ describe("chat-dispatcher permission flow", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", state: "idle", provider: "claude", mode: "json" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          state: "idle",
+          provider: "claude",
+          mode: "json",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
 
     handler({
@@ -638,7 +658,17 @@ describe("chat-dispatcher permission flow", () => {
   it("shows a completion toast for compact turn_result while the session is compacting", () => {
     const handle = createChatMessageHandler({ sendControl: vi.fn() });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "compacting" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "compacting",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
 
     handle({
@@ -656,7 +686,17 @@ describe("chat-dispatcher permission flow", () => {
   it("shows an error toast when compact turn_result fails", () => {
     const handle = createChatMessageHandler({ sendControl: vi.fn() });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "compacting" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "compacting",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
 
     handle({

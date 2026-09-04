@@ -13,13 +13,7 @@ export type {
   ToolDenyPayload,
   ToolResultPayload,
 } from "../schemas/tool.js";
-export type {
-  SessionCreatePayload,
-  SessionListPayload,
-  SessionSwitchPayload,
-  SessionTerminatePayload,
-  SessionStatusPayload,
-} from "../schemas/session.js";
+export type { SessionListPayload, SessionStatusPayload } from "../schemas/session.js";
 export type {
   HeartbeatPayload,
   AuthPayload,

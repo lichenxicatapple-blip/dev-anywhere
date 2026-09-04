@@ -50,7 +50,15 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
   test("scrolls history, surfaces back-to-bottom, and applies resize without re-subscribing", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID, withVisualViewportMock: true });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      withVisualViewportMock: true,
+    });
     await expectPtyTerminalMounted(page);
     const touchEditingSurface = await page.evaluate(
       () => window.matchMedia("(pointer: coarse), (hover: none)").matches,
@@ -99,20 +107,24 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expectPtyTerminalMounted(page);
     await expect
       .poll(() =>
-        page.evaluate(
-          (sessionId) => {
-            const terminal = window.__ccTestPtyTerminals?.get(sessionId);
-            return terminal ? { cols: terminal.cols, rows: terminal.rows } : null;
-          },
-          SESSION_ID,
-        ),
+        page.evaluate((sessionId) => {
+          const terminal = window.__ccTestPtyTerminals?.get(sessionId);
+          return terminal ? { cols: terminal.cols, rows: terminal.rows } : null;
+        }, SESSION_ID),
       )
       .toEqual({ cols: 100, rows: 30 });
     await expectPtySessionSubscribeCount(page, 1);
   });
 
   test("discards stale browser positions and resumes the current live tail", async ({ page }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     await sendPtyLines(page, { count: 120, prefix: "resume-follow" });
@@ -157,6 +169,9 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     ).join("")}$ `;
     await setupPtyChat(page, {
       sessionId: `${SESSION_ID}-reload`,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
       snapshotData: snapshot,
       cols: 270,
       rows: 52,
@@ -187,7 +202,14 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
   test("keeps user-scrolled position when remote keeps outputting after a small wheel-up (longHost)", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     // 拉到 longHost: rows=80 强制 hostHeight (rows*cellH) > container.clientHeight。
@@ -236,7 +258,14 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await page.addInitScript(() => {
       localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
     });
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     await enterLongHostMode(page, { sessionId: SESSION_ID });
@@ -319,7 +348,14 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
   test("does not pin users to bottom when PTY output arrives during native touch scroll", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     await sendPtyLines(page, { count: 140, prefix: "stream line" });

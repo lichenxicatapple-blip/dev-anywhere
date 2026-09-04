@@ -1,23 +1,76 @@
-import { buildMessage, serializeControl, SessionState } from "@dev-anywhere/shared";
+import {
+  buildMessage,
+  serializeControl,
+  SessionState,
+  type ControlMessage,
+  type SessionListPayload,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 
 const ACTIVITY_STATUS_PUSH_INTERVAL_MS = 15_000;
 
-function toSessionListPayload(s: SessionInfo) {
-  return {
+type SessionListEntry = SessionListPayload["sessions"][number];
+type SessionSyncEntry = ControlMessage<"session_sync">["sessions"][number];
+
+export function toSessionListPayload(s: SessionInfo): SessionListEntry {
+  const common = {
     sessionId: s.id,
-    ...(s.kind !== undefined ? { kind: s.kind } : {}),
-    mode: s.mode,
-    provider: s.provider,
-    ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
     state: s.state,
     lastActive: s.updatedAt,
     cwd: s.cwd,
     ...(s.name !== undefined ? { name: s.name } : {}),
     ...(s.nameLocked !== undefined ? { nameLocked: s.nameLocked } : {}),
   };
+  if (s.kind === "terminal") {
+    return {
+      ...common,
+      kind: "terminal",
+      mode: "pty",
+      provider: "claude",
+      ptyOwner: "local-terminal",
+    };
+  }
+  if (s.mode === "pty") {
+    return {
+      ...common,
+      kind: "agent",
+      mode: "pty",
+      provider: s.provider,
+      ptyOwner: s.ptyOwner,
+    };
+  }
+  return { ...common, kind: "agent", mode: "json", provider: s.provider };
+}
+
+export function toSessionSyncEntry(s: SessionInfo): SessionSyncEntry {
+  const common = {
+    id: s.id,
+    cwd: s.cwd,
+    state: s.state,
+    ...(s.name !== undefined ? { name: s.name } : {}),
+    ...(s.nameLocked !== undefined ? { nameLocked: s.nameLocked } : {}),
+  };
+  if (s.kind === "terminal") {
+    return {
+      ...common,
+      kind: "terminal",
+      mode: "pty",
+      provider: "claude",
+      ptyOwner: "local-terminal",
+    };
+  }
+  if (s.mode === "pty") {
+    return {
+      ...common,
+      kind: "agent",
+      mode: "pty",
+      provider: s.provider,
+      ptyOwner: s.ptyOwner,
+    };
+  }
+  return { ...common, kind: "agent", mode: "json", provider: s.provider };
 }
 
 function pushSessionStatus(
@@ -42,9 +95,7 @@ function pushSessionStatus(
 }
 
 export function broadcastSessionList(relay: RelayConnection, sessionManager: SessionManager): void {
-  // session_list 是 envelope（payload 携带 sessions 数组），走 buildMessage 才能保证
-  // version / timestamp / source 字段与其它 envelope 一致；旧代码手写 version: "1" 与
-  // buildMessage 默认的 "1.0" 不符，会让任何对 envelope schema 严格校验的地方报错。
+  // 统一通过 buildMessage 构造完整的 session_list envelope。
   const envelope = buildMessage(
     "session_list",
     null,
@@ -55,23 +106,16 @@ export function broadcastSessionList(relay: RelayConnection, sessionManager: Ses
   relay.sendEnvelope(envelope);
 }
 
-export function broadcastSessionSync(relay: RelayConnection, session: SessionInfo): void {
+/**
+ * Replace Relay's proxy-to-session association with the complete in-memory snapshot.
+ * `session_sync` is authoritative (Relay uses set semantics), so sending only the session that
+ * changed would silently remove every other active association.
+ */
+export function broadcastSessionSync(relay: RelayConnection, sessionManager: SessionManager): void {
   relay.sendRaw(
     serializeControl({
       type: "session_sync",
-      sessions: [
-        {
-          id: session.id,
-          ...(session.kind !== undefined ? { kind: session.kind } : {}),
-          mode: session.mode,
-          provider: session.provider,
-          ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),
-          cwd: session.cwd,
-          ...(session.name !== undefined ? { name: session.name } : {}),
-          ...(session.nameLocked !== undefined ? { nameLocked: session.nameLocked } : {}),
-          state: session.state,
-        },
-      ],
+      sessions: sessionManager.listSessions().map(toSessionSyncEntry),
     }),
   );
 }

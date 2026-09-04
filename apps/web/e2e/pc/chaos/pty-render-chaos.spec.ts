@@ -10,7 +10,14 @@ test.describe("PTY render chaos: stale render snapshots and outputSeq dedupe", (
   test("ignores stale render snapshots and reorders duplicate PTY frames by outputSeq", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     await page.evaluate((sessionId) => {
@@ -68,7 +75,14 @@ test.describe("PTY render chaos: stale render snapshots and outputSeq dedupe", (
   test("keeps a large synchronized redraw, resize, and following output in one live stream", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
     await expect
       .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))

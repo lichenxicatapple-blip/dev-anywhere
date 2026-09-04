@@ -1,10 +1,5 @@
 import { z } from "zod";
-import {
-  providerValues,
-  ptyOwnerValues,
-  sessionKindValues,
-  sessionModeValues,
-} from "../constants/enums.js";
+import { providerValues, ptyOwnerValues } from "../constants/enums.js";
 import { ptySemanticStateValues } from "../constants/pty.js";
 import { IdSchema } from "./id.js";
 
@@ -25,75 +20,80 @@ const agentStatusPhaseValues = [
   "error",
 ] as const;
 
+/**
+ * 在所有会话协议中复用同一组身份约束。调用方只提供自身的公共字段，
+ * 这里负责把它们与三种合法的会话形态组成严格 union。
+ */
+export function createSessionIdentitySchema<T extends z.ZodRawShape>(commonFields: T) {
+  return z.union([
+    z
+      .object({
+        ...commonFields,
+        kind: z.literal("agent"),
+        mode: z.literal("json"),
+        provider: z.enum(providerValues),
+      })
+      .strict(),
+    z
+      .object({
+        ...commonFields,
+        kind: z.literal("agent"),
+        mode: z.literal("pty"),
+        provider: z.enum(providerValues),
+        ptyOwner: z.enum(ptyOwnerValues),
+      })
+      .strict(),
+    z
+      .object({
+        ...commonFields,
+        kind: z.literal("terminal"),
+        mode: z.literal("pty"),
+        provider: z.literal("claude"),
+        ptyOwner: z.literal("local-terminal"),
+      })
+      .strict(),
+  ]);
+}
+
 // 会话信息，用于会话列表展示
-// lastActive: 最近一次状态变更或运行时活动时间戳 (ms), 用于列表"最近活动 N 分钟前"显示, 可选
-export const SessionInfoSchema = z.object({
+// lastActive: 最近一次状态变更或运行时活动时间戳 (ms)，用于列表“最近活动 N 分钟前”显示。
+export const SessionInfoSchema = createSessionIdentitySchema({
   sessionId: IdSchema,
-  kind: z.enum(sessionKindValues).optional(),
   name: z.string().optional(),
   // cwd 只用于展示完整路径/tooltip，不作为前端路由或权限判断来源。
-  cwd: z.string().optional(),
+  cwd: z.string(),
   // true 表示 name 是用户显式命名，PTY UI 不再让 OSC terminal_title 覆盖它。
   nameLocked: z.boolean().optional(),
   state: z.enum(sessionStateValues),
-  mode: z.enum(sessionModeValues).optional(),
-  provider: z.enum(providerValues),
-  // PTY 进程所有权。两种 PTY 的 cols/rows 都由会话端持有，Web 仅按服务端快照展示，
-  // 浏览器视口变化不会隐式改变真实 PTY 几何。
-  // - local-terminal: 本地 terminal worker 持有 PTY
-  // - proxy-hosted: serve 内 HostedPtyRegistry 持有 PTY
-  ptyOwner: z.enum(ptyOwnerValues).optional(),
-  lastActive: z.number().optional(),
+  lastActive: z.number(),
 });
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;
 
-// 创建会话
-// streamDelta: client 端系统设置"逐字流式"toggle，true 时 proxy spawn 带 --include-partial-messages
-export const SessionCreatePayloadSchema = z.object({
-  name: z.string().optional(),
-  cwd: z.string().optional(),
-  streamDelta: z.boolean().optional(),
-});
-
-export type SessionCreatePayload = z.infer<typeof SessionCreatePayloadSchema>;
-
 // 会话列表
-export const SessionListPayloadSchema = z.object({
-  sessions: z.array(SessionInfoSchema),
-});
+export const SessionListPayloadSchema = z
+  .object({
+    sessions: z.array(SessionInfoSchema),
+  })
+  .strict();
 
 export type SessionListPayload = z.infer<typeof SessionListPayloadSchema>;
 
-// 切换会话
-export const SessionSwitchPayloadSchema = z.object({
-  sessionId: IdSchema,
-});
-
-export type SessionSwitchPayload = z.infer<typeof SessionSwitchPayloadSchema>;
-
-// 终止会话
-export const SessionTerminatePayloadSchema = z.object({
-  sessionId: IdSchema,
-});
-
-export type SessionTerminatePayload = z.infer<typeof SessionTerminatePayloadSchema>;
-
 // 会话状态变更
 // lastActive: 触发本次状态迁移或活动刷新的时间戳 (ms)，用于列表相对时间显示。
-export const SessionStatusPayloadSchema = z.object({
-  sessionId: IdSchema,
-  state: z.enum(sessionStateValues),
-  lastActive: z.number(),
-});
+export const SessionStatusPayloadSchema = z
+  .object({
+    sessionId: IdSchema,
+    state: z.enum(sessionStateValues),
+    lastActive: z.number(),
+  })
+  .strict();
 
 export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
 
 // PTY 语义状态事件，描述当前 PTY 处于何种状态
 export const PtyStatePayloadSchema = z.object({
   state: z.enum(ptySemanticStateValues),
-  // Semantic event sequence. Present for runtime PTY semantic events; optional for
-  // legacy cleanup messages from older proxies.
-  seq: z.number().int().nonnegative().optional(),
+  seq: z.number().int().nonnegative(),
   title: z.string().optional(),
   tool: z.string().optional(),
 });

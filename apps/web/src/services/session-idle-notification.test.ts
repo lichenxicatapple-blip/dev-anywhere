@@ -12,15 +12,16 @@ vi.mock("@/lib/browser-notifications", () => ({
 import { isBusyToIdleTransition, notifySessionIdleTransition } from "./session-idle-notification";
 import { useAppStore } from "@/stores/app-store";
 
-function makeSession(overrides: Partial<SessionInfo> = {}): SessionInfo {
+function makeSession(overrides: Partial<Pick<SessionInfo, "state">> = {}): SessionInfo {
   return {
     sessionId: "session-1",
-    kind: "terminal",
+    kind: "agent",
     name: "/home/dev/projects/sample-app/",
     cwd: "/home/dev/projects/sample-app/",
     state: "working",
     mode: "pty",
     provider: "codex",
+    ptyOwner: "proxy-hosted",
     lastActive: 100,
     ...overrides,
   };

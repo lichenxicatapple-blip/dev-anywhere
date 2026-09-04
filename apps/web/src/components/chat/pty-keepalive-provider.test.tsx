@@ -37,12 +37,14 @@ describe("PtyKeepAliveProvider", () => {
       sessions: [
         {
           sessionId: "pty-1",
+          kind: "agent",
           name: "/tmp/project",
           cwd: "/tmp/project",
           state: "idle",
           mode: "pty",
           provider: "claude",
           ptyOwner: "proxy-hosted",
+          lastActive: 1,
         },
       ],
       sessionListLoaded: true,
@@ -120,12 +122,14 @@ describe("PtyKeepAliveProvider", () => {
     useSessionStore.setState({
       sessions: ["pty-1", "pty-2", "pty-3", "pty-4"].map((sessionId) => ({
         sessionId,
+        kind: "agent" as const,
         name: `/tmp/${sessionId}`,
         cwd: `/tmp/${sessionId}`,
         state: "idle" as const,
         mode: "pty" as const,
         provider: "codex" as const,
         ptyOwner: "proxy-hosted" as const,
+        lastActive: 1,
       })),
       sessionListLoaded: true,
     });

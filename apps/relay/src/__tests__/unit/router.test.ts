@@ -3,6 +3,7 @@ import { parseMessage, routeProxyMessage, routeClientMessage } from "#src/router
 import { RelayRegistry } from "#src/registry.js";
 import { WebSocket } from "ws";
 import type { Logger } from "@dev-anywhere/shared/logger";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 
 function createMockWs(overrides: Record<string, unknown> = {}): WebSocket {
   return {
@@ -37,7 +38,12 @@ const validEnvelope = {
 
 describe("parseMessage", () => {
   it("parses relay control message", () => {
-    const data = JSON.stringify({ type: "proxy_register", proxyId: "p1" });
+    const data = JSON.stringify({
+      type: "proxy_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      proxyId: "p1",
+      proxyVersion: "0.9.0",
+    });
     const result = parseMessage(data);
     expect(result.kind).toBe("control");
     if (result.kind === "control") {
@@ -53,6 +59,57 @@ describe("parseMessage", () => {
       expect(result.message.type).toBe("assistant_message");
       expect(result.raw).toBe(data);
     }
+  });
+
+  it("parses a session_list envelope", () => {
+    const data = JSON.stringify({
+      seq: 1,
+      timestamp: 1,
+      source: "proxy",
+      version: "1.0",
+      type: "session_list",
+      payload: {
+        sessions: [
+          {
+            sessionId: "session-1",
+            kind: "agent",
+            mode: "pty",
+            provider: "kimi",
+            ptyOwner: "proxy-hosted",
+            state: "idle",
+            cwd: "/tmp/project",
+            lastActive: 1,
+          },
+        ],
+      },
+    });
+
+    expect(parseMessage(data).kind).toBe("envelope");
+  });
+
+  it("rejects a session_list envelope without kind", () => {
+    const data = JSON.stringify({
+      seq: 1,
+      timestamp: 1,
+      source: "proxy",
+      version: "1.0",
+      type: "session_list",
+      payload: {
+        sessions: [
+          {
+            sessionId: "session-without-kind",
+            mode: "pty",
+            provider: "kimi",
+            ptyOwner: "proxy-hosted",
+            state: "idle",
+            cwd: "/tmp/project",
+            lastActive: 1,
+          },
+        ],
+      },
+    });
+
+    expect(parseMessage(data).kind).toBe("invalid");
   });
 
   it("returns invalid for bad JSON", () => {
@@ -80,7 +137,7 @@ describe("routeProxyMessage", () => {
     const client1 = createMockWs();
     const client2 = createMockWs();
 
-    registry.registerProxy("p1", proxyWs);
+    registry.registerProxy("p1", proxyWs, "0.9.0");
     registry.bindClientById("c1", "p1", client1);
     registry.bindClientById("c2", "p1", client2);
 
@@ -95,7 +152,7 @@ describe("routeProxyMessage", () => {
     const proxyWs = createMockWs();
     const client1 = createMockWs();
 
-    registry.registerProxy("p1", proxyWs);
+    registry.registerProxy("p1", proxyWs, "0.9.0");
     registry.bindClientById("c1", "p1", client1);
 
     routeProxyMessage("invalid json", "p1", registry, logger);
@@ -110,7 +167,7 @@ describe("routeProxyMessage", () => {
 
   it("no clients bound: silently drops without logging warn (not an error)", () => {
     const proxyWs = createMockWs();
-    registry.registerProxy("p1", proxyWs);
+    registry.registerProxy("p1", proxyWs, "0.9.0");
 
     const raw = JSON.stringify(validEnvelope);
     routeProxyMessage(raw, "p1", registry, logger);
@@ -124,7 +181,7 @@ describe("routeProxyMessage", () => {
     const closedClient = createMockWs({ readyState: WebSocket.CLOSED });
     const openClient = createMockWs();
 
-    registry.registerProxy("p1", proxyWs);
+    registry.registerProxy("p1", proxyWs, "0.9.0");
     registry.bindClientById("c-closed", "p1", closedClient);
     registry.bindClientById("c-open", "p1", openClient);
 
@@ -149,7 +206,7 @@ describe("routeClientMessage", () => {
     const proxyWs = createMockWs();
     const clientWs = createMockWs();
 
-    registry.registerProxy("p1", proxyWs);
+    registry.registerProxy("p1", proxyWs, "0.9.0");
 
     const clientEnvelope = { ...validEnvelope, source: "client" as const };
     const raw = JSON.stringify(clientEnvelope);
@@ -162,7 +219,7 @@ describe("routeClientMessage", () => {
     const proxyWs = createMockWs({ readyState: WebSocket.CLOSED });
     const clientWs = createMockWs();
 
-    registry.registerProxy("p1", proxyWs);
+    registry.registerProxy("p1", proxyWs, "0.9.0");
 
     const raw = JSON.stringify({ ...validEnvelope, source: "client" as const });
     routeClientMessage(raw, "p1", clientWs, registry, logger);

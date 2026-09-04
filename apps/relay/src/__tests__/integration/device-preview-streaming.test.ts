@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import {
   DEVICE_PREVIEW_H264_HTTP_PACKET_HEADER_BYTES,
+  RELAY_CONTROL_PROTOCOL_VERSION,
   RelayCloseCode,
   decodeDevicePreviewH264HttpPacketHeader,
   decodeDevicePreviewHttpFrameHeader,
@@ -62,7 +63,14 @@ describe("Device Preview Relay data plane", () => {
     const proxy = connect(`/proxy?token=${PROXY_TOKEN}`);
     await waitForOpen(proxy);
     const registeredPromise = waitForMessageType(proxy, "proxy_register_response");
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
+    proxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId,
+        proxyVersion: "0.9.0",
+      }),
+    );
     const registered = JSON.parse(await registeredPromise) as JsonMessage & {
       connectionId: string;
     };
@@ -109,6 +117,7 @@ describe("Device Preview Relay data plane", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId,
         browserName: "Safari",
         osName: "iOS",

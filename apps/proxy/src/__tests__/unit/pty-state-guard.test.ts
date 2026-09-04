@@ -6,8 +6,10 @@ import type { SessionInfo } from "#src/serve/session-manager.js";
 function session(state: SessionState): SessionInfo {
   return {
     id: "s1",
+    kind: "agent",
     mode: "pty",
     provider: "claude",
+    ptyOwner: "local-terminal",
     state,
     createdAt: 1,
     updatedAt: 1,

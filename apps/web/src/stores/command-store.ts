@@ -8,10 +8,8 @@ interface CommandStoreState {
   lastUpdated: number;
   activeSessionId: string | null;
   commandsBySessionId: Record<string, CommandEntry[]>;
-  legacyCommands: CommandEntry[];
 
   setActiveSession: (sessionId: string | null) => void;
-  setCommands: (commands: CommandEntry[]) => void;
   setSessionCommands: (sessionId: string, commands: CommandEntry[]) => void;
   clear: () => void;
 }
@@ -23,27 +21,13 @@ export const useCommandStore = create<CommandStoreState>()(
       lastUpdated: 0,
       activeSessionId: null,
       commandsBySessionId: {},
-      legacyCommands: [],
 
       setActiveSession: (sessionId) =>
-        set((state) => {
-          let commands = state.legacyCommands;
-          if (
-            sessionId !== null &&
-            Object.prototype.hasOwnProperty.call(state.commandsBySessionId, sessionId)
-          ) {
-            commands = state.commandsBySessionId[sessionId];
-          }
-          return {
-            activeSessionId: sessionId,
-            commands,
-            lastUpdated: Date.now(),
-          };
-        }),
-
-      // Compatibility path for proxies that still publish one unscoped command snapshot.
-      setCommands: (commands) =>
-        set({ commands, legacyCommands: commands, lastUpdated: Date.now() }),
+        set((state) => ({
+          activeSessionId: sessionId,
+          commands: sessionId === null ? [] : (state.commandsBySessionId[sessionId] ?? []),
+          lastUpdated: Date.now(),
+        })),
 
       setSessionCommands: (sessionId, commands) =>
         set((state) => ({
@@ -59,7 +43,6 @@ export const useCommandStore = create<CommandStoreState>()(
           lastUpdated: 0,
           activeSessionId: null,
           commandsBySessionId: {},
-          legacyCommands: [],
         }),
     }),
     { name: "command-store" },

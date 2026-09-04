@@ -13,6 +13,11 @@ import { LineBuffer } from "./line-buffer.js";
 // IPC binary 帧标记字节，0x00 不可能是 JSON 行的首字节（JSON 以 '{' 开头）
 export const IPC_BINARY_MARKER = 0x00;
 
+// JSON session worker 与 daemon 的独立协议版本。只在 WorkerMessage 协议不兼容时递增，
+// 不与 npm 包的 patch/minor 版本绑定。
+export const WORKER_IPC_PROTOCOL_VERSION = 1 as const;
+export const TERMINAL_IPC_PROTOCOL_VERSION = 1 as const;
+
 // IPC binary 帧外层 = [1B marker][4B payload_len uint32LE] + 内层 PTY 帧（来自 shared/binary-frame）。
 // 内层格式（[1B sid_len][sid][4B seq][data]）由 encodeBinaryFrame 统一管理，
 // 避免与 hosted-pty-registry / terminal-ipc / web 各自手写偏移量分叉。
@@ -27,49 +32,70 @@ export function encodeBinaryIpcFrame(sessionId: string, data: Buffer, outputSeq:
 
 const sessionStateValues = Object.values(SessionState) as [SessionState, ...SessionState[]];
 
-const ProviderHookContextSchema = z.object({
-  provider: z.enum(["claude", "codex"]),
-  sessionId: z.string(),
-  hookUrl: z.string(),
-  marker: z.string(),
-  token: z.string(),
-});
+const ProviderHookContextSchema = z
+  .object({
+    provider: z.enum(["claude", "codex"]),
+    sessionId: z.string(),
+    hookUrl: z.string(),
+    marker: z.string(),
+    token: z.string(),
+  })
+  .strict();
+
+const terminalSessionCreateFields = {
+  type: z.literal("session_create_request"),
+  name: z.string().optional(),
+  mode: z.literal("pty"),
+  cwd: z.string().min(1),
+  pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
+  sessionId: z.string().min(1).optional(),
+};
+
+const TerminalSessionCreateRequestSchema = z.discriminatedUnion("kind", [
+  z
+    .object({
+      ...terminalSessionCreateFields,
+      kind: z.literal("agent"),
+      provider: z.enum(providerValues),
+    })
+    .strict(),
+  z
+    .object({
+      ...terminalSessionCreateFields,
+      kind: z.literal("terminal"),
+      provider: z.literal("claude"),
+    })
+    .strict(),
+]);
+
+const TerminalSessionCreateResponseSchema = z.discriminatedUnion("success", [
+  z
+    .object({
+      type: z.literal("session_create_response"),
+      success: z.literal(true),
+      sessionId: z.string().min(1),
+      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
+      hook: ProviderHookContextSchema.optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal("session_create_response"),
+      success: z.literal(false),
+      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
+      error: z.string().min(1),
+    })
+    .strict(),
+]);
 
 // IPC 消息 schema，客户端与服务端通过 Unix domain socket 使用 NDJSON 通信
 export const IpcMessageSchema = z.discriminatedUnion("type", [
   // 客户端请求创建新会话，sessionId 可选用于重连时复用
-  z.object({
-    type: z.literal("session_create_request"),
-    name: z.string().optional(),
-    mode: z.enum(["pty", "json"]),
-    // Local terminal and JSON sessions support every provider advertised by the shared protocol.
-    provider: z.enum(providerValues),
-    cwd: z.string(),
-    pid: z.number(),
-    sessionId: z.string().optional(),
-    kind: z.enum(["agent", "terminal"]).optional(),
-  }),
+  TerminalSessionCreateRequestSchema,
 
   // 服务端响应创建会话
-  z.object({
-    type: z.literal("session_create_response"),
-    sessionId: z.string(),
-    error: z.string().optional(),
-    hook: ProviderHookContextSchema.optional(),
-  }),
-
-  // 客户端请求终止会话
-  z.object({
-    type: z.literal("session_terminate_request"),
-    sessionId: z.string(),
-  }),
-
-  // 服务端响应终止会话
-  z.object({
-    type: z.literal("session_terminate_response"),
-    sessionId: z.string(),
-    success: z.boolean(),
-  }),
+  TerminalSessionCreateResponseSchema,
 
   // 客户端向服务端注册 PTY 会话
   z.object({
@@ -106,13 +132,6 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
   }),
 
-  // 服务端广播会话状态变更
-  z.object({
-    type: z.literal("session_status_update"),
-    sessionId: z.string(),
-    state: z.enum(sessionStateValues),
-  }),
-
   // 错误响应
   z.object({
     type: z.literal("error"),
@@ -121,45 +140,50 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
   }),
 
   // 客户端请求服务状态（含 relay 连接信息和 worker 状态）
-  z.object({
-    type: z.literal("service_status_request"),
-  }),
+  z
+    .object({
+      type: z.literal("service_status_request"),
+      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
+    })
+    .strict(),
 
   // 服务端响应增强版服务状态
-  z.object({
-    type: z.literal("service_status_response"),
-    config: z.object({
-      profile: z.string().optional(),
-      // optional 允许刚升级的 CLI 查询尚未重启的旧 daemon。
-      version: z.string().optional(),
-      autoUpdate: z.boolean().optional(),
-      relayName: z.string(),
-      relayNameSource: z.enum(["cli", "profile", "env"]),
-      relayUrl: z.string().optional(),
-      relayUrlSource: z.enum(["env", "file", "none"]),
-      relayTokenSource: z.enum(["env", "file", "none"]),
-      hookPort: z.number(),
-      hookPortSource: z.enum(["env", "file", "default"]),
-    }),
-    relay: z
-      .object({
-        connected: z.boolean(),
-        proxyId: z.string(),
-        reconnectAttempt: z.number(),
-        queueDepth: z.number(),
-      })
-      .nullable(),
-    sessions: z.array(
-      z.object({
-        id: z.string(),
-        mode: z.enum(["pty", "json"]),
-        state: z.enum(sessionStateValues),
-        createdAt: z.string(),
-        name: z.string().optional(),
-        hasWorker: z.boolean(),
+  z
+    .object({
+      type: z.literal("service_status_response"),
+      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
+      config: z.object({
+        profile: z.string().optional(),
+        version: z.string(),
+        autoUpdate: z.boolean(),
+        relayName: z.string(),
+        relayNameSource: z.enum(["cli", "profile", "env"]),
+        relayUrl: z.string().optional(),
+        relayUrlSource: z.enum(["env", "file", "none"]),
+        relayTokenSource: z.enum(["env", "file", "none"]),
+        hookPort: z.number(),
+        hookPortSource: z.enum(["env", "file", "default"]),
       }),
-    ),
-  }),
+      relay: z
+        .object({
+          connected: z.boolean(),
+          proxyId: z.string(),
+          reconnectAttempt: z.number(),
+          queueDepth: z.number(),
+        })
+        .nullable(),
+      sessions: z.array(
+        z.object({
+          id: z.string(),
+          mode: z.enum(["pty", "json"]),
+          state: z.enum(sessionStateValues),
+          createdAt: z.string(),
+          name: z.string().optional(),
+          hasWorker: z.boolean(),
+        }),
+      ),
+    })
+    .strict(),
 
   // terminal → serve：终端标题变化，由 xterm onTitleChange 触发
   z.object({
@@ -230,6 +254,28 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
 
 // serve 与 session-worker 之间的通信协议
 export const WorkerMessageSchema = z.discriminatedUnion("type", [
+  // worker → serve: every socket connection begins with this protocol and process identity.
+  // Readiness is reported separately because provider bootstrap can fail after IPC negotiation.
+  z
+    .object({
+      type: z.literal("worker_protocol_hello"),
+      protocolVersion: z.literal(WORKER_IPC_PROTOCOL_VERSION),
+      sessionId: z.string().min(1),
+      provider: z.enum(providerValues),
+      pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    })
+    .strict(),
+
+  // serve → worker: the worker also rejects a daemon from another IPC generation.
+  z
+    .object({
+      type: z.literal("serve_protocol_hello"),
+      protocolVersion: z.literal(WORKER_IPC_PROTOCOL_VERSION),
+      sessionId: z.string().min(1),
+      pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+    })
+    .strict(),
+
   // serve → worker: 发送用户输入给 claude
   z.object({
     type: z.literal("worker_input"),
@@ -312,15 +358,7 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     nativeSessionId: z.string().optional(),
   }),
 
-  // worker → serve: 从 stream-json 的 system.init 事件捕获 Claude CLI 侧的 session ID
-  // proxy 拿它来读 ~/.claude/projects/.../<id>.jsonl 历史或后续 --resume
-  z.object({
-    type: z.literal("worker_claude_session_id"),
-    sessionId: z.string(),
-  }),
-
-  // worker → serve: provider 原生会话 ID。Codex thread id 与 Kimi ACP session id 都作为
-  // historySessionId；Claude 仍保留 worker_claude_session_id 的兼容路径。
+  // worker → serve: provider 原生会话 ID。
   z.object({
     type: z.literal("worker_native_session_id"),
     provider: z.enum(providerValues),
@@ -340,14 +378,12 @@ export function serializeWorkerMsg(msg: WorkerMessage): string {
   return JSON.stringify(msg) + "\n";
 }
 
-// onProtocolError：单条 NDJSON 行 parse 失败 / schema 校验失败时回调（不会终止 reader）。
-// 历史上这里用 stream.emit("error") 把传输层炸掉，触发 socket close 与 onDisconnect，等于让一条
-// 协议层的不兼容消息把整个 session 推进 ERROR 态——这是 Claude/Codex CLI 增加新事件类型时的真实风险。
-// 现在改为 callback：调用方自行决定 log + skip 还是断开，传输层保持开放。
+// 单条 NDJSON 的解析/schema 错误必须交给连接所有者明确处理；reader 不替调用方决定
+// 是记录并继续，还是关闭传输。
 export function createWorkerReader(
   stream: NodeJS.ReadableStream,
   onMessage: (msg: WorkerMessage) => void,
-  onProtocolError?: (err: Error, line: string) => void,
+  onProtocolError: (err: Error, line: string) => void,
 ): void {
   const lineBuffer = new LineBuffer();
   lineBuffer.on("data", (line: Buffer | string) => {
@@ -357,15 +393,12 @@ export function createWorkerReader(
     try {
       raw = JSON.parse(str);
     } catch (err) {
-      onProtocolError?.(new Error("Worker message parse error", { cause: err }), str);
+      onProtocolError(new Error("Worker message parse error", { cause: err }), str);
       return;
     }
     const result = WorkerMessageSchema.safeParse(raw);
     if (!result.success) {
-      onProtocolError?.(
-        new Error(`Worker message validation failed: ${result.error.message}`),
-        str,
-      );
+      onProtocolError(new Error(`Worker message validation failed: ${result.error.message}`), str);
       return;
     }
     onMessage(result.data);
@@ -383,13 +416,12 @@ export function serializeIpc(msg: IpcMessage): string {
 // 混合协议 IPC 读取器，支持 NDJSON 控制消息和 binary PTY 帧。
 // binary 帧以 0x00 开头，NDJSON 行以 '{' 开头，通过首字节区分。
 // 返回 dispose 函数用于摘掉 'data' 监听，长连接可以忽略，一次性等待（如 waitForMessage）必须调用避免累积 listener 重复解析每条消息。
-// 同 createWorkerReader：onProtocolError 让协议层 parse / schema 错误不再走 stream.emit("error")，
-// 由调用方决定如何处理（warn-skip / disconnect）。默认 silent drop 是为了向后兼容尚未挂回调的调用点。
+// 同 createWorkerReader：解析/schema 错误必须由调用方显式处理。
 export function createIpcReader(
   stream: NodeJS.ReadableStream,
   onMessage: (msg: IpcMessage) => void,
-  onBinaryFrame?: (sessionId: string, data: Buffer, outputSeq: number) => void,
-  onProtocolError?: (err: Error, line: string) => void,
+  onBinaryFrame: ((sessionId: string, data: Buffer, outputSeq: number) => void) | undefined,
+  onProtocolError: (err: Error, line: string) => void,
 ): () => void {
   let buf = Buffer.alloc(0);
   let disposed = false;
@@ -408,8 +440,7 @@ export function createIpcReader(
         // 解码同样走 decodeBinaryFrame 保持单一权威。
         const decoded = decodeBinaryFrame(buf.subarray(5, totalFrameLen));
         if (decoded && onBinaryFrame) {
-          // ptyData copy 保留与旧代码一致的语义：调用方拿到的是独立 Buffer，
-          // 不会被后续 buf reslice 影响。
+          // 向调用方交付独立 Buffer，避免后续 buf reslice 改变已交付的数据。
           onBinaryFrame(decoded.sessionId, Buffer.from(decoded.data), decoded.outputSeq);
         }
 
@@ -424,20 +455,24 @@ export function createIpcReader(
 
         if (line.length === 0) continue;
 
+        let raw: unknown;
         try {
-          const raw = JSON.parse(line);
-          const result = IpcMessageSchema.safeParse(raw);
-          if (result.success) {
-            onMessage(result.data);
-          } else {
-            onProtocolError?.(
-              new Error(`IPC message validation failed: ${result.error.message}`),
-              line,
-            );
-          }
+          raw = JSON.parse(line);
         } catch (err) {
-          onProtocolError?.(new Error("IPC message parse error", { cause: err }), line);
+          onProtocolError(new Error("IPC message parse error", { cause: err }), line);
+          continue;
         }
+        const result = IpcMessageSchema.safeParse(raw);
+        if (!result.success) {
+          onProtocolError(
+            new Error(`IPC message validation failed: ${result.error.message}`),
+            line,
+          );
+          continue;
+        }
+        // Application callback failures are not protocol parse failures. Let them reach the
+        // owning connection handler instead of silently turning a valid request into a timeout.
+        onMessage(result.data);
       }
     }
   }

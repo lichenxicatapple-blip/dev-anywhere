@@ -1,5 +1,9 @@
 import { WebSocket } from "ws";
-import type { MessageType, MessageSource } from "@dev-anywhere/shared";
+import {
+  MESSAGE_ENVELOPE_VERSION,
+  type MessageSource,
+  type MessageType,
+} from "@dev-anywhere/shared";
 import type { RelayServer } from "#src/server.js";
 
 /**
@@ -117,7 +121,7 @@ export function makeEnvelope(
     sessionId,
     timestamp: Date.now(),
     source,
-    version: "1.0",
+    version: MESSAGE_ENVELOPE_VERSION,
     type,
     payload: payloads[type] ?? {
       turnId: `turn-${seq}`,

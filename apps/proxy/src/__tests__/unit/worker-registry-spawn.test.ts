@@ -35,6 +35,7 @@ describe("WorkerRegistry spawn", () => {
     });
 
     const pid = registry.spawn("s1", {
+      provider: "claude",
       cwd: "/tmp/project",
       permissionMode: "plan",
       hook: {
@@ -83,7 +84,19 @@ describe("WorkerRegistry spawn", () => {
   it("removes an active session when the worker exits without worker_exit IPC", () => {
     const child = createChildProcessFake();
     spawnScriptMock.mockReturnValue(child);
-    const sessionManager = createSessionManagerFake([{ id: "s1", mode: "json" }]);
+    const sessionManager = createSessionManagerFake([
+      {
+        id: "s1",
+        kind: "agent",
+        mode: "json",
+        provider: "claude",
+        state: "idle",
+        createdAt: 1,
+        updatedAt: 1,
+        cwd: "/tmp",
+        pid: 1,
+      },
+    ]);
     const registry = new WorkerRegistry({
       sessionManager,
       permissionBroker: new PermissionBroker(),
@@ -92,7 +105,7 @@ describe("WorkerRegistry spawn", () => {
       getProviderEnv: () => ({}),
     });
 
-    registry.spawn("s1");
+    registry.spawn("s1", { provider: "claude" });
     child.emit("exit", null, "SIGKILL");
 
     expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");

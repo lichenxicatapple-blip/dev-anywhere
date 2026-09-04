@@ -49,7 +49,14 @@ test.describe("PTY paste", () => {
     const pastedText = `first line\nsecond line\n${"x".repeat(800)}`;
     const plainText = "first line\nsecond line";
 
-    await setupPtyChat(page, { sessionId: bracketedSessionId, provider: "codex" });
+    await setupPtyChat(page, {
+      sessionId: bracketedSessionId,
+      sessionKind: "agent",
+      provider: "codex",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
     await sendPtyOutput(page, "\x1b[?2004h");
     await waitForBracketedPasteMode(page, bracketedSessionId, true);
@@ -59,7 +66,14 @@ test.describe("PTY paste", () => {
 
     await expect.poll(() => readRawPtyInput(page)).toBe(bracketedPastePayload(pastedText));
 
-    await setupPtyChat(page, { sessionId: plainSessionId, provider: "codex" });
+    await setupPtyChat(page, {
+      sessionId: plainSessionId,
+      sessionKind: "agent",
+      provider: "codex",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
     await waitForBracketedPasteMode(page, plainSessionId, false);
 

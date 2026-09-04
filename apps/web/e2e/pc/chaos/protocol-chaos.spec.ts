@@ -82,12 +82,73 @@ test.describe("protocol chaos", () => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "pty_state",
         sessionId: "claude-pty",
-        payload: { state: "approval_wait", tool: "Write" },
+        payload: { state: "approval_wait", seq: 1, tool: "Write" },
       });
     });
     await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
 
     await page.reload();
     await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
+  });
+
+  test("fake relay enforces strict current control shapes", async ({ page }) => {
+    await selectFakeProxy(page);
+    await page.goto(`${BASE_URL}/#/sessions`);
+    const row = page.locator('[data-slot="session-row"][data-session-id="test-sess"]:visible');
+    await expect(row).toBeVisible();
+
+    const directoryRejection = await page.evaluate(() => {
+      const socket = window.__devAnywhereE2E?.socket as unknown as
+        | { send(raw: string): void }
+        | undefined;
+      try {
+        socket?.send(
+          JSON.stringify({
+            type: "dir_list_request",
+            requestId: "strict-directory-request",
+            path: "/home/dev",
+            includeHidden: false,
+            proxyId: "unexpected-proxy",
+          }),
+        );
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    });
+    expect(directoryRejection).toContain("invalid dir_list_request fixture input");
+
+    const rejection = await page.evaluate(() => {
+      const socket = window.__devAnywhereE2E?.socket as unknown as
+        | { send(raw: string): void }
+        | undefined;
+      try {
+        socket?.send(
+          JSON.stringify({
+            type: "session_terminate",
+            sessionId: "test-sess",
+            seq: 1,
+            timestamp: 1,
+            source: "client",
+            version: "1.0",
+            payload: { sessionId: "test-sess" },
+          }),
+        );
+        return null;
+      } catch (error) {
+        return error instanceof Error ? error.message : String(error);
+      }
+    });
+
+    expect(rejection).toContain("invalid session_terminate fixture input");
+    await expect(row).toBeVisible();
+
+    await page.evaluate(() => {
+      const socket = window.__devAnywhereE2E?.socket as unknown as
+        | { send(raw: string): void }
+        | undefined;
+      socket?.send(JSON.stringify({ type: "session_terminate", sessionId: "test-sess" }));
+    });
+    await expect(row).toHaveCount(0);
   });
 });

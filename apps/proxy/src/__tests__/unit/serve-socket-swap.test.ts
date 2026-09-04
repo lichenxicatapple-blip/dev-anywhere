@@ -1,13 +1,13 @@
 import { EventEmitter } from "node:events";
 import type { Socket } from "node:net";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { swapServeSocket } from "../../terminal/serve-socket-swap.js";
 
 describe("swapServeSocket", () => {
   it("clears every listener on the prev socket and returns the next socket", () => {
     // 用真 EventEmitter 反映 reconnectToServe 的实际场景：旧 socket 上累积了
     // close/error/data + createIpcReader pipe 的 listener。
-    const prev = new EventEmitter();
+    const prev = Object.assign(new EventEmitter(), { destroy: vi.fn() });
     prev.on("close", () => {});
     prev.on("error", () => {});
     prev.on("data", () => {});
@@ -23,10 +23,11 @@ describe("swapServeSocket", () => {
     expect(prev.listenerCount("close")).toBe(0);
     expect(prev.listenerCount("error")).toBe(0);
     expect(prev.listenerCount("data")).toBe(0);
+    expect(prev.destroy).toHaveBeenCalledOnce();
   });
 
   it("does not touch listeners on the next socket", () => {
-    const prev = new EventEmitter();
+    const prev = Object.assign(new EventEmitter(), { destroy: vi.fn() });
     const next = new EventEmitter();
     next.on("close", () => {});
     swapServeSocket(prev as unknown as Socket, next as unknown as Socket);

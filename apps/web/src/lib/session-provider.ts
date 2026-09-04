@@ -19,5 +19,5 @@ export function compareProvider(a: SessionProvider, b: SessionProvider): number 
 }
 
 export function historySessionProvider(session: HistorySession): SessionProvider {
-  return session.provider ?? "claude";
+  return session.provider;
 }

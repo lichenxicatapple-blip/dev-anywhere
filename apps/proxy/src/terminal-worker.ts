@@ -1,6 +1,5 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import { PTY_INITIAL_MIN_COLS, PTY_INITIAL_MIN_ROWS } from "@dev-anywhere/shared";
 import type { Socket } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { existsSync } from "node:fs";
@@ -14,14 +13,27 @@ import {
   createIpcReader,
   encodeBinaryIpcFrame,
   serializeIpc,
+  TERMINAL_IPC_PROTOCOL_VERSION,
   type IpcMessage,
 } from "./ipc/ipc-protocol.js";
 import { parseTerminalWorkerCliArgs } from "./terminal-worker-args.js";
-import { ensureService, tryConnect, waitForMessage } from "./terminal/serve-bootstrap.js";
+import {
+  ensureService,
+  IpcProtocolError,
+  tryConnect,
+  waitForMessage,
+} from "./terminal/serve-bootstrap.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
 
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 5_000;
+
+class TerminalRegistrationRejectedError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "TerminalRegistrationRejectedError";
+  }
+}
 
 function normalizeTerminalWorkerEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const normalized: Record<string, string> = {};
@@ -50,8 +62,8 @@ class ShellTerminalWorker {
     private readonly sessionId: string,
     private readonly cwd: string,
     private readonly name: string,
-    cols = PTY_INITIAL_MIN_COLS,
-    rows = PTY_INITIAL_MIN_ROWS,
+    cols: number,
+    rows: number,
   ) {
     this.currentCwd = cwd;
     this.renderSequencer = new PtyRenderSequencer({ cols, rows });
@@ -82,6 +94,7 @@ class ShellTerminalWorker {
     this.socket.write(
       serializeIpc({
         type: "session_create_request",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
         mode: "pty",
         provider: "claude",
         cwd: this.currentCwd,
@@ -91,8 +104,21 @@ class ShellTerminalWorker {
         kind: "terminal",
       }),
     );
-    const response = await responsePromise;
-    if (response.error) throw new Error(`Failed to register terminal worker: ${response.error}`);
+    let response: Awaited<typeof responsePromise>;
+    try {
+      response = await responsePromise;
+    } catch (error) {
+      if (error instanceof IpcProtocolError) {
+        throw new TerminalRegistrationRejectedError(error.message);
+      }
+      throw error;
+    }
+    if (!response.success) {
+      this.socket.destroy();
+      throw new TerminalRegistrationRejectedError(
+        `Failed to register terminal worker: ${response.error}`,
+      );
+    }
     this.socket.write(
       serializeIpc({ type: "pty_register", sessionId: this.sessionId, pid: process.pid }),
     );
@@ -242,10 +268,19 @@ class ShellTerminalWorker {
         return;
       }
     } catch (err) {
+      const failedSocket = this.socket;
+      this.socket = null;
+      failedSocket?.destroy();
       log.warn(
         { sessionId: this.sessionId, err: err instanceof Error ? err.message : String(err) },
         "Terminal worker reconnect failed",
       );
+      if (err instanceof TerminalRegistrationRejectedError) {
+        // The daemon understood this protocol generation and rejected the identity. Retrying the
+        // same registration cannot succeed; stop the owned PTY instead of looping forever.
+        this.shutdown(1);
+        return;
+      }
       this.reconnecting = false;
       void this.reconnectToServe();
       return;
@@ -293,7 +328,7 @@ class ShellTerminalWorker {
 
 const parsedArgs = parseTerminalWorkerCliArgs(process.argv.slice(2));
 if (!parsedArgs) {
-  console.error("Usage: terminal-worker [--profile <name>] <sessionId> <cwd> <name> [cols] [rows]");
+  console.error("Usage: terminal-worker [--profile <name>] <sessionId> <cwd> <name> <cols> <rows>");
   process.exit(1);
 }
 

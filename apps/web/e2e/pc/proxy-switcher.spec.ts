@@ -32,8 +32,14 @@ test.describe("ProxySwitcher — dropdown layout (desktop)", () => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "proxy_list_response",
         proxies: [
-          { proxyId: "proxy-1", name: "Local Mac", online: true, sessions: ["claude-pty"] },
-          { proxyId: "proxy-slow", name: "Slow Mac", online: true, sessions: [] },
+          {
+            proxyId: "proxy-1",
+            name: "Local Mac",
+            version: "0.9.0",
+            online: true,
+            sessions: ["claude-pty"],
+          },
+          { proxyId: "proxy-slow", name: "Slow Mac", version: "0.9.0", online: true, sessions: [] },
         ],
       });
       window.__devAnywhereE2E?.setProxySelectDelay(600);
@@ -61,9 +67,12 @@ test.describe("ProxySwitcher — dropdown layout (desktop)", () => {
 
   test("removes an offline proxy from its desktop overflow menu", async ({ page }) => {
     await page.goto(`${BASE_URL}/#/`);
+    await page.locator('button[data-slot="proxy-switcher-trigger"]').click();
+    await expect(
+      page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"][data-online="true"]:visible'),
+    ).toBeVisible();
     await page.evaluate(() => window.__devAnywhereE2E?.setProxyOnline(false));
 
-    await page.locator('button[data-slot="proxy-switcher-trigger"]').click();
     const offlineRow = page.locator(
       '[data-slot="proxy-item"][data-proxy-id="proxy-1"][data-online="false"]:visible',
     );
@@ -106,6 +115,9 @@ test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
     page,
   }) => {
     await page.goto(`${BASE_URL}/#/`);
+    await expect(
+      page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible'),
+    ).toBeVisible();
     await page.evaluate(() => window.__devAnywhereE2E?.setProxyOnline(false));
 
     const row = page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]');
@@ -172,8 +184,14 @@ test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "proxy_list_response",
         proxies: [
-          { proxyId: "proxy-1", name: "Local Mac", online: true, sessions: ["claude-pty"] },
-          { proxyId: "proxy-slow", name: "Slow Mac", online: true, sessions: [] },
+          {
+            proxyId: "proxy-1",
+            name: "Local Mac",
+            version: "0.9.0",
+            online: true,
+            sessions: ["claude-pty"],
+          },
+          { proxyId: "proxy-slow", name: "Slow Mac", version: "0.9.0", online: true, sessions: [] },
         ],
       });
       window.__devAnywhereE2E?.setProxySelectDelay(400);

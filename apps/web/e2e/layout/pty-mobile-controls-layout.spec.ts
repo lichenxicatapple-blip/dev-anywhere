@@ -18,7 +18,15 @@ test.describe("PTY mobile controls — portrait layout geometry", () => {
   test.use({ viewport: MOBILE_VIEWPORTS.standard, hasTouch: true });
 
   test("two rows keep uniform key sizes and keyboard-edge clearance", async ({ page }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID, withVisualViewportMock: true });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      withVisualViewportMock: true,
+    });
     await expectPtyTerminalMounted(page);
 
     await page.locator('[data-slot="pty-terminal"]').click();
@@ -133,6 +141,11 @@ test.describe("PTY mobile controls — portrait layout geometry", () => {
     });
     await setupPtyChat(page, {
       sessionId: `${SESSION_ID}-light-theme`,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
       withVisualViewportMock: true,
     });
     await expectPtyTerminalMounted(page);
@@ -181,6 +194,11 @@ test.describe("PTY mobile controls — portrait layout geometry", () => {
   }) => {
     await setupPtyChat(page, {
       sessionId: `${SESSION_ID}-desktop-interaction`,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
       withVisualViewportMock: true,
     });
     await page.evaluate(() => {
@@ -236,6 +254,11 @@ test.describe("PTY mobile controls — iPad landscape keyboard", () => {
     });
     await setupPtyChat(page, {
       sessionId: `${SESSION_ID}-ipad-landscape`,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
       withVisualViewportMock: true,
     });
     await expectPtyTerminalMounted(page);
@@ -356,6 +379,11 @@ test.describe("PTY mobile controls — tablet sidebar geometry", () => {
   test("spans the visual viewport instead of only the PTY content column", async ({ page }) => {
     await setupPtyChat(page, {
       sessionId: `${SESSION_ID}-tablet-sidebar`,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
       withVisualViewportMock: true,
     });
     await expectPtyTerminalMounted(page);

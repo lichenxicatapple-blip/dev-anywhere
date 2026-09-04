@@ -2,6 +2,7 @@
 // hostedPty / jsonMode fixture 的差别只在 session_create 的 mode 字段, 其余走同一条路.
 // 用 Node 22+ 内置 WebSocket (W3C EventTarget 风格).
 import type { LocalRuntime } from "./local-runtime";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 
 const REQ_TIMEOUT_MS = 15_000;
 
@@ -87,7 +88,7 @@ export interface SessionViaRelay {
   proxyId: string;
   cwd: string;
   mode: "pty" | "json";
-  kind?: "agent" | "terminal";
+  kind: "agent" | "terminal";
   ptyOwner?: "local-terminal" | "proxy-hosted";
   // 主动发协议消息到 relay (e.g. session_subscribe / user_input).
   send: (payload: Record<string, unknown>) => void;
@@ -107,18 +108,24 @@ export interface SessionViaRelay {
 
 export type SpawnSessionOptions =
   | {
-      kind?: "agent";
-      mode: "pty" | "json";
+      kind: "agent";
+      mode: "json";
       cwd: string;
       provider: "claude" | "codex" | "kimi";
     }
   | {
+      kind: "agent";
+      mode: "pty";
+      cwd: string;
+      provider: "claude" | "codex" | "kimi";
+      cols: number;
+      rows: number;
+    }
+  | {
       kind: "terminal";
       mode: "pty";
-      cwd?: string;
-      provider?: "claude" | "codex" | "kimi";
-      cols?: number;
-      rows?: number;
+      cols: number;
+      rows: number;
     };
 
 export async function spawnSessionViaRelay(
@@ -131,6 +138,7 @@ export async function spawnSessionViaRelay(
   const clientId = `e2e-client-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
   ws.send({
     type: "client_register",
+    protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
     clientId,
     browserName: "Chrome",
     osName: "macOS",
@@ -150,22 +158,25 @@ export async function spawnSessionViaRelay(
     throw new Error(`relay-control: proxy_select 失败: ${selectResp.error}`);
   }
 
-  const createResp = await ws.request<{
-    sessionId?: string;
-    error?: string;
-    kind?: "agent" | "terminal";
-    ptyOwner?: "local-terminal" | "proxy-hosted";
-  }>("session_create", {
+  const createResp = await ws.request<
+    | {
+        success: true;
+        sessionId: string;
+        kind: "agent" | "terminal";
+        cwd: string;
+        lastActive: number;
+        ptyOwner?: "local-terminal" | "proxy-hosted";
+      }
+    | { success: false; error?: string }
+  >("session_create", {
     mode: options.mode,
-    ...(options.cwd !== undefined ? { cwd: options.cwd } : {}),
-    ...(options.provider !== undefined ? { provider: options.provider } : {}),
-    ...(options.kind !== undefined ? { kind: options.kind } : {}),
-    ...(options.kind === "terminal" && options.cols !== undefined ? { cols: options.cols } : {}),
-    ...(options.kind === "terminal" && options.rows !== undefined ? { rows: options.rows } : {}),
+    kind: options.kind,
+    ...(options.kind === "agent" ? { cwd: options.cwd, provider: options.provider } : {}),
+    ...(options.mode === "pty" ? { cols: options.cols, rows: options.rows } : {}),
   });
-  if (!createResp.sessionId) {
+  if (!createResp.success) {
     throw new Error(
-      `relay-control: session_create(mode=${options.mode}) 失败: ${createResp.error ?? "无 sessionId"}`,
+      `relay-control: session_create(mode=${options.mode}) 失败: ${createResp.error ?? "未知错误"}`,
     );
   }
 
@@ -181,9 +192,9 @@ export async function spawnSessionViaRelay(
   return {
     sessionId,
     proxyId,
-    cwd: options.cwd ?? "",
+    cwd: createResp.cwd,
     mode: options.mode,
-    kind: createResp.kind ?? options.kind,
+    kind: createResp.kind,
     ptyOwner: createResp.ptyOwner,
     send: (payload) => ws.send(payload),
     onJson: (handler) => ws.onJson(handler),

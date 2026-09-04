@@ -148,6 +148,7 @@ async function terminateSessionByControl(sessionId: string): Promise<void> {
   try {
     const register = waitForRelayMessage<{
       type: "client_register_response";
+      protocolVersion: 1;
       status: "new" | "restored" | "proxy_offline";
     }>(
       ws,
@@ -155,12 +156,14 @@ async function terminateSessionByControl(sessionId: string): Promise<void> {
         msg,
       ): msg is {
         type: "client_register_response";
+        protocolVersion: 1;
         status: "new" | "restored" | "proxy_offline";
-      } => msg.type === "client_register_response",
+      } => msg.type === "client_register_response" && msg.protocolVersion === 1,
     );
     ws.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: 1,
         clientId: `e2e-cleanup-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
         browserName: "Chrome",
         osName: "macOS",

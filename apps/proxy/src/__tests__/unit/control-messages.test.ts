@@ -230,12 +230,14 @@ describe("control-messages: provider-aware session resources", () => {
 
     await handlers.handleSessionResourcesRequest({
       sessionId: "kimi-1",
+      requestId: "resources-1",
       workDir: tmpDir,
       includeCommands: false,
     });
 
     const response = JSON.parse(sent[0]);
     expect(response.type).toBe("session_resources_response");
+    expect(response.requestId).toBe("resources-1");
     expect(response.commands).toEqual([]);
     expect(response.groups[0]).toMatchObject({ path: tmpDir });
     handlers.cleanup("kimi-1");
@@ -261,12 +263,14 @@ describe("control-messages: provider-aware session resources", () => {
 
     await handlers.handleSessionResourcesRequest({
       sessionId: "kimi-1",
+      requestId: "resources-2",
       workDir: tmpDir,
       includeCommands: false,
     });
 
     expect(JSON.parse(sent[0])).toMatchObject({
       type: "session_resources_response",
+      requestId: "resources-2",
       sessionId: "kimi-1",
       commands,
     });
@@ -350,7 +354,19 @@ describe("control-messages: reinitializeOnReconnect", () => {
     const sent: string[] = [];
     const handlers = createControlMessageHandlers(
       (data) => sent.push(data),
-      createMockSessionManager([{ id: "terminated-1", state: SessionState.TERMINATED }]),
+      createMockSessionManager([
+        {
+          id: "terminated-1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: SessionState.TERMINATED,
+          createdAt: 1,
+          updatedAt: 1,
+          cwd: "/tmp",
+          pid: 1,
+        },
+      ]),
     );
 
     await handlers.reinitializeOnReconnect();
@@ -370,8 +386,28 @@ describe("control-messages: reinitializeOnReconnect", () => {
     const sent: string[] = [];
 
     const sessionManager = createMockSessionManager([
-      { id: "active-1", state: SessionState.WORKING },
-      { id: "terminated-1", state: SessionState.TERMINATED },
+      {
+        id: "active-1",
+        kind: "agent",
+        mode: "json",
+        provider: "claude",
+        state: SessionState.WORKING,
+        createdAt: 1,
+        updatedAt: 1,
+        cwd: "/tmp",
+        pid: 1,
+      },
+      {
+        id: "terminated-1",
+        kind: "agent",
+        mode: "json",
+        provider: "claude",
+        state: SessionState.TERMINATED,
+        createdAt: 1,
+        updatedAt: 1,
+        cwd: "/tmp",
+        pid: 1,
+      },
     ]);
 
     const handlers = createControlMessageHandlers((d) => sent.push(d), sessionManager);
@@ -385,6 +421,12 @@ describe("control-messages: reinitializeOnReconnect", () => {
     // 应为 active session 推送 session_sync + command_list_push + file_tree_push
     const types = sent.map((s) => JSON.parse(s).type);
     expect(types).toContain("session_sync");
+    expect(sent.map((data) => JSON.parse(data))).toContainEqual(
+      expect.objectContaining({
+        type: "session_sync",
+        sessions: [expect.objectContaining({ id: "active-1", kind: "agent" })],
+      }),
+    );
     expect(types).toContain("command_list_push");
     expect(types).toContain("file_tree_push");
     // terminated session 不应有推送（session_sync 也只包含 active session）
@@ -402,7 +444,17 @@ describe("control-messages: reinitializeOnReconnect", () => {
     const handlers = createControlMessageHandlers(
       (data) => sent.push(data),
       createMockSessionManager([
-        { id: "kimi-1", provider: "kimi", state: SessionState.IDLE, cwd: tmpDir },
+        {
+          id: "kimi-1",
+          kind: "agent",
+          mode: "json",
+          provider: "kimi",
+          state: SessionState.IDLE,
+          createdAt: 1,
+          updatedAt: 1,
+          cwd: tmpDir,
+          pid: 1,
+        },
       ]),
     );
 

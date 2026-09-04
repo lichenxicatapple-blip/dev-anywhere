@@ -319,7 +319,17 @@ describe("VoicePilotController", () => {
     useVoicePilotStore.getState().resetAll();
     useChatStore.setState({ bySessionId: { s1: { ...EMPTY_SLICE, inputDraft: "typed draft" } } });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
       agentStatusBySessionId: {},
       ptyStateBySessionId: {},
     });

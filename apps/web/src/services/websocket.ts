@@ -399,7 +399,10 @@ export class WebSocketManager {
       if (this.ws !== ws) return;
       this.cancelConnectionProbe(ws);
       this.cancelForegroundWatchdog();
-      if (event.code === RelayCloseCode.CLIENT_KICKED) {
+      if (
+        event.code === RelayCloseCode.CLIENT_KICKED ||
+        event.code === RelayCloseCode.CLIENT_PROTOCOL_REJECTED
+      ) {
         this.closed = true;
         this.cancelReconnectTimer();
       }

@@ -2,22 +2,35 @@
 // 每个 spec 用自己的 sessionId, 通过 setupPtyChat 完成 init+reload+resetLocal 流程.
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
+import { MESSAGE_ENVELOPE_VERSION, RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 import { BASE_URL, resetLocalState } from "./helpers";
 import { installVisualViewportMock } from "./mobile-helpers";
 
-export type PtyFakeRelayOptions = {
+type PtyFakeRelayOptionsBase = {
   sessionId: string;
-  provider?: "claude" | "codex" | "kimi";
-  sessionKind?: "agent" | "terminal";
-  ptyOwner?: "local-terminal" | "proxy-hosted";
   snapshotData?: string;
-  cols?: number;
-  rows?: number;
+  cols: number;
+  rows: number;
 };
+
+export type PtyFakeRelayOptions =
+  | (PtyFakeRelayOptionsBase & {
+      sessionKind: "agent";
+      provider: "claude" | "codex" | "kimi";
+      ptyOwner: "local-terminal" | "proxy-hosted";
+    })
+  | (PtyFakeRelayOptionsBase & {
+      sessionKind: "terminal";
+      provider: "claude";
+      ptyOwner: "local-terminal";
+    });
 
 const PTY_FAKE_RELAY_ACTIVE_KEY = "__dev_anywhere_pty_fake_relay_active";
 
 export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptions): Promise<void> {
+  const { sessionKind, provider, ptyOwner } = options;
+  const sessionCwd = "/tmp";
+
   await page.route("**/health", async (route) => {
     await route.fulfill({
       status: 200,
@@ -45,7 +58,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
       {
         key: PTY_FAKE_RELAY_ACTIVE_KEY,
         sessionId: options.sessionId,
-        provider: options.provider ?? "claude",
+        provider,
       },
     )
     .catch(() => {});
@@ -59,6 +72,9 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
       snapshotData,
       initialCols,
       initialRows,
+      controlProtocolVersion,
+      envelopeVersion,
+      sessionCwd,
     }) => {
       const active = (() => {
         try {
@@ -83,7 +99,9 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
       const alreadyInstalled = (window as unknown as Record<string, unknown>)[installedKey];
       if (alreadyInstalled) return;
       (window as unknown as Record<string, unknown>)[installedKey] = true;
-      const providerForSession = active?.provider ?? provider;
+      if (active?.provider !== undefined && active.provider !== provider) {
+        throw new Error("PTY fixture state provider does not match the current session identity");
+      }
 
       type Listener = (event: Event) => void;
 
@@ -122,7 +140,14 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
           }
 
           if (msg.type === "client_register") {
-            this.emitJson({ type: "client_register_response", status: "new" });
+            if (msg.protocolVersion !== controlProtocolVersion) {
+              throw new Error("invalid client_register fixture protocolVersion");
+            }
+            this.emitJson({
+              type: "client_register_response",
+              protocolVersion: controlProtocolVersion,
+              status: "new",
+            });
             return;
           }
 
@@ -140,7 +165,13 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
               type: "proxy_list_response",
               requestId: msg.requestId,
               proxies: [
-                { proxyId: "proxy-1", name: "Smoke Proxy", online: true, sessions: [sessionId] },
+                {
+                  proxyId: "proxy-1",
+                  name: "Smoke Proxy",
+                  version: "0.9.0",
+                  online: true,
+                  sessions: [sessionId],
+                },
               ],
             });
             return;
@@ -192,22 +223,22 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
             return;
           }
 
-          if (msg.type === "session_list") {
+          if (msg.type === "session_list_request") {
             this.emitJson({
               seq: 1,
-              sessionId,
               timestamp: Date.now(),
               source: "proxy",
-              version: "1",
+              version: envelopeVersion,
               type: "session_list",
               payload: {
                 sessions: [
                   {
                     sessionId,
-                    ...(sessionKind ? { kind: sessionKind } : {}),
+                    kind: sessionKind,
+                    cwd: sessionCwd,
                     mode: "pty",
-                    provider: providerForSession,
-                    ...(ptyOwner ? { ptyOwner } : {}),
+                    provider,
+                    ptyOwner,
                     state: "working",
                     lastActive: Date.now(),
                   },
@@ -315,13 +346,17 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
           this.socket?.emitResize(cols, rows);
         },
         setPtyState(state: "working" | "turn_complete" | "approval_wait") {
-          this.socket?.emitJson({ type: "pty_state", sessionId, payload: { state } });
+          this.socket?.emitJson({
+            type: "pty_state",
+            sessionId,
+            payload: { state, seq: Date.now() },
+          });
           this.socket?.emitJson({
             seq: Date.now(),
             sessionId,
             timestamp: Date.now(),
             source: "proxy",
-            version: "1",
+            version: envelopeVersion,
             type: "session_status",
             payload: {
               sessionId,
@@ -341,12 +376,15 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
     {
       activeKey: PTY_FAKE_RELAY_ACTIVE_KEY,
       sessionId: options.sessionId,
-      provider: options.provider ?? "claude",
-      sessionKind: options.sessionKind,
-      ptyOwner: options.ptyOwner,
+      provider,
+      sessionKind,
+      ptyOwner,
       snapshotData: options.snapshotData ?? "PTY SMOKE READY\r\n$ ",
-      initialCols: options.cols ?? 80,
-      initialRows: options.rows ?? 24,
+      initialCols: options.cols,
+      initialRows: options.rows,
+      controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      envelopeVersion: MESSAGE_ENVELOPE_VERSION,
+      sessionCwd,
     },
   );
 }
@@ -408,16 +446,9 @@ export async function readRawPtyInput(page: Page): Promise<string> {
   );
 }
 
-export type SetupPtyChatOptions = {
-  sessionId: string;
-  provider?: "claude" | "codex" | "kimi";
-  sessionKind?: "agent" | "terminal";
-  ptyOwner?: "local-terminal" | "proxy-hosted";
+export type SetupPtyChatOptions = PtyFakeRelayOptions & {
   query?: string;
   withVisualViewportMock?: boolean;
-  snapshotData?: string;
-  cols?: number;
-  rows?: number;
   // mobile L4 spec 用 mobileBaseUrl, PC L3 用默认 BASE_URL.
   baseUrl?: string;
 };
@@ -433,18 +464,9 @@ export async function setupPtyChat(page: Page, options: SetupPtyChatOptions): Pr
     navNonce += 1;
     return `${baseUrl}/?ptyFakeRelay=${Date.now()}-${navNonce}#/chat/${options.sessionId}?mode=pty${query}`;
   };
-  const relayOptions = {
-    sessionId: options.sessionId,
-    provider: options.provider,
-    sessionKind: options.sessionKind,
-    ptyOwner: options.ptyOwner,
-    snapshotData: options.snapshotData,
-    cols: options.cols,
-    rows: options.rows,
-  };
-  await installPtyFakeRelay(page, relayOptions);
+  await installPtyFakeRelay(page, options);
   await page.goto(url());
   await resetLocalState(page);
-  await installPtyFakeRelay(page, relayOptions);
+  await installPtyFakeRelay(page, options);
   await page.goto(url());
 }

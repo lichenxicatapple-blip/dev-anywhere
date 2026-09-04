@@ -1,6 +1,10 @@
 import { describe, expect, it, vi } from "vitest";
 import type { Socket } from "node:net";
-import { releaseServeSocket, takeoverServeSocket } from "../../worker/serve-socket-takeover.js";
+import {
+  acceptCurrentServeSocketMessage,
+  releaseServeSocket,
+  takeoverServeSocket,
+} from "../../worker/serve-socket-takeover.js";
 
 function fakeSocket(): Socket & { destroyCalls: number } {
   const sock = {
@@ -64,5 +68,19 @@ describe("releaseServeSocket", () => {
 
     expect(releaseServeSocket(current, current, onCurrentClosed)).toBeNull();
     expect(onCurrentClosed).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("acceptCurrentServeSocketMessage", () => {
+  it("destroys a superseded socket before its buffered business message can run", () => {
+    const previous = fakeSocket();
+    const current = fakeSocket();
+    const executeBusinessMessage = vi.fn();
+
+    if (acceptCurrentServeSocketMessage(current, previous)) executeBusinessMessage();
+
+    expect(executeBusinessMessage).not.toHaveBeenCalled();
+    expect(previous.destroyCalls).toBe(1);
+    expect(acceptCurrentServeSocketMessage(current, current)).toBe(true);
   });
 });

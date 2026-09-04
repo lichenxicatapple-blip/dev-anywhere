@@ -874,7 +874,7 @@ describe("DevicePreviewBridge management failures", () => {
   it("returns a typed Proxy-offline capability failure", () => {
     const registry = new RelayRegistry();
     const proxy = { readyState: WebSocket.OPEN, send: vi.fn() } as unknown as WebSocket;
-    registry.registerProxy("proxy-1", proxy);
+    registry.registerProxy("proxy-1", proxy, "0.9.0");
     const sent: string[] = [];
     const client = {
       clientId: "client-1",

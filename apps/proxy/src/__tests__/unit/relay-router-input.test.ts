@@ -92,14 +92,30 @@ function createRouter(options: {
         listSessions: () => [],
         getSession: (sessionId: string) =>
           sessionId === "s1"
-            ? {
-                id: "s1",
-                mode: options.mode,
-                provider: "claude",
-                state: SessionState.IDLE,
-                cwd: "/tmp",
-                pid: 1,
-              }
+            ? options.mode === "pty"
+              ? {
+                  id: "s1",
+                  kind: "agent",
+                  mode: "pty",
+                  provider: "claude",
+                  ptyOwner: "proxy-hosted",
+                  state: SessionState.IDLE,
+                  createdAt: 1,
+                  updatedAt: 1,
+                  cwd: "/tmp",
+                  pid: 1,
+                }
+              : {
+                  id: "s1",
+                  kind: "agent",
+                  mode: "json",
+                  provider: "claude",
+                  state: SessionState.IDLE,
+                  createdAt: 1,
+                  updatedAt: 1,
+                  cwd: "/tmp",
+                  pid: 1,
+                }
             : undefined,
       } as unknown as SessionManager),
     workerRegistry: createWorkerRegistryFake({
@@ -196,6 +212,29 @@ describe("RelayRouter input routing", () => {
   afterEach(() => {
     vi.useRealTimers();
     vi.unstubAllEnvs();
+  });
+
+  it("rejects session termination outside the control protocol", () => {
+    const terminateSession = vi.fn(() => ({ success: true, pid: 123 }));
+    const router = createRouter({
+      mode: "json",
+      sessionManager: {
+        getSession: vi.fn(),
+        terminateSession,
+      } as unknown as SessionManager,
+    });
+
+    router.handle({
+      type: "session_terminate",
+      seq: 1,
+      sessionId: "s1",
+      timestamp: 1,
+      source: "client",
+      version: "1.0",
+      payload: { sessionId: "s1" },
+    });
+
+    expect(terminateSession).not.toHaveBeenCalled();
   });
 
   it("routes scoped Web preview capability requests to the preview manager", async () => {
@@ -459,7 +498,7 @@ describe("RelayRouter input routing", () => {
       seq: 7,
       timestamp: 1234,
       source: "client",
-      version: "1",
+      version: "1.0",
       payload: { text: "hello", messageId: "s1-user-client-1" },
     });
 
@@ -513,7 +552,7 @@ describe("RelayRouter input routing", () => {
       seq: 7,
       timestamp: 1234,
       source: "client",
-      version: "1",
+      version: "1.0",
       payload: { text: "/compact", messageId: "s1-user-client-1" },
     });
 
@@ -610,6 +649,8 @@ describe("RelayRouter input routing", () => {
 
     router.handle({
       type: "session_create",
+      requestId: "missing-cwd",
+      kind: "agent",
       cwd: "/home/dev/path-that-should-not-exist-dev-anywhere-test",
       provider: "claude",
       mode: "json",
@@ -619,8 +660,7 @@ describe("RelayRouter input routing", () => {
     expect(relaySend).toHaveBeenCalledTimes(1);
     const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
     expect(msg.type).toBe("session_create_response");
-    if (msg.type === "session_create_response") {
-      expect(msg.sessionId).toBeUndefined();
+    if (msg.type === "session_create_response" && !msg.success) {
       expect(msg.error).toContain("工作目录不存在或不可访问");
     }
   });
@@ -668,6 +708,8 @@ describe("RelayRouter input routing", () => {
 
     router.handle({
       type: "session_create",
+      requestId: "json-timeout",
+      kind: "agent",
       cwd: "/tmp",
       provider: "claude",
       mode: "json",
@@ -679,7 +721,7 @@ describe("RelayRouter input routing", () => {
     if (typeof lastRaw !== "string") throw new Error("expected last relay send to be a string");
     const msg = RelayControlSchema.parse(JSON.parse(lastRaw));
     expect(msg.type).toBe("session_create_response");
-    if (msg.type === "session_create_response") {
+    if (msg.type === "session_create_response" && !msg.success) {
       expect(msg.error).toBe("Agent 启动超时，请检查 Agent CLI 配置与开发机负载后重试");
     }
     expect(workerTerminateProcess).toHaveBeenCalledTimes(1);
@@ -707,6 +749,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-json-spawn-failed",
+      kind: "agent",
       cwd: "/tmp",
       provider: "claude",
       mode: "json",
@@ -738,6 +781,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-json-exited-before-connect",
+      kind: "agent",
       cwd: "/tmp",
       provider: "claude",
       mode: "json",
@@ -763,6 +807,8 @@ describe("RelayRouter input routing", () => {
 
     router.handle({
       type: "session_create",
+      requestId: "json-permission-mode",
+      kind: "agent",
       cwd: "/tmp",
       provider: "claude",
       mode: "json",
@@ -786,6 +832,8 @@ describe("RelayRouter input routing", () => {
 
     router.handle({
       type: "session_create",
+      requestId: "codex-auto-permission",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -809,6 +857,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "codex-strict",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -838,6 +887,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "codex-active-writer",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -862,6 +912,7 @@ describe("RelayRouter input routing", () => {
     const findCodexActiveWriter = vi.fn(() => ({ pid: 46559 }));
     const managed = {
       id: "managed-codex-session",
+      kind: "agent" as const,
       mode: "pty" as const,
       provider: "codex" as const,
       ptyOwner: "local-terminal" as const,
@@ -884,6 +935,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "codex-managed",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -919,7 +971,7 @@ describe("RelayRouter input routing", () => {
       pid: 46546,
       createdAt: 1,
       updatedAt: 1,
-      // Legacy local resumes do not know which native Codex thread the TUI selected.
+      // Local resume leaves the native Codex thread selection inside the TUI.
       historySessionId: undefined,
     };
     const router = createRouter({
@@ -935,6 +987,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "codex-managed-by-process-tree",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -996,6 +1049,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-json-ready",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -1046,6 +1100,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-json-fail-ready",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -1087,6 +1142,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-json-active-writer-race",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "json",
@@ -1121,6 +1177,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-json-exited-after-ready",
+      kind: "agent",
       cwd: "/tmp",
       provider: "claude",
       mode: "json",
@@ -1146,9 +1203,13 @@ describe("RelayRouter input routing", () => {
 
     router.handle({
       type: "session_create",
+      requestId: "hosted-pty-permission",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "pty",
+      cols: 80,
+      rows: 24,
       permissionMode: "bypassPermissions",
     });
 
@@ -1175,14 +1236,16 @@ describe("RelayRouter input routing", () => {
         listSessions: () => [],
         createSession: vi.fn(
           (
+            _kind: unknown,
             _mode: unknown,
+            provider: "kimi",
             cwd: string,
             pid: number,
             name: string | undefined,
             id: string,
-            provider: "kimi",
           ) => ({
             id,
+            kind: "agent",
             mode: "pty",
             provider,
             ptyOwner: "proxy-hosted",
@@ -1200,9 +1263,12 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-kimi-pty",
+      kind: "agent",
       cwd: "/tmp",
       provider: "kimi",
       mode: "pty",
+      cols: 80,
+      rows: 24,
       permissionMode: "plan",
     });
 
@@ -1228,14 +1294,16 @@ describe("RelayRouter input routing", () => {
     const setHistorySessionId = vi.fn();
     const createSession = vi.fn(
       (
+        _kind: unknown,
         _mode: unknown,
+        provider: "kimi",
         cwd: string,
         pid: number,
         name: string | undefined,
         id: string,
-        provider: "kimi",
       ) => ({
         id,
+        kind: "agent" as const,
         mode: "json" as const,
         provider,
         state: SessionState.IDLE,
@@ -1282,6 +1350,7 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-kimi-json",
+      kind: "agent",
       cwd: "/tmp",
       provider: "kimi",
       mode: "json",
@@ -1319,9 +1388,12 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-kimi-invalid-permission",
+      kind: "agent",
       cwd: "/tmp",
       provider: "kimi",
       mode: "pty",
+      cols: 80,
+      rows: 24,
       permissionMode: "acceptEdits",
     });
 
@@ -1371,7 +1443,14 @@ describe("RelayRouter input routing", () => {
     const hostedStart = vi.fn(() => 4321);
     const terminalWorkerStart = vi.fn((_options: unknown) => 5678);
     const createSession = vi.fn(
-      (_mode: unknown, sessionCwd: string, pid: number, name: string) => ({
+      (
+        _kind: unknown,
+        _mode: unknown,
+        _provider: unknown,
+        sessionCwd: string,
+        pid: number,
+        name: string,
+      ) => ({
         id: "terminal-session",
         kind: "terminal",
         mode: "pty",
@@ -1400,6 +1479,8 @@ describe("RelayRouter input routing", () => {
       requestId: "create-terminal-1",
       kind: "terminal",
       mode: "pty",
+      cols: 80,
+      rows: 24,
     });
 
     expect(hostedStart).not.toHaveBeenCalled();
@@ -1416,15 +1497,15 @@ describe("RelayRouter input routing", () => {
       }),
     );
     expect(createSession).toHaveBeenCalledWith(
+      "terminal",
       "pty",
+      "claude",
       terminalOptions.cwd,
       5678,
       terminalName,
       expect.any(String),
-      "claude",
       "local-terminal",
       false,
-      "terminal",
     );
     const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
     expect(msg).toMatchObject({
@@ -1465,9 +1546,12 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-codex-pty-resume",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "pty",
+      cols: 80,
+      rows: 24,
       resumeSessionId: "codex-native-thread",
     });
 
@@ -1495,9 +1579,12 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-fail-1",
+      kind: "agent",
       cwd: "/tmp",
       provider: "claude",
       mode: "pty",
+      cols: 80,
+      rows: 24,
     });
 
     expect(relaySend).toHaveBeenCalledTimes(1);
@@ -1537,9 +1624,12 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-fail-after-spawn",
+      kind: "agent",
       cwd: "/tmp",
       provider: "claude",
       mode: "pty",
+      cols: 80,
+      rows: 24,
     });
 
     expect(hostedAbortStartup).toHaveBeenCalledWith(pendingId);
@@ -1558,6 +1648,7 @@ describe("RelayRouter input routing", () => {
     const hostedStart = vi.fn((_options: unknown) => 1234);
     const createSession = vi.fn(() => ({
       id: "created-session",
+      kind: "agent" as const,
       mode: "pty",
       provider: "codex",
       ptyOwner: "proxy-hosted",
@@ -1582,19 +1673,23 @@ describe("RelayRouter input routing", () => {
     router.handle({
       type: "session_create",
       requestId: "create-1",
+      kind: "agent",
       cwd: "/tmp",
       provider: "codex",
       mode: "pty",
+      cols: 80,
+      rows: 24,
       name: "  Release checklist  ",
     });
 
     expect(createSession).toHaveBeenCalledWith(
+      "agent",
       "pty",
+      "codex",
       "/tmp",
       1234,
       "Release checklist",
       expect.any(String),
-      "codex",
       "proxy-hosted",
       true,
     );

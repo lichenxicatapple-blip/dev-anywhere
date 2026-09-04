@@ -2,7 +2,9 @@ import { WebSocket } from "ws";
 import {
   isProxyToClientRelayControlType,
   RELAY_BINARY_FRAME_MAX_BYTES,
+  RELAY_CONTROL_PROTOCOL_VERSION,
   RelayErrorCode,
+  RelayCloseCode,
   RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
   type PreviewScope,
@@ -174,6 +176,14 @@ function rejectNotRegistered(ws: ProxySocket): void {
   );
 }
 
+function closeRejectedProxyProtocol(ws: ProxySocket): void {
+  ws.close(RelayCloseCode.PROXY_PROTOCOL_REJECTED, "proxy protocol rejected");
+}
+
+function isCurrentProxySocket(ws: ProxySocket, registry: RelayRegistry): boolean {
+  return ws.proxyId !== undefined && registry.getProxy(ws.proxyId) === ws;
+}
+
 // 处理代理端 WebSocket 连接生命周期
 export function handleProxyConnection(
   ws: WebSocket,
@@ -188,6 +198,7 @@ export function handleProxyConnection(
 ): void {
   const proxyWs = ws as ProxySocket;
   proxyWs.isAlive = true;
+  let registrationCompleted = false;
 
   proxyWs.on("pong", () => {
     proxyWs.isAlive = true;
@@ -196,6 +207,17 @@ export function handleProxyConnection(
   proxyWs.on("message", (data: Buffer, isBinary: boolean) => {
     // Binary frames are pass-through; relay only reads the sessionId prefix for routing.
     if (isBinary) {
+      if (!proxyWs.proxyId) {
+        closeRejectedProxyProtocol(proxyWs);
+        return;
+      }
+      if (!isCurrentProxySocket(proxyWs, registry)) {
+        logger.debug(
+          { proxyId: proxyWs.proxyId },
+          "Binary frame from superseded Proxy socket dropped",
+        );
+        return;
+      }
       if (data.length < 2 || data.length > RELAY_BINARY_FRAME_MAX_BYTES) {
         logger.warn({ size: data.length }, "Binary frame rejected: invalid size");
         return;
@@ -231,6 +253,7 @@ export function handleProxyConnection(
         { size: data.length, proxyId: proxyWs.proxyId },
         "JSON message rejected: exceeds max size",
       );
+      if (!proxyWs.proxyId) closeRejectedProxyProtocol(proxyWs);
       return;
     }
 
@@ -238,9 +261,18 @@ export function handleProxyConnection(
     const result = parseMessage(raw);
 
     if (result.kind === "control" && result.message.type === "proxy_register") {
+      if (registrationCompleted) {
+        logger.warn(
+          { proxyId: proxyWs.proxyId, requestedProxyId: result.message.proxyId },
+          "Repeated Proxy registration on the same socket rejected",
+        );
+        closeRejectedProxyProtocol(proxyWs);
+        return;
+      }
       const { proxyId, name, proxyVersion } = result.message;
-      const status = registry.registerProxy(proxyId, proxyWs, name, proxyVersion);
+      const status = registry.registerProxy(proxyId, proxyWs, proxyVersion, name);
       proxyWs.proxyId = proxyId;
+      registrationCompleted = true;
       const connectionId = devicePreviewBridge.registerProxyConnection(proxyId, proxyWs);
       if (status === "reconnected") {
         ptySnapshotRoutes.clearProxy(proxyId);
@@ -252,6 +284,7 @@ export function handleProxyConnection(
       proxyWs.send(
         serializeControl({
           type: "proxy_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
           status,
           relayVersion: RELAY_VERSION,
           connectionId,
@@ -263,6 +296,20 @@ export function handleProxyConnection(
       }
 
       broadcastProxyList(registry, chaos);
+      return;
+    }
+
+    if (!proxyWs.proxyId) {
+      rejectNotRegistered(proxyWs);
+      closeRejectedProxyProtocol(proxyWs);
+      return;
+    }
+
+    if (!isCurrentProxySocket(proxyWs, registry)) {
+      logger.debug(
+        { proxyId: proxyWs.proxyId, kind: result.kind },
+        "Message from superseded Proxy socket dropped",
+      );
       return;
     }
 

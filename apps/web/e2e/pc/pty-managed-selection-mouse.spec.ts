@@ -269,7 +269,14 @@ async function setupHistory(
 ): Promise<void> {
   const cols = options.cols ?? 160;
   const lines = options.lines ?? 440;
-  await setupPtyChat(page, { sessionId, cols, rows: 24 });
+  await setupPtyChat(page, {
+    sessionId,
+    sessionKind: "agent",
+    provider: "claude",
+    ptyOwner: "proxy-hosted",
+    cols,
+    rows: 24,
+  });
   await expectPtyTerminalMounted(page, { timeout: 10_000 });
 
   const output = Array.from({ length: lines }, (_, index) => {

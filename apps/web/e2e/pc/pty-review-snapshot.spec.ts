@@ -85,6 +85,9 @@ test("keeps a partially visible live status updating after a shallow wheel-up", 
 }) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
+    sessionKind: "agent",
+    provider: "claude",
+    ptyOwner: "proxy-hosted",
     cols: 80,
     rows: 40,
     withVisualViewportMock: true,
@@ -142,6 +145,9 @@ test("anchors history during output and traverses appended rows before reaching 
 }) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
+    sessionKind: "agent",
+    provider: "claude",
+    ptyOwner: "proxy-hosted",
     cols: 80,
     rows: 40,
     withVisualViewportMock: true,
@@ -232,6 +238,9 @@ test("anchors history during output and traverses appended rows before reaching 
 test("keeps dim truecolor foregrounds unchanged while scrolling native rows", async ({ page }) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
+    sessionKind: "agent",
+    provider: "claude",
+    ptyOwner: "proxy-hosted",
     cols: 80,
     rows: 24,
     withVisualViewportMock: true,
@@ -300,6 +309,9 @@ test("keeps native live rows authoritative across passive container scroll event
 }) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
+    sessionKind: "agent",
+    provider: "claude",
+    ptyOwner: "proxy-hosted",
     cols: 80,
     rows: 24,
     withVisualViewportMock: true,
@@ -349,7 +361,9 @@ test("preserves BCE-only padding around Codex prompts while scrolling native row
 }) => {
   await setupPtyChat(page, {
     sessionId: SESSION_ID,
+    sessionKind: "agent",
     provider: "codex",
+    ptyOwner: "proxy-hosted",
     cols: 80,
     rows: 24,
     withVisualViewportMock: true,

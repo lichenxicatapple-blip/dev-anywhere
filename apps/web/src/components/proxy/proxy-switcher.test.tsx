@@ -86,8 +86,8 @@ import { usePreviewStore } from "@/stores/preview-store";
 import { ProxySwitcher } from "./proxy-switcher";
 
 const proxies = [
-  { proxyId: "proxy-online", name: "工作站", online: true, sessions: [] },
-  { proxyId: "proxy-offline", name: "旧 Mac", online: false, sessions: [] },
+  { proxyId: "proxy-online", name: "工作站", version: "0.9.0", online: true, sessions: [] },
+  { proxyId: "proxy-offline", name: "旧 Mac", version: "0.9.0", online: false, sessions: [] },
 ];
 
 function proxyInfo(homePath: string) {

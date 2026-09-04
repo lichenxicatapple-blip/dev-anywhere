@@ -116,7 +116,7 @@ export function SessionRow({
   onTerminate,
 }: SessionRowProps) {
   const lastActive = session.lastActive;
-  const rawName = session.cwd ?? session.name ?? session.sessionId;
+  const rawName = session.cwd;
   const formattedName = formatSessionName(session.name);
   const terminalPathName = formatUnlockedTerminalPathName(session);
   const displayName =
@@ -127,8 +127,7 @@ export function SessionRow({
         : formattedName === "New Session"
           ? session.sessionId.slice(0, 8)
           : formattedName;
-  const hasMeta = !!session.mode || !!session.provider || lastActive !== undefined;
-  const lastActiveLabel = lastActive !== undefined ? formatRelativeTime(lastActive, now) : null;
+  const lastActiveLabel = formatRelativeTime(lastActive, now);
   const isLocalTerminalPty = session.mode === "pty" && session.ptyOwner === "local-terminal";
   const terminateLabel =
     session.kind === "terminal" ? "终止终端" : isLocalTerminalPty ? "断开远程连接" : "终止会话";
@@ -163,39 +162,33 @@ export function SessionRow({
             {displayName}
           </span>
         </span>
-        {hasMeta && (
-          <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
-            {session.mode && <SessionModeIcon mode={session.mode} />}
-            {session.mode && (
+        <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
+          <SessionModeIcon mode={session.mode} />
+          <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
+            ·
+          </span>
+          {session.kind !== "terminal" && (
+            <>
+              <span className="font-mono text-muted-foreground shrink-0">
+                {providerLabel(session.provider)}
+              </span>
               <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                 ·
               </span>
-            )}
-            {session.provider && session.kind !== "terminal" && (
-              <>
-                <span className="font-mono text-muted-foreground shrink-0">
-                  {providerLabel(session.provider)}
-                </span>
-                <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
-                  ·
-                </span>
-              </>
-            )}
-            <span className={cn("shrink-0", stateStyleForSession(session).text)}>
-              {stateStyleForSession(session).label}
-            </span>
-            {lastActiveLabel && (
-              <>
-                <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
-                  ·
-                </span>
-                <span className="text-muted-foreground shrink-0 tabular-nums">
-                  {lastActiveLabel}
-                </span>
-              </>
-            )}
+            </>
+          )}
+          <span className={cn("shrink-0", stateStyleForSession(session).text)}>
+            {stateStyleForSession(session).label}
           </span>
-        )}
+          {lastActiveLabel && (
+            <>
+              <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
+                ·
+              </span>
+              <span className="text-muted-foreground shrink-0 tabular-nums">{lastActiveLabel}</span>
+            </>
+          )}
+        </span>
       </button>
       {(onRename || onTerminate) && (
         <DropdownMenu>

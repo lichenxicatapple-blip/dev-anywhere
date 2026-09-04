@@ -12,7 +12,15 @@ test.describe("L4 mobile / PTY approval hint", () => {
   test("pty_state=approval_wait surfaces hint touch-safely without overflow", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await emuPage.evaluate(() => {

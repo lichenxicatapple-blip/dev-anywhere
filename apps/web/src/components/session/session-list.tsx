@@ -80,10 +80,9 @@ export function SessionList({ layout }: SessionListProps) {
     return () => clearInterval(id);
   }, []);
 
-  function handleRowClick(sessionId: string, mode: "pty" | "json" | undefined) {
-    const resolvedMode = mode ?? "json";
+  function handleRowClick(sessionId: string, mode: "pty" | "json") {
     // URL 更新但不触发页面级 transition；AppShell 是父路由，Outlet 内直接切换。
-    navigate(`/chat/${sessionId}?mode=${resolvedMode}`, { replace: false });
+    navigate(`/chat/${sessionId}?mode=${mode}`, { replace: false });
   }
 
   function handleTerminate(session: SessionInfo) {
@@ -97,7 +96,11 @@ export function SessionList({ layout }: SessionListProps) {
     useSessionStore.getState().removeSession(sessionId);
     useChatStore.getState().clearSession(sessionId);
     if (sessionId === activeSessionId) navigate("/sessions");
-    if (session?.mode === "pty" && session.ptyOwner === "local-terminal") {
+    if (
+      session?.kind === "agent" &&
+      session.mode === "pty" &&
+      session.ptyOwner === "local-terminal"
+    ) {
       // local-terminal "页面断开" 是行为说明, 给用户读完整句的时间
       toast.info("已断开页面连接，本地终端仍在运行");
     } else {

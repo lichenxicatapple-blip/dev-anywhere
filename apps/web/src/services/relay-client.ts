@@ -1,6 +1,10 @@
 // Relay 协议客户端，处理注册、代理选择、消息发送和控制消息路由
 import type { WebSocketManager } from "@/services/websocket";
-import { MessageEnvelopeSchema, RelayControlSchema } from "@dev-anywhere/shared";
+import {
+  MessageEnvelopeSchema,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  RelayControlSchema,
+} from "@dev-anywhere/shared";
 import type {
   AgentStatusPayload,
   AgentCliStatus,
@@ -43,7 +47,7 @@ type ProxyInfoResult = Array<{
   proxyId: string;
   name?: string;
   online: boolean;
-  sessions?: string[];
+  sessions: string[];
 }>;
 type RelayClientListResult = RelayClientInfo[];
 type RelayClientKickResponse = Extract<RelayControlMessage, { type: "relay_client_kick_response" }>;
@@ -97,9 +101,12 @@ type FileUploadResult = {
   path?: string;
 } & RequestError;
 
-type RelayTransport = Pick<WebSocketManager, "onMessage" | "onStatusChange" | "send">;
+type RelayTransport = Pick<WebSocketManager, "close" | "onMessage" | "onStatusChange" | "send">;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
+type SessionCreateInput<T> = T extends unknown
+  ? Omit<T, "type" | "requestId" | "cols" | "rows">
+  : never;
 type SessionRenameResponse = Extract<RelayControlMessage, { type: "session_rename_response" }>;
 type SessionRenameResult = {
   sessionId: string;
@@ -252,9 +259,6 @@ function parseInboundMessage(raw: string): InboundMessage | null {
     return null;
   }
 
-  // Some names (notably session_list/session_create/session_terminate) exist in both protocols.
-  // Envelope-first preserves their required payload/base fields; the looser control objects accept
-  // unknown fields and would otherwise strip a valid envelope down to a control request.
   const envelope = MessageEnvelopeSchema.safeParse(candidate);
   if (envelope.success) return envelope.data;
 
@@ -267,6 +271,19 @@ function parseInboundMessage(raw: string): InboundMessage | null {
     control: issueSummary(control.error.issues),
   });
   return null;
+}
+
+function isClientRegisterResponse(raw: string): boolean {
+  try {
+    const candidate = JSON.parse(raw) as { type?: unknown } | null;
+    return (
+      candidate !== null &&
+      typeof candidate === "object" &&
+      candidate.type === "client_register_response"
+    );
+  } catch {
+    return false;
+  }
 }
 
 let requestSeq = 0;
@@ -284,6 +301,7 @@ export class RelayClient {
   private messageHandlers = new Set<(msg: InboundMessage) => void>();
   private pendingMessages: InboundMessage[] = [];
   private devicePreviewInputSequence = 0;
+  private registered = false;
 
   constructor(ws: RelayTransport, clientId: string) {
     this.ws = ws;
@@ -293,8 +311,12 @@ export class RelayClient {
     // handler 未注册时先缓冲，等 onMessage 注册后 flush
     this.ws.onMessage((raw) => {
       const parsed = parseInboundMessage(raw);
-      if (!parsed) return;
+      if (!parsed) {
+        if (!this.registered || isClientRegisterResponse(raw)) this.ws.close();
+        return;
+      }
       if (parsed.type === "client_register_response") {
+        this.registered = true;
         if (parsed.status === "restored" || parsed.status === "proxy_offline") {
           this.boundProxyId = parsed.proxyId;
           this.previewScope = Object.freeze({
@@ -305,6 +327,9 @@ export class RelayClient {
           this.boundProxyId = null;
           this.previewScope = null;
         }
+      } else if (!this.registered) {
+        this.ws.close();
+        return;
       }
       if (this.messageHandlers.size === 0) {
         this.pendingMessages.push(parsed);
@@ -327,12 +352,14 @@ export class RelayClient {
   // 发送 client_register，携带 clientId 和设备描述，便于客户端管理识别设备。
   // 注册意味着新连接，旧绑定对新 relay 实例无效
   register(): void {
+    this.registered = false;
     this.boundProxyId = null;
     this.previewScope = null;
     const clientDevice = describeCurrentClientDevice();
     this.ws.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: this.clientId,
         ...clientDevice,
       }),
@@ -1598,7 +1625,7 @@ export class RelayClient {
   }
 
   createSession(
-    request: Omit<SessionCreateRequest, "type" | "requestId">,
+    request: SessionCreateInput<SessionCreateRequest>,
     timeoutMs = SESSION_CREATE_CLIENT_TIMEOUT_MS,
   ): Promise<SessionCreateResponse> {
     const requestId = nextRequestId("session-create");

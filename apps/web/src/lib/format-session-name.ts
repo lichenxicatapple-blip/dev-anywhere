@@ -25,6 +25,5 @@ export function formatUnlockedTerminalPathName(
   session: Pick<SessionInfo, "kind" | "name" | "cwd" | "nameLocked"> | undefined,
 ): string | undefined {
   if (!session || session.kind !== "terminal" || session.nameLocked) return undefined;
-  const rawName = session.cwd ?? session.name;
-  return rawName ? formatSessionName(rawName) : undefined;
+  return formatSessionName(session.cwd);
 }

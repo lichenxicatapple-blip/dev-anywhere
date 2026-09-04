@@ -119,13 +119,14 @@ export function HistoryList({ now }: HistoryListProps) {
     const provider = historySessionProvider(h);
     try {
       const ctrl = await relay.createSession({
+        kind: "agent",
         cwd: h.projectDir,
         mode,
         provider,
         resumeSessionId: h.id,
         ...(permissionMode ? { permissionMode } : {}),
       });
-      if (ctrl.error || !ctrl.sessionId) {
+      if (!ctrl.success) {
         if (ctrl.errorCode === ControlErrorCode.SESSION_ALREADY_ACTIVE) {
           useSessionStore.getState().setCodexActiveWriterConflict({
             ...(ctrl.activeWriterPid ? { activeWriterPid: ctrl.activeWriterPid } : {}),
@@ -133,21 +134,29 @@ export function HistoryList({ now }: HistoryListProps) {
           setRestoreTarget(null);
           return;
         }
-        toast.error(`恢复失败：${ctrl.error ?? "未知错误"}`);
+        toast.error(`恢复失败：${ctrl.error}`);
         return;
       }
-      const newSession: SessionInfo = {
+      if (ctrl.kind !== "agent") {
+        toast.error("恢复失败：开发机返回了错误的会话类型");
+        return;
+      }
+      const common = {
         sessionId: ctrl.sessionId,
-        ...(ctrl.kind !== undefined ? { kind: ctrl.kind } : {}),
+        kind: "agent" as const,
         ...(ctrl.name !== undefined ? { name: ctrl.name } : {}),
         ...(ctrl.nameLocked !== undefined ? { nameLocked: ctrl.nameLocked } : {}),
-        state: "idle",
-        mode: ctrl.mode ?? mode,
-        provider: ctrl.provider ?? "claude",
-        ...(ctrl.ptyOwner !== undefined ? { ptyOwner: ctrl.ptyOwner } : {}),
+        state: "idle" as const,
+        cwd: ctrl.cwd,
+        lastActive: ctrl.lastActive,
+        provider: ctrl.provider,
       };
+      const newSession: SessionInfo =
+        ctrl.mode === "pty"
+          ? { ...common, mode: "pty", ptyOwner: ctrl.ptyOwner }
+          : { ...common, mode: "json" };
       useSessionStore.getState().addSession(newSession);
-      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode ?? mode}`);
+      navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode}`);
       setRestoreTarget(null);
     } catch (err) {
       toast.error(`恢复失败：${err instanceof Error ? err.message : String(err)}`);
@@ -423,9 +432,7 @@ function defaultRestoreMode(session: HistorySession): RestoreMode {
 }
 
 function defaultRestorePermissionMode(session: HistorySession): RestorePermissionMode {
-  // Newer Codex CLIs no longer expose the old strict `untrusted` policy. Keep
-  // the wire value as `auto` so this Web build also works with older Proxies,
-  // which already map it to Codex's cross-version `on-request` policy.
+  // Codex maps the product-level `auto` policy to its current on-request behavior.
   return historySessionProvider(session) === "codex" ? "auto" : "default";
 }
 

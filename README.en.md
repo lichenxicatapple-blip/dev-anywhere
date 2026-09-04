@@ -188,7 +188,14 @@ bash scripts/deploy/install-relay.sh \
 
 Keep the last argument consistent with the initial deployment: pass the domain again for a domain deployment, or the public IP for an IP deployment. The installer reuses the existing tokens on the VPS.
 
-After the Relay is updated, DEV Anywhere updates automatically on connected development machines; no per-machine update is needed.
+DEV Anywhere 0.9.0 is incompatible with earlier releases. After upgrading the Relay, manually update and restart DEV Anywhere on every development machine:
+
+```bash
+npm install -g @dev-anywhere/proxy@0.9.0
+dev-anywhere serve restart --relay cloud
+```
+
+After all development machines are updated, refresh the browser and restart any sessions that were still running before the upgrade.
 
 You can then verify the version and connection on any development machine:
 
@@ -206,7 +213,7 @@ For pinned versions or VPS container checks, see the [VPS deployment guide](./do
 - Create terminal or chat sessions for Claude Code, Codex, and Kimi Code, plus Shell sessions, directly from the browser.
 - Choose the working directory, terminal or chat interaction, and permission mode for Claude Code, Codex, or Kimi Code sessions.
 - Attach sessions started from a local terminal, or resume Claude Code, Codex, and Kimi Code historical sessions.
-- Rename, terminate, or detach sessions; hosted terminals can reconnect after a Proxy restart.
+- Rename, terminate, or detach sessions; sessions started from a local terminal can reconnect after a Proxy restart.
 - Switch between development machines, and inspect or disconnect clients currently connected to the Relay. Remove an unused offline machine by swiping left on mobile or using its desktop overflow menu; it will appear again if it reconnects.
 
 ![Creating a real coding agent session from the browser](./docs/assets/readme-create-session.gif)

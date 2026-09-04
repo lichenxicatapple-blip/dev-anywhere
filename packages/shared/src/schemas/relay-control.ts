@@ -1,6 +1,11 @@
 import { z } from "zod";
 import { IdSchema } from "./id.js";
-import { AgentStatusPayloadSchema, PtyStatePayloadSchema, sessionStateValues } from "./session.js";
+import {
+  AgentStatusPayloadSchema,
+  createSessionIdentitySchema,
+  PtyStatePayloadSchema,
+  sessionStateValues,
+} from "./session.js";
 import { ApprovalOptionSchema, ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import {
   VoiceCapabilitiesSchema,
@@ -11,12 +16,7 @@ import {
 } from "./voice.js";
 import { RelayErrorCode } from "../constants/relay-errors.js";
 import { ControlErrorCode } from "../constants/control-errors.js";
-import {
-  providerValues,
-  ptyOwnerValues,
-  sessionKindValues,
-  sessionModeValues,
-} from "../constants/enums.js";
+import { providerValues, ptyOwnerValues, sessionModeValues } from "../constants/enums.js";
 import { PTY_INITIAL_MAX_COLS, PTY_INITIAL_MAX_ROWS } from "../constants/pty.js";
 import {
   PreviewHtmlEntriesSchema,
@@ -41,13 +41,17 @@ import {
 } from "./device-preview.js";
 import { PreviewScopeSchema } from "./preview-scope.js";
 
+// Web, Relay 与 Proxy 的控制协议版本。只在握手或消息协议不兼容时递增，
+// 不与任何组件的 npm 版本绑定。
+export const RELAY_CONTROL_PROTOCOL_VERSION = 1 as const;
+
 // 控制消息中复用的子类型
 export const ProxyInfoSchema = z.object({
   proxyId: IdSchema,
   name: z.string().optional(),
-  version: z.string().optional(),
+  version: z.string().min(1).max(64),
   online: z.boolean(),
-  sessions: z.array(z.string()).optional(),
+  sessions: z.array(z.string()),
 });
 export type ProxyInfo = z.infer<typeof ProxyInfoSchema>;
 
@@ -77,8 +81,7 @@ export type AgentCliAvailability = z.infer<typeof AgentCliAvailabilitySchema>;
 export const AgentCliStatusSchema = z.object({
   claude: AgentCliAvailabilitySchema,
   codex: AgentCliAvailabilitySchema,
-  // 滚动升级兼容：旧 Proxy 不会上报 Kimi，新 Proxy 的探测结果始终包含它。
-  kimi: AgentCliAvailabilitySchema.optional(),
+  kimi: AgentCliAvailabilitySchema,
 });
 export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
 
@@ -104,7 +107,7 @@ export const HistorySessionSchema = z.object({
   title: z.string(),
   projectDir: z.string(),
   updatedAt: z.number(),
-  provider: z.enum(providerValues).optional(),
+  provider: z.enum(providerValues),
   preferredMode: z.enum(sessionModeValues).optional(),
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
@@ -235,6 +238,7 @@ const ClientRegisterResponseSchema = z.discriminatedUnion("status", [
   z
     .object({
       type: z.literal("client_register_response"),
+      protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
       status: z.literal("restored"),
       proxyId: IdSchema,
       bindingId: IdSchema,
@@ -243,6 +247,7 @@ const ClientRegisterResponseSchema = z.discriminatedUnion("status", [
   z
     .object({
       type: z.literal("client_register_response"),
+      protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
       status: z.literal("proxy_offline"),
       proxyId: IdSchema,
       bindingId: IdSchema,
@@ -251,6 +256,7 @@ const ClientRegisterResponseSchema = z.discriminatedUnion("status", [
   z
     .object({
       type: z.literal("client_register_response"),
+      protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
       status: z.literal("new"),
     })
     .strict(),
@@ -687,17 +693,129 @@ const DevicePreviewControlClaimResponseSchema = z.discriminatedUnion("success", 
     .strict(),
 ]);
 
+const SessionPermissionModeSchema = z.enum([
+  "default",
+  "auto",
+  "acceptEdits",
+  "plan",
+  "bypassPermissions",
+  "dontAsk",
+]);
+
+const AgentJsonSessionCreateSchema = z
+  .object({
+    type: z.literal("session_create"),
+    ...RequiredRequestIdShape,
+    kind: z.literal("agent"),
+    cwd: z.string(),
+    name: z.string().optional(),
+    provider: z.enum(providerValues),
+    mode: z.literal("json"),
+    resumeSessionId: z.string().optional(),
+    permissionMode: SessionPermissionModeSchema.optional(),
+  })
+  .strict();
+
+const AgentPtySessionCreateSchema = z
+  .object({
+    type: z.literal("session_create"),
+    ...RequiredRequestIdShape,
+    kind: z.literal("agent"),
+    cwd: z.string(),
+    name: z.string().optional(),
+    provider: z.enum(providerValues),
+    mode: z.literal("pty"),
+    resumeSessionId: z.string().optional(),
+    cols: z.number().int().positive().max(PTY_INITIAL_MAX_COLS),
+    rows: z.number().int().positive().max(PTY_INITIAL_MAX_ROWS),
+    permissionMode: SessionPermissionModeSchema.optional(),
+  })
+  .strict();
+
+const TerminalSessionCreateSchema = z
+  .object({
+    type: z.literal("session_create"),
+    ...RequiredRequestIdShape,
+    kind: z.literal("terminal"),
+    name: z.string().optional(),
+    mode: z.literal("pty"),
+    cols: z.number().int().positive().max(PTY_INITIAL_MAX_COLS),
+    rows: z.number().int().positive().max(PTY_INITIAL_MAX_ROWS),
+  })
+  .strict();
+
+const SessionCreateSchema = z.discriminatedUnion("mode", [
+  AgentJsonSessionCreateSchema,
+  z.discriminatedUnion("kind", [AgentPtySessionCreateSchema, TerminalSessionCreateSchema]),
+]);
+
+const SessionCreateSuccessBaseShape = {
+  type: z.literal("session_create_response"),
+  ...RequiredRequestIdShape,
+  success: z.literal(true),
+  sessionId: IdSchema,
+  cwd: z.string(),
+  lastActive: z.number(),
+  name: z.string().optional(),
+  nameLocked: z.boolean().optional(),
+};
+
+const SessionCreateSuccessResponseSchema = z.discriminatedUnion("mode", [
+  z
+    .object({
+      ...SessionCreateSuccessBaseShape,
+      kind: z.literal("agent"),
+      mode: z.literal("json"),
+      provider: z.enum(providerValues),
+    })
+    .strict(),
+  z.discriminatedUnion("kind", [
+    z
+      .object({
+        ...SessionCreateSuccessBaseShape,
+        kind: z.literal("agent"),
+        mode: z.literal("pty"),
+        provider: z.enum(providerValues),
+        ptyOwner: z.enum(ptyOwnerValues),
+      })
+      .strict(),
+    z
+      .object({
+        ...SessionCreateSuccessBaseShape,
+        kind: z.literal("terminal"),
+        mode: z.literal("pty"),
+        provider: z.literal("claude"),
+        ptyOwner: z.literal("local-terminal"),
+      })
+      .strict(),
+  ]),
+]);
+
+const SessionCreateResponseSchema = z.discriminatedUnion("success", [
+  SessionCreateSuccessResponseSchema,
+  z
+    .object({
+      type: z.literal("session_create_response"),
+      ...RequiredRequestIdShape,
+      success: z.literal(false),
+      ...RequiredRequestErrorShape,
+      activeWriterPid: z.number().int().positive().optional(),
+    })
+    .strict(),
+]);
+
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 const relayControlDefinitions = [
   control("proxy_register", {
+    protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
     proxyId: IdSchema,
     name: z.string().optional(),
-    proxyVersion: z.string().min(1).max(64).optional(),
+    proxyVersion: z.string().min(1).max(64),
   }),
   control("proxy_register_response", {
+    protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
     status: z.enum(["new", "reconnected"]),
-    // optional 只用于滚动升级：新 Proxy 连接旧 Relay 时继续工作，但不会自动更新。
-    relayVersion: z.string().min(1).max(64).optional(),
+    relayVersion: z.string().min(1).max(64),
     // Relay rotates this nonce for every successful main Proxy registration. The dedicated image
     // stream socket must present it before Relay accepts frames, so a superseded Proxy connection
     // cannot keep publishing into a newly registered Proxy with the same persistent proxyId.
@@ -1207,6 +1325,7 @@ const relayControlDefinitions = [
 
   // 客户端注册协议
   control("client_register", {
+    protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
     clientId: IdSchema,
     userAgent: z.string().optional(),
     platform: z.string().optional(),
@@ -1238,10 +1357,9 @@ const relayControlDefinitions = [
   }),
 
   // 目录列表请求与响应
-  control(
+  strictControl(
     "dir_list_request",
     {
-      proxyId: IdSchema.optional(),
       ...RequestIdShape,
       path: z.string(),
       includeHidden: z.boolean(),
@@ -1277,9 +1395,7 @@ const relayControlDefinitions = [
   control(
     "command_list_push",
     {
-      // New proxies scope command snapshots to their owning session. Keep this optional so
-      // rolling upgrades can still consume the legacy, proxy-wide snapshot.
-      sessionId: IdSchema.optional(),
+      sessionId: IdSchema,
       commands: z.array(CommandEntrySchema),
     },
     "proxy_to_client",
@@ -1296,7 +1412,7 @@ const relayControlDefinitions = [
   ),
 
   // 会话列表请求与权限模式变更
-  control("session_list", undefined, ["client_to_proxy", "proxy_to_client"]),
+  strictControl("session_list_request", {}, "client_to_proxy"),
   control(
     "permission_mode_change",
     {
@@ -1353,7 +1469,7 @@ const relayControlDefinitions = [
   ),
 
   // 远程终止 JSON 会话，client -> proxy
-  control("session_terminate", { sessionId: IdSchema }, "client_to_proxy"),
+  strictControl("session_terminate", { sessionId: IdSchema }, "client_to_proxy"),
   control(
     "session_rename",
     { ...RequestIdShape, sessionId: IdSchema, name: z.string() },
@@ -1414,47 +1530,10 @@ const relayControlDefinitions = [
     "proxy_to_client",
   ),
 
-  // 远程创建 JSON 会话，client -> proxy -> response
-  control(
-    "session_create",
-    {
-      ...RequestIdShape,
-      kind: z.enum(sessionKindValues).optional(),
-      cwd: z.string().optional(),
-      name: z.string().optional(),
-      provider: z.enum(providerValues).optional(),
-      mode: z.enum(sessionModeValues).optional(),
-      resumeSessionId: z.string().optional(),
-      // 仅用于新建 PTY 的一次性初始几何。创建后尺寸由会话端持有，浏览器刷新、
-      // 重连或换设备不会隐式重排既有终端内容。
-      cols: z.number().int().positive().max(PTY_INITIAL_MAX_COLS).optional(),
-      rows: z.number().int().positive().max(PTY_INITIAL_MAX_ROWS).optional(),
-      // Provider 级审批策略。Claude 未提供时仍使用其 default；Codex 未提供时尊重
-      // 用户本机配置，不由 DEV Anywhere 注入覆盖值。
-      permissionMode: z
-        .enum(["default", "auto", "acceptEdits", "plan", "bypassPermissions", "dontAsk"])
-        .optional(),
-    },
-    "client_to_proxy",
-  ),
-  control(
-    "session_create_response",
-    {
-      ...RequestIdShape,
-      // 失败路径只送 errorCode/error, sessionId 此时无语义。成功路径才有 id。
-      sessionId: IdSchema.optional(),
-      name: z.string().optional(),
-      nameLocked: z.boolean().optional(),
-      kind: z.enum(sessionKindValues).optional(),
-      mode: z.enum(sessionModeValues).optional(),
-      provider: z.enum(providerValues).optional(),
-      ptyOwner: z.enum(ptyOwnerValues).optional(),
-      // Codex 原生 thread 被其他进程持有时返回真实锁持有 PID；无法探测时省略。
-      activeWriterPid: z.number().int().positive().optional(),
-      ...RequestErrorShape,
-    },
-    "proxy_to_client",
-  ),
+  // 远程创建会话，client -> proxy -> response。PTY 初始几何是一次性的；
+  // 创建后尺寸由会话端持有，浏览器刷新、重连或换设备不重排既有内容。
+  controlSchema("session_create", SessionCreateSchema, "client_to_proxy"),
+  controlSchema("session_create_response", SessionCreateResponseSchema, "proxy_to_client"),
 
   // 会话创建响应已经成功返回、页面已进入终端后，Provider 仍可能在 bootstrap 阶段
   // 非零退出。把可识别的运行时错误结构化推给 Web，避免关键错误只留在终端闪屏里。
@@ -1484,13 +1563,13 @@ const relayControlDefinitions = [
   // 客户端请求会话资源（命令列表 + 文件树），client -> proxy
   control(
     "session_resources_request",
-    { ...RequestIdShape, sessionId: IdSchema },
+    { ...RequiredRequestIdShape, sessionId: IdSchema },
     "client_to_proxy",
   ),
   control(
     "session_resources_response",
     {
-      ...RequestIdShape,
+      ...RequiredRequestIdShape,
       ...RequestErrorShape,
       sessionId: IdSchema,
       commands: z.array(CommandEntrySchema),
@@ -1600,13 +1679,9 @@ const relayControlDefinitions = [
   // 关联）不转发给 client，因此**没有** direction 标注——RelayControlDirection 只描述转发流。
   control("session_sync", {
     sessions: z.array(
-      z.object({
+      createSessionIdentitySchema({
         id: z.string(),
-        kind: z.enum(sessionKindValues).optional(),
-        mode: z.enum(sessionModeValues),
-        provider: z.enum(providerValues),
-        ptyOwner: z.enum(ptyOwnerValues).optional(),
-        cwd: z.string().optional(),
+        cwd: z.string(),
         name: z.string().optional(),
         nameLocked: z.boolean().optional(),
         state: z.enum(sessionStateValues),

@@ -7,6 +7,7 @@ import {
   SOCK_PATH,
   STOPPED_PATH,
   SESSIONS_PATH,
+  SESSION_RUNTIME_IPC_VERSION_PATH,
   SERVICE_LOG_PATH,
   CONFIG_PATH,
   PROFILE_NAME,
@@ -19,7 +20,12 @@ import { prepareDaemonSpawnEnvironment } from "./common/daemon-spawn-env.js";
 import { daemonRelayArgs, setDesiredDaemonRelay } from "./common/daemon-env.js";
 import { getErrnoCode, getErrorMessage, probeProcess } from "./common/process-probe.js";
 import { unlinkIfPresent } from "./common/safe-unlink.js";
-import { createIpcReader, serializeIpc } from "./ipc/ipc-protocol.js";
+import {
+  createIpcReader,
+  serializeIpc,
+  TERMINAL_IPC_PROTOCOL_VERSION,
+  WORKER_IPC_PROTOCOL_VERSION,
+} from "./ipc/ipc-protocol.js";
 import type { IpcMessage } from "./ipc/ipc-protocol.js";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "./cli-args.js";
 import { waitForProcessExit } from "./common/daemon-stop.js";
@@ -104,14 +110,24 @@ function requestActiveSessionIds(timeoutMs = 1_000): Promise<string[] | null> {
     timer.unref?.();
     socket.once("error", () => finish(null, socket));
     socket.once("connect", () => {
-      createIpcReader(socket, (msg) => {
-        if (msg.type !== "service_status_response") return;
-        finish(
-          (msg as ServiceStatusResponse).sessions.map((session) => session.id),
-          socket,
-        );
-      });
-      socket.write(serializeIpc({ type: "service_status_request" }));
+      createIpcReader(
+        socket,
+        (msg) => {
+          if (msg.type !== "service_status_response") return;
+          finish(
+            (msg as ServiceStatusResponse).sessions.map((session) => session.id),
+            socket,
+          );
+        },
+        undefined,
+        () => finish(null, socket),
+      );
+      socket.write(
+        serializeIpc({
+          type: "service_status_request",
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        }),
+      );
     });
   });
 }
@@ -158,60 +174,64 @@ function showStatus(): Promise<number> {
       resolve(lines);
     });
     sock.on("connect", () => {
-      createIpcReader(sock, (msg) => {
-        if (msg.type === "service_status_response") {
-          const config = msg.config;
-          log(`Daemon:  profile ${config.profile ?? PROFILE_NAME}`);
-          log(
-            `Version: ${
-              config.version === undefined
-                ? `daemon unknown (CLI ${PROXY_VERSION})`
-                : config.version === PROXY_VERSION
+      createIpcReader(
+        sock,
+        (msg) => {
+          if (msg.type === "service_status_response") {
+            const config = msg.config;
+            log(`Daemon:  profile ${config.profile ?? PROFILE_NAME}`);
+            log(
+              `Version: ${
+                config.version === PROXY_VERSION
                   ? config.version
                   : `daemon ${config.version} (CLI ${PROXY_VERSION})`
-            }`,
-          );
-          log(
-            `Updates: ${
-              config.autoUpdate === undefined
-                ? "unknown (restart daemon to refresh)"
-                : config.autoUpdate
-                  ? "automatic (follows Relay)"
-                  : "disabled"
-            }`,
-          );
-          log(`Relay:   ${config.relayName} (${config.relayNameSource})`);
-          log(`Config:  relay ${config.relayUrl ?? "(unset)"} (${config.relayUrlSource})`);
-          const relay = msg.relay;
-          if (!relay) {
-            log("Relay:   not configured");
-          } else if (relay.connected) {
-            log(`Relay:   connected (proxy: ${relay.proxyId})`);
-            log(
-              `         queue depth: ${relay.queueDepth}, reconnect attempts: ${relay.reconnectAttempt}`,
+              }`,
             );
-          } else {
-            log(
-              `Relay:   disconnected (proxy: ${relay.proxyId}, reconnecting: attempt ${relay.reconnectAttempt}, queued: ${relay.queueDepth})`,
-            );
-          }
-          log("");
-
-          // 显示会话列表
-          const sessions = msg.sessions;
-          if (sessions.length === 0) {
-            log("Sessions: none");
-          } else {
-            log(`Sessions: ${sessions.length}`);
-            for (const s of sessions) {
-              log(`  ${s.id}  ${s.mode}  ${s.state}  worker: ${s.hasWorker ? "yes" : "no"}`);
+            log(`Updates: ${config.autoUpdate ? "automatic (follows Relay)" : "disabled"}`);
+            log(`Relay:   ${config.relayName} (${config.relayNameSource})`);
+            log(`Config:  relay ${config.relayUrl ?? "(unset)"} (${config.relayUrlSource})`);
+            const relay = msg.relay;
+            if (!relay) {
+              log("Relay:   not configured");
+            } else if (relay.connected) {
+              log(`Relay:   connected (proxy: ${relay.proxyId})`);
+              log(
+                `         queue depth: ${relay.queueDepth}, reconnect attempts: ${relay.reconnectAttempt}`,
+              );
+            } else {
+              log(
+                `Relay:   disconnected (proxy: ${relay.proxyId}, reconnecting: attempt ${relay.reconnectAttempt}, queued: ${relay.queueDepth})`,
+              );
             }
+            log("");
+
+            // 显示会话列表
+            const sessions = msg.sessions;
+            if (sessions.length === 0) {
+              log("Sessions: none");
+            } else {
+              log(`Sessions: ${sessions.length}`);
+              for (const s of sessions) {
+                log(`  ${s.id}  ${s.mode}  ${s.state}  worker: ${s.hasWorker ? "yes" : "no"}`);
+              }
+            }
+            sock.destroy();
+            resolve(lines);
           }
+        },
+        undefined,
+        (err) => {
+          log(`Sessions: invalid service response (${err.message})`);
           sock.destroy();
           resolve(lines);
-        }
-      });
-      sock.write(serializeIpc({ type: "service_status_request" }));
+        },
+      );
+      sock.write(
+        serializeIpc({
+          type: "service_status_request",
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        }),
+      );
     });
   });
 }
@@ -301,7 +321,7 @@ async function startDaemon(options?: {
   const result = await Promise.race([readyOutcome, exitOutcome]);
 
   if (result.kind === "ready") {
-    // 旧 daemon 完全退出、新 socket 已 ready 后再允许 terminal 主动连接/拉起服务，
+    // 上一个 daemon 完全退出、新 socket 已 ready 后再允许 terminal 主动连接/拉起服务，
     // 避免重启窗口里 terminal worker 与 CLI 各 spawn 一份 daemon。
     unlinkIfPresent(STOPPED_PATH);
     console.log(`Service started in background (PID ${child.pid})`);
@@ -432,7 +452,14 @@ serve
     // daemon。这样 shell 配置较慢或失败时不会无谓延长服务中断窗口；手动 restart 则原样
     // 继承调用它的终端环境。
     const daemonEnvironment = await prepareDaemonSpawnEnvironment();
-    const expectedSessionIds = readLiveLocalPtySessionIds(SESSIONS_PATH);
+    const expectedSessionIds = readLiveLocalPtySessionIds(
+      SESSIONS_PATH,
+      SESSION_RUNTIME_IPC_VERSION_PATH,
+      {
+        terminal: TERMINAL_IPC_PROTOCOL_VERSION,
+        worker: WORKER_IPC_PROTOCOL_VERSION,
+      },
+    );
     const stopResult = await stopService();
     if (stopResult === "failed") {
       process.exitCode = 1;

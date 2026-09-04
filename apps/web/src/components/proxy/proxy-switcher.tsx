@@ -89,7 +89,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
       useAppStore.getState().setProxyOnline(true);
       useAppStore.getState().transitionToPhase("session_browsing");
       // 绑定成功后刷新会话列表，并用 request-scoped snapshot 拉取历史和 provider 状态。
-      relay.sendControl({ type: "session_list" });
+      relay.sendControl({ type: "session_list_request" });
       void relay
         .requestProxyInfo()
         .then((info) => {

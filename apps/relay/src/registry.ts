@@ -25,7 +25,7 @@ interface ProxyState {
   sessions: Set<string>;
   disconnectedAt: number | null;
   name?: string;
-  version?: string;
+  version: string;
 }
 
 // 客户端绑定状态，通过 clientId 而非 WebSocket 引用标识
@@ -62,8 +62,8 @@ export class RelayRegistry {
   registerProxy(
     proxyId: string,
     ws: WebSocket,
+    version: string,
     name?: string,
-    version?: string,
   ): "new" | "reconnected" {
     const existing = this.proxyStates.get(proxyId);
     if (existing) {
@@ -75,7 +75,6 @@ export class RelayRegistry {
       existing.connectionState = "online";
       existing.disconnectedAt = null;
       if (name !== undefined) existing.name = name;
-      // 缺失版本表示旧 Proxy；不能沿用上一次新 Proxy 留下的版本造成假象。
       existing.version = version;
       return "reconnected";
     }
@@ -187,13 +186,13 @@ export class RelayRegistry {
   listProxiesWithName(): Array<{
     proxyId: string;
     name?: string;
-    version?: string;
+    version: string;
     online: boolean;
   }> {
     return Array.from(this.proxyStates.entries()).map(([proxyId, state]) => ({
       proxyId,
       ...(state.name !== undefined ? { name: state.name } : {}),
-      ...(state.version !== undefined ? { version: state.version } : {}),
+      version: state.version,
       online: state.connectionState === "online",
     }));
   }

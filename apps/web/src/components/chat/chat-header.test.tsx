@@ -150,10 +150,13 @@ describe("ChatHeader PTY upload menu", () => {
       sessions: [
         {
           sessionId: "s1",
+          kind: "agent",
           mode: "pty",
           provider: "claude",
           state: "idle",
           ptyOwner: "local-terminal",
+          cwd: "/tmp/project",
+          lastActive: 1,
         },
       ],
       ptyTitles: {},
@@ -229,7 +232,17 @@ describe("ChatHeader PTY upload menu", () => {
 
   it("does not render the hidden file input in JSON mode", () => {
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     const { container } = render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
     expect(container.querySelector('input[data-slot="chat-menu-upload-file-input"]')).toBeNull();
@@ -240,12 +253,15 @@ describe("ChatHeader PTY upload menu", () => {
       sessions: [
         {
           sessionId: "s1",
+          kind: "agent",
           mode: "pty",
           provider: "claude",
           state: "idle",
           name: "Release checklist",
           nameLocked: true,
           cwd: "/Users/dev/project",
+          ptyOwner: "local-terminal",
+          lastActive: 1,
         },
       ],
       ptyTitles: { s1: "✻ Working" },
@@ -270,6 +286,7 @@ describe("ChatHeader PTY upload menu", () => {
           name: "Terminal",
           cwd: "/Users/dev/MyApps/dev-anywhere",
           ptyOwner: "local-terminal",
+          lastActive: 1,
         },
       ],
       ptyTitles: { "term-1": "Claude Code" },
@@ -295,6 +312,7 @@ describe("ChatHeader PTY upload menu", () => {
           nameLocked: true,
           cwd: "/Users/dev/MyApps/dev-anywhere",
           ptyOwner: "local-terminal",
+          lastActive: 1,
         },
       ],
       ptyTitles: { "term-1": "Claude Code" },
@@ -378,7 +396,17 @@ describe("ChatHeader PTY upload menu", () => {
 
   it("lets JSON sessions toggle Voice Pilot from the overflow menu", async () => {
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
@@ -421,7 +449,17 @@ describe("ChatHeader PTY upload menu", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
@@ -448,7 +486,17 @@ describe("ChatHeader PTY upload menu", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
@@ -477,7 +525,17 @@ describe("ChatHeader PTY upload menu", () => {
     });
     window.history.replaceState({}, "", "/?voice-fixture=default");
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
@@ -500,7 +558,17 @@ describe("ChatHeader PTY upload menu", () => {
       new DOMException("Permission was denied", "NotAllowedError"),
     );
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
@@ -527,7 +595,17 @@ describe("ChatHeader PTY upload menu", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
@@ -556,7 +634,17 @@ describe("ChatHeader PTY upload menu", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
 
@@ -577,7 +665,17 @@ describe("ChatHeader PTY upload menu", () => {
 
   it("can turn off Voice Pilot without rechecking provider config", async () => {
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     useVoicePilotStore.getState().enable("s1");
     requestVoiceConfig.mockClear();
@@ -595,7 +693,17 @@ describe("ChatHeader PTY upload menu", () => {
 
   it("shows screen wake lock as controlled while Voice Pilot is running", async () => {
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
     useVoicePilotStore.getState().enable("s1");
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);

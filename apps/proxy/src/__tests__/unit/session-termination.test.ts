@@ -76,6 +76,58 @@ describe("terminateSessionByOwnership", () => {
     });
   });
 
+  it("does not signal an unverified persisted terminal-worker PID", () => {
+    const deps = {
+      ...createDeps({
+        id: "s1",
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+        cwd: "/tmp",
+        pid: 4242,
+      }),
+      isManagedSessionProcess: vi.fn(() => false),
+    };
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    const result = terminateSessionByOwnership(deps as never, "s1");
+
+    expect(result).toEqual({ success: true, action: "terminate_terminal_worker" });
+    expect(deps.isManagedSessionProcess).toHaveBeenCalledWith(4242, {
+      id: "s1",
+      mode: "pty",
+      provider: "claude",
+      ptyOwner: "local-terminal",
+    });
+    expect(kill).not.toHaveBeenCalled();
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    kill.mockRestore();
+  });
+
+  it("signals a terminal-worker PID only after exact managed-process verification", () => {
+    const deps = {
+      ...createDeps({
+        id: "s1",
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+        cwd: "/tmp",
+        pid: 4242,
+      }),
+      isManagedSessionProcess: vi.fn(() => true),
+    };
+    const kill = vi.spyOn(process, "kill").mockImplementation(() => true);
+
+    const result = terminateSessionByOwnership(deps as never, "s1");
+
+    expect(result).toEqual({ success: true, action: "terminate_terminal_worker" });
+    expect(kill).toHaveBeenCalledWith(4242, "SIGTERM");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    kill.mockRestore();
+  });
+
   it("terminates hosted PTY through HostedPtyRegistry", () => {
     const deps = createDeps({
       id: "s1",

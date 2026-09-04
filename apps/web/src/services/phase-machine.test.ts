@@ -16,6 +16,7 @@ import { router } from "@/lib/router";
 import { getPendingProxyRemovals, markPendingProxyRemoval } from "@/services/proxy-removal-state";
 import { previewController } from "@/services/preview-controller";
 import { createPreviewScope } from "@/services/preview-scope";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 
 vi.mock("@/lib/router", () => ({
   router: { navigate: vi.fn() },
@@ -41,7 +42,9 @@ function resetAppStore(): void {
     proxyOnline: true,
     selectedProxyId: "proxy-1",
     selectedProxyName: "DEV Mac",
-    proxies: [{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: ["s1"] }],
+    proxies: [
+      { proxyId: "proxy-1", name: "DEV Mac", version: "0.9.0", online: true, sessions: ["s1"] },
+    ],
     proxyListLoaded: true,
     relayClientAuthIssue: null,
     relayConnectionIssue: null,
@@ -204,6 +207,7 @@ describe("phase-machine reconnect timers", () => {
     await handleRelayMessage(
       {
         type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         status: "restored",
         proxyId: previewScope.proxyId,
         bindingId: previewScope.bindingId,
@@ -452,7 +456,7 @@ describe("phase-machine reconnect timers", () => {
     );
 
     expect(relay.selectProxy).toHaveBeenCalledWith("proxy-1");
-    expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list" });
+    expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list_request" });
     expect(useAppStore.getState().phase).toBe("chatting");
     expect(useAppStore.getState().proxyOnline).toBe(true);
   });
@@ -487,6 +491,7 @@ describe("phase-machine reconnect timers", () => {
     await handleRelayMessage(
       {
         type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         status: "proxy_offline",
         proxyId: previewScope.proxyId,
         bindingId: previewScope.bindingId,
@@ -506,7 +511,7 @@ describe("phase-machine reconnect timers", () => {
         expect.objectContaining({ signal: expect.any(AbortSignal) }),
       );
     });
-    expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list" });
+    expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list_request" });
     expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000);
   });
 
@@ -773,7 +778,17 @@ describe("phase-machine proxy_offline preserves session list for cold-start rout
   beforeEach(() => {
     resetAppStore();
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
       sessionListLoaded: true,
     });
   });
@@ -813,7 +828,17 @@ describe("phase-machine explicit proxy removal", () => {
     resetAppStore();
     localStorage.setItem("dev_anywhere_proxyId", "proxy-1");
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
       sessionListLoaded: true,
       loadingProxyName: null,
     });
@@ -848,7 +873,6 @@ describe("phase-machine explicit proxy removal", () => {
       commandsBySessionId: {
         s1: [{ name: "review", description: "Review", source: "test" }],
       },
-      legacyCommands: [],
     });
     vi.mocked(router.navigate).mockClear();
   });
@@ -901,8 +925,8 @@ describe("phase-machine explicit proxy removal", () => {
     if (!currentGrant || !removedGrant) throw new Error("missing PTY grant key");
     useAppStore.setState({
       proxies: [
-        { proxyId: "proxy-1", name: "Current", online: true, sessions: ["s1"] },
-        { proxyId: "proxy-2", name: "Old Mac", online: false, sessions: [] },
+        { proxyId: "proxy-1", name: "Current", version: "0.9.0", online: true, sessions: ["s1"] },
+        { proxyId: "proxy-2", name: "Old Mac", version: "0.9.0", online: false, sessions: [] },
       ],
     });
     useSessionStore.setState({

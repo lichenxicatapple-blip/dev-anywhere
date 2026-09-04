@@ -12,7 +12,14 @@ const SESSION_ID = "pty-scrollbar-drag";
 
 test.describe("PTY scrollbar thumb drag", () => {
   test("dragging vertical scrollbar thumb scrolls the terminal", async ({ page }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     // 灌长 buffer 让 thumb 短(可拖动距离大).

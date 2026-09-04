@@ -188,7 +188,14 @@ bash scripts/deploy/install-relay.sh \
 
 最后一个参数应与首次部署时保持一致：使用域名部署就继续传域名，使用公网 IP 部署就传公网 IP。部署脚本会复用 VPS 上已有的 Token。
 
-Relay 更新后，各开发机上的 DEV Anywhere 会自动更新，无需逐台操作。
+DEV Anywhere 0.9.0 不兼容此前版本。Relay 更新后，请在每台开发机上手动更新并重启 DEV Anywhere：
+
+```bash
+npm install -g @dev-anywhere/proxy@0.9.0
+dev-anywhere serve restart --relay cloud
+```
+
+全部开发机更新完成后，刷新浏览器，并重新启动升级前仍在运行的会话。
 
 升级后可在任意开发机确认版本和连接状态：
 
@@ -206,7 +213,7 @@ dev-anywhere serve status
 - 直接从浏览器创建 Claude Code、Codex、Kimi Code 的终端或聊天会话，以及 Shell 会话。
 - 创建 Claude Code、Codex 或 Kimi Code 会话时，可以选择工作目录、终端或聊天交互方式，以及权限模式。
 - 接入从本地终端启动的会话，也可以恢复 Claude Code、Codex 与 Kimi Code 的历史会话。
-- 重命名、终止或分离会话；托管终端在 Proxy 重启后可以重新连接。
+- 重命名、终止或分离会话；从本地终端启动的会话在 Proxy 重启后可以重新连接。
 - 在多台开发机之间切换，并查看、断开当前连接到 Relay 的客户端；不再使用的离线开发机可在手机上左滑移除，或从桌面端的更多菜单移除，重新连接后会再次出现。
 
 ![从浏览器创建真实 coding agent 会话](./docs/assets/readme-create-session.gif)

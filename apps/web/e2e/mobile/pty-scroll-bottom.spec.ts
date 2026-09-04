@@ -540,7 +540,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
   test("PTY screen covers the mobile scroll viewport without a full-row bottom blank", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await sendPtyLines(emuPage, { count: 120 });
@@ -553,7 +561,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-passive-live-gap`;
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 270, rows: 57 });
     await sendPtyLines(emuPage, { count: 520, prefix: "passive-live-history" });
@@ -584,8 +600,10 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     const sessionId = `${SESSION_ID}-short-live-backfill`;
     await setupPtyChat(emuPage, {
       sessionId,
+      sessionKind: "agent",
       baseUrl: mobileBaseUrl,
       provider: "codex",
+      ptyOwner: "proxy-hosted",
       rows: 25,
       cols: 122,
     });
@@ -636,7 +654,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
   });
 
   test("scroll up shows back-to-bottom; tap returns to bottom", async ({ emuPage }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await sendPtyLines(emuPage, { count: 120 });
@@ -662,7 +688,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-bottom-touch-drift`;
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 120, rows: 54 });
     await sendPtyLines(emuPage, { count: 260, prefix: "bottom-drift" });
@@ -706,7 +740,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-visible-live-tail`;
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 120, rows: 54 });
     await sendPtyLines(emuPage, { count: 260, prefix: "visible-live-tail" });
@@ -781,7 +823,10 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       sessionId,
       baseUrl: mobileBaseUrl,
       sessionKind: "terminal",
-      ptyOwner: "proxy-hosted",
+      provider: "claude",
+      ptyOwner: "local-terminal",
+      cols: 80,
+      rows: 24,
     });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 122, rows: 29 });
@@ -810,7 +855,10 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       sessionId,
       baseUrl: mobileBaseUrl,
       sessionKind: "terminal",
-      ptyOwner: "proxy-hosted",
+      provider: "claude",
+      ptyOwner: "local-terminal",
+      cols: 80,
+      rows: 24,
     });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 122, rows: 29 });
@@ -839,7 +887,10 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       sessionId,
       baseUrl: mobileBaseUrl,
       sessionKind: "terminal",
-      ptyOwner: "proxy-hosted",
+      provider: "claude",
+      ptyOwner: "local-terminal",
+      cols: 80,
+      rows: 24,
     });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 80, rows: 29 });
@@ -885,7 +936,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
   test("new PTY output while scrolled up surfaces 有新消息 indicator without snapping to bottom", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await sendPtyLines(emuPage, { count: 120 });
@@ -911,7 +970,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-history-anchor`;
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await sendPtyLines(emuPage, { count: 240, prefix: "anchored-history" });
@@ -981,7 +1048,15 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-touch-progressive-tail`;
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await enterLongHostMode(emuPage, { sessionId, cols: 270, rows: 57 });
     await sendPtyLines(emuPage, { count: 520, prefix: "touch-history" });

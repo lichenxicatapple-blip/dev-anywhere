@@ -12,6 +12,15 @@ function createMockWs(readyState: number = WebSocket.OPEN): WebSocket {
   } as unknown as WebSocket;
 }
 
+function registerProxy(
+  registry: RelayRegistry,
+  proxyId: string,
+  ws: WebSocket,
+  name?: string,
+): "new" | "reconnected" {
+  return registry.registerProxy(proxyId, ws, "0.9.0", name);
+}
+
 function bindingIdentity(ws: WebSocket): { boundProxyId?: string; bindingId?: string } {
   return ws as WebSocket & { boundProxyId?: string; bindingId?: string };
 }
@@ -26,7 +35,7 @@ describe("RelayRegistry", () => {
   describe("proxy registration", () => {
     it("registerProxy returns 'new' for first registration", () => {
       const ws = createMockWs();
-      const status = registry.registerProxy("p1", ws);
+      const status = registerProxy(registry, "p1", ws);
       expect(status).toBe("new");
       expect(registry.getProxy("p1")).toBe(ws);
     });
@@ -34,8 +43,8 @@ describe("RelayRegistry", () => {
     it("registerProxy returns 'reconnected' for re-registration", () => {
       const ws1 = createMockWs();
       const ws2 = createMockWs();
-      registry.registerProxy("p1", ws1);
-      const status = registry.registerProxy("p1", ws2);
+      registerProxy(registry, "p1", ws1);
+      const status = registerProxy(registry, "p1", ws2);
       expect(status).toBe("reconnected");
       expect(registry.getProxy("p1")).toBe(ws2);
     });
@@ -43,14 +52,14 @@ describe("RelayRegistry", () => {
     it("registerProxy terminates existing open connection on re-register", () => {
       const ws1 = createMockWs();
       const ws2 = createMockWs();
-      registry.registerProxy("p1", ws1);
-      registry.registerProxy("p1", ws2);
+      registerProxy(registry, "p1", ws1);
+      registerProxy(registry, "p1", ws2);
       expect(ws1.terminate).toHaveBeenCalled();
     });
 
     it("unregisterProxy removes proxy and cleans up", () => {
       const ws = createMockWs();
-      registry.registerProxy("p1", ws);
+      registerProxy(registry, "p1", ws);
       registry.unregisterProxy("p1");
       expect(registry.getProxy("p1")).toBeUndefined();
     });
@@ -60,7 +69,7 @@ describe("RelayRegistry", () => {
       const client1 = createMockWs();
       const client2 = createMockWs();
 
-      registry.registerProxy("p1", proxyWs);
+      registerProxy(registry, "p1", proxyWs);
       registry.bindClientById("c1", "p1", client1);
       registry.bindClientById("c2", "p1", client2);
 
@@ -71,8 +80,8 @@ describe("RelayRegistry", () => {
     });
 
     it("listProxies returns all registered proxyIds", () => {
-      registry.registerProxy("p1", createMockWs());
-      registry.registerProxy("p2", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
+      registerProxy(registry, "p2", createMockWs());
       const list = registry.listProxies();
       expect(list).toContain("p1");
       expect(list).toContain("p2");
@@ -82,12 +91,12 @@ describe("RelayRegistry", () => {
 
   describe("isProxyOnline", () => {
     it("returns true when proxy ws is open", () => {
-      registry.registerProxy("p1", createMockWs(WebSocket.OPEN));
+      registerProxy(registry, "p1", createMockWs(WebSocket.OPEN));
       expect(registry.isProxyOnline("p1")).toBe(true);
     });
 
     it("returns false when proxy is offline", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.transitionProxy("p1", "online", "offline");
       expect(registry.isProxyOnline("p1")).toBe(false);
     });
@@ -99,7 +108,7 @@ describe("RelayRegistry", () => {
 
   describe("proxy offline and reconnect", () => {
     it("transition online->offline clears ws but preserves entry + sessions for reconnect", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
 
       registry.transitionProxy("p1", "online", "offline");
@@ -111,14 +120,14 @@ describe("RelayRegistry", () => {
 
     it("reconnect after offline restores state", () => {
       const ws1 = createMockWs();
-      registry.registerProxy("p1", ws1);
+      registerProxy(registry, "p1", ws1);
       registry.addSessionToProxy("p1", "s1");
 
       registry.transitionProxy("p1", "online", "offline");
       expect(registry.getProxy("p1")).toBeUndefined();
 
       const ws2 = createMockWs();
-      const status = registry.registerProxy("p1", ws2);
+      const status = registerProxy(registry, "p1", ws2);
       expect(status).toBe("reconnected");
       expect(registry.getProxy("p1")).toBe(ws2);
       expect(registry.isProxyOnline("p1")).toBe(true);
@@ -137,7 +146,7 @@ describe("RelayRegistry", () => {
       currentClient.bindingId = "current-binding";
       staleTab.boundProxyId = "p1";
       staleTab.bindingId = "stale-binding";
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
       registry.addClientWs(currentClient, { clientId: "c1" });
       registry.addClientWs(staleTab, { clientId: "c1" });
@@ -155,7 +164,7 @@ describe("RelayRegistry", () => {
     });
 
     it("refuses to remove an online-state proxy even when its socket is already unavailable", () => {
-      registry.registerProxy("p1", createMockWs(WebSocket.CLOSING));
+      registerProxy(registry, "p1", createMockWs(WebSocket.CLOSING));
 
       expect(registry.isProxyOnline("p1")).toBe(false);
       expect(registry.removeOfflineProxy("p1")).toBe("online");
@@ -164,7 +173,7 @@ describe("RelayRegistry", () => {
     });
 
     it("reports an unknown proxy without mutating the registry", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
 
       expect(registry.removeOfflineProxy("missing")).toBe("not_found");
       expect(registry.listProxies()).toEqual(["p1"]);
@@ -173,7 +182,7 @@ describe("RelayRegistry", () => {
 
   describe("session tracking", () => {
     it("addSessionToProxy tracks sessionId in proxy session set", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
       registry.addSessionToProxy("p1", "s2");
 
@@ -183,7 +192,7 @@ describe("RelayRegistry", () => {
     });
 
     it("setSessionsForProxy replaces stale session ids from a fresh sync", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.addSessionToProxy("p1", "stale");
       registry.addSessionToProxy("p1", "s1");
 
@@ -194,7 +203,7 @@ describe("RelayRegistry", () => {
     });
 
     it("unregisterProxy cleans up sessions", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.addSessionToProxy("p1", "s1");
       registry.unregisterProxy("p1");
       expect(registry.getSessionsForProxy("p1")).toEqual([]);
@@ -204,7 +213,7 @@ describe("RelayRegistry", () => {
   describe("client binding by id", () => {
     it("bindClientById and getClientBinding work correctly", () => {
       const ws = createMockWs();
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       const bindingId = registry.bindClientById("c1", "p1", ws);
       expect(bindingId).toEqual(expect.any(String));
 
@@ -221,7 +230,7 @@ describe("RelayRegistry", () => {
     });
 
     it("unbindClientById clears ws but preserves binding for reconnect", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", createMockWs());
       registry.unbindClientById("c1");
       const binding = registry.getClientBinding("c1");
@@ -232,7 +241,7 @@ describe("RelayRegistry", () => {
     it("restoreClientBinding moves authority and rotates the binding generation", () => {
       const ws1 = createMockWs();
       const ws2 = createMockWs();
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       const oldBindingId = registry.bindClientById("c1", "p1", ws1);
 
       const restored = registry.restoreClientBinding("c1", ws2);
@@ -250,7 +259,7 @@ describe("RelayRegistry", () => {
     it("only lets the current client socket clear its binding", () => {
       const oldWs = createMockWs();
       const currentWs = createMockWs();
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", oldWs);
       registry.restoreClientBinding("c1", currentWs);
 
@@ -266,7 +275,7 @@ describe("RelayRegistry", () => {
     it("accepts only the exact authoritative Preview scope", () => {
       const oldWs = createMockWs();
       const currentWs = createMockWs();
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       const oldBindingId = registry.bindClientById("c1", "p1", oldWs)!;
       const restored = registry.restoreClientBinding("c1", currentWs)!;
 
@@ -287,7 +296,7 @@ describe("RelayRegistry", () => {
 
     it("rotates bindingId when selecting the same Proxy again", () => {
       const ws = createMockWs();
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       const first = registry.bindClientById("c1", "p1", ws)!;
       const second = registry.bindClientById("c1", "p1", ws)!;
 
@@ -303,7 +312,7 @@ describe("RelayRegistry", () => {
     it("getClientsForProxy includes clientId-bound clients", () => {
       const proxyWs = createMockWs();
       const clientWs = createMockWs();
-      registry.registerProxy("p1", proxyWs);
+      registerProxy(registry, "p1", proxyWs);
       registry.bindClientById("c1", "p1", clientWs);
 
       const clients = registry.getClientsForProxy("p1");
@@ -313,14 +322,14 @@ describe("RelayRegistry", () => {
 
   describe("countClients", () => {
     it("returns total bound clients", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", createMockWs());
       registry.bindClientById("c2", "p1", createMockWs());
       expect(registry.countClients()).toBe(2);
     });
 
     it("excludes bindings whose ws has been unbound (clientId binding kept for reconnect)", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", createMockWs());
       registry.bindClientById("c2", "p1", createMockWs());
       registry.unbindClientById("c1");
@@ -328,7 +337,7 @@ describe("RelayRegistry", () => {
     });
 
     it("excludes bindings whose ws is no longer OPEN", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", createMockWs(WebSocket.CLOSED));
       registry.bindClientById("c2", "p1", createMockWs());
       expect(registry.countClients()).toBe(1);
@@ -342,7 +351,7 @@ describe("RelayRegistry", () => {
 
     it("returns detail for online proxy with sessions", () => {
       const ws = createMockWs();
-      registry.registerProxy("p1", ws, "MacBook");
+      registerProxy(registry, "p1", ws, "MacBook");
       registry.addSessionToProxy("p1", "s1");
       registry.addSessionToProxy("p1", "s2");
 
@@ -356,7 +365,7 @@ describe("RelayRegistry", () => {
     });
 
     it("returns detail for offline proxy with disconnectedAt timestamp", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.transitionProxy("p1", "online", "offline");
 
       const detail = registry.getProxyDetail("p1");
@@ -366,7 +375,7 @@ describe("RelayRegistry", () => {
     });
 
     it("omits name field when proxy has no name", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       const detail = registry.getProxyDetail("p1");
       expect(detail && "name" in detail).toBe(false);
     });
@@ -378,7 +387,7 @@ describe("RelayRegistry", () => {
     });
 
     it("returns all client bindings with online status", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", createMockWs(WebSocket.OPEN));
       registry.bindClientById("c2", "p1", createMockWs(WebSocket.OPEN));
 
@@ -399,7 +408,7 @@ describe("RelayRegistry", () => {
     });
 
     it("shows offline status for unbound clients", () => {
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", createMockWs());
       registry.unbindClientById("c1");
 
@@ -423,7 +432,7 @@ describe("RelayRegistry", () => {
         remoteAddress: "127.0.0.1",
       });
       registry.updateConnectedClientId(clientWs, "c1");
-      registry.registerProxy("p1", createMockWs());
+      registerProxy(registry, "p1", createMockWs());
       registry.bindClientById("c1", "p1", clientWs);
 
       expect(registry.getConnectedClientDetails("c1")).toEqual([
@@ -468,12 +477,12 @@ describe("RelayRegistry", () => {
   describe("state transitions", () => {
     describe("proxy connection state", () => {
       it("getProxyConnectionState returns 'online' after registration", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         expect(registry.getProxyConnectionState("p1")).toBe("online");
       });
 
       it("getProxyConnectionState returns 'offline' after transitionProxy to offline", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.transitionProxy("p1", "online", "offline");
         expect(registry.getProxyConnectionState("p1")).toBe("offline");
       });
@@ -483,25 +492,25 @@ describe("RelayRegistry", () => {
       });
 
       it("transitionProxy online->offline succeeds", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.transitionProxy("p1", "online", "offline");
         expect(registry.getProxyConnectionState("p1")).toBe("offline");
       });
 
       it("transitionProxy offline->online succeeds", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.transitionProxy("p1", "online", "offline");
         registry.transitionProxy("p1", "offline", "online");
         expect(registry.getProxyConnectionState("p1")).toBe("online");
       });
 
       it("transitionProxy online->online throws (same state)", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         expect(() => registry.transitionProxy("p1", "online", "online")).toThrow();
       });
 
       it("transitionProxy offline->offline throws (same state)", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.transitionProxy("p1", "online", "offline");
         expect(() => registry.transitionProxy("p1", "offline", "offline")).toThrow();
       });
@@ -511,29 +520,29 @@ describe("RelayRegistry", () => {
       });
 
       it("transitionProxy throws on from-state mismatch", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         expect(() => registry.transitionProxy("p1", "offline", "online")).toThrow();
       });
 
       it("transitionProxy to offline sets ws to null and disconnectedAt", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.transitionProxy("p1", "online", "offline");
         expect(registry.getProxy("p1")).toBeUndefined();
         expect(registry.isProxyOnline("p1")).toBe(false);
       });
 
       it("reconnect sets connectionState back to online", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.transitionProxy("p1", "online", "offline");
         const ws2 = createMockWs();
-        registry.registerProxy("p1", ws2);
+        registerProxy(registry, "p1", ws2);
         expect(registry.getProxyConnectionState("p1")).toBe("online");
       });
     });
 
     describe("client connection state", () => {
       it("getClientConnectionState returns 'bound' after bindClientById", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.bindClientById("c1", "p1", createMockWs());
         expect(registry.getClientConnectionState("c1")).toBe("bound");
       });
@@ -545,7 +554,7 @@ describe("RelayRegistry", () => {
 
     describe("connectionState in detail APIs", () => {
       it("getProxyDetail includes connectionState field", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         const detail = registry.getProxyDetail("p1");
         expect(detail!.connectionState).toBe("online");
 
@@ -555,7 +564,7 @@ describe("RelayRegistry", () => {
       });
 
       it("getClientDetails includes connectionState field", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         registry.bindClientById("c1", "p1", createMockWs());
 
         const details = registry.getClientDetails();
@@ -563,7 +572,7 @@ describe("RelayRegistry", () => {
       });
 
       it("listProxiesWithName online field derives from connectionState", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         let list = registry.listProxiesWithName();
         expect(list[0].online).toBe(true);
 
@@ -573,7 +582,7 @@ describe("RelayRegistry", () => {
       });
 
       it("isProxyOnline reads from connectionState", () => {
-        registry.registerProxy("p1", createMockWs());
+        registerProxy(registry, "p1", createMockWs());
         expect(registry.isProxyOnline("p1")).toBe(true);
 
         registry.transitionProxy("p1", "online", "offline");

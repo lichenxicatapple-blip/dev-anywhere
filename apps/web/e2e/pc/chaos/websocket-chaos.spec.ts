@@ -204,7 +204,7 @@ test.describe("WebSocket reconnect chaos", () => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "pty_state",
         sessionId: "claude-pty",
-        payload: { state: "approval_wait", tool: "Write" },
+        payload: { state: "approval_wait", seq: 1, tool: "Write" },
       });
     });
     await expect(page.locator('[data-slot="pty-approval-hint"]')).toBeVisible();
@@ -388,10 +388,7 @@ test.describe("WebSocket reconnect chaos", () => {
 
     await scrollPtyToTop(page);
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
-    const visibleAnchorBeforeReconnect = await waitForStableVisiblePtyRow(
-      page,
-      "history line 000",
-    );
+    const visibleAnchorBeforeReconnect = await waitForStableVisiblePtyRow(page, "history line 000");
 
     await holdNextConnectionAndDropSocket(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(

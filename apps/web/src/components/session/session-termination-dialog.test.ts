@@ -4,9 +4,13 @@ import { sessionTerminationCopy } from "./session-termination-dialog";
 
 const baseSession: SessionInfo = {
   sessionId: "s1",
+  kind: "agent",
   mode: "pty",
   provider: "claude",
   state: "idle",
+  ptyOwner: "proxy-hosted",
+  cwd: "/tmp/project",
+  lastActive: 1,
 };
 
 describe("sessionTerminationCopy", () => {
@@ -28,9 +32,14 @@ describe("sessionTerminationCopy", () => {
   it("uses terminal wording for pure terminal sessions", () => {
     expect(
       sessionTerminationCopy({
-        ...baseSession,
+        sessionId: "terminal-1",
         kind: "terminal",
-        ptyOwner: "proxy-hosted",
+        mode: "pty",
+        provider: "claude",
+        state: "idle",
+        ptyOwner: "local-terminal",
+        cwd: "/tmp/project",
+        lastActive: 1,
       }),
     ).toEqual({
       title: "终止终端？",
@@ -52,7 +61,17 @@ describe("sessionTerminationCopy", () => {
       confirmLabel: "终止会话",
       destructive: true,
     });
-    expect(sessionTerminationCopy({ ...baseSession, mode: "json" })).toMatchObject({
+    expect(
+      sessionTerminationCopy({
+        sessionId: "json-1",
+        kind: "agent",
+        mode: "json",
+        provider: "claude",
+        state: "idle",
+        cwd: "/tmp/project",
+        lastActive: 1,
+      }),
+    ).toMatchObject({
       title: "终止会话？",
       confirmLabel: "终止会话",
       destructive: true,

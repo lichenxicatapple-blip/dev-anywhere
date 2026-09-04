@@ -19,6 +19,7 @@ import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 import { WebSocket } from "ws";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 import {
   waitForOpen,
   waitForMessage,
@@ -169,10 +170,20 @@ async function fetchJson(port: number, path: string): Promise<Record<string, unk
 function clientRegister(clientId: string): Record<string, unknown> {
   return {
     type: "client_register",
+    protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
     clientId,
     browserName: "Chrome",
     osName: "macOS",
     deviceKind: "desktop",
+  };
+}
+
+function proxyRegister(proxyId: string): Record<string, unknown> {
+  return {
+    type: "proxy_register",
+    protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+    proxyId,
+    proxyVersion: "0.9.0",
   };
 }
 
@@ -240,7 +251,7 @@ describe("proxy lifecycle", () => {
       await waitForOpen(proxy);
 
       const msgPromise = waitForMessage(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy.send(JSON.stringify(proxyRegister(id)));
       const response = JSON.parse(await msgPromise);
 
       expect(response.type).toBe("proxy_register_response");
@@ -258,7 +269,7 @@ describe("proxy lifecycle", () => {
       const id = uid();
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy);
       await settle();
 
@@ -292,7 +303,7 @@ describe("proxy lifecycle", () => {
       // 第一次连接，发送消息填充 buffer
       const proxy1 = ws.proxy(port);
       await waitForOpen(proxy1);
-      proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy1.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy1);
       await settle();
 
@@ -322,7 +333,7 @@ describe("proxy lifecycle", () => {
       await waitForOpen(proxy2);
 
       const registerPromise = waitForMessage(proxy2);
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy2.send(JSON.stringify(proxyRegister(id)));
 
       const response = JSON.parse(await registerPromise);
       expect(response.type).toBe("proxy_register_response");
@@ -341,7 +352,7 @@ describe("proxy lifecycle", () => {
       const id = uid();
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy);
       await settle();
 
@@ -399,7 +410,7 @@ describe("proxy lifecycle", () => {
       const id = uid();
       const proxy1 = ws.proxy(port);
       await waitForOpen(proxy1);
-      proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy1.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy1);
 
       // 第二个连接用同一 proxyId 注册
@@ -410,7 +421,7 @@ describe("proxy lifecycle", () => {
         proxy1.on("close", () => resolve());
       });
 
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy2.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy2); // reconnected response
 
       // 旧连接应被 terminate
@@ -433,7 +444,7 @@ describe("proxy lifecycle", () => {
 
       const proxy1 = ws.proxy(port);
       await waitForOpen(proxy1);
-      proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy1.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy1);
       await settle(50);
 
@@ -454,7 +465,7 @@ describe("proxy lifecycle", () => {
       const closeP = new Promise<void>((resolve) => {
         proxy1.on("close", () => resolve());
       });
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy2.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy2);
       await closeP;
       // 给旧 ws 的 close handler 一段时间触发其异步逻辑
@@ -481,7 +492,7 @@ describe("proxy lifecycle", () => {
       const id = uid();
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy.send(JSON.stringify(proxyRegister(id)));
       await waitForMessage(proxy);
       await settle();
 
@@ -523,7 +534,7 @@ describe("proxy lifecycle", () => {
         const proxy = ws.proxy(port);
         await waitForOpen(proxy);
         const msgP = waitForMessage(proxy);
-        proxy.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+        proxy.send(JSON.stringify(proxyRegister(id)));
         const resp = JSON.parse(await msgP);
 
         if (round === 1) {
@@ -543,7 +554,7 @@ describe("proxy lifecycle", () => {
       const proxy4 = ws.proxy(port);
       await waitForOpen(proxy4);
       const msgP = waitForMessage(proxy4);
-      proxy4.send(JSON.stringify({ type: "proxy_register", proxyId: id }));
+      proxy4.send(JSON.stringify(proxyRegister(id)));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("reconnected");
     },
@@ -580,12 +591,14 @@ describe("client lifecycle", () => {
       const proxyId = uid();
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
+      proxy.send(JSON.stringify(proxyRegister(proxyId)));
       await waitForMessage(proxy);
       await settle();
 
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister(uid("c"))));
+      await waitForMessage(client); // consume client_register_response
 
       // proxy_list
       const listPromise = waitForMessage(client);
@@ -595,8 +608,6 @@ describe("client lifecycle", () => {
       expect(listResp.proxies.some((p: { proxyId: string }) => p.proxyId === proxyId)).toBe(true);
 
       // proxy_select + 双向
-      client.send(JSON.stringify(clientRegister(uid("c"))));
-      await waitForMessage(client); // consume client_register_response
       client.send(JSON.stringify({ type: "proxy_select", proxyId }));
       await waitForMessage(client); // consume proxy_select_response ACK
 
@@ -636,7 +647,7 @@ describe("client lifecycle", () => {
       const proxyId = uid();
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
+      proxy.send(JSON.stringify(proxyRegister(proxyId)));
       await waitForMessage(proxy);
       await settle();
 
@@ -667,7 +678,7 @@ describe("client lifecycle", () => {
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
+      proxy.send(JSON.stringify(proxyRegister(proxyId)));
       await waitForMessage(proxy);
       await settle();
 
@@ -710,7 +721,7 @@ describe("client lifecycle", () => {
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
+      proxy.send(JSON.stringify(proxyRegister(proxyId)));
       await waitForMessage(proxy);
       await settle();
 
@@ -737,7 +748,7 @@ describe("client lifecycle", () => {
       const onlineP = waitForMessageType(client2, "proxy_online");
       const proxy2 = ws.proxy(port);
       await waitForOpen(proxy2);
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId }));
+      proxy2.send(JSON.stringify(proxyRegister(proxyId)));
       expect(JSON.parse(await onlineP).type).toBe("proxy_online");
     },
     E2E_TIMEOUT,
@@ -763,7 +774,7 @@ describe("client lifecycle", () => {
       const proxyId = uid();
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
+      proxy.send(JSON.stringify(proxyRegister(proxyId)));
       await waitForMessage(proxy);
       await settle();
 
@@ -791,6 +802,8 @@ describe("client lifecycle", () => {
     async () => {
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister(uid("c"))));
+      await waitForMessage(client); // consume client_register_response
       const msgP = waitForMessage(client);
       client.send(JSON.stringify(makeEnvelope(1, "s1", "user_input", "client")));
       const resp = JSON.parse(await msgP);
@@ -805,9 +818,11 @@ describe("client lifecycle", () => {
     async () => {
       const client = ws.client(port);
       await waitForOpen(client);
+      client.send(JSON.stringify(clientRegister(uid("c"))));
+      await waitForMessage(client);
       const msgP = waitForMessage(client);
       // proxy_register 是 proxy 端控制消息，client 端不应发送
-      client.send(JSON.stringify({ type: "proxy_register", proxyId: "x" }));
+      client.send(JSON.stringify(proxyRegister("x")));
       const resp = JSON.parse(await msgP);
       expect(resp.type).toBe("relay_error");
       expect(resp.code).toBe("UNSUPPORTED");
@@ -823,7 +838,7 @@ describe("client lifecycle", () => {
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId }));
+      proxy.send(JSON.stringify(proxyRegister(proxyId)));
       await waitForMessage(proxy);
       await settle();
 
@@ -896,7 +911,7 @@ describe("disk persistence and relay restart", () => {
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p6-1" }));
+      proxy.send(JSON.stringify(proxyRegister("p6-1")));
       await waitForMessage(proxy);
       await settle();
 
@@ -922,7 +937,7 @@ describe("disk persistence and relay restart", () => {
 
       const proxy1 = ws.proxy(port);
       await waitForOpen(proxy1);
-      proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p6-5" }));
+      proxy1.send(JSON.stringify(proxyRegister("p6-5")));
       await waitForMessage(proxy1);
       await settle();
 
@@ -938,7 +953,7 @@ describe("disk persistence and relay restart", () => {
       const proxy2 = ws.proxy(port);
       await waitForOpen(proxy2);
       const msgP = waitForMessage(proxy2);
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p6-5" }));
+      proxy2.send(JSON.stringify(proxyRegister("p6-5")));
       const resp = JSON.parse(await msgP);
       expect(resp.status).toBe("new");
     },
@@ -955,7 +970,7 @@ describe("disk persistence and relay restart", () => {
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p-sigterm" }));
+      proxy.send(JSON.stringify(proxyRegister("p-sigterm")));
       await waitForMessage(proxy);
 
       killRelay(relay, "SIGTERM");
@@ -995,7 +1010,7 @@ describe("heartbeat dead connection detection", () => {
     async () => {
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "hb-p" }));
+      proxy.send(JSON.stringify(proxyRegister("hb-p")));
       await waitForMessage(proxy);
       await settle();
 
@@ -1024,7 +1039,7 @@ describe("heartbeat dead connection detection", () => {
     async () => {
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "hb-c" }));
+      proxy.send(JSON.stringify(proxyRegister("hb-c")));
       await waitForMessage(proxy);
       await settle();
 
@@ -1084,7 +1099,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       // -- 阶段 1: 正常工作 --
       const proxy1 = ws.proxy(port);
       await waitForOpen(proxy1);
-      proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "cable" }));
+      proxy1.send(JSON.stringify(proxyRegister("cable")));
       await waitForMessage(proxy1);
       await settle();
 
@@ -1118,7 +1133,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       await waitForOpen(proxy2);
 
       const registerP = waitForMessage(proxy2);
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "cable" }));
+      proxy2.send(JSON.stringify(proxyRegister("cable")));
 
       const resp = JSON.parse(await registerP);
       expect(resp.status).toBe("reconnected");
@@ -1146,7 +1161,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
 
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
-      proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "multi" }));
+      proxy.send(JSON.stringify(proxyRegister("multi")));
       await waitForMessage(proxy);
       await settle();
 
@@ -1195,7 +1210,7 @@ describe("end-to-end: network interruption recovery and multi-session", () => {
       const proxy2 = ws.proxy(port);
       await waitForOpen(proxy2);
       const regP = waitForMessage(proxy2);
-      proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "multi" }));
+      proxy2.send(JSON.stringify(proxyRegister("multi")));
       const regResp = JSON.parse(await regP);
       expect(regResp.status).toBe("reconnected");
       expect(regResp.sessions).toBeUndefined();

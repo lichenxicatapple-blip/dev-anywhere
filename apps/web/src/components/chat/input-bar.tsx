@@ -13,7 +13,11 @@ import {
 } from "react";
 import { ImageIcon, Paperclip, Upload } from "lucide-react";
 import { VisuallyHidden } from "radix-ui";
-import { isCompactCommandText, type CommandEntry } from "@dev-anywhere/shared";
+import {
+  isCompactCommandText,
+  MESSAGE_ENVELOPE_VERSION,
+  type CommandEntry,
+} from "@dev-anywhere/shared";
 import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -185,7 +189,7 @@ export function InputBar({ sessionId }: InputBarProps) {
       seq: 0,
       timestamp: now,
       source: "client",
-      version: "1",
+      version: MESSAGE_ENVELOPE_VERSION,
     });
     clearComposer();
   }, [

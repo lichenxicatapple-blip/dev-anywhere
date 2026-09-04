@@ -3,6 +3,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import type { VoiceCapabilitiesProvider } from "#src/voice/capabilities.js";
@@ -38,6 +39,18 @@ describe("voice config relay controls", () => {
     const ws = new WebSocket(`ws://127.0.0.1:${port}/client`);
     connections.push(ws);
     await waitForOpen(ws);
+    const registered = waitForMessageType(ws, "client_register_response");
+    ws.send(
+      JSON.stringify({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId: `voice-config-${connections.length}`,
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await registered;
     return ws;
   }
 

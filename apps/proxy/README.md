@@ -120,7 +120,7 @@ that value in Settings -> Relay Token so the browser client can authenticate.
 
 `dev-anywhere serve start --relay cloud` and `dev-anywhere serve restart --relay cloud` use a named relay without editing the file each time.
 
-`autoUpdate` defaults to `true`. After the connected Relay is upgraded, DEV Anywhere on this machine updates automatically. Set `autoUpdate` to `false` and restart the service to keep the installed version.
+`autoUpdate` defaults to `true` and runs after this machine connects to the Relay. DEV Anywhere 0.9.0 must be installed manually on every development machine after the Relay is upgraded; restart the service after installing it. Set `autoUpdate` to `false` and restart the service to keep the installed version.
 
 If DEV Anywhere cannot detect an agent CLI automatically, set its persistent
 path under the top-level `agentCli` object:

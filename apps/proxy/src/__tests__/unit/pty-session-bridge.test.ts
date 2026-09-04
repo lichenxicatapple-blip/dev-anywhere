@@ -9,8 +9,10 @@ import type { SessionInfo } from "#src/serve/session-manager.js";
 function makeSession(state: SessionState): SessionInfo {
   return {
     id: "test-session",
+    kind: "agent",
     mode: "pty",
     provider: "claude",
+    ptyOwner: "local-terminal",
     state,
     cwd: "/tmp",
     createdAt: 0,

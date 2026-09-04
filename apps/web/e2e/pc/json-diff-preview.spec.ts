@@ -16,7 +16,7 @@ test.describe("JSON diff preview", () => {
         sessionId: "test-sess",
         timestamp: Date.now(),
         source: "proxy",
-        version: "1",
+        version: "1.0",
         type: "assistant_tool_use",
         payload: {
           toolId: "tool-edit-1",
@@ -160,7 +160,7 @@ test.describe("JSON diff preview", () => {
       const base = {
         timestamp: Date.now(),
         source: "proxy",
-        version: "1",
+        version: "1.0",
         sessionId: "test-sess",
       };
       socket?.emitJson({

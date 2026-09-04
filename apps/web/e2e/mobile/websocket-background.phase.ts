@@ -200,7 +200,7 @@ async function setup(): Promise<Record<string, unknown>> {
             sessionId,
             timestamp: Date.now(),
             source: "proxy",
-            version: "1",
+            version: "1.0",
             type: "assistant_message",
             payload: {
               turnId,

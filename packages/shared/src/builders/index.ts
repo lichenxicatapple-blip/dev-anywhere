@@ -1,6 +1,7 @@
 import type { MessageEnvelope } from "../schemas/envelope.js";
 import { MessageEnvelopeSchema } from "../schemas/envelope.js";
 import type { RelayControlMessage } from "../schemas/relay-control.js";
+import { MESSAGE_ENVELOPE_VERSION } from "../constants/envelope.js";
 
 // 构建经过 schema 验证的消息信封
 // seq 由调用方提供；session-scoped envelope 应使用该会话单调递增的发送序号。
@@ -20,7 +21,7 @@ export function buildMessage<T extends MessageEnvelope["type"]>(
     payload,
     timestamp: Date.now(),
     source,
-    version: "1.0",
+    version: MESSAGE_ENVELOPE_VERSION,
   };
   return MessageEnvelopeSchema.parse(envelope) as Extract<MessageEnvelope, { type: T }>;
 }

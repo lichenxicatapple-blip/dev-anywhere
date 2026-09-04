@@ -4,13 +4,14 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { RelayControlSchema } from "@dev-anywhere/shared";
-import { serializeWorkerMsg } from "#src/ipc/ipc-protocol.js";
+import { WORKER_IPC_PROTOCOL_VERSION, serializeWorkerMsg } from "#src/ipc/ipc-protocol.js";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import {
   createJsonObserverFake,
   createRelayConnectionFake,
   createSessionManagerFake,
+  serializeWorkerHandshake,
 } from "./test-fakes.js";
 
 describe("WorkerRegistry Codex app-server events", () => {
@@ -35,11 +36,26 @@ describe("WorkerRegistry Codex app-server events", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  async function createConnectedRegistry() {
+  async function createConnectedRegistry(
+    ready: Parameters<typeof serializeWorkerHandshake>[3] = {
+      type: "worker_ready",
+      pid: 123,
+    },
+  ) {
     const relay = createRelayConnectionFake();
     const onTurnResult = vi.fn();
     const sessionManager = createSessionManagerFake([
-      { id: "s1", mode: "json", provider: "codex" },
+      {
+        id: "s1",
+        kind: "agent",
+        mode: "json",
+        provider: "codex",
+        state: "idle",
+        createdAt: 1,
+        updatedAt: 1,
+        cwd: "/tmp",
+        pid: 1,
+      },
     ]);
     const registry = new WorkerRegistry({
       sessionManager,
@@ -50,6 +66,8 @@ describe("WorkerRegistry Codex app-server events", () => {
     });
     const sock = await registry.connect("s1", sockPath);
     expect(sock).not.toBeNull();
+    acceptedSocket?.write(serializeWorkerHandshake("s1", 1, "codex", ready));
+    await registry.waitForReady("s1", 1_000);
     return { relay, onTurnResult, sessionManager };
   }
 
@@ -263,15 +281,11 @@ describe("WorkerRegistry Codex app-server events", () => {
   });
 
   it("stores the Codex thread id atomically with worker readiness", async () => {
-    const { sessionManager } = await createConnectedRegistry();
-
-    acceptedSocket?.write(
-      serializeWorkerMsg({
-        type: "worker_ready",
-        pid: 123,
-        nativeSession: { provider: "codex", sessionId: "cx-ready-thread-1" },
-      }),
-    );
+    const { sessionManager } = await createConnectedRegistry({
+      type: "worker_ready",
+      pid: 123,
+      nativeSession: { provider: "codex", sessionId: "cx-ready-thread-1" },
+    });
 
     await vi.waitFor(() =>
       expect(sessionManager.setHistorySessionId).toHaveBeenCalledWith("s1", "cx-ready-thread-1"),
@@ -280,7 +294,18 @@ describe("WorkerRegistry Codex app-server events", () => {
 
   it("holds the Codex thread id until a pending session is published", async () => {
     const relay = createRelayConnectionFake();
-    const sessionManager = createSessionManagerFake([]);
+    const pendingSession = {
+      id: "pending",
+      kind: "agent" as const,
+      mode: "json" as const,
+      provider: "codex" as const,
+      state: "idle" as const,
+      createdAt: 1,
+      updatedAt: 1,
+      cwd: "/tmp",
+      pid: 123,
+    };
+    const sessionManager = createSessionManagerFake([pendingSession]);
     const registry = new WorkerRegistry({
       sessionManager,
       permissionBroker: new PermissionBroker(),
@@ -292,8 +317,32 @@ describe("WorkerRegistry Codex app-server events", () => {
 
     acceptedSocket?.write(
       serializeWorkerMsg({
-        type: "worker_ready",
+        type: "worker_protocol_hello",
+        protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+        sessionId: "pending",
+        provider: "codex",
         pid: 123,
+      }),
+    );
+    acceptedSocket?.write(
+      serializeWorkerMsg({
+        type: "worker_native_session_id",
+        provider: "codex",
+        sessionId: "handshake-confirmed",
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(sessionManager.setHistorySessionId).toHaveBeenCalledWith(
+        "pending",
+        "handshake-confirmed",
+      ),
+    );
+    vi.mocked(sessionManager.setHistorySessionId).mockClear();
+    vi.mocked(sessionManager.getSession).mockReturnValue(undefined);
+    acceptedSocket?.write(
+      serializeWorkerMsg({
+        type: "worker_ready",
+        pid: 456,
         nativeSession: { provider: "codex", sessionId: "cx-pending-thread" },
       }),
     );

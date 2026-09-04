@@ -4,12 +4,75 @@ import {
   isClientToProxyRelayControlType,
   isProxyToClientRelayControlType,
   ProxyToClientRelayControlTypes,
+  RELAY_CONTROL_PROTOCOL_VERSION,
   RelayControlSchema,
 } from "../relay-control.js";
 
 describe("RelayControlSchema", () => {
   it("rejects proxy_register with empty proxyId", () => {
-    expect(() => RelayControlSchema.parse({ type: "proxy_register", proxyId: "" })).toThrow();
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "",
+        proxyVersion: "0.9.0",
+      }),
+    ).toThrow();
+  });
+
+  it("requires both sides of Proxy registration to report their version", () => {
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "proxy-1",
+      }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status: "new",
+        connectionId: "connection-1",
+      }).success,
+    ).toBe(false);
+  });
+
+  it.each([
+    {
+      type: "proxy_register",
+      proxyId: "proxy-1",
+      proxyVersion: "0.9.0",
+    },
+    {
+      type: "proxy_register_response",
+      status: "new",
+      relayVersion: "0.9.0",
+      connectionId: "connection-1",
+    },
+    {
+      type: "client_register",
+      clientId: "client-1",
+      userAgent: "test",
+      platform: "test",
+      maxTouchPoints: 0,
+      browserName: "test",
+      osName: "test",
+      deviceKind: "desktop",
+    },
+    {
+      type: "client_register_response",
+      status: "new",
+    },
+  ])("requires the current Relay control protocol for $type", (message) => {
+    expect(
+      RelayControlSchema.safeParse({
+        ...message,
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      }).success,
+    ).toBe(true);
+    expect(RelayControlSchema.safeParse(message).success).toBe(false);
+    expect(RelayControlSchema.safeParse({ ...message, protocolVersion: 0 }).success).toBe(false);
   });
 
   it("rejects unknown type", () => {
@@ -31,7 +94,7 @@ describe("RelayControlSchema", () => {
     expect(isClientToProxyRelayControlType("tool_deny")).toBe(true);
     expect(isClientToProxyRelayControlType("session_resources_request")).toBe(true);
     expect(isClientToProxyRelayControlType("session_rename")).toBe(true);
-    expect(isClientToProxyRelayControlType("session_list")).toBe(true);
+    expect(isClientToProxyRelayControlType("session_list_request")).toBe(true);
     expect(isClientToProxyRelayControlType("voice_summary_request")).toBe(true);
     expect(isClientToProxyRelayControlType("agent_status")).toBe(false);
     expect(isClientToProxyRelayControlType("permission_decision_result")).toBe(false);
@@ -568,12 +631,25 @@ describe("RelayControlSchema", () => {
   });
 
   it("rejects client_register with empty clientId", () => {
-    expect(() => RelayControlSchema.parse({ type: "client_register", clientId: "" })).toThrow();
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId: "",
+        browserName: "test",
+        osName: "test",
+        deviceKind: "desktop",
+      }),
+    ).toThrow();
   });
 
   it("rejects client_register without device descriptor", () => {
     expect(() =>
-      RelayControlSchema.parse({ type: "client_register", clientId: "client-1" }),
+      RelayControlSchema.parse({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId: "client-1",
+      }),
     ).toThrow();
   });
 
@@ -581,6 +657,7 @@ describe("RelayControlSchema", () => {
     expect(
       RelayControlSchema.parse({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "client-1",
         userAgent:
           "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 Version/26.5 Safari/605.1.15",
@@ -648,7 +725,11 @@ describe("RelayControlSchema", () => {
 
   it("rejects client_register_response with unknown status", () => {
     expect(() =>
-      RelayControlSchema.parse({ type: "client_register_response", status: "invalid" }),
+      RelayControlSchema.parse({
+        type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status: "invalid",
+      }),
     ).toThrow();
   });
 
@@ -656,12 +737,19 @@ describe("RelayControlSchema", () => {
     expect(
       RelayControlSchema.parse({
         type: "proxy_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         status: "new",
+        relayVersion: "0.9.0",
         connectionId: "connection-1",
       }),
     ).toMatchObject({ status: "new", connectionId: "connection-1" });
     expect(
-      RelayControlSchema.safeParse({ type: "proxy_register_response", status: "new" }).success,
+      RelayControlSchema.safeParse({
+        type: "proxy_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status: "new",
+        connectionId: "connection-1",
+      }).success,
     ).toBe(false);
   });
 
@@ -759,46 +847,59 @@ describe("RelayControlSchema", () => {
     const result = RelayControlSchema.parse({
       type: "proxy_list_response",
       proxies: [
-        { proxyId: "p1", name: "my-laptop", online: true },
-        { proxyId: "p2", online: false },
+        { proxyId: "p1", name: "my-laptop", version: "0.9.0", online: true, sessions: [] },
+        { proxyId: "p2", version: "0.9.0", online: false, sessions: [] },
       ],
     });
     expect(result.type).toBe("proxy_list_response");
     if (result.type === "proxy_list_response") {
       expect(result.proxies).toHaveLength(2);
-      expect(result.proxies[0]).toEqual({ proxyId: "p1", name: "my-laptop", online: true });
-      expect(result.proxies[1]).toEqual({ proxyId: "p2", online: false });
+      expect(result.proxies[0]).toEqual({
+        proxyId: "p1",
+        name: "my-laptop",
+        version: "0.9.0",
+        online: true,
+        sessions: [],
+      });
+      expect(result.proxies[1]).toEqual({
+        proxyId: "p2",
+        version: "0.9.0",
+        online: false,
+        sessions: [],
+      });
     }
   });
 
-  it("parses command_list_push with commands array", () => {
-    const result = RelayControlSchema.parse({
+  it("rejects command_list_push without a session id", () => {
+    const result = RelayControlSchema.safeParse({
       type: "command_list_push",
       commands: [
         { name: "/compact", description: "Compact history", source: "builtin" },
         { name: "/help", description: "Show help", argumentHint: "[topic]", source: "builtin" },
       ],
     });
-    expect(result.type).toBe("command_list_push");
-    if (result.type === "command_list_push") {
-      expect(result.commands).toHaveLength(2);
-      expect(result.commands[0].argumentHint).toBeUndefined();
-      expect(result.commands[1].argumentHint).toBe("[topic]");
-      expect(result.sessionId).toBeUndefined();
-    }
+    expect(result.success).toBe(false);
   });
 
-  it("parses a session-scoped command_list_push", () => {
+  it("parses command_list_push with its session id", () => {
     const result = RelayControlSchema.parse({
       type: "command_list_push",
       sessionId: "session-kimi-1",
-      commands: [{ name: "/init", description: "Initialize", source: "kimi" }],
+      commands: [
+        { name: "/init", description: "Initialize", source: "kimi" },
+        {
+          name: "/compact",
+          description: "Compact history",
+          argumentHint: "[instructions]",
+          source: "kimi",
+        },
+      ],
     });
 
     expect(result).toMatchObject({
       type: "command_list_push",
       sessionId: "session-kimi-1",
-      commands: [{ name: "/init" }],
+      commands: [{ name: "/init" }, { name: "/compact", argumentHint: "[instructions]" }],
     });
   });
 
@@ -826,7 +927,7 @@ describe("RelayControlSchema", () => {
     }
   });
 
-  it("requires an explicit hidden-entry policy for directory requests and responses", () => {
+  it("requires an explicit hidden-entry policy and rejects forged directory targets", () => {
     expect(
       RelayControlSchema.parse({
         type: "dir_list_request",
@@ -835,6 +936,16 @@ describe("RelayControlSchema", () => {
         includeHidden: false,
       }),
     ).toMatchObject({ type: "dir_list_request", includeHidden: false });
+
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "dir_list_request",
+        requestId: "dir-list-with-forged-proxy",
+        proxyId: "other-proxy",
+        path: "/home/user/project",
+        includeHidden: false,
+      }),
+    ).toThrow();
 
     expect(() =>
       RelayControlSchema.parse({
@@ -867,6 +978,7 @@ describe("RelayControlSchema", () => {
         agentCli: {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: false, error: "codex not found" },
+          kimi: { available: false, error: "kimi not found" },
         },
       }),
     ).toEqual({
@@ -876,6 +988,7 @@ describe("RelayControlSchema", () => {
       agentCli: {
         claude: { available: true, command: "/usr/local/bin/claude" },
         codex: { available: false, error: "codex not found" },
+        kimi: { available: false, error: "kimi not found" },
       },
     });
 
@@ -900,14 +1013,14 @@ describe("RelayControlSchema", () => {
     expect(
       RelayControlSchema.safeParse({
         type: "proxy_info_request",
-        requestId: "legacy-refresh",
+        requestId: "removed-refresh",
         refreshPath: true,
       }).success,
     ).toBe(false);
     expect(
       RelayControlSchema.safeParse({
         type: "proxy_info",
-        requestId: "legacy-capabilities",
+        requestId: "removed-capabilities",
         homePath: "/home/dev",
         agentCli: {
           claude: { available: true },
@@ -944,6 +1057,7 @@ describe("RelayControlSchema", () => {
         agentCli: {
           claude: { available: true, command: "/home/dev/.local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
+          kimi: { available: true, command: "/usr/local/bin/kimi" },
         },
       }),
     ).toEqual({
@@ -953,6 +1067,7 @@ describe("RelayControlSchema", () => {
       agentCli: {
         claude: { available: true, command: "/home/dev/.local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: true, command: "/usr/local/bin/kimi" },
       },
     });
 
@@ -1138,6 +1253,21 @@ describe("RelayControlSchema", () => {
       expect(result.commands[0].name).toBe("/init");
       expect(result.groups[0].entries[0].name).toBe("src");
     }
+
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_resources_request",
+        sessionId: "s1",
+      }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_resources_response",
+        sessionId: "s1",
+        commands: [],
+        groups: [],
+      }).success,
+    ).toBe(false);
   });
 
   it("parses permission delivery and decision result controls", () => {
@@ -1203,6 +1333,7 @@ describe("RelayControlSchema", () => {
     expect(
       RelayControlSchema.parse({
         type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         status: "restored",
         proxyId: "p1",
         bindingId: "binding-2",
@@ -1263,6 +1394,7 @@ describe("RelayControlSchema", () => {
       expect(
         RelayControlSchema.safeParse({
           type: "client_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
           status,
           proxyId: "p1",
         }).success,
@@ -1270,6 +1402,7 @@ describe("RelayControlSchema", () => {
       expect(
         RelayControlSchema.safeParse({
           type: "client_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
           status,
           bindingId: "binding-1",
         }).success,
@@ -1278,6 +1411,7 @@ describe("RelayControlSchema", () => {
     expect(
       RelayControlSchema.safeParse({
         type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         status: "new",
         proxyId: "p1",
         bindingId: "binding-1",
@@ -1289,20 +1423,30 @@ describe("RelayControlSchema", () => {
     const result = RelayControlSchema.parse({
       type: "proxy_list_response",
       proxies: [
-        { proxyId: "p1", online: true, sessions: ["s1", "s2"] },
-        { proxyId: "p2", online: false },
+        { proxyId: "p1", version: "0.9.0", online: true, sessions: ["s1", "s2"] },
+        { proxyId: "p2", version: "0.9.0", online: false, sessions: [] },
       ],
     });
     expect(result.type).toBe("proxy_list_response");
     if (result.type === "proxy_list_response") {
       expect(result.proxies[0].sessions).toEqual(["s1", "s2"]);
-      expect(result.proxies[1].sessions).toBeUndefined();
+      expect(result.proxies[1].sessions).toEqual([]);
     }
+  });
+
+  it("rejects proxy_list_response entries without sessions", () => {
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_list_response",
+        proxies: [{ proxyId: "p1", version: "0.9.0", online: true }],
+      }).success,
+    ).toBe(false);
   });
 
   it("accepts agent and terminal session_create", () => {
     const result = RelayControlSchema.parse({
       type: "session_create",
+      requestId: "create-agent",
       kind: "agent",
       cwd: "/tmp/project",
       provider: "claude",
@@ -1312,7 +1456,7 @@ describe("RelayControlSchema", () => {
       rows: 34,
     });
     expect(result.type).toBe("session_create");
-    if (result.type === "session_create") {
+    if (result.type === "session_create" && result.kind === "agent" && result.mode === "pty") {
       expect(result.kind).toBe("agent");
       expect(result.provider).toBe("claude");
       expect(result.mode).toBe("pty");
@@ -1322,19 +1466,162 @@ describe("RelayControlSchema", () => {
 
     const terminal = RelayControlSchema.parse({
       type: "session_create",
+      requestId: "create-terminal",
       kind: "terminal",
       mode: "pty",
       cols: 80,
       rows: 30,
     });
     expect(terminal.type).toBe("session_create");
-    if (terminal.type === "session_create") {
+    if (terminal.type === "session_create" && terminal.kind === "terminal") {
       expect(terminal.kind).toBe("terminal");
-      expect(terminal.cwd).toBeUndefined();
-      expect(terminal.provider).toBeUndefined();
+      expect("cwd" in terminal).toBe(false);
+      expect("provider" in terminal).toBe(false);
       expect(terminal.cols).toBe(80);
       expect(terminal.rows).toBe(30);
     }
+  });
+
+  it("rejects PTY session creation without complete initial geometry", () => {
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_create",
+        requestId: "create-agent",
+        kind: "agent",
+        cwd: "/tmp/project",
+        provider: "claude",
+        mode: "pty",
+        rows: 24,
+      }).success,
+    ).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_create",
+        requestId: "create-terminal",
+        kind: "terminal",
+        mode: "pty",
+        cols: 80,
+      }).success,
+    ).toBe(false);
+  });
+
+  it("rejects incomplete session creation messages", () => {
+    const complete = {
+      type: "session_create",
+      requestId: "create-agent",
+      kind: "agent",
+      cwd: "/tmp/project",
+      provider: "claude",
+      mode: "json",
+    } as const;
+    for (const field of ["requestId", "kind", "cwd", "provider", "mode"] as const) {
+      const message = { ...complete } as Record<string, unknown>;
+      delete message[field];
+      expect(RelayControlSchema.safeParse(message).success).toBe(false);
+    }
+
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_create_response",
+        requestId: "create-agent",
+        success: true,
+        sessionId: "session-1",
+        kind: "agent",
+        mode: "json",
+      }).success,
+    ).toBe(false);
+
+    const completeResponse = {
+      type: "session_create_response",
+      requestId: "create-agent",
+      success: true,
+      sessionId: "session-1",
+      cwd: "/tmp/project",
+      lastActive: 1,
+      kind: "agent",
+      mode: "json",
+      provider: "claude",
+    } as const;
+    expect(RelayControlSchema.safeParse(completeResponse).success).toBe(true);
+    for (const field of ["cwd", "lastActive"] as const) {
+      const response = { ...completeResponse } as Record<string, unknown>;
+      delete response[field];
+      expect(RelayControlSchema.safeParse(response).success).toBe(false);
+    }
+  });
+
+  it("requires every synchronized session to declare a legal identity", () => {
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_sync",
+        sessions: [
+          {
+            id: "session-1",
+            kind: "agent",
+            mode: "json",
+            provider: "claude",
+            cwd: "/tmp/test",
+            state: "idle",
+          },
+        ],
+      }).success,
+    ).toBe(true);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_sync",
+        sessions: [
+          {
+            id: "session-1",
+            mode: "json",
+            provider: "claude",
+            cwd: "/tmp/test",
+            state: "idle",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+
+    for (const session of [
+      {
+        id: "pty-no-owner",
+        kind: "agent",
+        mode: "pty",
+        provider: "claude",
+        cwd: "/tmp/test",
+        state: "idle",
+      },
+      {
+        id: "json-with-owner",
+        kind: "agent",
+        mode: "json",
+        provider: "claude",
+        ptyOwner: "local-terminal",
+        cwd: "/tmp/test",
+        state: "idle",
+      },
+      {
+        id: "terminal-wrong-owner",
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/test",
+        state: "idle",
+      },
+    ]) {
+      expect(
+        RelayControlSchema.safeParse({ type: "session_sync", sessions: [session] }).success,
+      ).toBe(false);
+    }
+
+    expect(
+      RelayControlSchema.safeParse({
+        type: "session_sync",
+        sessions: [
+          { id: "missing-cwd", kind: "agent", mode: "json", provider: "claude", state: "idle" },
+        ],
+      }).success,
+    ).toBe(false);
   });
 
   it("routes terminal_resize_request from client to proxy", () => {

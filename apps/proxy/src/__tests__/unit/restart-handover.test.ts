@@ -6,6 +6,14 @@ import {
   readLiveLocalPtySessionIds,
   waitForSessionHandover,
 } from "#src/common/restart-handover.js";
+import {
+  readSessionRuntimeIpcVersions,
+  writeSessionRuntimeIpcVersions,
+} from "#src/common/session-runtime-ipc-version.js";
+import {
+  TERMINAL_IPC_PROTOCOL_VERSION,
+  WORKER_IPC_PROTOCOL_VERSION,
+} from "#src/ipc/ipc-protocol.js";
 
 const dirs: string[] = [];
 
@@ -14,25 +22,129 @@ afterEach(() => {
 });
 
 describe("restart session handover", () => {
+  const runtimeVersions = {
+    terminal: TERMINAL_IPC_PROTOCOL_VERSION,
+    worker: WORKER_IPC_PROTOCOL_VERSION,
+  };
+
   it("tracks only live local-terminal PTYs from persisted state", () => {
     const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-handover-"));
     dirs.push(dir);
     const path = join(dir, "sessions.json");
+    const versionPath = join(dir, "session-runtime-ipc-version");
+    writeSessionRuntimeIpcVersions(versionPath, runtimeVersions);
     writeFileSync(
       path,
       JSON.stringify([
-        { id: "local-live", mode: "pty", ptyOwner: "local-terminal", pid: 11 },
-        { id: "hosted-live", mode: "pty", ptyOwner: "proxy-hosted", pid: 12 },
-        { id: "json-live", mode: "json", pid: 13 },
-        { id: "local-dead", mode: "pty", ptyOwner: "local-terminal", pid: 14 },
+        {
+          id: "local-live",
+          kind: "agent",
+          mode: "pty",
+          provider: "claude",
+          ptyOwner: "local-terminal",
+          cwd: "/tmp",
+          pid: 11,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "hosted-live",
+          kind: "agent",
+          mode: "pty",
+          provider: "claude",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp",
+          pid: 12,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "json-live",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          cwd: "/tmp",
+          pid: 13,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+        {
+          id: "local-dead",
+          kind: "terminal",
+          mode: "pty",
+          provider: "claude",
+          ptyOwner: "local-terminal",
+          cwd: "/tmp",
+          pid: 14,
+          createdAt: 1,
+          updatedAt: 1,
+        },
       ]),
     );
 
     expect(
-      readLiveLocalPtySessionIds(path, (pid) =>
+      readLiveLocalPtySessionIds(path, versionPath, runtimeVersions, (pid) =>
         pid === 14 ? { status: "not-found", code: "ESRCH", message: "gone" } : { status: "alive" },
       ),
     ).toEqual(["local-live"]);
+  });
+
+  it("does not wait for incomplete records even when the runtime marker matches", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-handover-"));
+    dirs.push(dir);
+    const sessionsPath = join(dir, "sessions.json");
+    const versionPath = join(dir, "session-runtime-ipc-version");
+    writeSessionRuntimeIpcVersions(versionPath, runtimeVersions);
+    writeFileSync(
+      sessionsPath,
+      JSON.stringify([
+        { id: "missing-current-fields", mode: "pty", ptyOwner: "local-terminal", pid: 11 },
+      ]),
+    );
+
+    expect(
+      readLiveLocalPtySessionIds(sessionsPath, versionPath, runtimeVersions, () => ({
+        status: "alive",
+      })),
+    ).toEqual([]);
+  });
+
+  it.each([
+    ["missing", undefined],
+    ["malformed", "not-a-version"],
+    [
+      "mismatched",
+      JSON.stringify({
+        terminal: TERMINAL_IPC_PROTOCOL_VERSION,
+        worker: WORKER_IPC_PROTOCOL_VERSION + 1,
+      }),
+    ],
+  ])("does not wait for local PTYs when the protocol marker is %s", (_label, marker) => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-handover-"));
+    dirs.push(dir);
+    const sessionsPath = join(dir, "sessions.json");
+    const versionPath = join(dir, "session-runtime-ipc-version");
+    writeFileSync(
+      sessionsPath,
+      JSON.stringify([{ id: "local-live", mode: "pty", ptyOwner: "local-terminal", pid: 11 }]),
+    );
+    if (marker !== undefined) writeFileSync(versionPath, marker);
+
+    expect(
+      readLiveLocalPtySessionIds(sessionsPath, versionPath, runtimeVersions, () => ({
+        status: "alive",
+      })),
+    ).toEqual([]);
+  });
+
+  it("round-trips the session runtime IPC generation marker", () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-handover-"));
+    dirs.push(dir);
+    const versionPath = join(dir, "nested", "session-runtime-ipc-version");
+
+    expect(readSessionRuntimeIpcVersions(versionPath)).toBeNull();
+    writeSessionRuntimeIpcVersions(versionPath, runtimeVersions);
+    expect(readSessionRuntimeIpcVersions(versionPath)).toEqual(runtimeVersions);
   });
 
   it("waits until every expected terminal re-registers", async () => {

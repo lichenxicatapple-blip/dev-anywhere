@@ -22,7 +22,7 @@ test.describe("InputBar — queued JSON send", () => {
         seq: Date.now(),
         timestamp: Date.now(),
         source: "proxy",
-        version: "1",
+        version: "1.0",
       });
     });
 

@@ -228,7 +228,11 @@ describe("CreateSessionDialog", () => {
   it("lets the user create a Codex chat session", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "codex-json-1",
+      cwd: "/home/dev",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "codex",
     });
@@ -261,7 +265,11 @@ describe("CreateSessionDialog", () => {
   it("keeps chat mode selected when switching to Kimi", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "kimi-json-1",
+      cwd: "/home/dev",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "kimi",
     });
@@ -301,9 +309,14 @@ describe("CreateSessionDialog", () => {
   it("submits a manually entered working directory without overriding the terminal theme", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "claude-pty-1",
+      cwd: "/srv/projects/dev-anywhere",
+      lastActive: 1,
+      kind: "agent",
       mode: "pty",
       provider: "claude",
+      ptyOwner: "proxy-hosted",
     });
     useFileStore.setState({
       tree: new Map(),
@@ -347,9 +360,14 @@ describe("CreateSessionDialog", () => {
       const caseLabel = `${providerLabel} ${mode} ${permissionLabel}`;
       createSession.mockResolvedValueOnce({
         type: "session_create_response",
+        success: true,
         sessionId: `${provider}-${mode}-${permissionMode}`,
+        cwd: "/home/dev",
+        lastActive: 1,
+        kind: "agent",
         mode,
         provider,
+        ...(mode === "pty" ? { ptyOwner: "proxy-hosted" as const } : {}),
       });
       useFileStore.setState({
         tree: new Map(),
@@ -444,7 +462,7 @@ describe("CreateSessionDialog", () => {
   it("does not create a missing working directory as a side effect of session creation", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
-      sessionId: "",
+      success: false,
       errorCode: "PATH_NOT_FOUND",
       error: "工作目录不存在或不可访问: /home/dev/missing-project",
     });
@@ -539,9 +557,14 @@ describe("CreateSessionDialog", () => {
     testViewport = "mobile";
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "mobile-workspace",
+      cwd: "/home/dev/projects",
+      lastActive: 1,
+      kind: "agent",
       mode: "pty",
       provider: "claude",
+      ptyOwner: "proxy-hosted",
     });
     useFileStore.setState({
       tree: new Map([
@@ -651,6 +674,7 @@ describe("CreateSessionDialog", () => {
       agentCli: {
         claude: { available: false, error: "claude not found in PATH" },
         codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: true, command: "/usr/local/bin/kimi" },
       },
     });
 
@@ -665,34 +689,13 @@ describe("CreateSessionDialog", () => {
     expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
   });
 
-  it("keeps working with an older AgentCliStatus that does not contain Kimi", () => {
-    useFileStore.setState({
-      tree: new Map(),
-      treeWithHidden: new Map([["/home/dev/.local/bin", [{ name: "claude", isDir: false }]]]),
-      cwd: "",
-      homePath: "/home/dev",
-      agentCli: {
-        claude: { available: true, command: "/usr/local/bin/claude" },
-        codex: { available: true, command: "/usr/local/bin/codex" },
-      },
-    });
-
-    const { getByRole } = renderDialog();
-
-    selectAgentCli("Kimi Code");
-    expect((getByRole("button", { name: "创建" }) as HTMLButtonElement).disabled).toBe(true);
-
-    const pathInput = getByRole("textbox", { name: "CLI 路径" });
-    expect(pathInput).toBeInstanceOf(HTMLInputElement);
-    expect(pathInput).toHaveAttribute("data-path-control", "input");
-  });
-
   it("lets the user set a missing Agent CLI path from the dialog", async () => {
     requestProxyInfo.mockResolvedValueOnce({
       homePath: "/home/dev",
       agentCli: {
         claude: { available: false, error: "claude not found in PATH" },
         codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: true, command: "/usr/local/bin/kimi" },
       },
     });
     updateAgentCliPath.mockResolvedValueOnce({
@@ -773,7 +776,11 @@ describe("CreateSessionDialog", () => {
   it("persists a user supplied title through session_create and locks it like rename", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
+      success: true,
       sessionId: "new-sess-1",
+      cwd: "/home/dev",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "claude",
       name: "Release checklist",
@@ -849,7 +856,11 @@ describe("CreateSessionDialog", () => {
     // 此时后端才回应创建成功
     resolveCreate({
       type: "session_create_response",
+      success: true,
       sessionId: "new-sess-1",
+      cwd: "/home/dev",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "claude",
     });

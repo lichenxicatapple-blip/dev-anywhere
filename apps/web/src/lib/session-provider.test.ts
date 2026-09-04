@@ -10,8 +10,7 @@ describe("session-provider", () => {
     expect([...providers].sort(compareProvider)).toEqual(["claude", "codex", "kimi"]);
   });
 
-  it("keeps the legacy history provider fallback while accepting Kimi", () => {
-    expect(historySessionProvider({} as HistorySession)).toBe("claude");
+  it("uses the provider reported by history discovery", () => {
     expect(historySessionProvider({ provider: "kimi" } as HistorySession)).toBe("kimi");
   });
 });

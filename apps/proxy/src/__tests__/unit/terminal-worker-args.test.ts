@@ -40,7 +40,14 @@ describe("terminal worker args", () => {
 
   it("keeps option-looking terminal names as positional values", () => {
     expect(
-      parseTerminalWorkerCliArgs(["--profile=local", "session-1", "/Users/catli", "--profile"]),
+      parseTerminalWorkerCliArgs([
+        "--profile=local",
+        "session-1",
+        "/Users/catli",
+        "--profile",
+        "80",
+        "24",
+      ]),
     ).toEqual({
       sessionId: "session-1",
       cwd: "/Users/catli",
@@ -50,13 +57,7 @@ describe("terminal worker args", () => {
     });
   });
 
-  it("keeps old invocations compatible with the QR-safe baseline", () => {
-    expect(parseTerminalWorkerCliArgs(["session-1", "/Users/catli", "~"])).toEqual({
-      sessionId: "session-1",
-      cwd: "/Users/catli",
-      name: "~",
-      cols: 80,
-      rows: 24,
-    });
+  it("rejects invocations without terminal geometry", () => {
+    expect(parseTerminalWorkerCliArgs(["session-1", "/Users/catli", "~"])).toBeNull();
   });
 });

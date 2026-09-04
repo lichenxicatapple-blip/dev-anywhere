@@ -404,7 +404,15 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   test("does not auto-focus terminal; tap focuses, sends input, and preserves IME punctuation", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     // cold-start: textarea 不应该自动 focus, 否则 Android 系统软键盘立刻弹起.
@@ -441,7 +449,15 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   });
 
   test("raises the Android soft keyboard and keeps PTY controls above it", async ({ emuPage }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     const rowsBeforeFocus = await emuPage.evaluate(
       (sid) => window.__ccTestPtyTerminals?.get(sid)?.rows ?? 0,
@@ -515,6 +531,9 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     await setAndroidEmulatorOrientation(emuPage, "portrait");
     await setupPtyChat(emuPage, {
       sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
       baseUrl: mobileBaseUrl,
       rows: 52,
       cols: 80,
@@ -555,6 +574,9 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     const sessionId = `${SESSION_ID}-cursor-clearance`;
     await setupPtyChat(emuPage, {
       sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
       baseUrl: mobileBaseUrl,
       rows: 52,
       cols: 80,
@@ -615,8 +637,10 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       await setAndroidEmulatorDisplaySize(emuPage, "baseline");
       await setupPtyChat(emuPage, {
         sessionId,
+        sessionKind: "agent",
         baseUrl: mobileBaseUrl,
         provider: "codex",
+        ptyOwner: "proxy-hosted",
         rows: 25,
         cols: 80,
       });
@@ -818,6 +842,9 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
     const sessionId = `${SESSION_ID}-review-then-type`;
     await setupPtyChat(emuPage, {
       sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
       baseUrl: mobileBaseUrl,
       rows: 52,
       cols: 80,
@@ -906,7 +933,15 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
   }) => {
     await setAndroidEmulatorOrientation(emuPage, "landscape");
     try {
-      await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+      await setupPtyChat(emuPage, {
+        sessionId: SESSION_ID,
+        sessionKind: "agent",
+        provider: "claude",
+        ptyOwner: "proxy-hosted",
+        cols: 80,
+        rows: 24,
+        baseUrl: mobileBaseUrl,
+      });
       await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
       await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);
 

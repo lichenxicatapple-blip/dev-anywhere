@@ -1,6 +1,10 @@
 import { describe, it, expect, vi } from "vitest";
 import { PassThrough } from "node:stream";
 
+function throwProtocolError(error: Error): never {
+  throw error;
+}
+
 describe("IPC Protocol", () => {
   async function importIpc() {
     return await import("#src/ipc/ipc-protocol.js");
@@ -10,9 +14,9 @@ describe("IPC Protocol", () => {
     it("produces valid JSON terminated with newline", async () => {
       const { serializeIpc } = await importIpc();
       const msg = {
-        type: "session_status_update" as const,
+        type: "pty_title_change" as const,
         sessionId: "s1",
-        state: "idle" as const,
+        title: "Session one",
       };
       const result = serializeIpc(msg);
 
@@ -29,6 +33,8 @@ describe("IPC Protocol", () => {
         provider: "claude" as const,
         cwd: "/tmp/test",
         pid: 12345,
+        kind: "agent" as const,
+        protocolVersion: 1 as const,
       };
       const serialized = serializeIpc(msg);
       const parsed = JSON.parse(serialized.trim());
@@ -37,10 +43,12 @@ describe("IPC Protocol", () => {
     });
 
     it("accepts session create response with hook context", async () => {
-      const { IpcMessageSchema } = await importIpc();
+      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
       const result = IpcMessageSchema.safeParse({
         type: "session_create_response",
+        success: true,
         sessionId: "s1",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
         hook: {
           provider: "claude",
           sessionId: "s1",
@@ -53,6 +61,49 @@ describe("IPC Protocol", () => {
       expect(result.success).toBe(true);
     });
 
+    it.each([
+      [
+        "request",
+        {
+          type: "session_create_request",
+          kind: "agent",
+          mode: "pty",
+          provider: "claude",
+          cwd: "/tmp",
+          pid: 123,
+        },
+      ],
+      ["response", { type: "session_create_response", success: true, sessionId: "s1" }],
+    ])("rejects a terminal session create %s without protocolVersion", async (_label, message) => {
+      const { IpcMessageSchema } = await importIpc();
+      expect(IpcMessageSchema.safeParse(message).success).toBe(false);
+    });
+
+    it.each([
+      [
+        "request",
+        {
+          type: "session_create_request",
+          protocolVersion: 0,
+          kind: "agent",
+          mode: "pty",
+          provider: "claude",
+          cwd: "/tmp",
+          pid: 123,
+        },
+      ],
+      [
+        "response",
+        { type: "session_create_response", success: true, protocolVersion: 0, sessionId: "s1" },
+      ],
+    ])(
+      "rejects a terminal session create %s from another protocol generation",
+      async (_label, message) => {
+        const { IpcMessageSchema } = await importIpc();
+        expect(IpcMessageSchema.safeParse(message).success).toBe(false);
+      },
+    );
+
     it("accepts a Codex PTY session create request", async () => {
       const { IpcMessageSchema } = await importIpc();
       const result = IpcMessageSchema.safeParse({
@@ -61,6 +112,8 @@ describe("IPC Protocol", () => {
         provider: "codex",
         cwd: "/tmp/test",
         pid: 12345,
+        kind: "agent",
+        protocolVersion: 1,
       });
 
       expect(result.success).toBe(true);
@@ -74,9 +127,72 @@ describe("IPC Protocol", () => {
         provider: "kimi",
         cwd: "/tmp/test",
         pid: 12345,
+        kind: "agent",
+        protocolVersion: 1,
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it.each([
+      {
+        type: "session_create_request",
+        mode: "json",
+        provider: "claude",
+        cwd: "/tmp/test",
+        pid: 12345,
+        kind: "agent",
+        protocolVersion: 1,
+      },
+      {
+        type: "session_create_request",
+        mode: "pty",
+        provider: "kimi",
+        cwd: "/tmp/test",
+        pid: 12345,
+        kind: "terminal",
+        protocolVersion: 1,
+      },
+    ])("rejects impossible terminal create request combinations", async (message) => {
+      const { IpcMessageSchema } = await importIpc();
+      expect(IpcMessageSchema.safeParse(message).success).toBe(false);
+    });
+
+    it("requires explicit and internally complete terminal create responses", async () => {
+      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
+
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "session_create_response",
+          success: true,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+          sessionId: "session-1",
+        }).success,
+      ).toBe(true);
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "session_create_response",
+          success: false,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+          error: "identity mismatch",
+        }).success,
+      ).toBe(true);
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "session_create_response",
+          success: true,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+          error: "ambiguous",
+        }).success,
+      ).toBe(false);
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "session_create_response",
+          success: false,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+          sessionId: "ambiguous",
+        }).success,
+      ).toBe(false);
     });
 
     it("requires PTY subscribe and snapshot requestId round-trip fields", async () => {
@@ -186,11 +302,14 @@ describe("IPC Protocol", () => {
     });
 
     it("accepts service status responses with relay naming", async () => {
-      const { IpcMessageSchema } = await importIpc();
+      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
       const result = IpcMessageSchema.safeParse({
         type: "service_status_response",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
         config: {
           profile: "local",
+          version: "0.9.0",
+          autoUpdate: true,
           relayName: "local",
           relayNameSource: "profile",
           relayUrl: "ws://localhost:3100",
@@ -207,11 +326,14 @@ describe("IPC Protocol", () => {
     });
 
     it("accepts service status responses for env-only profiles", async () => {
-      const { IpcMessageSchema } = await importIpc();
+      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
       const result = IpcMessageSchema.safeParse({
         type: "service_status_response",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
         config: {
           profile: "quick-tunnel",
+          version: "0.9.0",
+          autoUpdate: true,
           relayName: "environment",
           relayNameSource: "env",
           relayUrl: "ws://127.0.0.1:43100",
@@ -225,6 +347,43 @@ describe("IPC Protocol", () => {
       });
 
       expect(result.success).toBe(true);
+    });
+
+    it("requires the current protocol generation for service status requests and responses", async () => {
+      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
+      const response = {
+        type: "service_status_response",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        config: {
+          version: "0.9.0",
+          autoUpdate: true,
+          relayName: "local",
+          relayNameSource: "profile",
+          relayUrlSource: "none",
+          relayTokenSource: "none",
+          hookPort: 17978,
+          hookPortSource: "default",
+        },
+        relay: null,
+        sessions: [],
+      } as const;
+
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "service_status_request",
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        }).success,
+      ).toBe(true);
+      expect(IpcMessageSchema.safeParse(response).success).toBe(true);
+      expect(IpcMessageSchema.safeParse({ type: "service_status_request" }).success).toBe(false);
+      expect(
+        IpcMessageSchema.safeParse({ type: "service_status_request", protocolVersion: 0 }).success,
+      ).toBe(false);
+      const unversionedResponse = Object.fromEntries(
+        Object.entries(response).filter(([key]) => key !== "protocolVersion"),
+      );
+      expect(IpcMessageSchema.safeParse(unversionedResponse).success).toBe(false);
+      expect(IpcMessageSchema.safeParse({ ...response, protocolVersion: 0 }).success).toBe(false);
     });
 
     it("accepts a structured provider startup error", async () => {
@@ -266,9 +425,11 @@ describe("IPC Protocol", () => {
       const stream = new PassThrough();
       const messages: unknown[] = [];
 
-      createIpcReader(stream, (msg) => messages.push(msg));
+      createIpcReader(stream, (msg) => messages.push(msg), undefined, throwProtocolError);
 
-      stream.write(serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" }));
+      stream.write(
+        serializeIpc({ type: "pty_title_change", sessionId: "s1", title: "Session one" }),
+      );
       stream.write(
         serializeIpc({
           type: "session_create_request",
@@ -277,6 +438,8 @@ describe("IPC Protocol", () => {
           provider: "claude",
           cwd: "/tmp/test",
           pid: 12345,
+          kind: "agent",
+          protocolVersion: 1,
         }),
       );
       stream.end();
@@ -284,9 +447,9 @@ describe("IPC Protocol", () => {
       await vi.waitFor(() => expect(messages).toHaveLength(2));
       expect(messages).toHaveLength(2);
       expect(messages[0]).toEqual({
-        type: "session_status_update",
+        type: "pty_title_change",
         sessionId: "s1",
-        state: "idle",
+        title: "Session one",
       });
       expect(messages[1]).toEqual({
         type: "session_create_request",
@@ -295,6 +458,8 @@ describe("IPC Protocol", () => {
         provider: "claude",
         cwd: "/tmp/test",
         pid: 12345,
+        kind: "agent",
+        protocolVersion: 1,
       });
     });
 
@@ -303,11 +468,11 @@ describe("IPC Protocol", () => {
       const stream = new PassThrough();
       const messages: unknown[] = [];
 
-      createIpcReader(stream, (msg) => messages.push(msg));
+      createIpcReader(stream, (msg) => messages.push(msg), undefined, throwProtocolError);
 
       // Split a single message across two writes
       const fullMsg =
-        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n";
+        JSON.stringify({ type: "pty_title_change", sessionId: "s1", title: "Session one" }) + "\n";
       const splitPoint = Math.floor(fullMsg.length / 2);
       stream.write(fullMsg.slice(0, splitPoint));
       stream.write(fullMsg.slice(splitPoint));
@@ -316,9 +481,9 @@ describe("IPC Protocol", () => {
       await vi.waitFor(() => expect(messages).toHaveLength(1));
       expect(messages).toHaveLength(1);
       expect(messages[0]).toEqual({
-        type: "session_status_update",
+        type: "pty_title_change",
         sessionId: "s1",
-        state: "idle",
+        title: "Session one",
       });
     });
 
@@ -327,10 +492,10 @@ describe("IPC Protocol", () => {
       const stream = new PassThrough();
       const messages: unknown[] = [];
 
-      createIpcReader(stream, (msg) => messages.push(msg));
+      createIpcReader(stream, (msg) => messages.push(msg), undefined, throwProtocolError);
 
       stream.write(
-        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n",
+        JSON.stringify({ type: "pty_title_change", sessionId: "s1", title: "Session one" }) + "\n",
       );
       stream.write("\n");
       stream.write(
@@ -340,6 +505,8 @@ describe("IPC Protocol", () => {
           provider: "claude",
           cwd: "/tmp/test",
           pid: 12345,
+          kind: "agent",
+          protocolVersion: 1,
         }) + "\n",
       );
       stream.end();
@@ -365,7 +532,7 @@ describe("IPC Protocol", () => {
 
       stream.write("not-valid-json\n");
       stream.write(
-        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n",
+        JSON.stringify({ type: "pty_title_change", sessionId: "s1", title: "Session one" }) + "\n",
       );
       stream.end();
 
@@ -395,7 +562,7 @@ describe("IPC Protocol", () => {
 
       stream.write(JSON.stringify({ type: "totally_unknown_future_message" }) + "\n");
       stream.write(
-        JSON.stringify({ type: "session_status_update", sessionId: "s1", state: "idle" }) + "\n",
+        JSON.stringify({ type: "pty_title_change", sessionId: "s1", title: "Session one" }) + "\n",
       );
       stream.end();
 
@@ -404,6 +571,29 @@ describe("IPC Protocol", () => {
       expect(streamErrors).toHaveLength(0);
       expect(protocolErrors).toHaveLength(1);
       expect(protocolErrors[0]!.message).toMatch(/IPC message validation failed/);
+    });
+
+    it("does not misclassify application callback failures as protocol parse errors", async () => {
+      const { createIpcReader, serializeIpc } = await importIpc();
+      const stream = new PassThrough();
+      const protocolErrors: Error[] = [];
+
+      createIpcReader(
+        stream,
+        () => {
+          throw new Error("application failure");
+        },
+        undefined,
+        (err) => protocolErrors.push(err),
+      );
+
+      expect(() =>
+        stream.write(
+          serializeIpc({ type: "pty_title_change", sessionId: "s1", title: "Session one" }),
+        ),
+      ).toThrow("application failure");
+      expect(protocolErrors).toEqual([]);
+      stream.destroy();
     });
   });
 
@@ -469,6 +659,7 @@ describe("IPC Protocol", () => {
         stream,
         (msg) => jsonMsgs.push(msg),
         (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
+        throwProtocolError,
       );
 
       const ptyData = Buffer.from("terminal output");
@@ -493,14 +684,19 @@ describe("IPC Protocol", () => {
         stream,
         (msg) => jsonMsgs.push(msg),
         (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
+        throwProtocolError,
       );
 
       // JSON message first
-      stream.write(serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" }));
+      stream.write(
+        serializeIpc({ type: "pty_title_change", sessionId: "s1", title: "Session one" }),
+      );
       // Binary frame
       stream.write(encodeBinaryIpcFrame("s1", Buffer.from("pty data 1"), 1));
       // Another JSON message
-      stream.write(serializeIpc({ type: "session_status_update", sessionId: "s2", state: "idle" }));
+      stream.write(
+        serializeIpc({ type: "pty_title_change", sessionId: "s2", title: "Session two" }),
+      );
       // Another binary frame
       stream.write(encodeBinaryIpcFrame("s2", Buffer.from("pty data 2"), 2));
       stream.end();
@@ -526,6 +722,7 @@ describe("IPC Protocol", () => {
         stream,
         () => {},
         (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
+        throwProtocolError,
       );
 
       const frame = encodeBinaryIpcFrame("sess-abc", Buffer.from("split me"), 3);
@@ -554,13 +751,14 @@ describe("IPC Protocol", () => {
         stream,
         (msg) => jsonMsgs.push(msg),
         (sessionId, data, outputSeq) => binaryFrames.push({ sessionId, data, outputSeq }),
+        throwProtocolError,
       );
 
       // Concatenate JSON line and binary frame into a single write
       const jsonLine = serializeIpc({
-        type: "session_status_update",
+        type: "pty_title_change",
         sessionId: "s1",
-        state: "idle",
+        title: "Session one",
       });
       const binaryFrame = encodeBinaryIpcFrame("s1", Buffer.from("combined"), 4);
       const combined = Buffer.concat([Buffer.from(jsonLine), binaryFrame]);
@@ -583,10 +781,12 @@ describe("IPC Protocol", () => {
       const jsonMsgs: unknown[] = [];
 
       // No onBinaryFrame callback - binary frames should be silently skipped
-      createIpcReader(stream, (msg) => jsonMsgs.push(msg));
+      createIpcReader(stream, (msg) => jsonMsgs.push(msg), undefined, throwProtocolError);
 
       stream.write(encodeBinaryIpcFrame("s1", Buffer.from("ignored"), 1));
-      stream.write(serializeIpc({ type: "session_status_update", sessionId: "s1", state: "idle" }));
+      stream.write(
+        serializeIpc({ type: "pty_title_change", sessionId: "s1", title: "Session one" }),
+      );
       stream.end();
 
       await vi.waitFor(() => expect(jsonMsgs).toHaveLength(1));
@@ -616,13 +816,28 @@ describe("Worker Protocol", () => {
 
   describe("createWorkerReader", () => {
     it("parses complete worker messages from a stream", async () => {
-      const { createWorkerReader, serializeWorkerMsg } = await importIpc();
+      const { WORKER_IPC_PROTOCOL_VERSION, createWorkerReader, serializeWorkerMsg } =
+        await importIpc();
       const stream = new PassThrough();
       const messages: unknown[] = [];
 
-      createWorkerReader(stream, (msg) => messages.push(msg));
+      createWorkerReader(stream, (msg) => messages.push(msg), throwProtocolError);
 
-      stream.write(serializeWorkerMsg({ type: "worker_ready", pid: 12345 }));
+      stream.write(
+        serializeWorkerMsg({
+          type: "worker_protocol_hello",
+          sessionId: "s1",
+          provider: "claude",
+          pid: 54321,
+          protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+        }),
+      );
+      stream.write(
+        serializeWorkerMsg({
+          type: "worker_ready",
+          pid: 12345,
+        }),
+      );
       stream.write(
         serializeWorkerMsg({
           type: "worker_event",
@@ -641,21 +856,31 @@ describe("Worker Protocol", () => {
       stream.write(serializeWorkerMsg({ type: "worker_exit", code: 0 }));
       stream.end();
 
-      await vi.waitFor(() => expect(messages).toHaveLength(4));
-      expect(messages).toHaveLength(4);
-      expect(messages[0]).toEqual({ type: "worker_ready", pid: 12345 });
+      await vi.waitFor(() => expect(messages).toHaveLength(5));
+      expect(messages).toHaveLength(5);
+      expect(messages[0]).toEqual({
+        type: "worker_protocol_hello",
+        sessionId: "s1",
+        provider: "claude",
+        pid: 54321,
+        protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+      });
       expect(messages[1]).toEqual({
+        type: "worker_ready",
+        pid: 12345,
+      });
+      expect(messages[2]).toEqual({
         type: "worker_event",
         seq: 1,
         event: { kind: "text", content: "hello" },
       });
-      expect(messages[2]).toEqual({
+      expect(messages[3]).toEqual({
         type: "worker_approval_request",
         requestId: "r1",
         toolName: "bash",
         input: { cmd: "ls" },
       });
-      expect(messages[3]).toEqual({ type: "worker_exit", code: 0 });
+      expect(messages[4]).toEqual({ type: "worker_exit", code: 0 });
     });
 
     it("handles messages split across data events", async () => {
@@ -663,7 +888,7 @@ describe("Worker Protocol", () => {
       const stream = new PassThrough();
       const messages: unknown[] = [];
 
-      createWorkerReader(stream, (msg) => messages.push(msg));
+      createWorkerReader(stream, (msg) => messages.push(msg), throwProtocolError);
 
       const fullMsg = serializeWorkerMsg({ type: "worker_stop" });
       const splitPoint = Math.floor(fullMsg.length / 2);
@@ -716,7 +941,7 @@ describe("Worker Protocol", () => {
         (err) => protocolErrors.push(err),
       );
 
-      // 模拟未来 Claude/Codex CLI 加新事件类型，旧版 dev-anywhere 不识别
+      // 模拟尚未纳入当前 schema 的未来事件类型。
       stream.write(JSON.stringify({ type: "worker_telemetry_v2" }) + "\n");
       stream.write(serializeWorkerMsg({ type: "worker_stop" }));
       stream.end();
@@ -766,7 +991,29 @@ describe("Worker Protocol", () => {
           ],
         },
       },
-      { type: "worker_ready", payload: { type: "worker_ready", pid: 999 } },
+      {
+        type: "worker_protocol_hello",
+        payload: {
+          type: "worker_protocol_hello",
+          protocolVersion: 1,
+          sessionId: "session-1",
+          provider: "claude",
+          pid: 998,
+        },
+      },
+      {
+        type: "serve_protocol_hello",
+        payload: {
+          type: "serve_protocol_hello",
+          protocolVersion: 1,
+          sessionId: "session-1",
+          pid: 997,
+        },
+      },
+      {
+        type: "worker_ready",
+        payload: { type: "worker_ready", pid: 999 },
+      },
       {
         type: "worker_ready_with_native_session",
         payload: {
@@ -782,10 +1029,6 @@ describe("Worker Protocol", () => {
           pid: 1000,
           nativeSession: { provider: "kimi", sessionId: "kimi-ready-123" },
         },
-      },
-      {
-        type: "worker_claude_session_id",
-        payload: { type: "worker_claude_session_id", sessionId: "cs-123" },
       },
       {
         type: "worker_native_session_id",
@@ -806,6 +1049,71 @@ describe("Worker Protocol", () => {
       const { WorkerMessageSchema } = await importIpc();
       const result = WorkerMessageSchema.safeParse({ type: "worker_unknown" });
       expect(result.success).toBe(false);
+    });
+
+    it("requires the current version and complete identity on worker protocol hello", async () => {
+      const { WorkerMessageSchema } = await importIpc();
+
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "worker_protocol_hello",
+          sessionId: "session-1",
+          provider: "claude",
+          pid: 999,
+        }).success,
+      ).toBe(false);
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "worker_protocol_hello",
+          protocolVersion: 0,
+          sessionId: "session-1",
+          provider: "claude",
+          pid: 999,
+        }).success,
+      ).toBe(false);
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "worker_protocol_hello",
+          protocolVersion: 1,
+          provider: "claude",
+          pid: 999,
+        }).success,
+      ).toBe(false);
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "worker_protocol_hello",
+          protocolVersion: 1,
+          sessionId: "session-1",
+          pid: 999,
+        }).success,
+      ).toBe(false);
+    });
+
+    it("requires the current version and complete identity on serve protocol hello", async () => {
+      const { WorkerMessageSchema } = await importIpc();
+
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "serve_protocol_hello",
+          sessionId: "session-1",
+          pid: 999,
+        }).success,
+      ).toBe(false);
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "serve_protocol_hello",
+          protocolVersion: 0,
+          sessionId: "session-1",
+          pid: 999,
+        }).success,
+      ).toBe(false);
+      expect(
+        WorkerMessageSchema.safeParse({
+          type: "serve_protocol_hello",
+          protocolVersion: 1,
+          pid: 999,
+        }).success,
+      ).toBe(false);
     });
   });
 });

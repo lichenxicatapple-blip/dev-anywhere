@@ -11,7 +11,7 @@ test.describe("iPad Safari PTY session geometry", () => {
       "Mozilla/5.0 (iPad; CPU OS 26_5_0 like Mac OS X) AppleWebKit/605.1.15 Version/26.5 Mobile/15E148 Safari/604.1",
   });
 
-  test("restores a session without size metadata from the server snapshot", async ({ page }) => {
+  test("restores session-owned geometry from the server snapshot", async ({ page }) => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, "platform", {
         configurable: true,
@@ -25,6 +25,7 @@ test.describe("iPad Safari PTY session geometry", () => {
     await setupPtyChat(page, {
       sessionId: SESSION_ID,
       sessionKind: "terminal",
+      provider: "claude",
       ptyOwner: "local-terminal",
       cols: 100,
       rows: 30,

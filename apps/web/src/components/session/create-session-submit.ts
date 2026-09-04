@@ -44,7 +44,7 @@ type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_creat
 interface CreateSessionRelay {
   createSession(
     request: {
-      kind?: "agent" | "terminal";
+      kind: "agent";
       cwd: string;
       name?: string;
       mode: SessionMode;
@@ -105,9 +105,6 @@ export function providerStatus(
     return { label: "检测中", disabled: true };
   }
   const status = agentCli[provider];
-  if (!status) {
-    return { label: "未检测", disabled: true };
-  }
   if (status.available) {
     return { label: "可用", disabled: false, title: status.command };
   }
@@ -178,27 +175,37 @@ export async function submitSessionCreate({
       timeoutMs,
     );
 
-    if (response.error || !response.sessionId) {
-      const missingPath = extractMissingCwd(response.error ?? "", response.errorCode);
+    if (!response.success) {
+      const missingPath = extractMissingCwd(response.error, response.errorCode);
       if (missingPath) {
         return { type: "missing_cwd", path: missingPath, message: "找不到这个工作目录" };
       }
-      return { type: "create_error", message: `创建失败：${response.error ?? "未知错误"}` };
+      return { type: "create_error", message: `创建失败：${response.error}` };
+    }
+    if (response.kind !== "agent") {
+      return { type: "create_error", message: "创建失败：开发机返回了错误的会话类型" };
     }
 
-    const mode = response.mode ?? submittedMode;
     const resolvedName = response.name?.trim() || undefined;
-    const session: SessionInfo = {
+    const common = {
       sessionId: response.sessionId,
-      ...(response.kind !== undefined ? { kind: response.kind } : {}),
+      kind: "agent" as const,
       name: resolvedName,
       ...(response.nameLocked !== undefined ? { nameLocked: response.nameLocked } : {}),
-      state: "idle",
-      mode,
-      provider: response.provider ?? submittedProvider,
-      ...(response.ptyOwner !== undefined ? { ptyOwner: response.ptyOwner } : {}),
+      state: "idle" as const,
+      cwd: response.cwd,
+      lastActive: response.lastActive,
+      provider: response.provider,
     };
-    return { type: "success", session, route: `/chat/${response.sessionId}?mode=${mode}` };
+    const session: SessionInfo =
+      response.mode === "pty"
+        ? { ...common, mode: "pty", ptyOwner: response.ptyOwner }
+        : { ...common, mode: "json" };
+    return {
+      type: "success",
+      session,
+      route: `/chat/${response.sessionId}?mode=${response.mode}`,
+    };
   } catch (err) {
     return { type: "exception", message: err instanceof Error ? err.message : String(err) };
   }
@@ -224,8 +231,11 @@ export async function submitTerminalCreate({
       timeoutMs,
     );
 
-    if (response.error || !response.sessionId) {
-      return { type: "create_error", message: `创建终端失败：${response.error ?? "未知错误"}` };
+    if (!response.success) {
+      return { type: "create_error", message: `创建终端失败：${response.error}` };
+    }
+    if (response.kind !== "terminal") {
+      return { type: "create_error", message: "创建终端失败：开发机返回了错误的会话类型" };
     }
 
     const session: SessionInfo = {
@@ -234,9 +244,11 @@ export async function submitTerminalCreate({
       name: response.name?.trim() || undefined,
       ...(response.nameLocked !== undefined ? { nameLocked: response.nameLocked } : {}),
       state: "idle",
+      cwd: response.cwd,
+      lastActive: response.lastActive,
       mode: "pty",
-      provider: response.provider ?? "claude",
-      ...(response.ptyOwner !== undefined ? { ptyOwner: response.ptyOwner } : {}),
+      provider: response.provider,
+      ptyOwner: response.ptyOwner,
     };
     return { type: "success", session, route: `/chat/${response.sessionId}?mode=pty` };
   } catch (err) {

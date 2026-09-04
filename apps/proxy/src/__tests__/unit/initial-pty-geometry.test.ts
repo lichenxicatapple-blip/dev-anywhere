@@ -15,8 +15,4 @@ describe("initial PTY geometry", () => {
       rows: 24,
     });
   });
-
-  it("keeps old clients on the baseline", () => {
-    expect(resolveInitialPtyGeometry({})).toEqual({ cols: 80, rows: 24 });
-  });
 });

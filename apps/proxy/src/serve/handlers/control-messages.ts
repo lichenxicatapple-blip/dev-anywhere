@@ -7,6 +7,7 @@ import { discoverCommands } from "../command-discovery.js";
 import { serviceLogger } from "../../common/logger.js";
 import { classifyPathError } from "../path-errors.js";
 import { HISTORY_METADATA_PATH } from "../../common/paths.js";
+import { toSessionSyncEntry } from "../session-broadcast.js";
 
 export interface ControlMessageHandlers {
   handleDirListRequest(msg: {
@@ -18,7 +19,7 @@ export interface ControlMessageHandlers {
   handleSessionHistoryRequest(msg: { requestId: string }): Promise<void>;
   handleSessionResourcesRequest(msg: {
     sessionId: string;
-    requestId?: string;
+    requestId: string;
     workDir: string;
     includeCommands?: boolean;
   }): Promise<void>;
@@ -277,7 +278,7 @@ export function createControlMessageHandlers(
 
     async handleSessionResourcesRequest(msg: {
       sessionId: string;
-      requestId?: string;
+      requestId: string;
       workDir: string;
       includeCommands?: boolean;
     }): Promise<void> {
@@ -381,14 +382,7 @@ export function createControlMessageHandlers(
       send(
         serializeControl({
           type: "session_sync",
-          sessions: activeSessions.map((s) => ({
-            id: s.id,
-            ...(s.kind !== undefined ? { kind: s.kind } : {}),
-            mode: s.mode,
-            provider: s.provider,
-            ...(s.ptyOwner !== undefined ? { ptyOwner: s.ptyOwner } : {}),
-            state: s.state,
-          })),
+          sessions: activeSessions.map(toSessionSyncEntry),
         }),
       );
       serviceLogger.info({ count: activeSessions.length }, "Session list synced to relay");

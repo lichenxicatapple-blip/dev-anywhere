@@ -10,6 +10,7 @@
  */
 
 import WebSocket from "ws";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 
 const RELAY_URL = process.argv[2] ?? "ws://localhost:3100";
 const RELAY_PROXY_TOKEN = process.env.RELAY_PROXY_TOKEN;
@@ -56,7 +57,16 @@ async function verify(): Promise<void> {
     // 2. Connect and register a proxy.
     proxy = new WebSocket(withToken(relayBaseUrl, "/proxy", RELAY_PROXY_TOKEN));
     await waitOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "verify-proxy" }));
+    const proxyRegistered = waitMessage(proxy);
+    proxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "verify-proxy",
+        proxyVersion: "0.9.0",
+      }),
+    );
+    await proxyRegistered;
     console.log("2. Proxy connected and registered");
     passed.push("proxy register");
 
@@ -65,6 +75,18 @@ async function verify(): Promise<void> {
     // 3. Connect a client and request the proxy list.
     client = new WebSocket(withToken(relayBaseUrl, "/client", RELAY_CLIENT_TOKEN));
     await waitOpen(client);
+    const clientRegistered = waitMessage(client);
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId: "verify-client",
+        browserName: "verify-script",
+        osName: process.platform,
+        deviceKind: "desktop",
+      }),
+    );
+    await clientRegistered;
     const listPromise = waitMessage(client);
     client.send(JSON.stringify({ type: "proxy_list_request" }));
     const list = listPromise as Promise<{ type: string; proxies: { proxyId: string }[] }>;

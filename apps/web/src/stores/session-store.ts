@@ -190,7 +190,7 @@ export const useSessionStore = create<SessionStoreState>()(
       setPtyState: (sessionId, status) =>
         set((state) => {
           const current = state.ptyStateBySessionId[sessionId];
-          if (current?.seq !== undefined && status.seq !== undefined && current.seq > status.seq) {
+          if (current && current.seq > status.seq) {
             return state;
           }
           return {

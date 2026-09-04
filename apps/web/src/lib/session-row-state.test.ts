@@ -4,9 +4,12 @@ import { resolveSessionRowState } from "./session-row-state";
 
 const jsonSession: SessionInfo = {
   sessionId: "json-sess",
+  kind: "agent",
   mode: "json",
   provider: "claude",
   state: "working",
+  cwd: "/tmp/project",
+  lastActive: 1,
 };
 
 function agentStatus(phase: AgentStatusPayload["phase"]): AgentStatusPayload {

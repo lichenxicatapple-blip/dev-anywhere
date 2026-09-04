@@ -16,8 +16,14 @@ import {
 } from "../common/stream-json-schema.js";
 import { DATA_DIR, sessionPaths } from "../common/paths.js";
 import { spawnScript } from "../common/env.js";
+import { isManagedSessionProcess } from "../common/managed-session-process.js";
 import { getSeqCounterFor } from "../common/seq-counter.js";
-import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "../ipc/ipc-protocol.js";
+import {
+  WORKER_IPC_PROTOCOL_VERSION,
+  createWorkerReader,
+  serializeWorkerMsg,
+  type WorkerMessage,
+} from "../ipc/ipc-protocol.js";
 import { mapClaudeStreamEvent } from "./claude-stream-event-mapper.js";
 import { mapCodexAppServerEvent } from "./codex-app-server-event-mapper.js";
 import { KimiAcpEventMapper } from "./kimi-acp-event-mapper.js";
@@ -42,13 +48,15 @@ interface WorkerRegistryDeps {
   getProviderEnv: () => NodeJS.ProcessEnv;
   setProviderCommands?: (sessionId: string, commands: CommandEntry[]) => void;
   nextSeq?: (sessionId: string) => number;
+  isManagedSessionProcess?: typeof isManagedSessionProcess;
+  terminateManagedSession?: (pid: number) => void;
 }
 
 interface SpawnOptions {
+  provider: ProviderId;
   cwd?: string;
   resumeSessionId?: string;
   permissionMode?: string;
-  provider?: ProviderId;
   // 开启后 worker spawn claude 带 --include-partial-messages，forwardEvent 处理 stream_event delta；
   // aggregated assistant 的 text/thinking 会被跳过避免和 delta 重复
   streamDelta?: boolean;
@@ -72,6 +80,8 @@ interface AssistantSnapshotState {
   text: string;
   status: "streaming" | "completed";
 }
+
+const RECONNECT_WORKER_HANDSHAKE_TIMEOUT_MS = 1_000;
 
 export class WorkerStartupError extends Error {
   constructor(
@@ -123,6 +133,7 @@ function parseCompactCommandOutcome(content: string): CompactCommandOutcome | nu
 export class WorkerRegistry {
   private sockets = new Map<string, Socket>();
   private children = new Map<string, ChildProcess>();
+  private providers = new Map<string, ProviderId>();
   private readySessions = new Set<string>();
   private readyWaiters = new Map<string, Set<ReadyWaiter>>();
   private pendingNativeSessions = new Map<string, NativeSessionRef>();
@@ -197,22 +208,22 @@ export class WorkerRegistry {
     });
   }
 
-  spawn(sessionId: string, options?: SpawnOptions): number {
+  spawn(sessionId: string, options: SpawnOptions): number {
     const paths = sessionPaths(sessionId);
     const args: string[] = [sessionId, paths.workerSock];
-    args.push("--provider", options?.provider ?? "claude");
-    if (options?.cwd) args.push("--cwd", options.cwd);
-    if (options?.resumeSessionId) args.push("--resume", options.resumeSessionId);
+    args.push("--provider", options.provider);
+    if (options.cwd) args.push("--cwd", options.cwd);
+    if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
     // Claude 的远程安全默认值仍是 default；Codex 未显式选择时保留其本机配置。
     // Codex 的显式值已在 session_create 边界做过严格校验。
-    const provider = options?.provider ?? "claude";
+    const provider = options.provider;
     const permissionMode =
-      options?.permissionMode ?? (provider === "claude" ? "default" : undefined);
+      options.permissionMode ?? (provider === "claude" ? "default" : undefined);
     if (permissionMode) args.push("--permission-mode", permissionMode);
-    if (options?.streamDelta) {
+    if (options.streamDelta) {
       args.push("--stream-delta");
     }
-    if (options?.hook) {
+    if (options.hook) {
       args.push(
         "--hook-provider",
         options.hook.provider,
@@ -227,12 +238,13 @@ export class WorkerRegistry {
     const providerEnv = this.deps.getProviderEnv();
     const child = spawnScript("session-worker", args, {
       logger: serviceLogger,
-      env: options?.hook
+      env: options.hook
         ? { ...providerEnv, DEV_ANYWHERE_HOOK_TOKEN: options.hook.token }
         : providerEnv,
     });
     const workerPid = child.pid!;
     this.children.set(sessionId, child);
+    this.providers.set(sessionId, provider);
     // 正常退出会先通过 worker_exit IPC 删除 session；SIGKILL/OOM 等路径来不及发 IPC，
     // 只能依赖父进程的 child exit。两条路径都落到 SessionManager.onSessionRemoved，
     // 由统一出口清审批、临时目录并广播会话列表。
@@ -247,7 +259,7 @@ export class WorkerRegistry {
       );
     });
     serviceLogger.info(
-      { sessionId, workerPid, cwd: options?.cwd, resume: options?.resumeSessionId },
+      { sessionId, workerPid, cwd: options.cwd, resume: options.resumeSessionId },
       "Worker process spawned",
     );
     return workerPid;
@@ -269,10 +281,129 @@ export class WorkerRegistry {
       sock.once("connect", () => {
         sock.off("error", onConnectError);
         this.sockets.set(sessionId, sock);
+        this.readySessions.delete(sessionId);
+        let protocolAccepted = false;
+        let workerReady = false;
+        let startupFailed = false;
+        let negotiatedProvider: ProviderId | null = null;
         createWorkerReader(
           sock,
           (msg) => {
             try {
+              if (this.sockets.get(sessionId) !== sock) {
+                sock.destroy();
+                return;
+              }
+              if (!protocolAccepted) {
+                if (msg.type !== "worker_protocol_hello") {
+                  this.rejectForeignWorkerProtocol(sessionId, null, sock, msg.type);
+                  return;
+                }
+                if (
+                  msg.sessionId !== sessionId ||
+                  !this.matchesExpectedWorkerIdentity(sessionId, msg.pid, msg.provider)
+                ) {
+                  this.rejectForeignWorkerProtocol(
+                    sessionId,
+                    msg.protocolVersion,
+                    sock,
+                    "worker_protocol_hello identity mismatch",
+                  );
+                  return;
+                }
+                protocolAccepted = true;
+                negotiatedProvider = msg.provider;
+                serviceLogger.debug(
+                  { sessionId, workerPid: msg.pid, protocolVersion: msg.protocolVersion },
+                  "Worker IPC protocol accepted",
+                );
+                return;
+              }
+              if (msg.type === "worker_protocol_hello") {
+                this.rejectForeignWorkerProtocol(
+                  sessionId,
+                  msg.protocolVersion,
+                  sock,
+                  "duplicate worker_protocol_hello",
+                );
+                return;
+              }
+              if (
+                msg.type === "serve_protocol_hello" ||
+                msg.type === "worker_input" ||
+                msg.type === "worker_stop" ||
+                msg.type === "worker_interrupt" ||
+                msg.type === "worker_approval_response" ||
+                msg.type === "worker_whitelist_add"
+              ) {
+                this.rejectForeignWorkerProtocol(
+                  sessionId,
+                  WORKER_IPC_PROTOCOL_VERSION,
+                  sock,
+                  `invalid worker-to-serve message type: ${msg.type}`,
+                );
+                return;
+              }
+              if (
+                (msg.type === "worker_startup_error" || msg.type === "worker_native_session_id") &&
+                msg.provider !== negotiatedProvider
+              ) {
+                this.rejectForeignWorkerProtocol(
+                  sessionId,
+                  WORKER_IPC_PROTOCOL_VERSION,
+                  sock,
+                  `${msg.type} provider identity mismatch`,
+                );
+                return;
+              }
+              if (
+                msg.type === "worker_ready" &&
+                msg.nativeSession !== undefined &&
+                msg.nativeSession.provider !== negotiatedProvider
+              ) {
+                this.rejectForeignWorkerProtocol(
+                  sessionId,
+                  WORKER_IPC_PROTOCOL_VERSION,
+                  sock,
+                  "worker_ready provider identity mismatch",
+                );
+                return;
+              }
+              if (!workerReady) {
+                if (startupFailed && msg.type !== "worker_exit") {
+                  this.rejectForeignWorkerProtocol(
+                    sessionId,
+                    WORKER_IPC_PROTOCOL_VERSION,
+                    sock,
+                    `${msg.type} arrived after worker startup failure`,
+                  );
+                  return;
+                }
+                if (
+                  msg.type !== "worker_ready" &&
+                  msg.type !== "worker_startup_error" &&
+                  msg.type !== "worker_exit" &&
+                  msg.type !== "worker_native_session_id"
+                ) {
+                  this.rejectForeignWorkerProtocol(
+                    sessionId,
+                    WORKER_IPC_PROTOCOL_VERSION,
+                    sock,
+                    `${msg.type} arrived before worker readiness`,
+                  );
+                  return;
+                }
+                if (msg.type === "worker_ready") workerReady = true;
+                if (msg.type === "worker_startup_error") startupFailed = true;
+              } else if (msg.type === "worker_ready" || msg.type === "worker_startup_error") {
+                this.rejectForeignWorkerProtocol(
+                  sessionId,
+                  WORKER_IPC_PROTOCOL_VERSION,
+                  sock,
+                  `${msg.type} arrived after worker readiness`,
+                );
+                return;
+              }
               this.handleWorkerMessage(sessionId, msg);
             } catch (err) {
               serviceLogger.error(
@@ -282,6 +413,20 @@ export class WorkerRegistry {
             }
           },
           (err, line) => {
+            if (this.sockets.get(sessionId) !== sock) {
+              sock.destroy();
+              return;
+            }
+            if (!protocolAccepted) {
+              const invalidHelloVersion = this.readProtocolHelloVersion(line);
+              this.rejectForeignWorkerProtocol(
+                sessionId,
+                invalidHelloVersion,
+                sock,
+                "invalid or missing worker_protocol_hello",
+              );
+              return;
+            }
             // 单条 worker NDJSON 行 schema 校验失败：warn 而非断连。Claude/Codex CLI 增量
             // 加新事件类型时不该把整个 session 推进 ERROR；连接保持开放，下一条仍继续解析。
             serviceLogger.warn(
@@ -294,8 +439,16 @@ export class WorkerRegistry {
             );
           },
         );
-        sock.on("close", () => this.onDisconnect(sessionId));
-        sock.on("error", () => this.onDisconnect(sessionId));
+        sock.on("close", () => this.onDisconnect(sessionId, sock));
+        sock.on("error", () => this.onDisconnect(sessionId, sock));
+        sock.write(
+          serializeWorkerMsg({
+            type: "serve_protocol_hello",
+            protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+            sessionId,
+            pid: process.pid,
+          }),
+        );
         finish(sock);
       });
       if (timeoutMs !== undefined) {
@@ -313,26 +466,29 @@ export class WorkerRegistry {
 
   // 枚举 DATA_DIR 下所有 session 目录，尝试连接存活的 worker.sock；失败则清理 stale socket。
   async reconnectAll(): Promise<void> {
-    if (!existsSync(DATA_DIR)) return;
-
-    const dirs = readdirSync(DATA_DIR, { withFileTypes: true }).filter((d) => d.isDirectory());
+    const dirs = existsSync(DATA_DIR)
+      ? readdirSync(DATA_DIR, { withFileTypes: true }).filter((d) => d.isDirectory())
+      : [];
 
     for (const dir of dirs) {
       const sessionId = dir.name;
       const paths = sessionPaths(sessionId);
       if (!existsSync(paths.workerSock)) continue;
 
+      const persistedSession = this.deps.sessionManager.getSession(sessionId);
+      if (!persistedSession || persistedSession.mode !== "json") {
+        await this.terminateOrphanWorker(sessionId, paths.workerSock);
+        continue;
+      }
+
       const sock = await this.connect(sessionId, paths.workerSock);
       if (sock) {
-        if (!this.deps.sessionManager.getSession(sessionId)) {
-          // worker.sock 可连通但 SessionManager 无该 session 记录
-          // （sessions.json 写盘失败或文件丢失，但 worker 仍存活），属于孤儿 worker，直接终止。
-          serviceLogger.warn(
-            { sessionId },
-            "Orphaned worker found without session data, terminating",
-          );
-          sock.end();
-          this.sockets.delete(sessionId);
+        try {
+          await this.waitForReady(sessionId, RECONNECT_WORKER_HANDSHAKE_TIMEOUT_MS);
+        } catch {
+          if (this.deps.sessionManager.getSession(sessionId)) {
+            this.rejectForeignWorkerProtocol(sessionId);
+          }
           continue;
         }
         serviceLogger.info({ sessionId }, "Reconnected to existing worker");
@@ -345,10 +501,19 @@ export class WorkerRegistry {
         serviceLogger.info({ sessionId }, "Cleaned up stale worker socket");
       }
     }
+
+    // Persisted JSON sessions are usable only when their worker completed a current-generation
+    // socket handshake. A missing directory/socket or failed connection must not leave a ghost
+    // session in Relay/Web state.
+    for (const session of this.deps.sessionManager.listSessions()) {
+      if (session.mode === "json" && !this.has(session.id)) {
+        this.discardUnconnectedJsonSession(session.id);
+      }
+    }
   }
 
   has(sessionId: string): boolean {
-    return this.sockets.has(sessionId);
+    return this.readySessions.has(sessionId) && this.sockets.has(sessionId);
   }
 
   hasProcess(sessionId: string): boolean {
@@ -361,6 +526,7 @@ export class WorkerRegistry {
 
   delete(sessionId: string): void {
     this.children.delete(sessionId);
+    this.providers.delete(sessionId);
     this.sockets.delete(sessionId);
     this.readySessions.delete(sessionId);
     this.pendingNativeSessions.delete(sessionId);
@@ -383,6 +549,7 @@ export class WorkerRegistry {
     this.kimiAcpEventMapper.clearSession(sessionId);
     this.startupFailures.delete(sessionId);
     this.children.delete(sessionId);
+    this.providers.delete(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker process terminated before ready: ${sessionId}`),
       sessionId,
@@ -394,7 +561,7 @@ export class WorkerRegistry {
   // 向指定 session 的 worker 写 WorkerMessage；socket 缺失或不可写返回 false 由 caller 决定日志。
   send(sessionId: string, msg: WorkerMessage): boolean {
     const sock = this.sockets.get(sessionId);
-    if (!sock?.writable) return false;
+    if (!this.readySessions.has(sessionId) || !sock?.writable) return false;
     sock.write(serializeWorkerMsg(msg));
     return true;
   }
@@ -404,6 +571,7 @@ export class WorkerRegistry {
       ws.destroy();
     }
     this.sockets.clear();
+    this.providers.clear();
     this.readySessions.clear();
     this.pendingNativeSessions.clear();
     this.assistantSnapshots.clear();
@@ -495,14 +663,6 @@ export class WorkerRegistry {
         this.forwardApprovalRequest(sessionId, msg);
         break;
 
-      case "worker_claude_session_id":
-        this.captureNativeSession(sessionId, { provider: "claude", sessionId: msg.sessionId });
-        serviceLogger.info(
-          { sessionId, claudeSessionId: msg.sessionId },
-          "Claude session ID captured",
-        );
-        break;
-
       case "worker_native_session_id":
         this.captureNativeSession(sessionId, {
           provider: msg.provider,
@@ -513,7 +673,210 @@ export class WorkerRegistry {
           "Native JSON session ID captured",
         );
         break;
+
+      case "worker_protocol_hello":
+        // Socket-level negotiation is handled before messages enter this switch.
+        break;
     }
+  }
+
+  private readProtocolHelloVersion(line: string): string | number | null {
+    try {
+      const value = JSON.parse(line) as { type?: unknown; protocolVersion?: unknown };
+      if (value?.type !== "worker_protocol_hello") return null;
+      return typeof value.protocolVersion === "string" || typeof value.protocolVersion === "number"
+        ? value.protocolVersion
+        : null;
+    } catch {
+      return null;
+    }
+  }
+
+  private terminateOrphanWorker(sessionId: string, workerSocketPath: string): Promise<void> {
+    return new Promise((resolve) => {
+      const socket = connect(workerSocketPath);
+      let settled = false;
+      const finish = (details: {
+        pid?: number;
+        provider?: ProviderId;
+        terminated: boolean;
+      }): void => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timeout);
+        socket.destroy();
+        try {
+          unlinkSync(workerSocketPath);
+        } catch {
+          // The worker may already have removed its socket while handling SIGTERM.
+        }
+        serviceLogger.warn(
+          { sessionId, ...details },
+          "Orphaned JSON worker removed without session data",
+        );
+        resolve();
+      };
+      const timeout = setTimeout(
+        () => finish({ terminated: false }),
+        RECONNECT_WORKER_HANDSHAKE_TIMEOUT_MS,
+      );
+      timeout.unref?.();
+
+      socket.once("error", () => finish({ terminated: false }));
+      socket.once("connect", () => {
+        createWorkerReader(
+          socket,
+          (msg) => {
+            if (msg.type !== "worker_protocol_hello" || msg.sessionId !== sessionId) {
+              finish({ terminated: false });
+              return;
+            }
+            const identity = {
+              id: sessionId,
+              mode: "json" as const,
+              provider: msg.provider,
+              workerSocketPath,
+            };
+            const inspect = this.deps.isManagedSessionProcess ?? isManagedSessionProcess;
+            if (!inspect(msg.pid, identity)) {
+              finish({ pid: msg.pid, provider: msg.provider, terminated: false });
+              return;
+            }
+            let terminated = false;
+            try {
+              (this.deps.terminateManagedSession ?? ((pid) => process.kill(pid, "SIGTERM")))(
+                msg.pid,
+              );
+              terminated = true;
+            } catch {
+              // The verified process may have exited before signaling.
+            }
+            finish({ pid: msg.pid, provider: msg.provider, terminated });
+          },
+          () => finish({ terminated: false }),
+        );
+      });
+    });
+  }
+
+  private matchesExpectedWorkerIdentity(
+    sessionId: string,
+    receivedPid: number,
+    receivedProvider: ProviderId,
+  ): boolean {
+    const childPid = this.children.get(sessionId)?.pid;
+    if (childPid !== undefined) {
+      return childPid === receivedPid && this.providers.get(sessionId) === receivedProvider;
+    }
+    const persisted = this.deps.sessionManager.getSession(sessionId);
+    return (
+      persisted?.mode === "json" &&
+      persisted.pid === receivedPid &&
+      persisted.provider === receivedProvider
+    );
+  }
+
+  private discardUnconnectedJsonSession(sessionId: string): void {
+    const session = this.deps.sessionManager.getSession(sessionId);
+    if (!session || session.mode !== "json") return;
+    const child = this.children.get(sessionId);
+    const result = this.deps.sessionManager.terminateSession(sessionId);
+    const pid = result.pid ?? session.pid;
+    this.delete(sessionId);
+    this.startupFailures.delete(sessionId);
+
+    let terminated = false;
+    if (child && !child.killed) {
+      terminated = child.kill("SIGTERM");
+    } else {
+      if (
+        pid &&
+        isManagedSessionProcess(pid, {
+          id: sessionId,
+          mode: "json",
+          provider: session.provider,
+          workerSocketPath: sessionPaths(sessionId).workerSock,
+        })
+      ) {
+        try {
+          process.kill(pid, "SIGTERM");
+          terminated = true;
+        } catch {
+          // The process may have exited between identity verification and signaling.
+        }
+      }
+    }
+
+    serviceLogger.warn(
+      { sessionId, pid, terminated },
+      "Removed JSON session without a connected current-generation worker",
+    );
+  }
+
+  private rejectForeignWorkerProtocol(
+    sessionId: string,
+    receivedProtocolVersion: string | number | null = null,
+    workerSocket?: Socket,
+    reason?: string,
+  ): void {
+    const socket = workerSocket ?? this.sockets.get(sessionId);
+    if (workerSocket && this.sockets.get(sessionId) !== workerSocket) {
+      workerSocket.destroy();
+      return;
+    }
+    const child = this.children.get(sessionId);
+    const session = this.deps.sessionManager.getSession(sessionId);
+    const error = new WorkerStartupError("Worker IPC protocol handshake rejected");
+
+    this.sockets.delete(sessionId);
+    this.children.delete(sessionId);
+    this.providers.delete(sessionId);
+    this.readySessions.delete(sessionId);
+    this.pendingNativeSessions.delete(sessionId);
+    this.assistantSnapshots.delete(sessionId);
+    this.kimiAcpEventMapper.clearSession(sessionId);
+    if (child) this.startupFailures.set(sessionId, error);
+    else this.startupFailures.delete(sessionId);
+    this.rejectReadyWaiters(error, sessionId);
+
+    const result = this.deps.sessionManager.terminateSession(sessionId);
+    socket?.destroy();
+
+    let terminated = false;
+    if (child && !child.killed) {
+      terminated = child.kill("SIGTERM");
+    } else {
+      const pid = result.pid;
+      const workerSocketPath = sessionPaths(sessionId).workerSock;
+      if (
+        pid &&
+        session?.mode === "json" &&
+        isManagedSessionProcess(pid, {
+          id: sessionId,
+          mode: "json",
+          provider: session.provider,
+          workerSocketPath,
+        })
+      ) {
+        try {
+          process.kill(pid, "SIGTERM");
+          terminated = true;
+        } catch {
+          // 进程已退出时会落到这里，session/socket 仍然已完成清理。
+        }
+      }
+    }
+
+    serviceLogger.warn(
+      {
+        sessionId,
+        expectedProtocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+        receivedProtocolVersion,
+        reason,
+        terminated,
+      },
+      "Rejected JSON worker from a foreign IPC generation",
+    );
   }
 
   takePendingNativeSession(sessionId: string): NativeSessionRef | undefined {
@@ -535,7 +898,8 @@ export class WorkerRegistry {
   }
 
   // worker 连接断开或异常时的统一清理入口。仅记录一份，不再区分 close vs error 语义。
-  private onDisconnect(sessionId: string): void {
+  private onDisconnect(sessionId: string, socket: Socket): void {
+    if (this.sockets.get(sessionId) !== socket) return;
     this.sockets.delete(sessionId);
     this.readySessions.delete(sessionId);
     this.rejectReadyWaiters(new Error(`Worker disconnected before ready: ${sessionId}`), sessionId);
@@ -612,8 +976,8 @@ export class WorkerRegistry {
     }
     const ev = parsed.data;
     this.deps.touchSessionActivity?.(sessionId);
-    // 全文快照协议下 Claude worker 始终以 --stream-delta 启动；serve 重启并重连
-    // 到旧 worker 后也必须继续忽略 aggregated assistant text，避免同一回复重复。
+    // Claude worker 始终以 --stream-delta 启动；aggregated assistant text 会与
+    // delta 重复，因此只消费增量内容。
     const isStreamDeltaSession = true;
 
     if (ev.type === "system") {
@@ -855,10 +1219,23 @@ export class WorkerRegistry {
         "proxy",
       );
       const session = this.deps.sessionManager.getSession(sessionId);
+      if (!session) {
+        serviceLogger.warn(
+          { sessionId, requestId: msg.requestId },
+          "Rejecting approval request for missing JSON session",
+        );
+        this.send(sessionId, {
+          type: "worker_approval_response",
+          requestId: msg.requestId,
+          behavior: "deny",
+          message: "Session no longer exists.",
+        });
+        return;
+      }
       const registered = this.deps.permissionBroker.registerWorkerRequest(
         {
           requestId: msg.requestId,
-          provider: session?.provider ?? "claude",
+          provider: session.provider,
           sessionId,
           toolName: msg.toolName,
           input: msg.input,

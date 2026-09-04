@@ -50,21 +50,42 @@ describe("session-store agent status", () => {
       updatedAt: 100,
     });
 
-    useSessionStore
-      .getState()
-      .setSessions([{ sessionId: "s2", state: "working", provider: "codex" }]);
+    useSessionStore.getState().setSessions([
+      {
+        sessionId: "s2",
+        kind: "agent",
+        state: "working",
+        mode: "json",
+        provider: "codex",
+        cwd: "/tmp/project",
+        lastActive: 1,
+      },
+    ]);
 
     expect(useSessionStore.getState().agentStatusBySessionId.s1).toBeUndefined();
     expect(useSessionStore.getState().agentStatusBySessionId.s2.phase).toBe("waiting_permission");
   });
 
   it("prunes PTY semantic state when replacing the session list", () => {
-    useSessionStore.getState().setPtyState("s1", { state: "approval_wait", tool: "Write" });
-    useSessionStore.getState().setPtyState("s2", { state: "working" });
+    useSessionStore.getState().setPtyState("s1", {
+      state: "approval_wait",
+      seq: 1,
+      tool: "Write",
+    });
+    useSessionStore.getState().setPtyState("s2", { state: "working", seq: 1 });
 
-    useSessionStore
-      .getState()
-      .setSessions([{ sessionId: "s2", state: "working", provider: "claude", mode: "pty" }]);
+    useSessionStore.getState().setSessions([
+      {
+        sessionId: "s2",
+        kind: "agent",
+        state: "working",
+        provider: "claude",
+        mode: "pty",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/project",
+        lastActive: 1,
+      },
+    ]);
 
     expect(useSessionStore.getState().ptyStateBySessionId.s1).toBeUndefined();
     expect(useSessionStore.getState().ptyStateBySessionId.s2.state).toBe("working");
@@ -84,15 +105,42 @@ describe("session-store agent status", () => {
   it("prunes PTY titles when replacing or removing sessions", () => {
     useSessionStore.setState({
       sessions: [
-        { sessionId: "s1", state: "idle", provider: "claude", mode: "pty" },
-        { sessionId: "s2", state: "idle", provider: "codex", mode: "pty" },
+        {
+          sessionId: "s1",
+          kind: "agent",
+          state: "idle",
+          provider: "claude",
+          mode: "pty",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+        {
+          sessionId: "s2",
+          kind: "agent",
+          state: "idle",
+          provider: "codex",
+          mode: "pty",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
       ],
       ptyTitles: { s1: "old title", s2: "live title" },
     });
 
-    useSessionStore
-      .getState()
-      .setSessions([{ sessionId: "s2", state: "working", provider: "codex", mode: "pty" }]);
+    useSessionStore.getState().setSessions([
+      {
+        sessionId: "s2",
+        kind: "agent",
+        state: "working",
+        provider: "codex",
+        mode: "pty",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/project",
+        lastActive: 1,
+      },
+    ]);
 
     expect(useSessionStore.getState().ptyTitles).toEqual({ s2: "live title" });
 
@@ -106,11 +154,14 @@ describe("session-store agent status", () => {
       sessions: [
         {
           sessionId: "s1",
+          kind: "agent",
           mode: "pty",
           provider: "claude",
+          ptyOwner: "proxy-hosted",
           state: "idle",
           name: "~/project",
           cwd: "/Users/dev/project",
+          lastActive: 1,
         },
       ],
       ptyTitles: { s1: "✻ Working" },
@@ -134,9 +185,18 @@ describe("session-store agent status", () => {
 
     useSessionStore.getState().setPtyAutoYes(sessionKey, true);
     useSessionStore.getState().setPtyAutoYes(otherProxySessionKey, true);
-    useSessionStore
-      .getState()
-      .setSessions([{ sessionId: "s2", state: "working", provider: "codex", mode: "pty" }]);
+    useSessionStore.getState().setSessions([
+      {
+        sessionId: "s2",
+        kind: "agent",
+        state: "working",
+        provider: "codex",
+        mode: "pty",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/project",
+        lastActive: 1,
+      },
+    ]);
 
     expect(useSessionStore.getState().ptyAutoYesBySessionKey).toEqual({
       [sessionKey]: true,
@@ -154,7 +214,18 @@ describe("session-store agent status", () => {
     const sessionKey = ptyAutoYesSessionKey("proxy-a", "s1");
     if (!sessionKey) throw new Error("missing session key");
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", state: "idle", provider: "claude", mode: "pty" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          state: "idle",
+          provider: "claude",
+          mode: "pty",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
       sessionListLoaded: true,
       historySessions: [
         {
@@ -166,7 +237,7 @@ describe("session-store agent status", () => {
         },
       ],
       ptyTitles: { s1: "Old title" },
-      ptyStateBySessionId: { s1: { state: "working" } },
+      ptyStateBySessionId: { s1: { state: "working", seq: 1 } },
       agentStatusBySessionId: {
         s1: { provider: "claude", phase: "thinking", seq: 1, updatedAt: 1 },
       },
@@ -187,9 +258,17 @@ describe("session-store agent status", () => {
       ptyAutoYesBySessionKey: { [sessionKey]: true },
     });
 
-    useSessionStore
-      .getState()
-      .setSessions([{ sessionId: "s2", state: "idle", provider: "codex", mode: "json" }]);
+    useSessionStore.getState().setSessions([
+      {
+        sessionId: "s2",
+        kind: "agent",
+        state: "idle",
+        provider: "codex",
+        mode: "json",
+        cwd: "/tmp/project",
+        lastActive: 1,
+      },
+    ]);
 
     expect(useSessionStore.getState().loadingProxyName).toBeNull();
     expect(useSessionStore.getState().sessionListLoaded).toBe(true);
@@ -200,7 +279,18 @@ describe("session-store agent status", () => {
     const retainedKey = ptyAutoYesSessionKey("proxy-b", "s2");
     if (!removedKey || !retainedKey) throw new Error("missing session key");
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", state: "idle", provider: "claude", mode: "pty" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          state: "idle",
+          provider: "claude",
+          mode: "pty",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
       sessionListLoaded: true,
       loadingProxyName: "Old Mac",
       ptyAutoYesBySessionKey: { [removedKey]: true, [retainedKey]: true },

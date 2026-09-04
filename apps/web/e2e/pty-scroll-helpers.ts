@@ -144,10 +144,7 @@ export async function readPtyHorizontalScrollMetrics(
  * controller remaps its outer scroll coordinates. Raw `scrollTop` is therefore not a stable
  * history-position identity; the row's offset from the terminal content edge is.
  */
-export async function readVisiblePtyRow(
-  page: Page,
-  needle: string,
-): Promise<PtyVisibleRow | null> {
+export async function readVisiblePtyRow(page: Page, needle: string): Promise<PtyVisibleRow | null> {
   return ptyTerminal(page).evaluate((container, targetText) => {
     const containerRect = container.getBoundingClientRect();
     const containerStyle = getComputedStyle(container);

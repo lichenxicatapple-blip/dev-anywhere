@@ -1,8 +1,6 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import {
-  PTY_INITIAL_MIN_COLS,
-  PTY_INITIAL_MIN_ROWS,
   ControlErrorCode,
   SessionState,
   encodeBinaryFrame,
@@ -70,15 +68,15 @@ interface HostedPtyRegistryDeps {
 
 interface HostedPtyStartOptions {
   sessionId: string;
-  kind?: "agent";
+  kind: "agent";
   provider: ProviderId;
   cwd: string;
   args: string[];
   permissionMode?: string;
   nativeSessionId?: string;
   hook?: ProviderHookContext;
-  cols?: number;
-  rows?: number;
+  cols: number;
+  rows: number;
 }
 
 interface HostedShellStartOptions {
@@ -86,8 +84,8 @@ interface HostedShellStartOptions {
   kind: "terminal";
   cwd: string;
   shell?: string;
-  cols?: number;
-  rows?: number;
+  cols: number;
+  rows: number;
 }
 
 interface HostedPtySession {
@@ -147,9 +145,8 @@ export class HostedPtyRegistry {
   constructor(private readonly deps: HostedPtyRegistryDeps) {}
 
   start(options: HostedPtyStartOptions | HostedShellStartOptions): number {
-    const kind = options.kind ?? "agent";
-    const cols = options.cols ?? PTY_INITIAL_MIN_COLS;
-    const rows = options.rows ?? PTY_INITIAL_MIN_ROWS;
+    const kind = options.kind;
+    const { cols, rows } = options;
     const command =
       options.kind === "terminal"
         ? {
@@ -351,7 +348,12 @@ export class HostedPtyRegistry {
 
   destroyAll(): void {
     for (const sessionId of Array.from(this.sessions.keys())) {
-      this.close(sessionId, { kill: true, notify: false });
+      if (this.close(sessionId, { kill: true, notify: false })) {
+        // Hosted node-pty runtimes cannot reconnect to a replacement daemon. Remove their
+        // persisted SessionManager record while the old daemon still has an authenticated child
+        // handle; leaving it behind would make the new daemon mistake it for a handover candidate.
+        this.deps.sessionManager.terminateSession(sessionId);
+      }
     }
   }
 
@@ -459,13 +461,13 @@ export class HostedPtyRegistry {
   private sendPtyState(
     sessionId: string,
     state: PtySemanticState,
-    meta?: { title?: string; tool?: string },
-    hosted: HostedPtySession | undefined = this.sessions.get(sessionId),
+    meta: { title?: string; tool?: string } | undefined,
+    hosted: HostedPtySession,
   ): void {
-    const seq = hosted ? ++hosted.ptyStateSeq : undefined;
+    const seq = ++hosted.ptyStateSeq;
     const payload = {
       state,
-      ...(seq !== undefined ? { seq } : {}),
+      seq,
       ...(meta?.title !== undefined ? { title: meta.title } : {}),
       ...(meta?.tool !== undefined ? { tool: meta.tool } : {}),
     };

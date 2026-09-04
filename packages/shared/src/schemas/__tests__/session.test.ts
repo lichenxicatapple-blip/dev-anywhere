@@ -1,10 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  SessionListPayloadSchema,
-  SessionSwitchPayloadSchema,
-  SessionTerminatePayloadSchema,
-  SessionStatusPayloadSchema,
-} from "../session.js";
+import { SessionListPayloadSchema, SessionStatusPayloadSchema } from "../session.js";
 
 describe("SessionListPayloadSchema", () => {
   it("accepts valid session list", () => {
@@ -20,8 +15,17 @@ describe("SessionListPayloadSchema", () => {
           ptyOwner: "local-terminal",
           cwd: "/Users/dev/project",
           nameLocked: true,
+          lastActive: 1,
         },
-        { sessionId: "s2", state: "working", provider: "codex" },
+        {
+          sessionId: "s2",
+          kind: "agent",
+          state: "working",
+          mode: "json",
+          provider: "codex",
+          cwd: "/Users/dev/project",
+          lastActive: 2,
+        },
       ],
     });
     expect(result.sessions).toHaveLength(2);
@@ -30,6 +34,8 @@ describe("SessionListPayloadSchema", () => {
     expect(result.sessions[0].nameLocked).toBe(true);
     expect(result.sessions[0].provider).toBe("claude");
     expect(result.sessions[0].kind).toBe("agent");
+    expect(result.sessions[0].mode).toBe("pty");
+    if (result.sessions[0].mode !== "pty") throw new Error("expected PTY session");
     expect(result.sessions[0].ptyOwner).toBe("local-terminal");
     expect(result.sessions[1].provider).toBe("codex");
     expect(result.sessions[1].name).toBeUndefined();
@@ -50,7 +56,9 @@ describe("SessionListPayloadSchema", () => {
           state: "idle",
           provider: "claude",
           mode: "pty",
-          ptyOwner: "proxy-hosted",
+          ptyOwner: "local-terminal",
+          cwd: "/Users/dev/project",
+          lastActive: 1,
         },
       ],
     });
@@ -60,7 +68,18 @@ describe("SessionListPayloadSchema", () => {
   it("rejects invalid session state", () => {
     expect(() =>
       SessionListPayloadSchema.parse({
-        sessions: [{ sessionId: "s1", state: "invalid_state", provider: "claude" }],
+        sessions: [
+          {
+            sessionId: "s1",
+            kind: "agent",
+            state: "invalid_state",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "local-terminal",
+            cwd: "/tmp/test",
+            lastActive: 1,
+          },
+        ],
       }),
     ).toThrow();
   });
@@ -68,9 +87,134 @@ describe("SessionListPayloadSchema", () => {
   it("rejects missing provider", () => {
     expect(() =>
       SessionListPayloadSchema.parse({
-        sessions: [{ sessionId: "s1", state: "idle" }],
+        sessions: [
+          {
+            sessionId: "s1",
+            kind: "agent",
+            state: "idle",
+            mode: "pty",
+            ptyOwner: "local-terminal",
+            cwd: "/tmp/test",
+            lastActive: 1,
+          },
+        ],
       }),
     ).toThrow();
+  });
+
+  it("rejects missing kind", () => {
+    expect(() =>
+      SessionListPayloadSchema.parse({
+        sessions: [
+          {
+            sessionId: "s1",
+            state: "idle",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "local-terminal",
+            cwd: "/tmp/test",
+            lastActive: 1,
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects missing mode", () => {
+    expect(() =>
+      SessionListPayloadSchema.parse({
+        sessions: [
+          {
+            sessionId: "s1",
+            kind: "agent",
+            state: "idle",
+            provider: "claude",
+            cwd: "/tmp/test",
+            lastActive: 1,
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a PTY agent without an owner", () => {
+    expect(() =>
+      SessionListPayloadSchema.parse({
+        sessions: [
+          {
+            sessionId: "s1",
+            kind: "agent",
+            state: "idle",
+            mode: "pty",
+            provider: "claude",
+            cwd: "/tmp/test",
+            lastActive: 1,
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it("rejects a JSON agent with a PTY owner", () => {
+    expect(() =>
+      SessionListPayloadSchema.parse({
+        sessions: [
+          {
+            sessionId: "s1",
+            kind: "agent",
+            state: "idle",
+            mode: "json",
+            provider: "claude",
+            ptyOwner: "local-terminal",
+            cwd: "/tmp/test",
+            lastActive: 1,
+          },
+        ],
+      }),
+    ).toThrow();
+  });
+
+  it.each([
+    {
+      sessionId: "terminal-json",
+      kind: "terminal",
+      state: "idle",
+      mode: "json",
+      provider: "claude",
+      cwd: "/tmp/test",
+      lastActive: 1,
+    },
+    {
+      sessionId: "terminal-provider",
+      kind: "terminal",
+      state: "idle",
+      mode: "pty",
+      provider: "codex",
+      ptyOwner: "local-terminal",
+      cwd: "/tmp/test",
+      lastActive: 1,
+    },
+    {
+      sessionId: "terminal-owner",
+      kind: "terminal",
+      state: "idle",
+      mode: "pty",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cwd: "/tmp/test",
+      lastActive: 1,
+    },
+    {
+      sessionId: "terminal-missing-owner",
+      kind: "terminal",
+      state: "idle",
+      mode: "pty",
+      provider: "claude",
+      cwd: "/tmp/test",
+      lastActive: 1,
+    },
+  ])("rejects an illegal terminal identity ($sessionId)", (session) => {
+    expect(() => SessionListPayloadSchema.parse({ sessions: [session] })).toThrow();
   });
 
   it("accepts all valid session states", () => {
@@ -84,7 +228,18 @@ describe("SessionListPayloadSchema", () => {
     ] as const;
     for (const state of states) {
       const result = SessionListPayloadSchema.parse({
-        sessions: [{ sessionId: "s1", state, provider: "claude" }],
+        sessions: [
+          {
+            sessionId: "s1",
+            kind: "agent",
+            state,
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "local-terminal",
+            cwd: "/tmp/test",
+            lastActive: 1,
+          },
+        ],
       });
       expect(result.sessions[0].state).toBe(state);
     }
@@ -93,17 +248,19 @@ describe("SessionListPayloadSchema", () => {
   it("rejects missing sessions field", () => {
     expect(() => SessionListPayloadSchema.parse({})).toThrow();
   });
-});
 
-describe("SessionSwitchPayloadSchema", () => {
-  it("rejects missing sessionId", () => {
-    expect(() => SessionSwitchPayloadSchema.parse({})).toThrow();
-  });
-});
-
-describe("SessionTerminatePayloadSchema", () => {
-  it("rejects missing sessionId", () => {
-    expect(() => SessionTerminatePayloadSchema.parse({})).toThrow();
+  it.each(["cwd", "lastActive"] as const)("rejects a session missing %s", (field) => {
+    const session: Record<string, unknown> = {
+      sessionId: "s1",
+      kind: "agent",
+      state: "idle",
+      mode: "json",
+      provider: "claude",
+      cwd: "/tmp/test",
+      lastActive: 1,
+    };
+    delete session[field];
+    expect(() => SessionListPayloadSchema.parse({ sessions: [session] })).toThrow();
   });
 });
 

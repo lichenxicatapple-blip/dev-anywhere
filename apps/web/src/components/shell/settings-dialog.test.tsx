@@ -137,7 +137,9 @@ describe("SettingsDialog", () => {
     useAppStore.setState({
       inputModePreference: "auto",
       latencyMonitorEnabled: false,
-      proxies: [{ proxyId: "proxy-1", name: "Work Mac", online: true }],
+      proxies: [
+        { proxyId: "proxy-1", name: "Work Mac", version: "0.9.0", online: true, sessions: [] },
+      ],
       proxyListLoaded: true,
       ptyScrollTraceEnabled: false,
       sessionIdleNotificationsEnabled: false,

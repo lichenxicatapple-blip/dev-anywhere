@@ -210,7 +210,14 @@ bash scripts/deploy/install-relay.sh \
 
 部署脚本会复用 `/opt/dev-anywhere/.env` 中已有的 Token。
 
-Relay 更新后，各开发机上的 DEV Anywhere 会自动更新，无需逐台操作。
+DEV Anywhere 0.9.0 不兼容此前版本。Relay 更新后，请在每台开发机上手动更新并重启 DEV Anywhere：
+
+```bash
+npm install -g @dev-anywhere/proxy@0.9.0
+dev-anywhere serve restart --relay cloud
+```
+
+全部开发机更新完成后，刷新浏览器，并重新启动升级前仍在运行的会话。
 
 升级命令的最后一个参数应与首次部署保持一致：首次使用域名就继续传域名，首次使用公网 IP 就继续传公网 IP。
 

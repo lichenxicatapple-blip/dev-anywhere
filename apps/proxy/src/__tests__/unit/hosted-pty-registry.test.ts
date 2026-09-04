@@ -53,18 +53,23 @@ function createAgentRegistry(
     sendRaw: vi.fn(),
     sendBinary: vi.fn(),
   };
+  const sessionManager = {
+    getSession: vi.fn(() => ({
+      id: "s1",
+      kind: "agent",
+      mode: "pty",
+      provider,
+      ptyOwner: "proxy-hosted",
+      state: SessionState.IDLE,
+      cwd: "/tmp/project",
+      pid: 2468,
+      createdAt: 1,
+      updatedAt: 1,
+    })),
+    terminateSession: vi.fn(() => ({ success: true })),
+  };
   const registry = new HostedPtyRegistry({
-    sessionManager: {
-      getSession: vi.fn(() => ({
-        id: "s1",
-        mode: "pty",
-        provider,
-        state: SessionState.IDLE,
-        cwd: "/tmp/project",
-        pid: 2468,
-      })),
-      terminateSession: vi.fn(() => ({ success: true })),
-    } as never,
+    sessionManager: sessionManager as never,
     relayConnection: relayConnection as never,
     getProviderEnv: () => {
       if (provider === "claude") return { CLAUDE_BIN: commandPath };
@@ -75,7 +80,7 @@ function createAgentRegistry(
     updateTerminalCwd,
     applyPtyStateToSession: vi.fn(),
   });
-  return { registry, relayConnection };
+  return { registry, relayConnection, sessionManager };
 }
 
 function createShellRegistry(shellPath: string) {
@@ -90,9 +95,12 @@ function createShellRegistry(shellPath: string) {
         kind: "terminal",
         mode: "pty",
         provider: "claude",
+        ptyOwner: "local-terminal",
         state: SessionState.IDLE,
         cwd: "/tmp",
         pid: 2468,
+        createdAt: 1,
+        updatedAt: 1,
       })),
       terminateSession: vi.fn(() => ({ success: true })),
     } as never,
@@ -103,6 +111,12 @@ function createShellRegistry(shellPath: string) {
     applyPtyStateToSession: vi.fn(),
   });
   return { registry, relayConnection };
+}
+
+type HostedPtyStartOptions = Parameters<HostedPtyRegistry["start"]>[0];
+
+function startHostedPty(registry: HostedPtyRegistry, options: HostedPtyStartOptions): number {
+  return registry.start(options);
 }
 
 describe("Hosted PTY registry", () => {
@@ -143,11 +157,14 @@ describe("Hosted PTY registry", () => {
     withExecutable("claude", (claudeBin) => {
       const registry = createRegistry("claude", claudeBin);
 
-      const pid = registry.start({
+      const pid = startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "claude",
         cwd: "/tmp/project",
         args: ["--resume", "claude-session"],
+        cols: 80,
+        rows: 24,
         permissionMode: "plan",
         hook: {
           provider: "claude",
@@ -172,11 +189,14 @@ describe("Hosted PTY registry", () => {
     withExecutable("claude", (claudeBin) => {
       const registry = createRegistry("claude", claudeBin);
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "pending-pty",
+        kind: "agent",
         provider: "claude",
         cwd: "/tmp/project",
         args: [],
+        cols: 80,
+        rows: 24,
         hook: {
           provider: "claude",
           sessionId: "pending-pty",
@@ -192,15 +212,38 @@ describe("Hosted PTY registry", () => {
     });
   });
 
+  it("removes hosted session records while destroying daemon-owned PTYs", () => {
+    withExecutable("claude", (claudeBin) => {
+      const { registry, sessionManager } = createAgentRegistry("claude", claudeBin);
+      startHostedPty(registry, {
+        sessionId: "s1",
+        kind: "agent",
+        provider: "claude",
+        cwd: "/tmp/project",
+        args: [],
+        cols: 80,
+        rows: 24,
+      });
+
+      registry.destroyAll();
+
+      expect(ptySpawnMock.mock.results.at(-1)?.value.kill).toHaveBeenCalledOnce();
+      expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    });
+  });
+
   it("spawns Codex PTY with the requested approval flags", () => {
     withExecutable("codex", (codexBin) => {
       const registry = createRegistry("codex", codexBin);
 
-      const pid = registry.start({
+      const pid = startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "codex",
         cwd: "/tmp/project",
         args: ["resume", "codex-session"],
+        cols: 80,
+        rows: 24,
         permissionMode: "bypassPermissions",
         hook: {
           provider: "codex",
@@ -225,11 +268,14 @@ describe("Hosted PTY registry", () => {
     withExecutable("kimi", (kimiBin) => {
       const registry = createRegistry("kimi", kimiBin);
 
-      const pid = registry.start({
+      const pid = startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "kimi",
         cwd: "/tmp/project",
         args: ["--session", "kimi-session"],
+        cols: 80,
+        rows: 24,
         permissionMode: "auto",
       });
       registry.destroyAll();
@@ -247,11 +293,13 @@ describe("Hosted PTY registry", () => {
     withExecutable("zsh", (shellPath) => {
       const registry = createRegistry("claude", shellPath);
 
-      const pid = registry.start({
+      const pid = startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       registry.destroyAll();
 
@@ -268,8 +316,9 @@ describe("Hosted PTY registry", () => {
     withExecutable("codex", (codexBin) => {
       const registry = createRegistry("codex", codexBin);
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "codex",
         cwd: "/tmp/project",
         args: [],
@@ -303,11 +352,15 @@ describe("Hosted PTY registry", () => {
         sessionManager: {
           getSession: vi.fn(() => ({
             id: "s1",
+            kind: "agent",
             mode: "pty",
             provider: "codex",
+            ptyOwner: "proxy-hosted",
             state: SessionState.IDLE,
             cwd: "/tmp/project",
             pid: 2468,
+            createdAt: 1,
+            updatedAt: 1,
           })),
           terminateSession: vi.fn(() => ({ success: true })),
         } as never,
@@ -319,11 +372,14 @@ describe("Hosted PTY registry", () => {
       });
       const nativeSessionId = "019fa141-cdaf-78a2-a6c1-9cca04fb9f9a";
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "codex",
         cwd: "/tmp/project",
         args: ["resume", nativeSessionId],
+        cols: 80,
+        rows: 24,
         permissionMode: "auto",
         nativeSessionId,
         hook: {
@@ -373,9 +429,12 @@ describe("Hosted PTY registry", () => {
           kind: "terminal",
           mode: "pty",
           provider: "claude",
+          ptyOwner: "local-terminal",
           state: SessionState.IDLE,
           cwd: "/tmp",
           pid: 2468,
+          createdAt: 1,
+          updatedAt: 1,
         })),
         terminateSession: vi.fn(() => ({ success: true })),
       } as never,
@@ -387,11 +446,13 @@ describe("Hosted PTY registry", () => {
     });
 
     try {
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       const spawned = ptySpawnMock.mock.results.at(-1)!.value;
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
@@ -429,7 +490,7 @@ describe("Hosted PTY registry", () => {
     const { registry, relayConnection } = createShellRegistry(shellPath);
 
     try {
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
@@ -494,11 +555,13 @@ describe("Hosted PTY registry", () => {
     withExecutable("zsh", (shellPath) => {
       const { registry, relayConnection } = createShellRegistry(shellPath);
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       const spawned = ptySpawnMock.mock.results.at(-1)!.value;
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
@@ -527,11 +590,13 @@ describe("Hosted PTY registry", () => {
     withExecutable("zsh", (shellPath) => {
       const { registry, relayConnection } = createShellRegistry(shellPath);
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       const spawned = ptySpawnMock.mock.results.at(-1)!.value;
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
@@ -564,11 +629,14 @@ describe("Hosted PTY registry", () => {
   it("coalesces a Kimi-sized synchronized redraw split across PTY chunks", () => {
     withExecutable("kimi", (kimiBin) => {
       const { registry, relayConnection } = createAgentRegistry("kimi", kimiBin);
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "kimi",
         cwd: "/tmp/project",
         args: [],
+        cols: 80,
+        rows: 24,
       });
       const spawned = ptySpawnMock.mock.results.at(-1)!.value;
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
@@ -598,11 +666,13 @@ describe("Hosted PTY registry", () => {
     withExecutable("zsh", (shellPath) => {
       const { registry, relayConnection } = createShellRegistry(shellPath);
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       const spawned = ptySpawnMock.mock.results.at(-1)!.value;
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
@@ -641,11 +711,13 @@ describe("Hosted PTY registry", () => {
     withExecutable("zsh", (shellPath) => {
       const { registry, relayConnection } = createShellRegistry(shellPath);
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       const spawned = ptySpawnMock.mock.results.at(-1)!.value;
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
@@ -667,11 +739,13 @@ describe("Hosted PTY registry", () => {
       const updateTerminalCwd = vi.fn(() => true);
       const registry = createRegistry("claude", shellPath, updateTerminalCwd);
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       const child = ptySpawnMock.mock.results.at(-1)?.value;
       const onData = child?.onData.mock.calls[0]?.[0] as ((data: string) => void) | undefined;
@@ -694,11 +768,15 @@ describe("Hosted PTY registry", () => {
         sessionManager: {
           getSession: vi.fn(() => ({
             id: "s1",
+            kind: "agent",
             mode: "pty",
             provider: "codex",
+            ptyOwner: "proxy-hosted",
             state: SessionState.IDLE,
             cwd: "/tmp/project",
             pid: 2468,
+            createdAt: 1,
+            updatedAt: 1,
           })),
           terminateSession: vi.fn(() => ({ success: true })),
         } as never,
@@ -709,11 +787,14 @@ describe("Hosted PTY registry", () => {
         applyPtyStateToSession: vi.fn(),
       });
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "codex",
         cwd: "/tmp/project",
         args: [],
+        cols: 80,
+        rows: 24,
         hook: {
           provider: "codex",
           sessionId: "s1",
@@ -745,11 +826,15 @@ describe("Hosted PTY registry", () => {
         sessionManager: {
           getSession: vi.fn(() => ({
             id: "s1",
+            kind: "agent",
             mode: "pty",
             provider: "codex",
+            ptyOwner: "proxy-hosted",
             state: SessionState.IDLE,
             cwd: "/tmp/project",
             pid: 2468,
+            createdAt: 1,
+            updatedAt: 1,
           })),
           terminateSession: vi.fn(() => ({ success: true })),
         } as never,
@@ -763,11 +848,14 @@ describe("Hosted PTY registry", () => {
         applyPtyStateToSession,
       });
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "codex",
         cwd: "/tmp/project",
         args: [],
+        cols: 80,
+        rows: 24,
         hook: {
           provider: "codex",
           sessionId: "s1",
@@ -802,11 +890,15 @@ describe("Hosted PTY registry", () => {
         sessionManager: {
           getSession: vi.fn(() => ({
             id: "s1",
+            kind: "agent",
             mode: "pty",
             provider: "codex",
+            ptyOwner: "proxy-hosted",
             state: SessionState.WAITING_APPROVAL,
             cwd: "/tmp/project",
             pid: 2468,
+            createdAt: 1,
+            updatedAt: 1,
           })),
           terminateSession: vi.fn(() => ({ success: true })),
         } as never,
@@ -820,11 +912,14 @@ describe("Hosted PTY registry", () => {
         applyPtyStateToSession,
       });
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "s1",
+        kind: "agent",
         provider: "codex",
         cwd: "/tmp/project",
         args: [],
+        cols: 80,
+        rows: 24,
         hook: {
           provider: "codex",
           sessionId: "s1",
@@ -857,9 +952,12 @@ describe("Hosted PTY registry", () => {
             kind: "terminal",
             mode: "pty",
             provider: "claude",
+            ptyOwner: "local-terminal",
             state: SessionState.IDLE,
             cwd: "/tmp",
             pid: 2468,
+            createdAt: 1,
+            updatedAt: 1,
           })),
           terminateSession: vi.fn(() => ({ success: true })),
         } as never,
@@ -873,11 +971,13 @@ describe("Hosted PTY registry", () => {
         applyPtyStateToSession,
       });
 
-      registry.start({
+      startHostedPty(registry, {
         sessionId: "terminal-1",
         kind: "terminal",
         cwd: "/tmp",
         shell: shellPath,
+        cols: 80,
+        rows: 24,
       });
       const spawned = ptySpawnMock.mock.results.at(-1)!.value;
       const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;

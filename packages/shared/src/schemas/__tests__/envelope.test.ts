@@ -1,16 +1,11 @@
 import { describe, it, expect } from "vitest";
 import { MessageEnvelopeSchema } from "../envelope.js";
-import {
-  PtyStatePayloadSchema,
-  SessionCreatePayloadSchema,
-  SessionListPayloadSchema,
-} from "../session.js";
+import { PtyStatePayloadSchema, SessionListPayloadSchema } from "../session.js";
 
 // 辅助函数：创建一个基础的 envelope 结构
 function makeEnvelope(type: string, payload: unknown, overrides: Record<string, unknown> = {}) {
   return {
     seq: 0,
-    sessionId: "test-session",
     timestamp: Date.now(),
     source: "proxy",
     version: "1.0",
@@ -18,6 +13,14 @@ function makeEnvelope(type: string, payload: unknown, overrides: Record<string, 
     payload,
     ...overrides,
   };
+}
+
+function makeSessionEnvelope(
+  type: string,
+  payload: unknown,
+  overrides: Record<string, unknown> = {},
+) {
+  return makeEnvelope(type, payload, { sessionId: "test-session", ...overrides });
 }
 
 describe("MessageEnvelopeSchema", () => {
@@ -36,14 +39,28 @@ describe("MessageEnvelopeSchema", () => {
         state: "idle",
         lastActive: 0,
       });
-      delete (env as Record<string, unknown>).sessionId;
       expect(() => MessageEnvelopeSchema.parse(env)).toThrow();
     });
 
     it("allows missing sessionId on global broadcast envelope", () => {
       const env = makeEnvelope("heartbeat", {});
-      delete (env as Record<string, unknown>).sessionId;
       expect(() => MessageEnvelopeSchema.parse(env)).not.toThrow();
+    });
+
+    it("rejects removed sessionId on a global envelope", () => {
+      expect(() =>
+        MessageEnvelopeSchema.parse(
+          makeEnvelope("heartbeat", {}, { sessionId: "removed-session-scope" }),
+        ),
+      ).toThrow();
+    });
+
+    it("rejects unknown top-level fields on a session-scoped envelope", () => {
+      expect(() =>
+        MessageEnvelopeSchema.parse(
+          makeSessionEnvelope("user_input", { text: "hello" }, { proxyId: "unexpected" }),
+        ),
+      ).toThrow();
     });
 
     it("rejects missing timestamp", () => {
@@ -62,6 +79,12 @@ describe("MessageEnvelopeSchema", () => {
       const env = makeEnvelope("heartbeat", {});
       delete (env as Record<string, unknown>).version;
       expect(() => MessageEnvelopeSchema.parse(env)).toThrow();
+    });
+
+    it("rejects a non-current version", () => {
+      expect(() =>
+        MessageEnvelopeSchema.parse(makeEnvelope("heartbeat", {}, { version: "0.9" })),
+      ).toThrow();
     });
 
     it("rejects negative seq", () => {
@@ -86,7 +109,7 @@ describe("MessageEnvelopeSchema", () => {
 
   describe("PtyStatePayloadSchema", () => {
     it("validates state working", () => {
-      const result = PtyStatePayloadSchema.parse({ state: "working" });
+      const result = PtyStatePayloadSchema.parse({ state: "working", seq: 1 });
       expect(result.state).toBe("working");
     });
 
@@ -104,6 +127,7 @@ describe("MessageEnvelopeSchema", () => {
     it("validates state turn_complete with title", () => {
       const result = PtyStatePayloadSchema.parse({
         state: "turn_complete",
+        seq: 4,
         title: "task done",
       });
       expect(result.state).toBe("turn_complete");
@@ -111,26 +135,15 @@ describe("MessageEnvelopeSchema", () => {
     });
 
     it("rejects invalid state value", () => {
-      expect(() => PtyStatePayloadSchema.parse({ state: "invalid_state" })).toThrow();
+      expect(() => PtyStatePayloadSchema.parse({ state: "invalid_state", seq: 1 })).toThrow();
     });
 
     it("rejects removed mid_pause state", () => {
-      expect(() => PtyStatePayloadSchema.parse({ state: "mid_pause" })).toThrow();
-    });
-  });
-
-  describe("SessionCreatePayloadSchema cwd extension", () => {
-    it("accepts name and cwd", () => {
-      const result = SessionCreatePayloadSchema.parse({
-        name: "test",
-        cwd: "/home/user/project",
-      });
-      expect(result.cwd).toBe("/home/user/project");
+      expect(() => PtyStatePayloadSchema.parse({ state: "mid_pause", seq: 1 })).toThrow();
     });
 
-    it("accepts name without cwd (optional)", () => {
-      const result = SessionCreatePayloadSchema.parse({ name: "test" });
-      expect(result.cwd).toBeUndefined();
+    it("requires an event sequence", () => {
+      expect(() => PtyStatePayloadSchema.parse({ state: "working" })).toThrow();
     });
   });
 
@@ -138,8 +151,25 @@ describe("MessageEnvelopeSchema", () => {
     it("accepts session entries with mode field", () => {
       const result = SessionListPayloadSchema.parse({
         sessions: [
-          { sessionId: "s1", state: "idle", mode: "pty", provider: "claude" },
-          { sessionId: "s2", state: "working", mode: "json", provider: "codex" },
+          {
+            sessionId: "s1",
+            kind: "agent",
+            state: "idle",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "local-terminal",
+            cwd: "/project",
+            lastActive: 1,
+          },
+          {
+            sessionId: "s2",
+            kind: "agent",
+            state: "working",
+            mode: "json",
+            provider: "codex",
+            cwd: "/project",
+            lastActive: 2,
+          },
         ],
       });
       expect(result.sessions[0].mode).toBe("pty");
@@ -157,8 +187,33 @@ describe("MessageEnvelopeSchema", () => {
 
     it("rejects mismatched payload for type", () => {
       expect(() =>
-        MessageEnvelopeSchema.parse(makeEnvelope("user_input", { wrong: "field" })),
+        MessageEnvelopeSchema.parse(makeSessionEnvelope("user_input", { wrong: "field" })),
       ).toThrow();
     });
+
+    it("rejects unknown payload fields", () => {
+      expect(() =>
+        MessageEnvelopeSchema.parse(
+          makeSessionEnvelope("user_input", {
+            text: "hello",
+            removedField: "must not be stripped",
+          }),
+        ),
+      ).toThrow();
+    });
+
+    it.each(["session_create", "session_switch", "session_terminate"])(
+      "rejects removed %s envelope type",
+      (type) => {
+        expect(() =>
+          MessageEnvelopeSchema.parse(
+            makeSessionEnvelope(type, {
+              sessionId: "test-session",
+              cwd: "/project",
+            }),
+          ),
+        ).toThrow();
+      },
+    );
   });
 });

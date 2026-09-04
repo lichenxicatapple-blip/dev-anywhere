@@ -9,7 +9,7 @@ interface AgentCliStatusOptions {
   suggestions?: Partial<Record<ProviderId, string[]>>;
 }
 
-type DetectedAgentCliStatus = AgentCliStatus & { kimi: AgentCliAvailability };
+type DetectedAgentCliStatus = AgentCliStatus;
 
 const PROVIDER_BIN_NAME: Record<ProviderId, string> = {
   claude: "claude",
@@ -81,7 +81,6 @@ export function detectAgentCliStatus(
       () => resolveCodexCommand(env),
       [...discoverProviderCandidates("codex", env), ...(options.suggestions?.codex ?? [])],
     ),
-    // Shared 为滚动升级把该字段保持 optional；当前 Proxy 的探测结果始终完整上报 Kimi。
     kimi: detect(
       () => resolveKimiCommand(env),
       [...discoverProviderCandidates("kimi", env), ...(options.suggestions?.kimi ?? [])],

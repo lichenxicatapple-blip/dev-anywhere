@@ -127,7 +127,14 @@ test.describe("会话内查找", () => {
 
   test("PTY 模式跨滚屏定位且不会把查找按键发给远端", async ({ page }) => {
     const sessionId = "pty-find";
-    await setupPtyChat(page, { sessionId });
+    await setupPtyChat(page, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     const lines = Array.from({ length: 140 }, (_, index) => {

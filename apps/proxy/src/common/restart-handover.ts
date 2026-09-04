@@ -1,17 +1,26 @@
 import { existsSync, readFileSync } from "node:fs";
 import { probeProcess, type ProcessProbeResult } from "./process-probe.js";
-
-interface PersistedSessionCandidate {
-  id?: unknown;
-  mode?: unknown;
-  ptyOwner?: unknown;
-  pid?: unknown;
-}
+import { PersistedSessionRecordSchema } from "./persisted-session.js";
+import {
+  readSessionRuntimeIpcVersions,
+  sessionRuntimeIpcVersionsMatch,
+  type SessionRuntimeIpcVersions,
+} from "./session-runtime-ipc-version.js";
 
 export function readLiveLocalPtySessionIds(
   sessionsPath: string,
+  sessionRuntimeIpcVersionPath: string,
+  expectedProtocolVersions: SessionRuntimeIpcVersions,
   probe: (pid: number) => ProcessProbeResult = probeProcess,
 ): string[] {
+  if (
+    !sessionRuntimeIpcVersionsMatch(
+      readSessionRuntimeIpcVersions(sessionRuntimeIpcVersionPath),
+      expectedProtocolVersions,
+    )
+  ) {
+    return [];
+  }
   if (!existsSync(sessionsPath)) return [];
   let parsed: unknown;
   try {
@@ -22,18 +31,12 @@ export function readLiveLocalPtySessionIds(
   if (!Array.isArray(parsed)) return [];
 
   const ids = new Set<string>();
-  for (const item of parsed as PersistedSessionCandidate[]) {
-    if (
-      typeof item?.id !== "string" ||
-      item.mode !== "pty" ||
-      item.ptyOwner !== "local-terminal" ||
-      typeof item.pid !== "number" ||
-      !Number.isSafeInteger(item.pid) ||
-      item.pid <= 0
-    ) {
-      continue;
-    }
-    if (probe(item.pid).status !== "not-found") ids.add(item.id);
+  for (const item of parsed) {
+    const result = PersistedSessionRecordSchema.safeParse(item);
+    if (!result.success) continue;
+    const session = result.data;
+    if (session.mode !== "pty" || session.ptyOwner !== "local-terminal") continue;
+    if (probe(session.pid).status !== "not-found") ids.add(session.id);
   }
   return [...ids];
 }

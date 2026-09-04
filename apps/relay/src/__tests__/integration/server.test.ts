@@ -5,6 +5,7 @@ import { createLogger } from "@dev-anywhere/shared/logger";
 import {
   decodeFileStreamFrame,
   encodeFileStreamFrame,
+  RELAY_CONTROL_PROTOCOL_VERSION,
   serializeControl,
 } from "@dev-anywhere/shared";
 import {
@@ -88,11 +89,35 @@ describe("Relay Server Integration", () => {
     return ws;
   }
 
+  function proxyRegister(proxyId: string): Record<string, unknown> {
+    return {
+      type: "proxy_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      proxyId,
+      proxyVersion: "0.9.0",
+    };
+  }
+
+  async function registerClient(client: WebSocket, clientId: string): Promise<void> {
+    const registered = waitForMessageType(client, "client_register_response");
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId,
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await registered;
+  }
+
   it("proxy connects and registers", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
 
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "test-proxy" }));
+    proxy.send(JSON.stringify(proxyRegister("test-proxy")));
     await waitForCondition(
       () => relay.registry.listProxies().includes("test-proxy"),
       "proxy registration timed out",
@@ -104,24 +129,27 @@ describe("Relay Server Integration", () => {
   it("client sends proxy_list_request and receives response", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
 
     const client = connectClient();
     await waitForOpen(client);
+    await registerClient(client, "proxy-list-client");
 
     const msgPromise = waitForMessage(client);
     client.send(JSON.stringify({ type: "proxy_list_request" }));
     const response = JSON.parse(await msgPromise);
 
     expect(response.type).toBe("proxy_list_response");
-    expect(response.proxies).toEqual([{ proxyId: "p1", online: true, sessions: [] }]);
+    expect(response.proxies).toEqual([
+      { proxyId: "p1", version: "0.9.0", online: true, sessions: [] },
+    ]);
   });
 
   it("removes an offline proxy, ACKs its formerly bound client, then broadcasts removal and list", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "retired-proxy" }));
+    proxy.send(JSON.stringify(proxyRegister("retired-proxy")));
     await waitForMessageType(proxy, "proxy_register_response");
 
     const requester = connectClient();
@@ -130,6 +158,7 @@ describe("Relay Server Integration", () => {
     requester.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "remove-requester",
         browserName: "Safari",
         osName: "iOS",
@@ -139,6 +168,7 @@ describe("Relay Server Integration", () => {
     observer.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "remove-observer",
         browserName: "Chrome",
         osName: "macOS",
@@ -202,7 +232,7 @@ describe("Relay Server Integration", () => {
     // routing implicitly after the registry entry is recreated.
     const replacement = connectProxy();
     await waitForOpen(replacement);
-    replacement.send(JSON.stringify({ type: "proxy_register", proxyId: "retired-proxy" }));
+    replacement.send(JSON.stringify(proxyRegister("retired-proxy")));
     await waitForMessageType(replacement, "proxy_register_response");
     const notBoundPromise = waitForMessageType(requester, "relay_error");
     requester.send(
@@ -222,7 +252,7 @@ describe("Relay Server Integration", () => {
   it("rejects online and unknown proxy removal with explicit errors", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "online-proxy" }));
+    proxy.send(JSON.stringify(proxyRegister("online-proxy")));
     await waitForMessageType(proxy, "proxy_register_response");
 
     const unregisteredClient = connectClient();
@@ -246,6 +276,7 @@ describe("Relay Server Integration", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "remove-errors-client",
         browserName: "Chrome",
         osName: "macOS",
@@ -292,12 +323,22 @@ describe("Relay Server Integration", () => {
   it("revokes remote file tokens and pending metadata when an offline proxy is removed", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "file-proxy" }));
+    proxy.send(JSON.stringify(proxyRegister("file-proxy")));
     await waitForMessageType(proxy, "proxy_register_response");
     proxy.send(
       JSON.stringify({
         type: "session_sync",
-        sessions: [{ id: "file-session", mode: "pty", provider: "claude", state: "idle" }],
+        sessions: [
+          {
+            id: "file-session",
+            kind: "agent",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/project",
+            state: "idle",
+          },
+        ],
       }),
     );
     await waitForCondition(
@@ -310,6 +351,7 @@ describe("Relay Server Integration", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "file-client",
         browserName: "Chrome",
         osName: "macOS",
@@ -417,7 +459,7 @@ describe("Relay Server Integration", () => {
   it("client selects proxy and messages route bidirectionally", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
 
     const client = connectClient();
@@ -425,6 +467,7 @@ describe("Relay Server Integration", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "client-routing",
         browserName: "Chrome",
         osName: "macOS",
@@ -479,12 +522,22 @@ describe("Relay Server Integration", () => {
   it("streams remote files from proxy binary frames to HTTP responses", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForMessage(proxy);
     proxy.send(
       JSON.stringify({
         type: "session_sync",
-        sessions: [{ id: "s1", mode: "pty", provider: "claude", state: "idle" }],
+        sessions: [
+          {
+            id: "s1",
+            kind: "agent",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/project",
+            state: "idle",
+          },
+        ],
       }),
     );
     await waitForCondition(
@@ -497,6 +550,7 @@ describe("Relay Server Integration", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "client-remote-file",
         browserName: "Chrome",
         osName: "macOS",
@@ -606,12 +660,22 @@ describe("Relay Server Integration", () => {
   it("preflights remote file URLs and rejects missing files before issuing a URL", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForMessage(proxy);
     proxy.send(
       JSON.stringify({
         type: "session_sync",
-        sessions: [{ id: "s1", mode: "pty", provider: "claude", state: "idle" }],
+        sessions: [
+          {
+            id: "s1",
+            kind: "agent",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/project",
+            state: "idle",
+          },
+        ],
       }),
     );
     await waitForCondition(
@@ -624,6 +688,7 @@ describe("Relay Server Integration", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "client-remote-file-missing",
         browserName: "Chrome",
         osName: "macOS",
@@ -687,12 +752,22 @@ describe("Relay Server Integration", () => {
   it("streams HTTP uploads to proxy binary frames", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForMessage(proxy);
     proxy.send(
       JSON.stringify({
         type: "session_sync",
-        sessions: [{ id: "s1", mode: "pty", provider: "claude", state: "idle" }],
+        sessions: [
+          {
+            id: "s1",
+            kind: "agent",
+            mode: "pty",
+            provider: "claude",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/project",
+            state: "idle",
+          },
+        ],
       }),
     );
     await waitForCondition(
@@ -705,6 +780,7 @@ describe("Relay Server Integration", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "client-upload",
         browserName: "Chrome",
         osName: "macOS",
@@ -875,7 +951,7 @@ describe("Relay Server Integration", () => {
   it("GET /status returns proxy and client counts", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
 
     const res = await fetch(`http://127.0.0.1:${port}/status`);
@@ -889,7 +965,7 @@ describe("Relay Server Integration", () => {
   it("marks proxy offline when proxy disconnects, state preserved", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForCondition(() => relay.registry.listProxies().includes("p1"), "proxy not listed");
     expect(relay.registry.listProxies()).toContain("p1");
 
@@ -928,7 +1004,14 @@ describe("Relay Server Heartbeat", () => {
 
     const proxy = new WebSocket(`ws://127.0.0.1:${port}/proxy`);
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "hb-test" }));
+    proxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "hb-test",
+        proxyVersion: "0.9.0",
+      }),
+    );
     await waitForCondition(
       () => relay.registry.listProxies().includes("hb-test"),
       "proxy not listed",

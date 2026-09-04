@@ -144,7 +144,9 @@ describe("app-store proxy list lifecycle", () => {
     const { useAppStore } = await import("./app-store");
     useAppStore
       .getState()
-      .setProxies([{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: [] }]);
+      .setProxies([
+        { proxyId: "proxy-1", name: "DEV Mac", version: "0.9.0", online: true, sessions: [] },
+      ]);
 
     const observed: Array<{ proxiesLength: number; proxyListLoaded: boolean }> = [];
     const unsubscribe = useAppStore.subscribe((state) => {

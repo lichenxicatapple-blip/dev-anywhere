@@ -2,7 +2,11 @@ import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
 import { createLogger } from "@dev-anywhere/shared/logger";
-import { RELAY_JSON_MESSAGE_MAX_BYTES, serializeControl } from "@dev-anywhere/shared";
+import {
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  RELAY_JSON_MESSAGE_MAX_BYTES,
+  serializeControl,
+} from "@dev-anywhere/shared";
 import { collectMessages, waitForOpen, waitForMessage, getPort, settle } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
@@ -46,10 +50,21 @@ describe("Message routing integration", () => {
     return ws;
   }
 
+  function proxyRegister(proxyId: string, name?: string): Record<string, unknown> {
+    return {
+      type: "proxy_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      proxyId,
+      ...(name ? { name } : {}),
+      proxyVersion: "0.9.0",
+    };
+  }
+
   async function registerClient(client: WebSocket, clientId: string): Promise<void> {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId,
         browserName: "Chrome",
         osName: "macOS",
@@ -64,7 +79,7 @@ describe("Message routing integration", () => {
   async function setupBoundPair(): Promise<{ proxy: WebSocket; client: WebSocket }> {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1", name: "test-machine" }));
+    proxy.send(JSON.stringify(proxyRegister("p1", "test-machine")));
     await settle();
 
     const client = connectClient();
@@ -83,7 +98,7 @@ describe("Message routing integration", () => {
   }> {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1", name: "test-machine" }));
+    proxy.send(JSON.stringify(proxyRegister("p1", "test-machine")));
     await settle();
 
     const clientA = connectClient();
@@ -181,6 +196,7 @@ describe("Message routing integration", () => {
   it("answers Web to Relay latency probes directly", async () => {
     const client = connectClient();
     await waitForOpen(client);
+    await registerClient(client, "latency-client");
 
     const msgPromise = waitForMessage(client);
     client.send(JSON.stringify({ type: "latency_web_relay_ping", requestId: "latency-1" }));
@@ -217,22 +233,18 @@ describe("Message routing integration", () => {
     expect(typeof received.rttMs).toBe("number");
   });
 
-  // 跨租户隔离: 客户端 control msg 携带 proxyId 字段时, relay 必须忽略它, 只用 boundProxyId 路由。
-  // dir_list_request 的 schema 显式带 proxyId (历史上设计为可指定 proxy), 是这个漏洞的载体——
-  // 绑到 p1 的客户端通过 dir_list_request{proxyId:"p2"} 即可读取 p2 的本地目录。
-  it("ignores client-supplied proxyId override; routes only to boundProxyId", async () => {
-    // 起两个 proxy: p1 (client 绑这个) + p2 (client 不应能联到)
+  // 目录请求只使用当前绑定的 Proxy，额外指定目标属于非法请求。
+  it("rejects a forged dir_list_request proxyId without routing", async () => {
     const proxy1 = connectProxy();
     await waitForOpen(proxy1);
-    proxy1.send(JSON.stringify({ type: "proxy_register", proxyId: "p1", name: "m1" }));
+    proxy1.send(JSON.stringify(proxyRegister("p1", "m1")));
     await settle();
 
     const proxy2 = connectProxy();
     await waitForOpen(proxy2);
-    proxy2.send(JSON.stringify({ type: "proxy_register", proxyId: "p2", name: "m2" }));
+    proxy2.send(JSON.stringify(proxyRegister("p2", "m2")));
     await settle();
 
-    // 同时订阅两个 proxy 看 dir_list_request 落到哪里
     let p1ReceivedDirList = false;
     let p2ReceivedDirList = false;
     proxy1.on("message", (data: Buffer) => {
@@ -250,7 +262,7 @@ describe("Message routing integration", () => {
     client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
     await waitForMessage(client); // consume proxy_select_response
 
-    // 客户端尝试绕过: dir_list_request 字段里带 proxyId: "p2"
+    const errorPromise = waitForMessage(client);
     client.send(
       JSON.stringify({
         type: "dir_list_request",
@@ -261,9 +273,10 @@ describe("Message routing integration", () => {
       }),
     );
 
+    const error = JSON.parse(await errorPromise);
     await settle();
-    // 期望: 按 boundProxyId(=p1) 路由——p1 收到, p2 不收到
-    expect(p1ReceivedDirList).toBe(true);
+    expect(error).toMatchObject({ type: "relay_error", code: "INVALID_MESSAGE" });
+    expect(p1ReceivedDirList).toBe(false);
     expect(p2ReceivedDirList).toBe(false);
   });
 
@@ -279,7 +292,7 @@ describe("Message routing integration", () => {
       JSON.stringify({
         type: "pty_state",
         sessionId: "s1",
-        payload: { state: "approval_wait", tool: "Bash" },
+        payload: { state: "approval_wait", seq: 1, tool: "Bash" },
       }),
     );
 
@@ -442,7 +455,7 @@ describe("Message routing integration", () => {
     const newProxy = connectProxy();
     await waitForOpen(newProxy);
     const registerResponse = waitForMessage(newProxy);
-    newProxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    newProxy.send(JSON.stringify(proxyRegister("p1")));
     await registerResponse;
 
     const newProxyRequest = waitForMessage(newProxy);
@@ -553,12 +566,14 @@ describe("Message routing integration", () => {
     proxy.send(
       JSON.stringify({
         type: "command_list_push",
+        sessionId: "session-1",
         commands: [{ name: "/compact", description: "Compact", source: "builtin" }],
       }),
     );
 
     const received = JSON.parse(await msgPromise);
     expect(received.type).toBe("command_list_push");
+    expect(received.sessionId).toBe("session-1");
     expect(received.commands[0].name).toBe("/compact");
   });
 
@@ -584,12 +599,13 @@ describe("Message routing integration", () => {
 
   it("routes dir_list_request/response full round trip", async () => {
     const { proxy, client } = await setupBoundPair();
+    const requestId = "dir-list-round-trip";
 
     const proxyMsgPromise = waitForMessage(proxy);
     client.send(
       JSON.stringify({
         type: "dir_list_request",
-        proxyId: "p1",
+        requestId,
         path: "/home",
         includeHidden: true,
       }),
@@ -597,12 +613,14 @@ describe("Message routing integration", () => {
 
     const proxyReceived = JSON.parse(await proxyMsgPromise);
     expect(proxyReceived.type).toBe("dir_list_request");
+    expect(proxyReceived.requestId).toBe(requestId);
     expect(proxyReceived.includeHidden).toBe(true);
 
     const clientMsgPromise = waitForMessage(client);
     proxy.send(
       JSON.stringify({
         type: "dir_list_response",
+        requestId,
         path: "/home",
         entries: [{ name: "src", isDir: true }],
         includeHidden: true,
@@ -611,6 +629,7 @@ describe("Message routing integration", () => {
 
     const clientReceived = JSON.parse(await clientMsgPromise);
     expect(clientReceived.type).toBe("dir_list_response");
+    expect(clientReceived.requestId).toBe(requestId);
     expect(clientReceived.includeHidden).toBe(true);
     expect(clientReceived.entries[0].name).toBe("src");
   });
@@ -633,7 +652,9 @@ describe("Message routing integration", () => {
         type: "session_history_response",
         requestId: proxyReceived.requestId,
         success: true,
-        sessions: [{ id: "s1", title: "test", projectDir: "/proj", updatedAt: 123 }],
+        sessions: [
+          { id: "s1", title: "test", projectDir: "/proj", updatedAt: 123, provider: "claude" },
+        ],
       }),
     );
 
@@ -670,7 +691,15 @@ describe("Message routing integration", () => {
         type: "session_history_response",
         requestId: upstreamRequestId,
         success: true,
-        sessions: [{ id: "shared", title: "Shared", projectDir: "/shared", updatedAt: 2 }],
+        sessions: [
+          {
+            id: "shared",
+            title: "Shared",
+            projectDir: "/shared",
+            updatedAt: 2,
+            provider: "claude",
+          },
+        ],
       }),
     );
     await settle(100);
@@ -772,7 +801,15 @@ describe("Message routing integration", () => {
         type: "session_history_response",
         requestId: upstream.requestId,
         success: true,
-        sessions: [{ id: "survived", title: "Survived", projectDir: "/ok", updatedAt: 1 }],
+        sessions: [
+          {
+            id: "survived",
+            title: "Survived",
+            projectDir: "/ok",
+            updatedAt: 1,
+            provider: "claude",
+          },
+        ],
       }),
     );
 
@@ -831,11 +868,12 @@ describe("Message routing integration", () => {
   it("proxy_list_response includes proxy name", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1", name: "My MacBook" }));
+    proxy.send(JSON.stringify(proxyRegister("p1", "My MacBook")));
     await waitForMessage(proxy);
 
     const client = connectClient();
     await waitForOpen(client);
+    await registerClient(client, "proxy-name-client");
 
     const msgPromise = waitForMessage(client);
     client.send(JSON.stringify({ type: "proxy_list_request" }));
@@ -843,7 +881,13 @@ describe("Message routing integration", () => {
     const response = JSON.parse(await msgPromise);
     expect(response.type).toBe("proxy_list_response");
     expect(response.proxies).toEqual([
-      { proxyId: "p1", name: "My MacBook", online: true, sessions: [] },
+      {
+        proxyId: "p1",
+        name: "My MacBook",
+        version: "0.9.0",
+        online: true,
+        sessions: [],
+      },
     ]);
   });
 
@@ -931,11 +975,12 @@ describe("Message routing integration", () => {
   it("unbound client sending envelope receives relay_error", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "p1" }));
+    proxy.send(JSON.stringify(proxyRegister("p1")));
     await waitForMessage(proxy);
 
     const client = connectClient();
     await waitForOpen(client);
+    await registerClient(client, "unbound-client");
     // 不 bind，直接发 envelope
     const msgPromise = waitForMessage(client);
     client.send(
@@ -968,7 +1013,7 @@ describe("Message routing integration", () => {
       JSON.stringify({
         type: "pty_state",
         sessionId: "s1",
-        payload: { state: "working", title: "Running tests" },
+        payload: { state: "working", seq: 1, title: "Running tests" },
       }),
     );
     const jsonReceived = JSON.parse(await jsonMsgPromise);

@@ -33,8 +33,10 @@ describe("RemoteFileUploadManager", () => {
     sessionManager = {
       getSession: vi.fn(() => ({
         id: "s1",
+        kind: "agent" as const,
         mode: "pty" as const,
         provider: "claude" as const,
+        ptyOwner: "local-terminal" as const,
         state: SessionState.IDLE,
         createdAt: Date.now(),
         updatedAt: Date.now(),

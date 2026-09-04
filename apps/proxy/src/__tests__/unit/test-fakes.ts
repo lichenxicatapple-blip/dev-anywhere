@@ -4,11 +4,15 @@ import { PassThrough } from "node:stream";
 import { vi, type Mock } from "vitest";
 import type { Socket } from "node:net";
 import type { Logger } from "pino";
-import { SessionState } from "@dev-anywhere/shared";
 import type { RelayConnection } from "#src/serve/relay-connection.js";
 import type { WorkerRegistry } from "#src/serve/worker-registry.js";
 import type { SessionInfo, SessionManager } from "#src/serve/session-manager.js";
 import type { JsonObserver } from "#src/serve/json-observer.js";
+import {
+  WORKER_IPC_PROTOCOL_VERSION,
+  serializeWorkerMsg,
+  type WorkerMessage,
+} from "#src/ipc/ipc-protocol.js";
 
 interface RelayConnectionFake {
   relayConnection: RelayConnection;
@@ -44,6 +48,23 @@ export function createRelayConnectionFake(): RelayConnectionFake {
 
 export function createWritableSocketFake(write: unknown = vi.fn()) {
   return createSocketFake({ write });
+}
+
+export function serializeWorkerHandshake(
+  sessionId: string,
+  workerPid: number,
+  provider: SessionInfo["provider"],
+  ready: Extract<WorkerMessage, { type: "worker_ready" }>,
+): string {
+  return (
+    serializeWorkerMsg({
+      type: "worker_protocol_hello",
+      protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+      sessionId,
+      pid: workerPid,
+      provider,
+    }) + serializeWorkerMsg(ready)
+  );
 }
 
 export function createSocketFake(options?: { writable?: boolean; write?: unknown; end?: unknown }) {
@@ -82,23 +103,12 @@ export function createWorkerRegistryFake(options?: {
   } as unknown as WorkerRegistry;
 }
 
-type SessionFake = Partial<SessionInfo> & Pick<SessionInfo, "id">;
-
-export function createSessionManagerFake(sessions: SessionFake[] = []): SessionManager {
-  const normalized = sessions.map((session) => ({
-    mode: "pty" as const,
-    provider: "claude" as const,
-    state: SessionState.IDLE,
-    createdAt: 0,
-    updatedAt: 0,
-    cwd: "/tmp",
-    pid: 1,
-    ...session,
-  }));
+export function createSessionManagerFake(sessions: SessionInfo[] = []): SessionManager {
+  const currentSessions = sessions.map((session) => ({ ...session }));
 
   return {
-    getSession: vi.fn((id: string) => normalized.find((session) => session.id === id)),
-    listSessions: vi.fn(() => normalized),
+    getSession: vi.fn((id: string) => currentSessions.find((session) => session.id === id)),
+    listSessions: vi.fn(() => currentSessions),
     terminateSession: vi.fn(() => ({ success: true })),
     setClaudeSessionId: vi.fn(),
     setHistorySessionId: vi.fn(),

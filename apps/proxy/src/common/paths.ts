@@ -26,6 +26,7 @@ interface ProxyProfilePaths {
   desiredRelayPath: string;
   stateDir: string;
   sessionsPath: string;
+  sessionRuntimeIpcVersionPath: string;
   historyMetadataPath: string;
   previewsPath: string;
   hookRegistryPath: string;
@@ -114,6 +115,7 @@ export function buildProxyProfilePaths(home: string, profileName: string): Proxy
     desiredRelayPath: `${runDir}/desired-relay`,
     stateDir,
     sessionsPath: `${stateDir}/sessions.json`,
+    sessionRuntimeIpcVersionPath: `${stateDir}/session-runtime-ipc-version`,
     historyMetadataPath: `${stateDir}/history-metadata.json`,
     previewsPath: `${stateDir}/previews.json`,
     hookRegistryPath: `${stateDir}/hooks.json`,
@@ -164,6 +166,7 @@ export const AUTO_UPDATE_LOCK_PATH = `${APP_DIR}/run/auto-update.lock`;
 // 持久化状态
 const STATE_DIR = PROFILE_PATHS.stateDir;
 export const SESSIONS_PATH = PROFILE_PATHS.sessionsPath;
+export const SESSION_RUNTIME_IPC_VERSION_PATH = PROFILE_PATHS.sessionRuntimeIpcVersionPath;
 export const HISTORY_METADATA_PATH = PROFILE_PATHS.historyMetadataPath;
 export const PREVIEWS_PATH = PROFILE_PATHS.previewsPath;
 export const HOOK_REGISTRY_PATH = PROFILE_PATHS.hookRegistryPath;

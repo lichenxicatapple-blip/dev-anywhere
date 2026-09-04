@@ -185,7 +185,15 @@ test.describe("L4 mobile / PTY touch link activation", () => {
   test("tap on an xterm-wrapped PTY document path does not trigger download", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     const path =
@@ -219,7 +227,15 @@ test.describe("L4 mobile / PTY touch link activation", () => {
   test("does not combine indented hard-newline path fragments into one link", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     const path =
@@ -253,7 +269,15 @@ test.describe("L4 mobile / PTY touch link activation", () => {
   test("tap on a PTY image path opens image preview (no modifier on touch surface)", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
     await emitLineAndAwait(
       emuPage,

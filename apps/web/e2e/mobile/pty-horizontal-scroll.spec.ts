@@ -72,13 +72,14 @@ async function touchDrag(
 test.describe("L4 mobile / PTY input scroll", () => {
   test.setTimeout(60_000);
 
-  test("keeps a legacy Shell session at its snapshot width after mobile reconnect", async ({
+  test("keeps a local-terminal Shell session at its snapshot width after mobile reconnect", async ({
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-session-owned`;
     await setupPtyChat(emuPage, {
       sessionId,
       sessionKind: "terminal",
+      provider: "claude",
       ptyOwner: "local-terminal",
       cols: 80,
       rows: 24,
@@ -122,6 +123,9 @@ test.describe("L4 mobile / PTY input scroll", () => {
     const sessionId = `${SESSION_ID}-snapshot-lookahead`;
     await setupPtyChat(emuPage, {
       sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
       cols: 270,
       rows: 52,
       snapshotData: "x".repeat(40),
@@ -170,7 +174,15 @@ test.describe("L4 mobile / PTY input scroll", () => {
     await emuPage.addInitScript(() => {
       localStorage.setItem("dev_anywhere_pty_scroll_trace", "1");
     });
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await resizePty(emuPage, 80, 24);
@@ -203,7 +215,15 @@ test.describe("L4 mobile / PTY input scroll", () => {
   test("keeps following the cursor after Chrome nudges scrollLeft while typing", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: `${SESSION_ID}-nudge`, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: `${SESSION_ID}-nudge`,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await resizePty(emuPage, 270, 52);
@@ -233,7 +253,15 @@ test.describe("L4 mobile / PTY input scroll", () => {
 
   test("starts following before the cursor reaches the mobile right edge", async ({ emuPage }) => {
     const sessionId = `${SESSION_ID}-right-edge-follow`;
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await resizePty(emuPage, 80, 24);
@@ -265,7 +293,15 @@ test.describe("L4 mobile / PTY input scroll", () => {
   test("resets horizontal scroll to line start after mobile-control Enter on a long line", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await resizePty(emuPage, 270, 52);
@@ -304,7 +340,15 @@ test.describe("L4 mobile / PTY input scroll", () => {
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-vertical-drift`;
-    await setupPtyChat(emuPage, { sessionId, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await resizePty(emuPage, 270, 52);

@@ -19,7 +19,7 @@ test.describe("ToolApprovalCard — keyboard shortcuts", () => {
         sessionId: "json-sess",
         timestamp: Date.now(),
         source: "proxy",
-        version: "1",
+        version: "1.0",
         type: "session_status",
         payload: {
           sessionId: "json-sess",

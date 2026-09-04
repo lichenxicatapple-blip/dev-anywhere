@@ -84,6 +84,7 @@ describe("RelayControlSchema round-trip stability", () => {
     const original = {
       type: "session_create",
       requestId: "req-1",
+      kind: "agent",
       cwd: "/home/u/proj",
       name: "Release checklist",
       provider: "claude",
@@ -105,8 +106,11 @@ describe("RelayControlSchema round-trip stability", () => {
       requestId: "req-1",
       success: true,
       sessionId: "sess-new",
+      cwd: "/tmp/project",
+      lastActive: 1,
       name: "Release checklist",
       nameLocked: true,
+      kind: "agent",
       mode: "json",
       provider: "claude",
     };
@@ -120,6 +124,7 @@ describe("RelayControlSchema round-trip stability", () => {
     const original = {
       type: "session_create_response",
       requestId: "req-conflict",
+      success: false,
       errorCode: "SESSION_ALREADY_ACTIVE",
       error: "另一个 Codex 进程正在使用此会话",
       activeWriterPid: 46559,
@@ -155,8 +160,8 @@ describe("RelayControlSchema round-trip stability", () => {
     const original = {
       type: "proxy_list_response",
       proxies: [
-        { proxyId: "p1", name: "DEV Mac", online: true },
-        { proxyId: "p2", online: false },
+        { proxyId: "p1", name: "DEV Mac", version: "0.9.0", online: true, sessions: [] },
+        { proxyId: "p2", version: "0.9.0", online: false, sessions: [] },
       ],
     };
     const a = RelayControlSchema.parse(original);

@@ -13,9 +13,9 @@ interface TerminalWorkerCliArgs {
   rows: number;
 }
 
-function parseDimension(value: string | undefined, fallback: number, max: number): number {
+function parseDimension(value: string | undefined, max: number): number | null {
   const parsed = Number(value);
-  if (!Number.isInteger(parsed) || parsed <= 0) return fallback;
+  if (!Number.isInteger(parsed) || parsed <= 0) return null;
   return Math.min(max, parsed);
 }
 
@@ -40,11 +40,14 @@ export function parseTerminalWorkerCliArgs(argv: readonly string[]): TerminalWor
 
   const [sessionId, cwd, name, colsValue, rowsValue] = argv.slice(index);
   if (!sessionId || !cwd || !name) return null;
+  const cols = parseDimension(colsValue, PTY_INITIAL_MAX_COLS);
+  const rows = parseDimension(rowsValue, PTY_INITIAL_MAX_ROWS);
+  if (cols === null || rows === null) return null;
   return {
     sessionId,
     cwd,
     name,
-    cols: parseDimension(colsValue, PTY_INITIAL_MIN_COLS, PTY_INITIAL_MAX_COLS),
-    rows: parseDimension(rowsValue, PTY_INITIAL_MIN_ROWS, PTY_INITIAL_MAX_ROWS),
+    cols: Math.max(PTY_INITIAL_MIN_COLS, cols),
+    rows: Math.max(PTY_INITIAL_MIN_ROWS, rows),
   };
 }

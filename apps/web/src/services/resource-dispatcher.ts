@@ -10,12 +10,7 @@ import type { InboundMessage } from "./relay-client";
 function handleCommandListPush(
   msg: Extract<RelayControlMessage, { type: "command_list_push" }>,
 ): void {
-  const store = useCommandStore.getState();
-  if (msg.sessionId !== undefined) {
-    store.setSessionCommands(msg.sessionId, msg.commands);
-    return;
-  }
-  store.setCommands(msg.commands);
+  useCommandStore.getState().setSessionCommands(msg.sessionId, msg.commands);
 }
 
 function handleFileTreePush(msg: Extract<RelayControlMessage, { type: "file_tree_push" }>): void {
@@ -34,14 +29,6 @@ function applyFileTreeGroups(
   }
 }
 
-function handleSessionResourcesResponse(
-  msg: Extract<RelayControlMessage, { type: "session_resources_response" }>,
-): void {
-  useCommandStore.getState().setSessionCommands(msg.sessionId, msg.commands);
-  useFileStore.getState().clearTree();
-  applyFileTreeGroups(msg.groups);
-}
-
 export function dispatchResourceMessage(msg: InboundMessage): void {
   switch (msg.type) {
     case "command_list_push":
@@ -49,10 +36,6 @@ export function dispatchResourceMessage(msg: InboundMessage): void {
       break;
     case "file_tree_push":
       handleFileTreePush(msg);
-      break;
-    case "session_resources_response":
-      if (msg.requestId) break;
-      handleSessionResourcesResponse(msg);
       break;
     case "proxy_info":
       useFileStore.getState().setHomePath(msg.homePath);

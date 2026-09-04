@@ -4,7 +4,11 @@
 // 真实 type literals (见 packages/shared/src/schemas/envelope.ts + relay-control.ts):
 //   Envelope 层: assistant_message / tool_use_request / tool_result / thinking / user_input
 //   Control 层: pending_approvals_push / session_history_messages / turn_result
-import type { MessageEnvelope, RelayControlMessage } from "@dev-anywhere/shared";
+import {
+  MESSAGE_ENVELOPE_VERSION,
+  type MessageEnvelope,
+  type RelayControlMessage,
+} from "@dev-anywhere/shared";
 import { useChatStore, type ChatMessage } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
 import type { RelayClient } from "@/services/relay-client";
@@ -51,7 +55,7 @@ function flushQueuedUserInputBatch(sessionId: string, relay: ChatRelay | null): 
     seq: 0,
     timestamp: now,
     source: "client",
-    version: "1",
+    version: MESSAGE_ENVELOPE_VERSION,
   });
   return true;
 }

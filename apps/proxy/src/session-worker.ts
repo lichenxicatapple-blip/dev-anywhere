@@ -14,8 +14,17 @@ import {
 } from "./worker/kimi-acp-session.js";
 import { createApprovalRequestIdFactory } from "./common/approval-request-id.js";
 import { SeqCounter } from "./common/seq-counter.js";
-import { createWorkerReader, serializeWorkerMsg, type WorkerMessage } from "./ipc/ipc-protocol.js";
-import { releaseServeSocket, takeoverServeSocket } from "./worker/serve-socket-takeover.js";
+import {
+  WORKER_IPC_PROTOCOL_VERSION,
+  createWorkerReader,
+  serializeWorkerMsg,
+  type WorkerMessage,
+} from "./ipc/ipc-protocol.js";
+import {
+  acceptCurrentServeSocketMessage,
+  releaseServeSocket,
+  takeoverServeSocket,
+} from "./worker/serve-socket-takeover.js";
 import type { ProviderHookContext, ProviderId } from "./providers/index.js";
 import { ControlErrorCode } from "@dev-anywhere/shared";
 import {
@@ -46,17 +55,22 @@ const workerHookUrl = getArg("--hook-url");
 const workerHookMarker = getArg("--hook-marker");
 const workerHookToken = process.env.DEV_ANYWHERE_HOOK_TOKEN;
 const workerHookProvider = getArg("--hook-provider") as ProviderHookContext["provider"] | undefined;
-const provider = (getArg("--provider") ?? "claude") as ProviderId;
+const providerArg = getArg("--provider");
 
 if (!sessionId || !sockPath) {
   console.error("Usage: session-worker <sessionId> <socketPath> [-- claudeArgs...]");
   process.exit(1);
 }
 
-if (provider !== "claude" && provider !== "codex" && provider !== "kimi") {
-  console.error(`Unsupported JSON worker provider: ${provider}`);
+if (providerArg !== "claude" && providerArg !== "codex" && providerArg !== "kimi") {
+  console.error(
+    providerArg === undefined
+      ? "JSON worker provider is required"
+      : `Unsupported JSON worker provider: ${providerArg}`,
+  );
   process.exit(1);
 }
+const provider = providerArg as ProviderId;
 
 const workerHook: ProviderHookContext | undefined =
   workerHookUrl && workerHookMarker && workerHookToken && workerHookProvider
@@ -70,8 +84,11 @@ const workerHook: ProviderHookContext | undefined =
     : undefined;
 
 let serveSocket: Socket | null = null;
+let negotiatedServeSocket: Socket | null = null;
 const queuedServeMessages: WorkerMessage[] = [];
 let latestKimiCommandEvent: Extract<WorkerMessage, { type: "worker_event" }> | null = null;
+let readyMessage: Extract<WorkerMessage, { type: "worker_ready" }> | null = null;
+let providerReady = false;
 let exiting = false;
 let kimiTurnActive = false;
 const seqCounter = new SeqCounter(sessionId);
@@ -117,7 +134,13 @@ function isKimiCommandEvent(
 
 function sendToServe(msg: WorkerMessage): void {
   if (isKimiCommandEvent(msg)) latestKimiCommandEvent = msg;
-  if (serveSocket?.writable) {
+  if (!providerReady && msg.type !== "worker_startup_error" && msg.type !== "worker_exit") {
+    if (!isKimiCommandEvent(msg) && msg.type !== "worker_approval_request") {
+      queuedServeMessages.push(msg);
+    }
+    return;
+  }
+  if (serveSocket?.writable && negotiatedServeSocket === serveSocket) {
     serveSocket.write(serializeWorkerMsg(msg));
     return;
   }
@@ -128,10 +151,47 @@ function sendToServe(msg: WorkerMessage): void {
 }
 
 function flushQueuedServeMessages(): void {
-  if (!serveSocket?.writable) return;
+  if (!serveSocket?.writable || negotiatedServeSocket !== serveSocket) return;
   while (queuedServeMessages.length > 0) {
     const msg = queuedServeMessages.shift();
     if (msg) serveSocket.write(serializeWorkerMsg(msg));
+  }
+}
+
+function reportReady(message: Extract<WorkerMessage, { type: "worker_ready" }>): void {
+  readyMessage = message;
+  providerReady = true;
+  replayServeState(serveSocket);
+}
+
+function replayServeState(socket: Socket | null): void {
+  if (!socket?.writable || serveSocket !== socket || negotiatedServeSocket !== socket) return;
+  if (!providerReady || !readyMessage) return;
+
+  socket.write(serializeWorkerMsg(readyMessage));
+  const queuedKimiTurnStart = queuedServeMessages.some(
+    (message) => message.type === "worker_turn_started",
+  );
+  // If start happened on the previous connection, restore WORKING before replaying chunks. When
+  // start itself is queued, preserve backlog order (previous result -> next start -> next chunks).
+  if (provider === "kimi" && kimiTurnActive && !queuedKimiTurnStart) {
+    socket.write(serializeWorkerMsg({ type: "worker_turn_started" }));
+  }
+  flushQueuedServeMessages();
+  if (latestKimiCommandEvent && socket.writable) {
+    socket.write(serializeWorkerMsg(latestKimiCommandEvent));
+  }
+
+  for (const [requestId, pending] of pendingApprovals) {
+    socket.write(
+      serializeWorkerMsg({
+        type: "worker_approval_request",
+        requestId,
+        toolName: pending.toolName,
+        input: pending.input,
+        ...(pending.options ? { options: pending.options } : {}),
+      }),
+    );
   }
 }
 
@@ -162,7 +222,8 @@ function handleProviderEvent(event: Record<string, unknown>): void {
   // 从 system 事件中捕获 Claude 会话 ID 并通知 serve
   if (event.type === "system" && typeof event.session_id === "string") {
     sendToServe({
-      type: "worker_claude_session_id",
+      type: "worker_native_session_id",
+      provider: "claude",
       sessionId: event.session_id,
     });
   }
@@ -296,33 +357,45 @@ const session =
 function handleServeConnection(socket: Socket): void {
   const previousServeSocket = serveSocket;
   serveSocket = socket;
+  negotiatedServeSocket = null;
   takeoverServeSocket(previousServeSocket, socket);
-  const queuedKimiTurnStart = queuedServeMessages.some(
-    (message) => message.type === "worker_turn_started",
+  // Every daemon connection begins with an independent protocol handshake. Provider readiness
+  // follows separately, so bootstrap failures can still be delivered on a negotiated connection.
+  serveSocket.write(
+    serializeWorkerMsg({
+      type: "worker_protocol_hello",
+      protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+      sessionId,
+      provider,
+      pid: process.pid,
+    }),
   );
-  // If start happened on the previous connection, restore WORKING before replaying chunks. When
-  // start itself is queued, preserve backlog order (previous result -> next start -> next chunks).
-  if (provider === "kimi" && kimiTurnActive && !queuedKimiTurnStart && serveSocket.writable) {
-    serveSocket.write(serializeWorkerMsg({ type: "worker_turn_started" }));
-  }
-  flushQueuedServeMessages();
-  if (latestKimiCommandEvent && serveSocket.writable) {
-    serveSocket.write(serializeWorkerMsg(latestKimiCommandEvent));
-  }
-
-  for (const [requestId, pending] of pendingApprovals) {
-    sendToServe({
-      type: "worker_approval_request",
-      requestId,
-      toolName: pending.toolName,
-      input: pending.input,
-      ...(pending.options ? { options: pending.options } : {}),
-    });
-  }
-
+  let protocolAccepted = false;
   createWorkerReader(
     socket,
     (msg: WorkerMessage) => {
+      if (!acceptCurrentServeSocketMessage(serveSocket, socket)) return;
+      if (!protocolAccepted) {
+        if (msg.type !== "serve_protocol_hello" || msg.sessionId !== sessionId) {
+          console.error("[worker] serve IPC protocol handshake rejected");
+          socket.destroy();
+          return;
+        }
+        protocolAccepted = true;
+        negotiatedServeSocket = socket;
+        replayServeState(socket);
+        return;
+      }
+      if (msg.type === "serve_protocol_hello") {
+        console.error("[worker] duplicate serve IPC protocol hello");
+        socket.destroy();
+        return;
+      }
+      if (!providerReady && msg.type !== "worker_stop") {
+        console.error(`[worker] serve message ${msg.type} arrived before provider readiness`);
+        socket.destroy();
+        return;
+      }
       switch (msg.type) {
         case "worker_input":
           session.sendMessage(msg.content);
@@ -365,9 +438,17 @@ function handleServeConnection(socket: Socket): void {
         case "worker_whitelist_add":
           whitelist.add(msg.toolName);
           break;
+        default:
+          console.error(`[worker] invalid serve-to-worker message type: ${msg.type}`);
+          socket.destroy();
       }
     },
     (err) => {
+      if (!protocolAccepted) {
+        console.error(`[worker] serve IPC protocol handshake rejected: ${err.message}`);
+        socket.destroy();
+        return;
+      }
       // worker 进程没有 pino logger，console.error 经 ipc-protocol 捕获到 stderr。
       // 同样不让单条 schema 错误升级成 socket close。
       console.error(`[worker] serve IPC message dropped: ${err.message}`);
@@ -376,11 +457,13 @@ function handleServeConnection(socket: Socket): void {
 
   socket.on("close", () => {
     serveSocket = releaseServeSocket(serveSocket, socket, () => {
+      negotiatedServeSocket = null;
       rejectAllPendingApprovals("Serve connection closed");
     });
   });
   socket.on("error", () => {
     serveSocket = releaseServeSocket(serveSocket, socket, () => {
+      negotiatedServeSocket = null;
       rejectAllPendingApprovals("Serve connection error");
     });
   });
@@ -437,7 +520,7 @@ server.listen(sockPath, () => {
     void session
       .waitUntilReady()
       .then((threadId) => {
-        sendToServe({
+        reportReady({
           type: "worker_ready",
           pid,
           nativeSession: { provider: "codex", sessionId: threadId },
@@ -467,7 +550,7 @@ server.listen(sockPath, () => {
     void session
       .waitUntilReady()
       .then((kimiSessionId) => {
-        sendToServe({
+        reportReady({
           type: "worker_ready",
           pid,
           nativeSession: { provider: "kimi", sessionId: kimiSessionId },
@@ -486,6 +569,6 @@ server.listen(sockPath, () => {
         void session.stop(0).finally(() => handleProviderExit(1));
       });
   } else {
-    sendToServe({ type: "worker_ready", pid });
+    reportReady({ type: "worker_ready", pid });
   }
 });

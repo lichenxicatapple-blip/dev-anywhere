@@ -9,6 +9,7 @@ import type { RelayConnection } from "#src/serve/relay-connection.js";
 function makeSessionManager(): SessionManager {
   return new SessionManager({
     persistPath: join(mkdtempSync(join(tmpdir(), "event-bridge-test-")), "sessions.json"),
+    allowSessionRuntimeHandover: true,
   });
 }
 
@@ -18,11 +19,21 @@ function makeBridge(opts: {
   permissionCleanup?: () => void;
 }) {
   const manager = makeSessionManager();
-  const session = manager.createSession("pty", "/tmp/p", process.pid);
+  const session = manager.createSession(
+    "agent",
+    "pty",
+    "claude",
+    "/tmp/p",
+    process.pid,
+    undefined,
+    undefined,
+    "local-terminal",
+  );
   const envelopes: unknown[] = [];
+  const rawMessages: string[] = [];
   const relay = {
     sendEnvelope: (envelope: unknown) => envelopes.push(envelope),
-    sendRaw: vi.fn(),
+    sendRaw: (raw: string) => rawMessages.push(raw),
   } as unknown as RelayConnection;
   const bridge = createEventBridge({
     sessionManager: manager,
@@ -37,7 +48,7 @@ function makeBridge(opts: {
       cleanupSession: opts.permissionCleanup ?? vi.fn(),
     },
   });
-  return { manager, bridge, envelopes, sessionId: session.id };
+  return { manager, bridge, envelopes, rawMessages, sessionId: session.id };
 }
 
 describe("cleanupSessionResources isolation", () => {
@@ -94,5 +105,17 @@ describe("cleanupSessionResources isolation", () => {
     bridge.cleanupSessionResources(sessionId);
 
     expect(calls).toEqual(["control", "agent", "permission"]);
+  });
+
+  it("replaces Relay session associations with the post-removal snapshot", () => {
+    const { manager, bridge, rawMessages, sessionId } = makeBridge({});
+    manager.terminateSession(sessionId);
+
+    bridge.cleanupSessionResources(sessionId);
+
+    expect(rawMessages.map((raw) => JSON.parse(raw))).toContainEqual({
+      type: "session_sync",
+      sessions: [],
+    });
   });
 });

@@ -34,7 +34,11 @@ test.describe("L4 mobile / PTY paste", () => {
 
     await setupPtyChat(emuPage, {
       sessionId: SESSION_ID,
+      sessionKind: "agent",
       provider: "codex",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
       baseUrl: mobileBaseUrl,
     });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });

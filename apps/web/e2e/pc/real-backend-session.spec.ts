@@ -76,7 +76,7 @@ test.describe("real backend session protocol-level e2e", () => {
         seq: Date.now(),
         timestamp: Date.now(),
         source: "client",
-        version: "1",
+        version: "1.0",
         payload: {
           text: "Reply with just the single word: pong",
           messageId: `${jsonMode.sessionId}-real-input`,

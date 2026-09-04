@@ -10,6 +10,7 @@ import {
   PID_PATH,
   STOPPED_PATH,
   SESSIONS_PATH,
+  SESSION_RUNTIME_IPC_VERSION_PATH,
   HISTORY_METADATA_PATH,
   PROXY_ID_PATH,
   PROFILE_NAME,
@@ -19,7 +20,16 @@ import {
   sessionPaths,
 } from "./common/paths.js";
 import { buildProviderEnv, loadConfig } from "./common/config.js";
-import { serializeIpc } from "./ipc/ipc-protocol.js";
+import {
+  serializeIpc,
+  TERMINAL_IPC_PROTOCOL_VERSION,
+  WORKER_IPC_PROTOCOL_VERSION,
+} from "./ipc/ipc-protocol.js";
+import {
+  readSessionRuntimeIpcVersions,
+  sessionRuntimeIpcVersionsMatch,
+  writeSessionRuntimeIpcVersions,
+} from "./common/session-runtime-ipc-version.js";
 import { createControlMessageHandlers } from "./serve/handlers/control-messages.js";
 import { WorkerRegistry } from "./serve/worker-registry.js";
 import { RelayRouter } from "./serve/relay-router.js";
@@ -141,9 +151,18 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   // runtime 就绪后再接入统一清理出口，让手动终止、worker 退出、reaper 和 PTY 关闭
   // 都通过同一条 onSessionRemoved 生命周期完成资源回收与 session_list 广播。
   let cleanupRemovedSessionRuntime: (sessionId: string) => void = () => {};
+  const currentSessionRuntimeIpcVersions = {
+    terminal: TERMINAL_IPC_PROTOCOL_VERSION,
+    worker: WORKER_IPC_PROTOCOL_VERSION,
+  };
+  const allowSessionRuntimeHandover = sessionRuntimeIpcVersionsMatch(
+    readSessionRuntimeIpcVersions(SESSION_RUNTIME_IPC_VERSION_PATH),
+    currentSessionRuntimeIpcVersions,
+  );
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     historyMetadataPath: HISTORY_METADATA_PATH,
+    allowSessionRuntimeHandover,
     onSessionRemoved: (id, context) => {
       if (!context?.preserveProviderHooks) {
         unregisterHookSession(id);
@@ -157,6 +176,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
       cleanupRemovedSessionRuntime(id);
     },
   });
+  // Publish the current generation only after SessionManager has finished validating persisted
+  // runtime records. If startup is interrupted before this write, the next daemon refuses
+  // handover rather than adopting an unverified process.
+  writeSessionRuntimeIpcVersions(
+    SESSION_RUNTIME_IPC_VERSION_PATH,
+    currentSessionRuntimeIpcVersions,
+  );
   sessionManager.startReaper();
 
   const terminalSockets = new Map<string, Socket>();
@@ -387,7 +413,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     hostedPtyRegistry,
     terminalWorkerSpawner,
     broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
-    broadcastSessionSync: (session) => broadcastSessionSync(relayConnection, session),
+    broadcastSessionSync: () => broadcastSessionSync(relayConnection, sessionManager),
     jsonObserver,
     createHookContext: hookRuntime.createHookContext,
     cleanupHookContext: (sessionId) => hookRuntime.hookRegistry.unregisterSession(sessionId),

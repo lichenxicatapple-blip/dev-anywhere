@@ -139,6 +139,7 @@ describe("RelayHistoryHandlers resumed JSON history", () => {
     const sent: string[] = [];
     const session: SessionInfo = {
       id: "s1",
+      kind: "agent",
       mode: "json",
       provider: "claude",
       state: SessionState.IDLE,
@@ -203,6 +204,7 @@ describe("RelayHistoryHandlers resumed JSON history", () => {
     const sent: string[] = [];
     const session: SessionInfo = {
       id: "s1",
+      kind: "agent",
       mode: "json",
       provider: "claude",
       state: SessionState.IDLE,

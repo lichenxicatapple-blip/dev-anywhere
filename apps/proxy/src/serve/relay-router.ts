@@ -11,7 +11,7 @@ import {
 } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import { serializeIpc } from "../ipc/ipc-protocol.js";
-import type { SessionInfo, SessionManager } from "./session-manager.js";
+import type { SessionManager } from "./session-manager.js";
 import type { WorkerRegistry } from "./worker-registry.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelayConnection } from "./relay-connection.js";
@@ -50,7 +50,7 @@ interface RelayRouterDeps {
   hostedPtyRegistry: HostedPtyRegistry;
   terminalWorkerSpawner: TerminalWorkerSpawner;
   broadcastSessionList: () => void;
-  broadcastSessionSync: (session: SessionInfo) => void;
+  broadcastSessionSync: () => void;
   // user_input 注入触发 turn 开始（JSON 观察器）
   jsonObserver: JsonObserver;
   createHookContext: (
@@ -164,11 +164,18 @@ export class RelayRouter {
   // 强类型窄化后的消息，不再需要 `as string | undefined` / `as { ... }` 裸 cast。
   handle(rawMsg: Record<string, unknown>): void {
     const asEnvelope = MessageEnvelopeSchema.safeParse(rawMsg);
-    if (asEnvelope.success && asEnvelope.data.type === "user_input") {
-      try {
-        this.inputHandlers.onUserInput(asEnvelope.data);
-      } catch (err) {
-        serviceLogger.warn({ type: "user_input", error: String(err) }, "Relay handler threw");
+    if (asEnvelope.success) {
+      if (asEnvelope.data.type === "user_input") {
+        try {
+          this.inputHandlers.onUserInput(asEnvelope.data);
+        } catch (err) {
+          serviceLogger.warn({ type: "user_input", error: String(err) }, "Relay handler threw");
+        }
+      } else {
+        serviceLogger.warn(
+          { type: asEnvelope.data.type },
+          "Inbound envelope type is not accepted from Relay",
+        );
       }
       return;
     }
@@ -320,7 +327,7 @@ export class RelayRouter {
       case "session_history_request":
         this.deps.controlHandlers.handleSessionHistoryRequest({ requestId: msg.requestId });
         return;
-      case "session_list":
+      case "session_list_request":
         this.onSessionList();
         return;
       case "permission_mode_change":

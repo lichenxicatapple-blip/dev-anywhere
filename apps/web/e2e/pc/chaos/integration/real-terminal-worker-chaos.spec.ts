@@ -127,7 +127,12 @@ test.describe("real terminal worker chaos", () => {
   test("keeps shell input and Vim cursor keys interactive through the full relay path", async ({
     localRuntime,
   }) => {
-    const session = await spawnSessionViaRelay(localRuntime, { kind: "terminal", mode: "pty" });
+    const session = await spawnSessionViaRelay(localRuntime, {
+      kind: "terminal",
+      mode: "pty",
+      cols: 80,
+      rows: 24,
+    });
     const output = new PtyOutputCapture(session);
     const send = (data: string): void => {
       session.send({ type: "remote_input_raw", sessionId: session.sessionId, data });
@@ -163,7 +168,12 @@ test.describe("real terminal worker chaos", () => {
   test("keeps a web-created pure terminal usable across proxy serve restart", async ({
     localRuntime,
   }) => {
-    const session = await spawnSessionViaRelay(localRuntime, { kind: "terminal", mode: "pty" });
+    const session = await spawnSessionViaRelay(localRuntime, {
+      kind: "terminal",
+      mode: "pty",
+      cols: 80,
+      rows: 24,
+    });
     expect(session.kind).toBe("terminal");
     expect(session.ptyOwner).toBe("local-terminal");
 

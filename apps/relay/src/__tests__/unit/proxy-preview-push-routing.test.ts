@@ -2,6 +2,12 @@ import { EventEmitter } from "node:events";
 import { describe, expect, it, vi } from "vitest";
 import { WebSocket } from "ws";
 import { createLogger } from "@dev-anywhere/shared/logger";
+import {
+  buildMessage,
+  encodeBinaryFrame,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  RelayCloseCode,
+} from "@dev-anywhere/shared";
 import { handleProxyConnection } from "#src/handlers/proxy.js";
 import { handleClientConnection } from "#src/handlers/client.js";
 import { PtySnapshotRouteRegistry } from "#src/pty-snapshot-route-registry.js";
@@ -18,6 +24,7 @@ class FakeSocket extends EventEmitter {
   isAlive = true;
   readonly sent: string[] = [];
   readonly terminate = vi.fn();
+  readonly close = vi.fn();
   clientId?: string;
 
   send(data: unknown): void {
@@ -31,6 +38,19 @@ function asWebSocket(socket: FakeSocket): WebSocket {
 
 function receive(socket: FakeSocket, message: Record<string, unknown>): void {
   socket.emit("message", Buffer.from(JSON.stringify(message)), false);
+}
+
+function receiveBinary(socket: FakeSocket, data: Uint8Array): void {
+  socket.emit("message", Buffer.from(data), true);
+}
+
+function proxyRegistration(proxyId: string): Record<string, unknown> {
+  return {
+    type: "proxy_register",
+    protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+    proxyId,
+    proxyVersion: "0.9.0",
+  };
 }
 
 function previewEvents(): Array<Record<string, unknown>> {
@@ -159,8 +179,8 @@ function queueDelayedPreviewListRequest(kind: "Web" | "Device") {
   const devicePreviewBridge = new DevicePreviewBridge({ registry, logger, chaos });
   const proxyA = new FakeSocket();
   const proxyB = new FakeSocket();
-  registry.registerProxy("proxy-a", asWebSocket(proxyA));
-  registry.registerProxy("proxy-b", asWebSocket(proxyB));
+  registry.registerProxy("proxy-a", asWebSocket(proxyA), "0.9.0");
+  registry.registerProxy("proxy-b", asWebSocket(proxyB), "0.9.0");
 
   const client = new FakeSocket();
   client.clientId = "client-1";
@@ -280,6 +300,121 @@ function clearTestLeases(bridge: DevicePreviewBridge): void {
 }
 
 describe("Proxy preview push routing", () => {
+  it("drops every message class from a superseded Proxy socket", () => {
+    const registry = new RelayRegistry();
+    const ptySnapshotRoutes = new PtySnapshotRouteRegistry();
+    const sessionHistoryRoutes = new SessionHistoryRouteRegistry();
+    const webPreviewRoutes = new WebPreviewRouteRegistry();
+    const devicePreviewBridge = new DevicePreviewBridge({ registry, logger });
+    const oldProxy = new FakeSocket();
+    const currentProxy = new FakeSocket();
+    for (const proxy of [oldProxy, currentProxy]) {
+      handleProxyConnection(
+        asWebSocket(proxy),
+        registry,
+        logger,
+        ptySnapshotRoutes,
+        sessionHistoryRoutes,
+        webPreviewRoutes,
+        devicePreviewBridge,
+      );
+    }
+
+    receive(oldProxy, proxyRegistration("proxy-1"));
+    receive(currentProxy, proxyRegistration("proxy-1"));
+    const client = new FakeSocket();
+    registry.bindClientById("client-1", "proxy-1", asWebSocket(client));
+
+    receive(currentProxy, {
+      type: "session_sync",
+      sessions: [
+        {
+          id: "current-session",
+          kind: "agent",
+          mode: "pty",
+          provider: "claude",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp/current",
+          state: "idle",
+        },
+      ],
+    });
+    receive(oldProxy, {
+      type: "session_sync",
+      sessions: [
+        {
+          id: "stale-session",
+          kind: "agent",
+          mode: "pty",
+          provider: "claude",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp/stale",
+          state: "idle",
+        },
+      ],
+    });
+    receive(
+      oldProxy,
+      buildMessage(
+        "assistant_message",
+        "stale-session",
+        1,
+        { turnId: "stale-turn", revision: 1, text: "stale", status: "completed" },
+        "proxy",
+      ),
+    );
+    receiveBinary(oldProxy, encodeBinaryFrame("stale-session", 1, new TextEncoder().encode("x")));
+
+    expect(registry.getSessionsForProxy("proxy-1")).toEqual(["current-session"]);
+    expect(client.sent).toEqual([]);
+
+    receive(
+      currentProxy,
+      buildMessage(
+        "assistant_message",
+        "current-session",
+        1,
+        { turnId: "current-turn", revision: 1, text: "current", status: "completed" },
+        "proxy",
+      ),
+    );
+    expect(client.sent).toHaveLength(1);
+
+    devicePreviewBridge.dispose();
+    webPreviewRoutes.dispose();
+  });
+
+  it("rejects a second Proxy registration on the same socket without creating a ghost identity", () => {
+    const registry = new RelayRegistry();
+    const ptySnapshotRoutes = new PtySnapshotRouteRegistry();
+    const sessionHistoryRoutes = new SessionHistoryRouteRegistry();
+    const webPreviewRoutes = new WebPreviewRouteRegistry();
+    const devicePreviewBridge = new DevicePreviewBridge({ registry, logger });
+    const proxy = new FakeSocket();
+    handleProxyConnection(
+      asWebSocket(proxy),
+      registry,
+      logger,
+      ptySnapshotRoutes,
+      sessionHistoryRoutes,
+      webPreviewRoutes,
+      devicePreviewBridge,
+    );
+
+    receive(proxy, proxyRegistration("proxy-a"));
+    receive(proxy, proxyRegistration("proxy-b"));
+
+    expect(proxy.close).toHaveBeenCalledWith(
+      RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      "proxy protocol rejected",
+    );
+    expect(registry.getProxy("proxy-a")).toBe(asWebSocket(proxy));
+    expect(registry.hasProxy("proxy-b")).toBe(false);
+
+    devicePreviewBridge.dispose();
+    webPreviewRoutes.dispose();
+  });
+
   it("drops Web and Device Preview pushes from a superseded Proxy socket", () => {
     const registry = new RelayRegistry();
     const ptySnapshotRoutes = new PtySnapshotRouteRegistry();
@@ -308,8 +443,8 @@ describe("Proxy preview push routing", () => {
       devicePreviewBridge,
     );
 
-    receive(oldProxy, { type: "proxy_register", proxyId: "proxy-1" });
-    receive(currentProxy, { type: "proxy_register", proxyId: "proxy-1" });
+    receive(oldProxy, proxyRegistration("proxy-1"));
+    receive(currentProxy, proxyRegistration("proxy-1"));
     expect(oldProxy.terminate).toHaveBeenCalledOnce();
 
     const client = new FakeSocket();
@@ -361,8 +496,8 @@ describe("Proxy preview push routing", () => {
         chaos,
       );
     }
-    receive(proxyA, { type: "proxy_register", proxyId: "proxy-a" });
-    receive(proxyB, { type: "proxy_register", proxyId: "proxy-b" });
+    receive(proxyA, proxyRegistration("proxy-a"));
+    receive(proxyB, proxyRegistration("proxy-b"));
 
     const client = new FakeSocket();
     client.clientId = "client-1";
@@ -400,13 +535,13 @@ describe("Proxy preview push routing", () => {
         chaos,
       );
     }
-    receive(oldProxy, { type: "proxy_register", proxyId: "proxy-a" });
+    receive(oldProxy, proxyRegistration("proxy-a"));
     const client = new FakeSocket();
     client.clientId = "client-1";
     registry.bindClientById("client-1", "proxy-a", asWebSocket(client));
 
     receive(oldProxy, event);
-    receive(replacementProxy, { type: "proxy_register", proxyId: "proxy-a" });
+    receive(replacementProxy, proxyRegistration("proxy-a"));
     client.sent.length = 0;
     flush();
 
@@ -439,8 +574,8 @@ describe("Proxy preview push routing", () => {
         chaos,
       );
     }
-    receive(proxyA, { type: "proxy_register", proxyId: "proxy-a" });
-    receive(proxyB, { type: "proxy_register", proxyId: "proxy-b" });
+    receive(proxyA, proxyRegistration("proxy-a"));
+    receive(proxyB, proxyRegistration("proxy-b"));
 
     const client = new FakeSocket();
     client.clientId = "client-1";
@@ -483,8 +618,8 @@ describe("Proxy preview push routing", () => {
         chaos,
       );
     }
-    receive(proxyA, { type: "proxy_register", proxyId: "proxy-a" });
-    receive(proxyB, { type: "proxy_register", proxyId: "proxy-b" });
+    receive(proxyA, proxyRegistration("proxy-a"));
+    receive(proxyB, proxyRegistration("proxy-b"));
 
     const client = new FakeSocket();
     client.clientId = "client-1";
@@ -516,7 +651,7 @@ describe("Proxy preview push routing", () => {
         devicePreviewBridge,
         chaos,
       );
-      receive(replacementProxy, { type: "proxy_register", proxyId: "proxy-a" });
+      receive(replacementProxy, proxyRegistration("proxy-a"));
       client.sent.length = 0;
     } else {
       registry.bindClientById("client-1", "proxy-b", asWebSocket(client));
@@ -594,7 +729,7 @@ describe("Proxy preview push routing", () => {
     (kind) => {
       const setup = queueDelayedPreviewListRequest(kind);
 
-      setup.registry.registerProxy("proxy-a", asWebSocket(new FakeSocket()));
+      setup.registry.registerProxy("proxy-a", asWebSocket(new FakeSocket()), "0.9.0");
       setup.flushRequests();
 
       expect(setup.proxyA.sent).toEqual([]);
@@ -627,8 +762,8 @@ describe("Proxy preview push routing", () => {
         chaos,
       );
     }
-    receive(proxyA, { type: "proxy_register", proxyId: "proxy-a" });
-    receive(proxyB, { type: "proxy_register", proxyId: "proxy-b" });
+    receive(proxyA, proxyRegistration("proxy-a"));
+    receive(proxyB, proxyRegistration("proxy-b"));
 
     const client = new FakeSocket();
     client.clientId = "client-1";
@@ -663,7 +798,7 @@ describe("Proxy preview push routing", () => {
         devicePreviewBridge,
         chaos,
       );
-      receive(replacementProxy, { type: "proxy_register", proxyId: "proxy-a" });
+      receive(replacementProxy, proxyRegistration("proxy-a"));
       client.sent.length = 0;
     } else {
       registry.bindClientById("client-1", "proxy-b", asWebSocket(client));
@@ -702,8 +837,8 @@ describe("Proxy preview push routing", () => {
         chaos,
       );
     }
-    receive(proxyA, { type: "proxy_register", proxyId: "proxy-a" });
-    receive(proxyB, { type: "proxy_register", proxyId: "proxy-b" });
+    receive(proxyA, proxyRegistration("proxy-a"));
+    receive(proxyB, proxyRegistration("proxy-b"));
 
     const client = new FakeSocket();
     client.clientId = "client-1";
@@ -749,8 +884,8 @@ describe("Proxy preview push routing", () => {
     const bridge = new DevicePreviewBridge({ registry, logger, chaos });
     const proxyA = new FakeSocket();
     const proxyB = new FakeSocket();
-    registry.registerProxy("proxy-a", asWebSocket(proxyA));
-    registry.registerProxy("proxy-b", asWebSocket(proxyB));
+    registry.registerProxy("proxy-a", asWebSocket(proxyA), "0.9.0");
+    registry.registerProxy("proxy-b", asWebSocket(proxyB), "0.9.0");
     bridge.registerProxyConnection("proxy-a", asWebSocket(proxyA));
 
     const client = new FakeSocket();
@@ -794,7 +929,7 @@ describe("Proxy preview push routing", () => {
     const { chaos, flushInputs } = delayedDeviceInputChaos();
     const bridge = new DevicePreviewBridge({ registry, logger, chaos });
     const proxy = new FakeSocket();
-    registry.registerProxy("proxy-a", asWebSocket(proxy));
+    registry.registerProxy("proxy-a", asWebSocket(proxy), "0.9.0");
     bridge.registerProxyConnection("proxy-a", asWebSocket(proxy));
 
     const clientA = new FakeSocket();
@@ -870,8 +1005,8 @@ describe("Proxy preview push routing", () => {
     const bridge = new DevicePreviewBridge({ registry, logger, chaos });
     const proxyA = new FakeSocket();
     const proxyB = new FakeSocket();
-    registry.registerProxy("proxy-a", asWebSocket(proxyA));
-    registry.registerProxy("proxy-b", asWebSocket(proxyB));
+    registry.registerProxy("proxy-a", asWebSocket(proxyA), "0.9.0");
+    registry.registerProxy("proxy-b", asWebSocket(proxyB), "0.9.0");
 
     const client = new FakeSocket();
     handleClientConnection(
@@ -886,13 +1021,18 @@ describe("Proxy preview push routing", () => {
     );
     receive(client, {
       type: "client_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
       clientId: "client-select",
       browserName: "Chrome",
       osName: "macOS",
       deviceKind: "desktop",
     });
     expect(client.sent.map((raw) => JSON.parse(raw))).toEqual([
-      { type: "client_register_response", status: "new" },
+      {
+        type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status: "new",
+      },
     ]);
     client.sent.length = 0;
 

@@ -13,12 +13,12 @@ import { BASE_URL, resetLocalState } from "../helpers";
 const SESSION_ID = "pty-geometry";
 
 test.describe("PTY geometry edges", () => {
-  test("keeps snapshot geometry stable when session metadata has no size", async ({ page }) => {
-    // session_list 故意不带 cols/rows，覆盖升级前已存在的会话；尺寸仍由历史协议中
-    // 一直存在的 session_snapshot 恢复。
+  test("keeps snapshot-owned geometry stable across viewport changes", async ({ page }) => {
+    // session_list 只描述会话元数据；终端尺寸由 session_snapshot 权威恢复。
     await setupPtyChat(page, {
       sessionId: `${SESSION_ID}-session-owned`,
       sessionKind: "terminal",
+      provider: "claude",
       ptyOwner: "local-terminal",
       cols: 80,
       rows: 24,
@@ -75,10 +75,24 @@ test.describe("PTY geometry edges", () => {
     });
     // setupPtyChat 内部不带字号配置, 但 init 顺序需要先 ptyFontSize 再 fakeRelay.
     // 这里手动复制 setupPtyChat 的 init+reload+resetLocal 双跑流程.
-    await installPtyFakeRelay(page, { sessionId: SESSION_ID });
+    await installPtyFakeRelay(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
     await resetLocalState(page);
-    await installPtyFakeRelay(page, { sessionId: SESSION_ID });
+    await installPtyFakeRelay(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await page.goto(`${BASE_URL}/#/chat/${SESSION_ID}?mode=pty`);
 
     await expectPtyTerminalMounted(page);
@@ -144,6 +158,7 @@ test.describe("PTY geometry edges", () => {
     await setupPtyChat(page, {
       sessionId,
       sessionKind: "terminal",
+      provider: "claude",
       ptyOwner: "local-terminal",
       cols: 179,
       rows: 37,
@@ -234,7 +249,14 @@ test.describe("PTY geometry edges", () => {
   test("does not snap horizontal scroll back to cursor after user scrolls away", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     // 撑横向 overflow (spacer 2000px), cursor 默认在 col 0 / cursorPxX=0

@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
-import { encodeFileStreamFrame } from "@dev-anywhere/shared";
+import {
+  encodeFileStreamFrame,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  RelayCloseCode,
+} from "@dev-anywhere/shared";
 
 // RelayConnectionState 需要从 relay-connection.ts 导出
 import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";
@@ -153,6 +157,10 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     fakeWs.readyState = 1;
     fakeWs.emit("open");
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.REGISTERING);
+    expect(JSON.parse(String(fakeWs.send.mock.calls[0]?.[0]))).toMatchObject({
+      type: "proxy_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+    });
   });
 
   it("emits the dedicated stream connection nonce from a successful registration", async () => {
@@ -166,7 +174,9 @@ describe("RelayConnection: async ws events arriving after close()", () => {
       Buffer.from(
         JSON.stringify({
           type: "proxy_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
           status: "new",
+          relayVersion: "0.9.0",
           connectionId: "connection-1",
         }),
       ),
@@ -175,7 +185,35 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     expect(nonces).toEqual(["connection-1"]);
   });
 
-  it("terminates without syncing when registration response omits connectionId", async () => {
+  it.each([
+    ["missing", undefined],
+    ["mismatched", 0],
+  ])("rejects a Relay registration response with a %s protocol", async (_label, version) => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    const connected = vi.fn();
+    conn.on("connected", connected);
+    fakeWs.readyState = 1;
+    fakeWs.emit("open");
+    const response: Record<string, unknown> = {
+      type: "proxy_register_response",
+      protocolVersion: version,
+      status: "new",
+      relayVersion: "0.9.0",
+      connectionId: "connection-1",
+    };
+    if (version === undefined) delete response.protocolVersion;
+
+    fakeWs.emit("message", Buffer.from(JSON.stringify(response)));
+
+    expect(fakeWs.close).toHaveBeenCalledWith(
+      RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      "invalid registration response",
+    );
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
+    expect(connected).not.toHaveBeenCalled();
+  });
+
+  it("rejects without syncing when registration response omits connectionId", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
     const connected = vi.fn();
     const streamConnection = vi.fn();
@@ -186,11 +224,21 @@ describe("RelayConnection: async ws events arriving after close()", () => {
 
     fakeWs.emit(
       "message",
-      Buffer.from(JSON.stringify({ type: "proxy_register_response", status: "new" })),
+      Buffer.from(
+        JSON.stringify({
+          type: "proxy_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+          status: "new",
+          relayVersion: "0.9.0",
+        }),
+      ),
     );
 
-    expect(fakeWs.terminate).toHaveBeenCalledOnce();
-    expect(conn.getStatus().connectionState).not.toBe(RelayConnectionState.SYNCED);
+    expect(fakeWs.close).toHaveBeenCalledWith(
+      RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      "invalid registration response",
+    );
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
     expect(connected).not.toHaveBeenCalled();
     expect(streamConnection).not.toHaveBeenCalled();
   });
@@ -213,7 +261,9 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     conn.on("message", (msg: unknown) => leaked.push(msg));
     const resp = JSON.stringify({
       type: "proxy_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
       status: "new",
+      relayVersion: "0.9.0",
       connectionId: "connection-1",
     });
     // register_response 在 CLOSED 态应被忽略：不改状态、不泄露为 message
@@ -243,7 +293,9 @@ describe("RelayConnection: async ws events arriving after close()", () => {
         Buffer.from(
           JSON.stringify({
             type: "proxy_register_response",
+            protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
             status: "new",
+            relayVersion: "0.9.0",
             connectionId: "connection-1",
           }),
         ),
@@ -282,7 +334,9 @@ describe("RelayConnection: async ws events arriving after close()", () => {
         Buffer.from(
           JSON.stringify({
             type: "proxy_register_response",
+            protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
             status: "new",
+            relayVersion: "0.9.0",
             connectionId: "connection-1",
           }),
         ),

@@ -1,16 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { PreviewScope } from "@dev-anywhere/shared";
+import { RELAY_CONTROL_PROTOCOL_VERSION, type PreviewScope } from "@dev-anywhere/shared";
 import { RelayClient } from "./relay-client";
 
 class FakeWebSocketManager {
   sent: string[] = [];
   connected = true;
+  closed = false;
   private messageHandlers = new Set<(data: string) => void>();
   private statusHandlers = new Set<(connected: boolean) => void>();
 
   send(data: string): boolean {
     this.sent.push(data);
     return this.connected;
+  }
+
+  close(): void {
+    this.closed = true;
+    this.connected = false;
   }
 
   onMessage(handler: (data: string) => void): () => void {
@@ -40,12 +46,19 @@ function sentRequestId(ws: FakeWebSocketManager, index = 0): string {
   return msg.requestId;
 }
 
-function createClient(): { relay: RelayClient; ws: FakeWebSocketManager } {
+function createClient(registered = true): { relay: RelayClient; ws: FakeWebSocketManager } {
   const ws = new FakeWebSocketManager();
-  return {
-    relay: new RelayClient(ws, "client-1"),
-    ws,
-  };
+  const relay = new RelayClient(ws, "client-1");
+  if (registered) {
+    relay.register();
+    ws.emit({
+      type: "client_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      status: "new",
+    });
+    ws.sent.length = 0;
+  }
+  return { relay, ws };
 }
 
 function restorePreviewScope(
@@ -56,6 +69,7 @@ function restorePreviewScope(
 ): PreviewScope {
   ws.emit({
     type: "client_register_response",
+    protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
     status: "restored",
     proxyId,
     bindingId,
@@ -77,12 +91,13 @@ describe("RelayClient request handling", () => {
       platform: "MacIntel",
       maxTouchPoints: 5,
     });
-    const { relay, ws } = createClient();
+    const { relay, ws } = createClient(false);
 
     relay.register();
 
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({
       type: "client_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
       clientId: "client-1",
       platform: "MacIntel",
       maxTouchPoints: 5,
@@ -92,7 +107,34 @@ describe("RelayClient request handling", () => {
     });
   });
 
-  it("preserves an envelope when its type also exists in the control protocol", () => {
+  it.each([
+    ["missing", { type: "client_register_response", status: "new" }],
+    ["mismatched", { type: "client_register_response", protocolVersion: 0, status: "new" }],
+  ])("closes when the Relay registration response protocol is %s", (_label, response) => {
+    const { relay, ws } = createClient(false);
+    const handler = vi.fn();
+    relay.onMessage(handler);
+    relay.register();
+
+    ws.emit(response);
+
+    expect(ws.closed).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("does not enter the normal message flow before registration succeeds", () => {
+    const { relay, ws } = createClient(false);
+    const handler = vi.fn();
+    relay.onMessage(handler);
+    relay.register();
+
+    ws.emit({ type: "proxy_list_response", proxies: [] });
+
+    expect(ws.closed).toBe(true);
+    expect(handler).not.toHaveBeenCalled();
+  });
+
+  it("preserves a session list envelope", () => {
     const { relay, ws } = createClient();
     const handler = vi.fn();
     relay.onMessage(handler);
@@ -116,7 +158,46 @@ describe("RelayClient request handling", () => {
     });
   });
 
-  it("drops an old unscoped preview push before it can be buffered or dispatched", () => {
+  it("drops a session list when any session omits its kind", () => {
+    const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { relay, ws } = createClient();
+      const handler = vi.fn();
+      relay.onMessage(handler);
+      handler.mockClear();
+
+      ws.emit({
+        type: "session_list",
+        seq: 0,
+        timestamp: 1,
+        source: "proxy",
+        version: "1.0",
+        payload: {
+          sessions: [
+            {
+              sessionId: "session-without-kind",
+              state: "idle",
+              mode: "pty",
+              provider: "kimi",
+              ptyOwner: "proxy-hosted",
+              cwd: "/tmp/project",
+              lastActive: 1,
+            },
+          ],
+        },
+      });
+
+      expect(handler).not.toHaveBeenCalled();
+      expect(warn).toHaveBeenCalledWith(
+        "RelayClient: malformed inbound message dropped",
+        expect.objectContaining({ type: "session_list" }),
+      );
+    } finally {
+      warn.mockRestore();
+    }
+  });
+
+  it("drops an unscoped preview push before it can be buffered or dispatched", () => {
     const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
     try {
       const { relay, ws } = createClient();
@@ -138,6 +219,7 @@ describe("RelayClient request handling", () => {
 
       const handler = vi.fn();
       relay.onMessage(handler);
+      handler.mockClear();
 
       expect(handler).not.toHaveBeenCalled();
       expect(warn).toHaveBeenCalledWith(
@@ -193,11 +275,11 @@ describe("RelayClient request handling", () => {
     ws.emit({
       type: "proxy_list_response",
       requestId,
-      proxies: [{ proxyId: "proxy-1", online: true, sessions: ["s1"] }],
+      proxies: [{ proxyId: "proxy-1", version: "0.9.0", online: true, sessions: ["s1"] }],
     });
 
     await expect(promise).resolves.toEqual([
-      { proxyId: "proxy-1", online: true, sessions: ["s1"] },
+      { proxyId: "proxy-1", version: "0.9.0", online: true, sessions: ["s1"] },
     ]);
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({ type: "proxy_list_request" });
   });
@@ -617,6 +699,7 @@ describe("RelayClient request handling", () => {
     const agentCli = {
       claude: { available: true, command: "/usr/local/bin/claude" },
       codex: { available: false, error: "codex not found" },
+      kimi: { available: false, error: "kimi not found" },
     };
 
     ws.emit({
@@ -645,6 +728,7 @@ describe("RelayClient request handling", () => {
     const agentCli = {
       claude: { available: true, command: "/home/dev/.local/bin/claude" },
       codex: { available: true, command: "/usr/local/bin/codex" },
+      kimi: { available: true, command: "/usr/local/bin/kimi" },
     };
 
     ws.emit({
@@ -946,17 +1030,17 @@ describe("RelayClient request handling", () => {
       type: "session_history_response",
       requestId: "other-request",
       success: true,
-      sessions: [{ id: "old", title: "old", projectDir: "/old", updatedAt: 1 }],
+      sessions: [{ id: "old", title: "old", projectDir: "/old", updatedAt: 1, provider: "claude" }],
     });
     ws.emit({
       type: "session_history_response",
       requestId,
       success: true,
-      sessions: [{ id: "new", title: "new", projectDir: "/new", updatedAt: 2 }],
+      sessions: [{ id: "new", title: "new", projectDir: "/new", updatedAt: 2, provider: "claude" }],
     });
 
     await expect(promise).resolves.toEqual([
-      { id: "new", title: "new", projectDir: "/new", updatedAt: 2 },
+      { id: "new", title: "new", projectDir: "/new", updatedAt: 2, provider: "claude" },
     ]);
   });
 
@@ -1151,24 +1235,44 @@ describe("RelayClient request handling", () => {
 
   it("correlates concurrent session create responses by requestId", async () => {
     const { relay, ws } = createClient();
-    const first = relay.createSession({ cwd: "/one", provider: "claude", mode: "pty" });
-    const second = relay.createSession({ cwd: "/two", provider: "codex", mode: "pty" });
+    const first = relay.createSession({
+      kind: "agent",
+      cwd: "/one",
+      provider: "claude",
+      mode: "pty",
+    });
+    const second = relay.createSession({
+      kind: "agent",
+      cwd: "/two",
+      provider: "codex",
+      mode: "pty",
+    });
     const firstRequestId = sentRequestId(ws, 0);
     const secondRequestId = sentRequestId(ws, 1);
 
     ws.emit({
       type: "session_create_response",
       requestId: secondRequestId,
+      success: true,
       sessionId: "second-session",
+      cwd: "/two",
+      lastActive: 2,
+      kind: "agent",
       mode: "pty",
       provider: "codex",
+      ptyOwner: "proxy-hosted",
     });
     ws.emit({
       type: "session_create_response",
       requestId: firstRequestId,
+      success: true,
       sessionId: "first-session",
+      cwd: "/one",
+      lastActive: 1,
+      kind: "agent",
       mode: "pty",
       provider: "claude",
+      ptyOwner: "proxy-hosted",
     });
 
     await expect(first).resolves.toMatchObject({ sessionId: "first-session" });
@@ -1177,7 +1281,12 @@ describe("RelayClient request handling", () => {
 
   it("adds a QR-safe adaptive geometry to PTY session creation", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.createSession({ cwd: "/tmp/project", provider: "codex", mode: "pty" });
+    const promise = relay.createSession({
+      kind: "agent",
+      cwd: "/tmp/project",
+      provider: "codex",
+      mode: "pty",
+    });
     const requestId = sentRequestId(ws);
     const sent = JSON.parse(ws.sent[0] ?? "{}") as {
       cols?: number;
@@ -1190,16 +1299,26 @@ describe("RelayClient request handling", () => {
     ws.emit({
       type: "session_create_response",
       requestId,
+      success: true,
       sessionId: "adaptive-session",
+      cwd: "/tmp/project",
+      lastActive: 1,
+      kind: "agent",
       mode: "pty",
       provider: "codex",
+      ptyOwner: "proxy-hosted",
     });
     await expect(promise).resolves.toMatchObject({ sessionId: "adaptive-session" });
   });
 
   it("does not add terminal geometry to JSON session creation", async () => {
     const { relay, ws } = createClient();
-    const promise = relay.createSession({ cwd: "/tmp/project", provider: "claude", mode: "json" });
+    const promise = relay.createSession({
+      kind: "agent",
+      cwd: "/tmp/project",
+      provider: "claude",
+      mode: "json",
+    });
     const requestId = sentRequestId(ws);
     const sent = JSON.parse(ws.sent[0] ?? "{}") as {
       cols?: number;
@@ -1212,7 +1331,11 @@ describe("RelayClient request handling", () => {
     ws.emit({
       type: "session_create_response",
       requestId,
+      success: true,
       sessionId: "json-session",
+      cwd: "/tmp/project",
+      lastActive: 1,
+      kind: "agent",
       mode: "json",
       provider: "claude",
     });

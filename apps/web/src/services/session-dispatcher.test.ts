@@ -6,7 +6,15 @@ import { useSessionStore } from "@/stores/session-store";
 import { createSessionMessageHandler } from "./session-dispatcher";
 
 function session(sessionId: string, state: SessionInfo["state"] = "idle"): SessionInfo {
-  return { sessionId, state, provider: "claude", mode: "json" };
+  return {
+    sessionId,
+    kind: "agent",
+    state,
+    provider: "claude",
+    mode: "json",
+    cwd: "/tmp/project",
+    lastActive: 1,
+  };
 }
 
 function envelope(
@@ -21,7 +29,7 @@ function envelope(
     seq: 1,
     timestamp,
     source: "proxy",
-    version: "1",
+    version: "1.0",
   } as MessageEnvelope;
 }
 

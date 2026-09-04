@@ -7,6 +7,7 @@ import type { RelayConnection } from "./relay-connection.js";
 import type { SessionManager } from "./session-manager.js";
 import {
   broadcastSessionList,
+  broadcastSessionSync,
   changeSessionState,
   changeTerminalCwd,
   touchSessionActivity,
@@ -84,6 +85,10 @@ export function createEventBridge(deps: EventBridgeDeps): EventBridge {
     safe(
       () => deps.permissionBroker.cleanupSession(sessionId, "Session closed"),
       "permissionBroker.cleanupSession",
+    );
+    safe(
+      () => broadcastSessionSync(deps.relayConnection, deps.sessionManager),
+      "broadcastSessionSync",
     );
     safe(
       () => broadcastSessionList(deps.relayConnection, deps.sessionManager),

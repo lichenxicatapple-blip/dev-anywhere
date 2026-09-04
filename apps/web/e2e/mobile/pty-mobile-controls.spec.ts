@@ -14,7 +14,15 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
   test("esc / clear / arrows / enter buttons emit correct raw escape sequences", async ({
     emuPage,
   }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     // 触屏检测必须为 true 才显示 mobile controls. emu Chrome 默认 pointer:coarse.

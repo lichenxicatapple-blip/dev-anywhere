@@ -8,7 +8,7 @@ async function emitAssistantMessage(page: import("@playwright/test").Page, text:
       sessionId: "test-sess",
       timestamp: Date.now(),
       source: "proxy",
-      version: "1",
+      version: "1.0",
       type: "assistant_message",
       payload: {
         turnId: `inline-${Date.now()}`,

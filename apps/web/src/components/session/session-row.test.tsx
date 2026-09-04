@@ -10,12 +10,15 @@ describe("SessionRow", () => {
       <SessionRow
         session={{
           sessionId: "s1",
+          kind: "agent",
           mode: "pty",
           provider: "claude",
           state: "idle",
           name: "Release checklist",
           nameLocked: true,
           cwd: "/Users/dev/MyApps/dev-anywhere",
+          ptyOwner: "proxy-hosted",
+          lastActive: 1,
         }}
         selected={false}
         onClick={vi.fn()}
@@ -39,6 +42,7 @@ describe("SessionRow", () => {
           name: "Terminal",
           cwd: "/Users/dev/MyApps/dev-anywhere",
           ptyOwner: "local-terminal",
+          lastActive: 1,
         }}
         selected={false}
         onClick={vi.fn()}
@@ -55,12 +59,14 @@ describe("SessionRow", () => {
       <SessionRow
         session={{
           sessionId: "s1",
+          kind: "agent",
           mode: "pty",
           provider: "claude",
           state: "idle",
           name: "~/project",
           cwd: "/Users/dev/project",
           ptyOwner: "local-terminal",
+          lastActive: 1,
         }}
         selected={false}
         onClick={vi.fn()}

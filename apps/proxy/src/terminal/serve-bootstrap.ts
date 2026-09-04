@@ -15,6 +15,13 @@ const ENSURE_SERVICE_MAX_DELAY_MS = 2_000;
 // 等待特定类型 IPC 消息的默认超时
 const WAIT_FOR_MESSAGE_TIMEOUT_MS = 10_000;
 
+export class IpcProtocolError extends Error {
+  constructor(message: string, options?: ErrorOptions) {
+    super(message, options);
+    this.name = "IpcProtocolError";
+  }
+}
+
 // 单次 socket 连接尝试：连上 resolve socket，连不上 resolve null（不抛异常）。
 export function tryConnect(sockPath: string): Promise<Socket | null> {
   return new Promise((resolve) => {
@@ -92,23 +99,61 @@ export async function ensureService(autoStart = true): Promise<Socket> {
 }
 
 // 等待指定类型的 IPC 消息一次。`createIpcReader` 注册临时 listener，匹配后立即清理。
-// 超时返回 reject；调用方需自己保证 socket 不会同时被另一个 listener 持有否则消息可能被吃掉。
+// 协议错误、连接关闭或超时都会销毁本轮 socket 并 reject。
 export function waitForMessage<T extends IpcMessage["type"]>(
   socket: Socket,
   messageType: T,
+  timeoutMs = WAIT_FOR_MESSAGE_TIMEOUT_MS,
 ): Promise<Extract<IpcMessage, { type: T }>> {
   return new Promise((resolve, reject) => {
     let timeout: NodeJS.Timeout | null = null;
-    const dispose = createIpcReader(socket, (msg: IpcMessage) => {
-      if (msg.type === messageType) {
-        if (timeout) clearTimeout(timeout);
-        dispose();
-        resolve(msg as Extract<IpcMessage, { type: T }>);
-      }
-    });
-    timeout = setTimeout(() => {
+    let settled = false;
+    let dispose = (): void => {};
+    const cleanup = (): void => {
+      if (timeout) clearTimeout(timeout);
       dispose();
-      reject(new Error(`Timeout waiting for ${messageType}`));
-    }, WAIT_FOR_MESSAGE_TIMEOUT_MS);
+      socket.off("close", onClose);
+    };
+    const fail = (error: Error): void => {
+      if (settled) return;
+      settled = true;
+      cleanup();
+      socket.destroy();
+      reject(error);
+    };
+    const onClose = (): void => fail(new Error(`Socket closed waiting for ${messageType}`));
+    dispose = createIpcReader(
+      socket,
+      (msg: IpcMessage) => {
+        if (msg.type !== messageType || settled) return;
+        settled = true;
+        cleanup();
+        resolve(msg as Extract<IpcMessage, { type: T }>);
+      },
+      undefined,
+      (error, line) => {
+        try {
+          const raw: unknown = JSON.parse(line);
+          if (
+            raw !== null &&
+            typeof raw === "object" &&
+            !Array.isArray(raw) &&
+            (raw as { type?: unknown }).type === messageType
+          ) {
+            fail(
+              new IpcProtocolError(`Invalid ${messageType} for the current IPC protocol`, {
+                cause: error,
+              }),
+            );
+          }
+        } catch {
+          // A malformed line has no trustworthy message type and may be unrelated to this waiter.
+        }
+      },
+    );
+    socket.once("close", onClose);
+    timeout = setTimeout(() => {
+      fail(new Error(`Timeout waiting for ${messageType}`));
+    }, timeoutMs);
   });
 }

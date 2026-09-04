@@ -2,6 +2,7 @@ import { WebSocket } from "ws";
 import {
   ControlErrorCode,
   isClientToProxyRelayControlType,
+  RELAY_CONTROL_PROTOCOL_VERSION,
   RelayCloseCode,
   RelayErrorCode,
   RELAY_JSON_MESSAGE_MAX_BYTES,
@@ -44,6 +45,7 @@ interface ClientConnectionInfo {
 }
 
 interface ClientRegisterInfo {
+  protocolVersion: number;
   clientId: string;
   userAgent?: string;
   platform?: string;
@@ -94,7 +96,13 @@ function handleClientRegister(
   const binding = registry.getClientBinding(clientId);
 
   if (!binding) {
-    clientWs.send(serializeControl({ type: "client_register_response", status: "new" }));
+    clientWs.send(
+      serializeControl({
+        type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status: "new",
+      }),
+    );
     logger.info({ clientId, status: "new" }, "Client registered");
     return;
   }
@@ -117,6 +125,7 @@ function handleClientRegister(
     clientWs.send(
       serializeControl({
         type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         status: "proxy_offline",
         proxyId,
         bindingId,
@@ -130,6 +139,7 @@ function handleClientRegister(
   clientWs.send(
     serializeControl({
       type: "client_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
       status: "restored",
       proxyId,
       bindingId,
@@ -600,6 +610,7 @@ export function handleClientConnection(
   clientWs.on("message", (data: Buffer, isBinary: boolean) => {
     // Clients only send JSON control/envelope messages; binary frames from clients are ignored.
     if (isBinary) {
+      if (!clientWs.clientId) closeRejectedClientProtocol(clientWs);
       return;
     }
 
@@ -608,6 +619,7 @@ export function handleClientConnection(
         { size: data.length, clientId: clientWs.clientId },
         "JSON message rejected: exceeds max size",
       );
+      if (!clientWs.clientId) closeRejectedClientProtocol(clientWs);
       return;
     }
 
@@ -630,6 +642,14 @@ export function handleClientConnection(
           webPreviewRoutes,
           devicePreviewBridge,
         );
+        return;
+      }
+
+      if (!clientWs.clientId) {
+        const requestId =
+          "requestId" in msg && typeof msg.requestId === "string" ? msg.requestId : undefined;
+        rejectNotRegistered(clientWs, requestId);
+        closeRejectedClientProtocol(clientWs);
         return;
       }
 
@@ -1184,6 +1204,11 @@ export function handleClientConnection(
     }
 
     if (result.kind === "envelope") {
+      if (!clientWs.clientId) {
+        rejectNotRegistered(clientWs, undefined);
+        closeRejectedClientProtocol(clientWs);
+        return;
+      }
       if (!clientWs.boundProxyId) {
         rejectNotBound(clientWs);
         return;
@@ -1200,7 +1225,7 @@ export function handleClientConnection(
         message: `${result.error} | raw: ${raw.slice(0, 200)}`,
       }),
     );
-    if (isMalformedClientRegister(raw)) {
+    if (isMalformedClientRegister(raw) || !clientWs.clientId) {
       closeRejectedClientProtocol(clientWs);
     }
   });

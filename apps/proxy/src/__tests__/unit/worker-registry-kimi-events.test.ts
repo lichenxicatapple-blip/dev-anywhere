@@ -11,6 +11,7 @@ import {
   createJsonObserverFake,
   createRelayConnectionFake,
   createSessionManagerFake,
+  serializeWorkerHandshake,
 } from "./test-fakes.js";
 
 function acpUpdate(sessionUpdate: string, fields: Record<string, unknown>) {
@@ -44,7 +45,19 @@ describe("WorkerRegistry Kimi ACP events", () => {
   });
 
   async function createConnectedRegistry(
-    sessions = [{ id: "s1", mode: "json" as const, provider: "kimi" as const }],
+    sessions = [
+      {
+        id: "s1",
+        kind: "agent" as const,
+        mode: "json" as const,
+        provider: "kimi" as const,
+        state: "idle" as const,
+        createdAt: 1,
+        updatedAt: 1,
+        cwd: "/tmp",
+        pid: 1,
+      },
+    ],
   ) {
     const relay = createRelayConnectionFake();
     const permissionBroker = new PermissionBroker();
@@ -62,6 +75,18 @@ describe("WorkerRegistry Kimi ACP events", () => {
       setProviderCommands,
     });
     expect(await registry.connect("s1", sockPath)).not.toBeNull();
+    if (!acceptedSocket) throw new Error("worker socket was not accepted");
+    const daemonHello = await new Promise<string>((resolve) => {
+      acceptedSocket?.once("data", (chunk) => resolve(chunk.toString()));
+    });
+    expect(WorkerMessageSchema.parse(JSON.parse(daemonHello.trim()))).toMatchObject({
+      type: "serve_protocol_hello",
+      sessionId: "s1",
+    });
+    acceptedSocket?.write(
+      serializeWorkerHandshake("s1", 1, "kimi", { type: "worker_ready", pid: 321 }),
+    );
+    await registry.waitForReady("s1", 1_000);
     return {
       registry,
       relay,
@@ -283,9 +308,9 @@ describe("WorkerRegistry Kimi ACP events", () => {
     );
     acceptedSocket?.write(
       serializeWorkerMsg({
-        type: "worker_ready",
-        pid: 321,
-        nativeSession: { provider: "kimi", sessionId: "kimi-native-1" },
+        type: "worker_native_session_id",
+        provider: "kimi",
+        sessionId: "kimi-native-1",
       }),
     );
 

@@ -25,9 +25,12 @@ export const test = runtimeTest.extend<Fixtures>({
       return;
     }
     const session = await spawnSessionViaRelay(localRuntime, {
+      kind: "agent",
       mode: "pty",
       cwd: "/tmp",
       provider: "claude",
+      cols: 80,
+      rows: 24,
     });
     try {
       await use(session);
@@ -42,6 +45,7 @@ export const test = runtimeTest.extend<Fixtures>({
       return;
     }
     const session = await spawnSessionViaRelay(localRuntime, {
+      kind: "agent",
       mode: "json",
       cwd: "/tmp",
       provider: "claude",

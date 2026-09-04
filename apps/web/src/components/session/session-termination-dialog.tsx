@@ -17,7 +17,9 @@ interface SessionTerminationDialogProps {
 }
 
 function isLocalTerminalPty(session: SessionInfo | null): boolean {
-  return session?.mode === "pty" && session.ptyOwner === "local-terminal";
+  return (
+    session?.kind === "agent" && session.mode === "pty" && session.ptyOwner === "local-terminal"
+  );
 }
 
 function isPureTerminalSession(session: SessionInfo | null): boolean {

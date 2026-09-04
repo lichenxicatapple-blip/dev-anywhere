@@ -9,7 +9,15 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
   test("sends raw keystrokes and exposes touch-only on-screen keys when pointer is coarse", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID, withVisualViewportMock: true });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      withVisualViewportMock: true,
+    });
 
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
     await expect(page.locator('[data-slot="input-bar-region"]')).toHaveCount(0);
@@ -92,7 +100,14 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
   });
 
   test("preserves IME-transformed full-width punctuation in raw PTY input", async ({ page }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+    });
     await expectPtyTerminalMounted(page);
 
     const input = page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]');
@@ -136,6 +151,9 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     ).join("");
     await setupPtyChat(page, {
       sessionId: "pty-ime-anchor",
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
       cols: 80,
       rows: 40,
       snapshotData: `${history}\x1b[2J\x1b[Hfirst\r\nsecond\r\nime-anchor> `,
@@ -217,7 +235,11 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
   }) => {
     await setupPtyChat(page, {
       sessionId: "pty-input-codex-clear",
+      sessionKind: "agent",
       provider: "codex",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
       withVisualViewportMock: true,
     });
     await expectPtyTerminalMounted(page);

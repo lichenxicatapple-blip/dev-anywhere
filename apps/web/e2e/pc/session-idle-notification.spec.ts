@@ -75,7 +75,7 @@ async function emitSessionStatus(
         sessionId: "json-sess",
         timestamp: lastActive,
         source: "proxy",
-        version: "1",
+        version: "1.0",
         type: "session_status",
         payload: {
           sessionId: "json-sess",

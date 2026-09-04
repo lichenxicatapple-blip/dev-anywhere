@@ -22,7 +22,19 @@ describe("RemoteFileStreamManager metadata", () => {
           sent.push(raw);
         }),
       } as unknown as RelayConnection,
-      sessionManager: createSessionManagerFake([{ id: "s1", cwd: dir }]) as SessionManager,
+      sessionManager: createSessionManagerFake([
+        {
+          id: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          createdAt: 1,
+          updatedAt: 1,
+          cwd: dir,
+          pid: 1,
+        },
+      ]) as SessionManager,
     });
   });
 

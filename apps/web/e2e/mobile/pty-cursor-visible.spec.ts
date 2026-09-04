@@ -10,7 +10,15 @@ test.describe("L4 mobile / PTY cursor visibility", () => {
   test.setTimeout(60_000);
 
   test("keeps cursor inside viewport on cold-start with a long buffer", async ({ emuPage }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     // emu Chrome 上 vite 首次加载 + xterm 初始化比 host 桌面 chromium 慢, 拉长.
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 

@@ -220,7 +220,7 @@ test.describe("functional browser walkthrough", () => {
       window.__devAnywhereE2E?.socket?.emitJson({
         type: "pty_state",
         sessionId: "claude-pty",
-        payload: { state: "approval_wait", tool: "Write" },
+        payload: { state: "approval_wait", seq: 1, tool: "Write" },
       });
     });
 

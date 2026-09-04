@@ -31,9 +31,8 @@ export async function notifySessionIdleTransition(
   const app = useAppStore.getState();
   if (!app.sessionIdleNotificationsEnabled) return false;
 
-  const mode = previous.mode ?? "json";
   const url = new URL(
-    `/#/chat/${encodeURIComponent(previous.sessionId)}?mode=${mode}`,
+    `/#/chat/${encodeURIComponent(previous.sessionId)}?mode=${previous.mode}`,
     window.location.origin,
   ).toString();
   const label = sessionNotificationLabel(previous);

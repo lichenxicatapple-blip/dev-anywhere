@@ -4,9 +4,23 @@ import { resolveSessionDisplayState } from "./session-display-state";
 
 const ptySession: SessionInfo = {
   sessionId: "s1",
+  kind: "agent",
   mode: "pty",
   provider: "codex",
   state: "idle",
+  ptyOwner: "proxy-hosted",
+  cwd: "/tmp/project",
+  lastActive: 1,
+};
+
+const jsonSession: SessionInfo = {
+  sessionId: "s1",
+  kind: "agent",
+  mode: "json",
+  provider: "codex",
+  state: "idle",
+  cwd: "/tmp/project",
+  lastActive: 1,
 };
 
 function agentStatus(phase: AgentStatusPayload["phase"]): AgentStatusPayload {
@@ -25,7 +39,7 @@ describe("session display state", () => {
       input: {
         connected: false,
         session: { ...ptySession, state: "working" },
-        ptyState: { state: "approval_wait" } satisfies PtyStatePayload,
+        ptyState: { state: "approval_wait", seq: 1 } satisfies PtyStatePayload,
         agentStatus: agentStatus("tool_use"),
       },
       expected: "disconnected",
@@ -35,7 +49,7 @@ describe("session display state", () => {
       input: {
         routeSessionEnded: true,
         session: { ...ptySession, state: "waiting_approval" },
-        ptyState: { state: "approval_wait" } satisfies PtyStatePayload,
+        ptyState: { state: "approval_wait", seq: 1 } satisfies PtyStatePayload,
         agentStatus: agentStatus("waiting_permission"),
       },
       expected: "terminated",
@@ -44,7 +58,7 @@ describe("session display state", () => {
       name: "pending approval beats provider working",
       input: {
         session: { ...ptySession, state: "working" },
-        ptyState: { state: "working" } satisfies PtyStatePayload,
+        ptyState: { state: "working", seq: 1 } satisfies PtyStatePayload,
         agentStatus: agentStatus("tool_use"),
         hasPendingApproval: true,
       },
@@ -62,7 +76,7 @@ describe("session display state", () => {
       name: "session idle is authoritative over stale pty approval_wait",
       input: {
         session: { ...ptySession, state: "idle" },
-        ptyState: { state: "approval_wait" } satisfies PtyStatePayload,
+        ptyState: { state: "approval_wait", seq: 1 } satisfies PtyStatePayload,
       },
       expected: "idle",
     },
@@ -78,7 +92,7 @@ describe("session display state", () => {
       name: "session idle is authoritative over stale pty working",
       input: {
         session: { ...ptySession, state: "idle" },
-        ptyState: { state: "working" } satisfies PtyStatePayload,
+        ptyState: { state: "working", seq: 1 } satisfies PtyStatePayload,
       },
       expected: "idle",
     },
@@ -92,7 +106,7 @@ describe("session display state", () => {
     {
       name: "session compacting has its own display state",
       input: {
-        session: { ...ptySession, mode: "json", state: "compacting" },
+        session: { ...jsonSession, state: "compacting" },
       },
       expected: "compacting",
     },
@@ -100,7 +114,7 @@ describe("session display state", () => {
       name: "idle when no higher-priority signal exists",
       input: {
         session: ptySession,
-        ptyState: { state: "turn_complete" } satisfies PtyStatePayload,
+        ptyState: { state: "turn_complete", seq: 1 } satisfies PtyStatePayload,
         agentStatus: agentStatus("idle"),
       },
       expected: "idle",
@@ -119,7 +133,7 @@ describe("session display state", () => {
     expect(
       resolveSessionDisplayState({
         session: ptySession,
-        ptyState: { state: "approval_wait" },
+        ptyState: { state: "approval_wait", seq: 1 },
         agentStatus: agentStatus("tool_use"),
         hasPendingApproval: true,
       }),

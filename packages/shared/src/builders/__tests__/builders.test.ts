@@ -39,10 +39,14 @@ describe("buildMessage", () => {
   });
 
   it("uses the seq value provided by caller", () => {
-    const msg1 = buildMessage("heartbeat", "sess-1", 42, {}, "proxy");
-    const msg2 = buildMessage("heartbeat", "sess-1", 43, {}, "proxy");
+    const msg1 = buildMessage("heartbeat", null, 42, {}, "proxy");
+    const msg2 = buildMessage("heartbeat", null, 43, {}, "proxy");
     expect(msg1.seq).toBe(42);
     expect(msg2.seq).toBe(43);
+  });
+
+  it("rejects sessionId on a global envelope", () => {
+    expect(() => buildMessage("heartbeat", "sess-1", 42, {}, "proxy")).toThrow();
   });
 
   it("throws on invalid payload", () => {
@@ -51,7 +55,7 @@ describe("buildMessage", () => {
 
   it("sets timestamp close to current time", () => {
     const before = Date.now();
-    const msg = buildMessage("heartbeat", "sess-1", 0, {}, "proxy");
+    const msg = buildMessage("heartbeat", null, 0, {}, "proxy");
     const after = Date.now();
     expect(msg.timestamp).toBeGreaterThanOrEqual(before);
     expect(msg.timestamp).toBeLessThanOrEqual(after);

@@ -77,7 +77,17 @@ describe("InputBar clipboard image paste", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
   });
 
@@ -190,8 +200,24 @@ describe("InputBar clipboard image paste", () => {
     });
     useSessionStore.setState({
       sessions: [
-        { sessionId: "s1", mode: "json", provider: "claude", state: "idle" },
-        { sessionId: "s2", mode: "json", provider: "claude", state: "idle" },
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+        {
+          sessionId: "s2",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
       ],
     });
     const { getByLabelText, rerender } = render(<InputBar sessionId="s1" />);
@@ -237,7 +263,17 @@ describe("InputBar attach file picker", () => {
       bySessionId: { s1: { ...EMPTY_SLICE, inputDraft: "see " } },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
   });
 
@@ -365,7 +401,17 @@ describe("InputBar compact command", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "idle" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
   });
 
@@ -411,7 +457,17 @@ describe("InputBar queued JSON send", () => {
       },
     });
     useSessionStore.setState({
-      sessions: [{ sessionId: "s1", mode: "json", provider: "claude", state: "working" }],
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "working",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
     });
   });
 

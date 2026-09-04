@@ -48,14 +48,16 @@ describe("create-session submit model", () => {
       providerStatus("claude", {
         claude: { available: false, error: "claude not found" },
         codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: true, command: "/usr/local/bin/kimi" },
       }),
     ).toEqual({ label: "未找到", disabled: true, title: "claude not found" });
     expect(
       providerStatus("kimi", {
         claude: { available: true, command: "/usr/local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: false, error: "kimi not found" },
       }),
-    ).toEqual({ label: "未检测", disabled: true });
+    ).toEqual({ label: "未找到", disabled: true, title: "kimi not found" });
   });
 
   it("extracts missing cwd only from the structured path error", () => {
@@ -107,7 +109,11 @@ describe("create-session submit model", () => {
     const relay = {
       createSession: vi.fn().mockResolvedValue({
         type: "session_create_response",
+        success: true,
         sessionId: "kimi-json-1",
+        cwd: "/home/dev",
+        lastActive: 1,
+        kind: "agent",
         mode: "json",
         provider: "kimi",
       }),
@@ -129,9 +135,12 @@ describe("create-session submit model", () => {
       type: "success",
       session: {
         sessionId: "kimi-json-1",
+        kind: "agent",
         state: "idle",
         mode: "json",
         provider: "kimi",
+        cwd: "/home/dev",
+        lastActive: 1,
       },
       route: "/chat/kimi-json-1?mode=json",
     });
@@ -150,6 +159,7 @@ describe("create-session submit model", () => {
         agentCli: {
           claude: { available: false, error: "claude not found" },
           codex: { available: true, command: "/usr/local/bin/codex" },
+          kimi: { available: true, command: "/usr/local/bin/kimi" },
         },
         form: {
           cwd: "/home/dev",
@@ -170,6 +180,7 @@ describe("create-session submit model", () => {
     const relay = {
       createSession: vi.fn().mockResolvedValue({
         type: "session_create_response",
+        success: false,
         errorCode: ControlErrorCode.PATH_NOT_FOUND,
         error: "工作目录不存在或不可访问: /home/dev/missing-project",
       }),
@@ -198,7 +209,11 @@ describe("create-session submit model", () => {
     const relay = {
       createSession: vi.fn().mockResolvedValue({
         type: "session_create_response",
+        success: true,
         sessionId: "new-sess-1",
+        cwd: "/home/dev",
+        lastActive: 1,
+        kind: "agent",
         mode: "json",
         provider: "codex",
         name: "Release checklist",
@@ -222,11 +237,14 @@ describe("create-session submit model", () => {
       type: "success",
       session: {
         sessionId: "new-sess-1",
+        kind: "agent",
         name: "Release checklist",
         nameLocked: true,
         state: "idle",
         mode: "json",
         provider: "codex",
+        cwd: "/home/dev",
+        lastActive: 1,
       },
       route: "/chat/new-sess-1?mode=json",
     });
@@ -247,11 +265,14 @@ describe("create-session submit model", () => {
     const relay = {
       createSession: vi.fn().mockResolvedValue({
         type: "session_create_response",
+        success: true,
         sessionId: "term-1",
+        cwd: "/home/dev",
+        lastActive: 1,
         kind: "terminal",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "proxy-hosted",
+        ptyOwner: "local-terminal",
         name: "~/workspace",
       }),
     };
@@ -265,7 +286,9 @@ describe("create-session submit model", () => {
         state: "idle",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "proxy-hosted",
+        ptyOwner: "local-terminal",
+        cwd: "/home/dev",
+        lastActive: 1,
       },
       route: "/chat/term-1?mode=pty",
     });

@@ -1,5 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
-import { encodePcm16ToMuLaw, type VoiceSummaryReason } from "@dev-anywhere/shared";
+import {
+  encodePcm16ToMuLaw,
+  MESSAGE_ENVELOPE_VERSION,
+  type VoiceSummaryReason,
+} from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { getRelayClientToken } from "@/lib/relay-client-token";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
@@ -434,7 +438,7 @@ export function VoicePilotController({
             seq: 0,
             timestamp: Date.now(),
             source: "client",
-            version: "1",
+            version: MESSAGE_ENVELOPE_VERSION,
           });
           traceVoice("runtime", "user-text-submitted", {
             details: { chars: effect.text.length, messageId: effect.messageId },

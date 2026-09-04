@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
 import { createLogger } from "@dev-anywhere/shared/logger";
-import type { PreviewScope } from "@dev-anywhere/shared";
+import { RELAY_CONTROL_PROTOCOL_VERSION, type PreviewScope } from "@dev-anywhere/shared";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import {
   collectMessages,
@@ -44,6 +44,7 @@ describe("Web Preview routing integration", () => {
     client.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId,
         browserName: "Chrome",
         osName: "macOS",
@@ -63,7 +64,14 @@ describe("Web Preview routing integration", () => {
     const proxy = connect("/proxy");
     await waitForOpen(proxy);
     const registered = waitForMessage(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "preview-proxy" }));
+    proxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "preview-proxy",
+        proxyVersion: "0.9.0",
+      }),
+    );
     await registered;
 
     const clientA = connect("/client");
@@ -436,7 +444,14 @@ describe("Web Preview routing integration", () => {
     const newProxy = connect("/proxy");
     await waitForOpen(newProxy);
     const newProxyRegistered = waitForMessage(newProxy);
-    newProxy.send(JSON.stringify({ type: "proxy_register", proxyId: "preview-proxy-new" }));
+    newProxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "preview-proxy-new",
+        proxyVersion: "0.9.0",
+      }),
+    );
     await newProxyRegistered;
 
     const oldRequestPromise = waitForMessage(oldProxy);
@@ -523,7 +538,14 @@ describe("Web Preview routing integration", () => {
     const proxy = connect("/proxy");
     await waitForOpen(proxy);
     const registered = waitForMessage(proxy);
-    proxy.send(JSON.stringify({ type: "proxy_register", proxyId: "preview-proxy" }));
+    proxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "preview-proxy",
+        proxyVersion: "0.9.0",
+      }),
+    );
     await registered;
     const receivedByProxy = recordJson(proxy);
 
@@ -603,6 +625,7 @@ describe("Web Preview routing integration", () => {
     replacementClient.send(
       JSON.stringify({
         type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         clientId: "preview-client-a",
         browserName: "Chrome",
         osName: "macOS",

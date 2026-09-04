@@ -26,7 +26,15 @@ test.describe("PTY scrollback resume", () => {
   test("output renders again after wheel up + wheel back to bottom mid-stream", async ({
     page,
   }) => {
-    await setupPtyChat(page, { sessionId: SESSION_ID, withVisualViewportMock: true });
+    await setupPtyChat(page, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      withVisualViewportMock: true,
+    });
     await expectPtyTerminalMounted(page);
     // resize 让 PTY 行数比视口能放下的多, 走 longHost 分支。
     await page.evaluate(() => window.__ptySmoke.resize(80, 40));

@@ -276,7 +276,14 @@ function expectToolbarHiddenDuringActiveScroll(
 }
 
 async function prepareTerminal(page: Page, sessionId: string): Promise<void> {
-  await setupPtyChat(page, { sessionId, cols: COLS, rows: ROWS });
+  await setupPtyChat(page, {
+    sessionId,
+    sessionKind: "agent",
+    provider: "claude",
+    ptyOwner: "proxy-hosted",
+    cols: COLS,
+    rows: ROWS,
+  });
   await expectPtyTerminalMounted(page, { timeout: 15_000 });
   await page.evaluate(({ cols, rows }) => window.__ptySmoke.resize(cols, rows), {
     cols: COLS,

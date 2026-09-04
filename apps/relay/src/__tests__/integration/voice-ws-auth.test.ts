@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { WebSocket } from "ws";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { getPort, waitForMessageType, waitForOpen } from "../helpers.js";
@@ -132,6 +133,18 @@ describe("voice websocket endpoints", () => {
 
   async function configureVoice(): Promise<void> {
     const client = await connect("/client");
+    const registered = waitForMessageType(client, "client_register_response");
+    client.send(
+      JSON.stringify({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId: `voice-ws-${connections.length}`,
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+      }),
+    );
+    await registered;
     const responsePromise = waitForMessageType(client, "voice_config_update_response");
     client.send(
       JSON.stringify({

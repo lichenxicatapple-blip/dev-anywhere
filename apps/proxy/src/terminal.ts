@@ -3,7 +3,12 @@ import { setTimeout as sleep } from "node:timers/promises";
 import { readTtySize, notifyUser } from "./terminal/tty.js";
 import { PtyManager } from "./terminal/pty-manager.js";
 import { resolveTerminalCwd } from "./terminal/cwd.js";
-import { ensureService, tryConnect, waitForMessage } from "./terminal/serve-bootstrap.js";
+import {
+  ensureService,
+  IpcProtocolError,
+  tryConnect,
+  waitForMessage,
+} from "./terminal/serve-bootstrap.js";
 import { createIdleChecker, type IdleChecker } from "./terminal/idle-checker.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
 import {
@@ -32,6 +37,7 @@ import {
   createIpcReader,
   serializeIpc,
   encodeBinaryIpcFrame,
+  TERMINAL_IPC_PROTOCOL_VERSION,
   type IpcMessage,
 } from "./ipc/ipc-protocol.js";
 import { terminalLogger as log } from "./common/logger.js";
@@ -84,6 +90,7 @@ class TerminalSession {
   private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
   private ptyStateSeq = 0;
   private remoteDetached = false;
+  private reconnecting = false;
   // 记录上次 bridge 连接状态，避免重连抖动重复打印 banner；
   // 初值 null 确保首次状态变更（无论 true/false）都触发一次输出
   private lastBridgeConnected: boolean | null = null;
@@ -148,6 +155,8 @@ class TerminalSession {
     this.socket.write(
       serializeIpc({
         type: "session_create_request",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        kind: "agent",
         mode: "pty",
         provider: this.provider.id,
         cwd: this.sessionCwd,
@@ -156,7 +165,8 @@ class TerminalSession {
       }),
     );
     const response = await responsePromise;
-    if (response.error) {
+    if (!response.success) {
+      this.socket.destroy();
       throw new Error(`Failed to create session: ${response.error}`);
     }
     this.sessionId = response.sessionId;
@@ -462,6 +472,8 @@ class TerminalSession {
   }
 
   private async reconnectToServe(): Promise<void> {
+    if (this.reconnecting) return;
+    this.reconnecting = true;
     log.info("Serve connection lost, starting reconnection");
 
     // 两条路径都不该再继续 spawn daemon：
@@ -470,70 +482,102 @@ class TerminalSession {
     // 进入 passive 后仅做 tryConnect 等待，daemon 起来或用户 dev-anywhere start 后自动恢复。
     let consecutiveSpawnFailures = 0;
 
-    for (let i = 0; ; i++) {
-      if (this.remoteDetached) return;
-      await sleep(Math.min(RECONNECT_INITIAL_DELAY_MS * (i + 1), RECONNECT_MAX_DELAY_MS));
+    try {
+      for (let i = 0; ; i++) {
+        if (this.remoteDetached) return;
+        await sleep(Math.min(RECONNECT_INITIAL_DELAY_MS * (i + 1), RECONNECT_MAX_DELAY_MS));
 
-      const stopped = existsSync(STOPPED_PATH);
-      const degraded = consecutiveSpawnFailures >= SPAWN_FAILURE_THRESHOLD;
-      const passive = stopped || degraded;
+        const stopped = existsSync(STOPPED_PATH);
+        const degraded = consecutiveSpawnFailures >= SPAWN_FAILURE_THRESHOLD;
+        const passive = stopped || degraded;
 
-      try {
-        log.debug({ attempt: i + 1, stopped, degraded }, "Reconnect attempt");
-        const newSocket = passive ? await tryConnect(SOCK_PATH) : await ensureService();
-        if (!newSocket) continue;
+        try {
+          log.debug({ attempt: i + 1, stopped, degraded }, "Reconnect attempt");
+          const newSocket = passive ? await tryConnect(SOCK_PATH) : await ensureService();
+          if (!newSocket) continue;
 
-        if (degraded) notifyUser("serve daemon reachable, reconnected");
-        consecutiveSpawnFailures = 0;
+          if (degraded) notifyUser("serve daemon reachable, reconnected");
+          consecutiveSpawnFailures = 0;
 
-        this.socket = swapServeSocket(this.socket, newSocket);
-        log.info({ attempt: i + 1, sessionId: this.sessionId }, "Reconnected to serve");
+          this.socket = swapServeSocket(this.socket, newSocket);
+          log.info({ attempt: i + 1, sessionId: this.sessionId }, "Reconnected to serve");
 
-        this.setupSocketHandlers();
+          this.setupSocketHandlers();
 
-        if (this.sessionId) {
-          this.fsm.transitionTo(TerminalState.CREATING_SESSION);
-          this.socket.write(
-            serializeIpc({
-              type: "session_create_request",
-              mode: "pty",
-              provider: this.provider.id,
-              cwd: this.sessionCwd,
-              name: tildify(this.sessionCwd),
-              pid: process.pid,
-              sessionId: this.sessionId,
-            }),
-          );
-          const resp = await waitForMessage(this.socket, "session_create_response");
-          if (!resp.error) {
-            this.sessionId = resp.sessionId;
+          if (this.sessionId) {
+            this.fsm.transitionTo(TerminalState.CREATING_SESSION);
             this.socket.write(
-              serializeIpc({ type: "pty_register", sessionId: this.sessionId, pid: process.pid }),
+              serializeIpc({
+                type: "session_create_request",
+                protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+                kind: "agent",
+                mode: "pty",
+                provider: this.provider.id,
+                cwd: this.sessionCwd,
+                name: tildify(this.sessionCwd),
+                pid: process.pid,
+                sessionId: this.sessionId,
+              }),
             );
-            this.replayCurrentPtyState();
+            const resp = await waitForMessage(this.socket, "session_create_response");
+            if (resp.success) {
+              this.sessionId = resp.sessionId;
+              this.socket.write(
+                serializeIpc({ type: "pty_register", sessionId: this.sessionId, pid: process.pid }),
+              );
+              this.replayCurrentPtyState();
+              this.fsm.transitionTo(TerminalState.RUNNING);
+              log.info({ sessionId: this.sessionId }, "Session re-registered after reconnect");
+            } else {
+              // A current-generation daemon rejected this identity, so the same reconnect request
+              // cannot become valid on a later retry. Clear the id before cleanup to avoid sending
+              // pty_deregister for a session this socket never owned.
+              const rejectedSessionId = this.sessionId;
+              this.sessionId = null;
+              log.error(
+                { sessionId: rejectedSessionId, error: resp.error },
+                "Terminal session registration rejected after reconnect",
+              );
+              this.socket.destroy();
+              this.ptyManager?.cleanup(1);
+            }
+          } else {
             this.fsm.transitionTo(TerminalState.RUNNING);
-            log.info({ sessionId: this.sessionId }, "Session re-registered after reconnect");
           }
-        } else {
-          this.fsm.transitionTo(TerminalState.RUNNING);
-        }
 
-        return;
-      } catch (err) {
-        // passive 模式走 tryConnect，失败返回 null 不抛；这里只可能是 ensureService spawn 失败
-        if (!passive) {
-          consecutiveSpawnFailures++;
-          if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
-            notifyUser(
-              `serve daemon spawn failed ${SPAWN_FAILURE_THRESHOLD}x — auto-spawn disabled; check environment or run 'dev-anywhere start'`,
+          return;
+        } catch (err) {
+          // This.socket is either the failed attempt or the already-closed socket from the
+          // preceding round. Destroy is idempotent and guarantees no half-open attempt survives.
+          this.socket.destroy();
+          if (err instanceof IpcProtocolError) {
+            const rejectedSessionId = this.sessionId;
+            this.sessionId = null;
+            log.error(
+              { sessionId: rejectedSessionId, error: err.message },
+              "Terminal session registration failed the IPC protocol gate",
             );
+            this.ptyManager?.cleanup(1);
+            return;
           }
+          // passive 模式走 tryConnect，失败返回 null；主动连接还可能在拉起 daemon 或创建
+          // 会话握手时失败。所有失败都留在当前单一重连循环中处理。
+          if (!passive) {
+            consecutiveSpawnFailures++;
+            if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
+              notifyUser(
+                `serve daemon spawn failed ${SPAWN_FAILURE_THRESHOLD}x — auto-spawn disabled; check environment or run 'dev-anywhere start'`,
+              );
+            }
+          }
+          log.debug(
+            { err: err instanceof Error ? err.message : err, attempt: i + 1, degraded },
+            "Reconnect attempt failed",
+          );
         }
-        log.debug(
-          { err: err instanceof Error ? err.message : err, attempt: i + 1, degraded },
-          "Reconnect attempt failed",
-        );
       }
+    } finally {
+      this.reconnecting = false;
     }
   }
 

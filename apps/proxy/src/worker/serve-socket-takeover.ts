@@ -14,6 +14,15 @@ export function takeoverServeSocket(prev: Socket | null, next: Socket): Socket {
   return next;
 }
 
+export function acceptCurrentServeSocketMessage(
+  current: Socket | null,
+  candidate: Socket,
+): boolean {
+  if (current === candidate) return true;
+  candidate.destroy();
+  return false;
+}
+
 // A close/error event from the socket destroyed during takeover may arrive after the replacement
 // became current. Only the current socket is allowed to clear connection state or reject work.
 export function releaseServeSocket(

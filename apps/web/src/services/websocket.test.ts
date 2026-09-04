@@ -594,6 +594,21 @@ describe("WebSocketManager", () => {
     });
   });
 
+  it("does not reconnect after the relay rejects the client protocol", async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    const ws = sockets[0]!;
+    ws.open();
+
+    ws.closeWithCode(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(manager.isConnected()).toBe(false);
+  });
+
   it("removes wake listeners on close so document/window do not retain the manager", () => {
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
 

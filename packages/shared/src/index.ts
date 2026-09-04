@@ -2,6 +2,7 @@
 export { IdSchema } from "./schemas/id.js";
 export { MessageEnvelopeSchema } from "./schemas/envelope.js";
 export type { MessageEnvelope, MessageType, MessageSource } from "./schemas/envelope.js";
+export { MESSAGE_ENVELOPE_VERSION } from "./constants/envelope.js";
 export {
   UserInputPayloadSchema,
   AssistantMessagePayloadSchema,
@@ -26,20 +27,14 @@ export type {
 } from "./schemas/tool.js";
 export {
   SessionInfoSchema,
-  SessionCreatePayloadSchema,
   SessionListPayloadSchema,
-  SessionSwitchPayloadSchema,
-  SessionTerminatePayloadSchema,
   SessionStatusPayloadSchema,
   PtyStatePayloadSchema,
   AgentStatusPayloadSchema,
 } from "./schemas/session.js";
 export type {
   SessionInfo,
-  SessionCreatePayload,
   SessionListPayload,
-  SessionSwitchPayload,
-  SessionTerminatePayload,
   SessionStatusPayload,
   PtyStatePayload,
   AgentStatusPayload,
@@ -171,6 +166,7 @@ export { summarizeToolActivity } from "./tool-activity-summary.js";
 
 // relay control
 export {
+  RELAY_CONTROL_PROTOCOL_VERSION,
   ProxyInfoSchema,
   RelayClientInfoSchema,
   AgentCliAvailabilitySchema,

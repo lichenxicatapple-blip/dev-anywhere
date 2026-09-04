@@ -49,6 +49,10 @@ interface PendingJsonCreate {
   controller: AbortController;
 }
 
+type SessionCreateMessage = ControlMessage<"session_create">;
+type AgentPtySessionCreateMessage = Extract<SessionCreateMessage, { kind: "agent"; mode: "pty" }>;
+type TerminalSessionCreateMessage = Extract<SessionCreateMessage, { kind: "terminal" }>;
+
 interface RelaySessionCreateHandlerDeps {
   relaySend: RelaySend;
   workerRegistry: WorkerRegistry;
@@ -64,7 +68,7 @@ interface RelaySessionCreateHandlerDeps {
     provider: ProviderHookContext["provider"],
   ) => ProviderHookContext;
   cleanupHookContext: (sessionId: string) => void;
-  broadcastSessionSync: (session: SessionInfo) => void;
+  broadcastSessionSync: () => void;
   broadcastSessionList: () => void;
   findCodexActiveWriter?: (threadId: string, env?: NodeJS.ProcessEnv) => CodexActiveWriter | null;
   findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
@@ -117,13 +121,13 @@ function resolveTerminalCwd(): string {
   return process.cwd();
 }
 
-export function resolveInitialPtyGeometry(input: { cols?: number; rows?: number }): {
+export function resolveInitialPtyGeometry(input: { cols: number; rows: number }): {
   cols: number;
   rows: number;
 } {
-  const normalize = (value: number | undefined, min: number, max: number): number => {
-    if (!Number.isFinite(value)) return min;
-    return Math.min(max, Math.max(min, Math.trunc(value ?? min)));
+  const normalize = (value: number, min: number, max: number): number => {
+    if (!Number.isFinite(value)) throw new TypeError("PTY geometry must be finite");
+    return Math.min(max, Math.max(min, Math.trunc(value)));
   };
   return {
     cols: normalize(input.cols, PTY_INITIAL_MIN_COLS, PTY_INITIAL_MAX_COLS),
@@ -146,15 +150,15 @@ export class RelaySessionCreateHandler {
     }
   }
 
-  onSessionCreate(msg: ControlMessage<"session_create">): void {
+  onSessionCreate(msg: SessionCreateMessage): void {
     if (msg.kind === "terminal") {
       this.createShellTerminalSession(msg);
       return;
     }
 
     const { requestId, cwd } = msg;
-    const provider = msg.provider ?? "claude";
-    const mode = msg.mode ?? "json";
+    const provider = msg.provider;
+    const mode = msg.mode;
     const permissionMode = msg.permissionMode;
     const resumeSessionId = msg.resumeSessionId;
 
@@ -186,8 +190,8 @@ export class RelaySessionCreateHandler {
           this.deps.getProviderEnv(),
         );
         if (activeWriter) {
-          // 本地 `dev-anywhere codex resume` 的历史选择发生在 Codex TUI 内，旧版本没有
-          // 回传所选 thread ID。用真实 writer PID 的父进程链确认归属，仍能无提示复用
+          // 本地 `dev-anywhere codex resume` 的历史选择发生在 Codex TUI 内，
+          // TUI 不会回传所选 thread ID。用真实 writer PID 的父进程链确认归属，仍能无提示复用
           // 当前 DEV Anywhere 会话；只有不属于任何登记会话时才视为外部占用。
           const managedOwnerPid = (this.deps.findClosestAncestorPid ?? findClosestAncestorPid)(
             activeWriter.pid,
@@ -206,6 +210,7 @@ export class RelaySessionCreateHandler {
             serializeControl({
               type: "session_create_response",
               requestId,
+              success: false,
               errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
               error: codexActiveWriterMessage(activeWriter.pid),
               activeWriterPid: activeWriter.pid,
@@ -227,6 +232,7 @@ export class RelaySessionCreateHandler {
           serializeControl({
             type: "session_create_response",
             requestId,
+            success: false,
             errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
             error: err.message,
           }),
@@ -249,6 +255,7 @@ export class RelaySessionCreateHandler {
           serializeControl({
             type: "session_create_response",
             requestId,
+            success: false,
             errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
             error: err.message,
           }),
@@ -267,6 +274,7 @@ export class RelaySessionCreateHandler {
         serializeControl({
           type: "session_create_response",
           requestId,
+          success: false,
           error: cwdError.message,
           errorCode: cwdError.code,
         }),
@@ -274,23 +282,10 @@ export class RelaySessionCreateHandler {
       serviceLogger.warn({ cwd }, "Session create rejected: invalid cwd");
       return;
     }
-    const sessionCwd = typeof cwd === "string" ? cwd.trim() : "";
+    const sessionCwd = cwd.trim();
 
     if (mode === "pty") {
-      this.createHostedPtySession(msg, sessionCwd, provider ?? "claude", permissionMode);
-      return;
-    }
-
-    if (provider !== "claude" && provider !== "codex" && provider !== "kimi") {
-      this.deps.relaySend(
-        serializeControl({
-          type: "session_create_response",
-          requestId,
-          errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
-          error: "Unsupported provider for JSON session.",
-        }),
-      );
-      serviceLogger.warn({ provider }, "JSON session create rejected for unsupported provider");
+      this.createHostedPtySession(msg, sessionCwd, provider, permissionMode);
       return;
     }
 
@@ -354,20 +349,29 @@ export class RelaySessionCreateHandler {
       });
   }
 
-  private respondWithExistingSession(requestId: string | undefined, session: SessionInfo): void {
-    this.deps.relaySend(
-      serializeControl({
-        type: "session_create_response",
-        requestId,
-        sessionId: session.id,
-        ...(session.kind !== undefined ? { kind: session.kind } : {}),
-        ...(session.name !== undefined ? { name: session.name } : {}),
-        ...(session.nameLocked !== undefined ? { nameLocked: session.nameLocked } : {}),
-        mode: session.mode,
-        provider: session.provider,
-        ...(session.ptyOwner !== undefined ? { ptyOwner: session.ptyOwner } : {}),
-      }),
-    );
+  private respondWithExistingSession(requestId: string, session: SessionInfo): void {
+    if (session.kind !== "agent") {
+      throw new TypeError("Only agent sessions can satisfy an agent resume request");
+    }
+    const identity = {
+      type: "session_create_response" as const,
+      requestId,
+      success: true as const,
+      sessionId: session.id,
+      cwd: session.cwd,
+      lastActive: session.updatedAt,
+      kind: "agent" as const,
+      ...(session.name !== undefined ? { name: session.name } : {}),
+      ...(session.nameLocked !== undefined ? { nameLocked: session.nameLocked } : {}),
+      provider: session.provider,
+    };
+    if (session.mode === "pty") {
+      const ptyOwner = session.ptyOwner;
+      if (ptyOwner === undefined) throw new TypeError("PTY session is missing its owner");
+      this.deps.relaySend(serializeControl({ ...identity, mode: "pty", ptyOwner }));
+    } else {
+      this.deps.relaySend(serializeControl({ ...identity, mode: "json" }));
+    }
     serviceLogger.info(
       {
         sessionId: session.id,
@@ -385,7 +389,7 @@ export class RelaySessionCreateHandler {
   }
 
   private publishJsonSession(options: {
-    requestId?: string;
+    requestId: string;
     pendingId: string;
     workerPid: number;
     sessionCwd: string;
@@ -398,12 +402,13 @@ export class RelaySessionCreateHandler {
     let session: SessionInfo;
     try {
       session = this.deps.sessionManager.createSession(
+        "agent",
         "json",
+        options.provider,
         options.sessionCwd,
         options.workerPid,
         options.name,
         options.pendingId,
-        options.provider,
         undefined,
         options.nameLocked,
       );
@@ -431,9 +436,13 @@ export class RelaySessionCreateHandler {
       serializeControl({
         type: "session_create_response",
         requestId: options.requestId,
+        success: true,
         sessionId: session.id,
+        cwd: session.cwd,
+        lastActive: session.updatedAt,
         name: session.name,
         nameLocked: session.nameLocked,
+        kind: "agent",
         mode: "json",
         provider: options.provider,
       }),
@@ -448,12 +457,12 @@ export class RelaySessionCreateHandler {
     if (options.provider !== "kimi") {
       this.deps.controlHandlers.pushCommandList(session.id, options.sessionCwd);
     }
-    this.deps.broadcastSessionSync(session);
+    this.deps.broadcastSessionSync();
     this.deps.broadcastSessionList();
   }
 
   private reportJsonStartupFailure(
-    requestId: string | undefined,
+    requestId: string,
     sessionId: string,
     message: string,
     reason: unknown,
@@ -476,7 +485,7 @@ export class RelaySessionCreateHandler {
       serializeControl({
         type: "session_create_response",
         requestId,
-        sessionId,
+        success: false,
         errorCode: activeWriterFailure
           ? ControlErrorCode.SESSION_ALREADY_ACTIVE
           : ControlErrorCode.WORKER_START_FAILED,
@@ -510,29 +519,18 @@ export class RelaySessionCreateHandler {
   }
 
   private createHostedPtySession(
-    msg: ControlMessage<"session_create">,
+    msg: AgentPtySessionCreateMessage,
     cwd: string,
     provider: ProviderId,
     permissionMode?: string,
   ): void {
-    if (provider !== "claude" && provider !== "codex" && provider !== "kimi") {
-      this.deps.relaySend(
-        serializeControl({
-          type: "session_create_response",
-          requestId: msg.requestId,
-          errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
-          error: "Unsupported provider for PTY session.",
-        }),
-      );
-      return;
-    }
-
     const resumeSessionId = msg.resumeSessionId;
     const pendingId = nanoid();
     const requestedName = normalizeSessionName(msg.name);
     const name = requestedName ?? tildify(cwd);
     const nameLocked = requestedName !== undefined;
-    const geometry = resolveInitialPtyGeometry(msg);
+    const { cols, rows } = msg;
+    const geometry = resolveInitialPtyGeometry({ cols, rows });
     let session: SessionInfo;
     try {
       const hook = supportsProviderHooks(provider)
@@ -540,6 +538,7 @@ export class RelaySessionCreateHandler {
         : undefined;
       const pid = this.deps.hostedPtyRegistry.start({
         sessionId: pendingId,
+        kind: "agent",
         provider,
         cwd,
         args: buildHostedPtyArgs(provider, resumeSessionId),
@@ -549,12 +548,13 @@ export class RelaySessionCreateHandler {
         ...geometry,
       });
       session = this.deps.sessionManager.createSession(
+        "agent",
         "pty",
+        provider,
         cwd,
         pid,
         name,
         pendingId,
-        provider,
         "proxy-hosted",
         nameLocked,
       );
@@ -565,6 +565,7 @@ export class RelaySessionCreateHandler {
         serializeControl({
           type: "session_create_response",
           requestId: msg.requestId,
+          success: false,
           errorCode: ControlErrorCode.PROCESS_START_FAILED,
           error,
         }),
@@ -596,9 +597,13 @@ export class RelaySessionCreateHandler {
       serializeControl({
         type: "session_create_response",
         requestId: msg.requestId,
+        success: true,
         sessionId: session.id,
+        cwd: session.cwd,
+        lastActive: session.updatedAt,
         name: session.name,
         nameLocked: session.nameLocked,
+        kind: "agent",
         mode: "pty",
         provider,
         ptyOwner: "proxy-hosted",
@@ -610,7 +615,7 @@ export class RelaySessionCreateHandler {
       this.deps.controlHandlers.pushCommandList(session.id, cwd);
     }
     this.deps.controlHandlers.pushFileTree(session.id, cwd);
-    this.deps.broadcastSessionSync(session);
+    this.deps.broadcastSessionSync();
     this.deps.broadcastSessionList();
     serviceLogger.info({ sessionId: session.id, provider, cwd }, "Hosted PTY session created");
   }
@@ -627,13 +632,14 @@ export class RelaySessionCreateHandler {
     );
   }
 
-  private createShellTerminalSession(msg: ControlMessage<"session_create">): void {
+  private createShellTerminalSession(msg: TerminalSessionCreateMessage): void {
     const pendingId = nanoid();
     const cwd = resolveTerminalCwd();
     const requestedName = normalizeSessionName(msg.name);
     const name = requestedName ?? tildify(cwd);
     const nameLocked = requestedName !== undefined;
-    const geometry = resolveInitialPtyGeometry(msg);
+    const { cols, rows } = msg;
+    const geometry = resolveInitialPtyGeometry({ cols, rows });
 
     try {
       const pid = this.deps.terminalWorkerSpawner.start({
@@ -643,30 +649,33 @@ export class RelaySessionCreateHandler {
         ...geometry,
       });
       const session = this.deps.sessionManager.createSession(
+        "terminal",
         "pty",
+        "claude",
         cwd,
         pid,
         name,
         pendingId,
-        "claude",
         "local-terminal",
         nameLocked,
-        "terminal",
       );
       this.deps.relaySend(
         serializeControl({
           type: "session_create_response",
           requestId: msg.requestId,
+          success: true,
           sessionId: session.id,
+          cwd: session.cwd,
+          lastActive: session.updatedAt,
           name: session.name,
           nameLocked: session.nameLocked,
           kind: "terminal",
           mode: "pty",
-          provider: session.provider,
+          provider: "claude",
           ptyOwner: "local-terminal",
         }),
       );
-      this.deps.broadcastSessionSync(session);
+      this.deps.broadcastSessionSync();
       this.deps.broadcastSessionList();
       serviceLogger.info({ sessionId: session.id, cwd }, "Shell terminal session created");
     } catch (err) {
@@ -675,6 +684,7 @@ export class RelaySessionCreateHandler {
         serializeControl({
           type: "session_create_response",
           requestId: msg.requestId,
+          success: false,
           errorCode: ControlErrorCode.PROCESS_START_FAILED,
           error,
         }),

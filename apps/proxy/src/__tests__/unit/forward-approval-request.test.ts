@@ -12,6 +12,7 @@ import {
   createJsonObserverFake,
   createRelayConnectionFake,
   createSessionManagerFake,
+  serializeWorkerHandshake,
 } from "./test-fakes.js";
 
 // 拿真实 claude CLI control_request fixture 端到端验证 forwardApprovalRequest：
@@ -63,7 +64,19 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
 
     const permissionBroker = new PermissionBroker();
     const registry = new WorkerRegistry({
-      sessionManager: createSessionManagerFake([{ id: "session-real-data", provider: "claude" }]),
+      sessionManager: createSessionManagerFake([
+        {
+          id: "session-real-data",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          createdAt: 1,
+          updatedAt: 1,
+          cwd: "/tmp",
+          pid: 1,
+        },
+      ]),
       permissionBroker,
       relayConnection: relay.relayConnection,
       jsonObserver: createJsonObserverFake(),
@@ -74,6 +87,13 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
     // 通过真实的 worker → serve socket 路径喂入审批请求，避免穿透 private 方法直接调用
     const sock = await registry.connect("session-real-data", sockPath);
     expect(sock).not.toBeNull();
+    acceptedSocket?.write(
+      serializeWorkerHandshake("session-real-data", 1, "claude", {
+        type: "worker_ready",
+        pid: 123,
+      }),
+    );
+    await registry.waitForReady("session-real-data", 1_000);
 
     const ipcMsg = {
       type: "worker_approval_request" as const,
@@ -111,5 +131,61 @@ describe("forwardApprovalRequest (real CLI control_request data)", () => {
       toolName: fixtureReq.request.tool_name,
       input: fixtureReq.request.input,
     });
+  });
+
+  it("denies an approval request when its current session no longer exists", async () => {
+    const relay = createRelayConnectionFake();
+    const permissionBroker = new PermissionBroker();
+    const sessionManager = createSessionManagerFake([
+      {
+        id: "removed-session",
+        kind: "agent",
+        mode: "json",
+        provider: "claude",
+        state: "idle",
+        createdAt: 1,
+        updatedAt: 1,
+        cwd: "/tmp",
+        pid: 123,
+      },
+    ]);
+    const registry = new WorkerRegistry({
+      sessionManager,
+      permissionBroker,
+      relayConnection: relay.relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
+      nextSeq: () => 1,
+    });
+    const send = vi.spyOn(registry, "send");
+    expect(await registry.connect("removed-session", sockPath)).not.toBeNull();
+    acceptedSocket?.write(
+      serializeWorkerHandshake("removed-session", 123, "claude", {
+        type: "worker_ready",
+        pid: 123,
+      }),
+    );
+    await registry.waitForReady("removed-session", 1_000);
+    vi.mocked(sessionManager.getSession).mockReturnValue(undefined);
+
+    acceptedSocket?.write(
+      serializeWorkerMsg({
+        type: "worker_approval_request",
+        requestId: "missing-session-request",
+        toolName: "Bash",
+        input: { command: "pwd" },
+      }),
+    );
+
+    await vi.waitFor(() =>
+      expect(send).toHaveBeenCalledWith("removed-session", {
+        type: "worker_approval_response",
+        requestId: "missing-session-request",
+        behavior: "deny",
+        message: "Session no longer exists.",
+      }),
+    );
+    expect(permissionBroker.listSession("removed-session")).toEqual([]);
+    expect(relay.envelopes).toEqual([]);
   });
 });

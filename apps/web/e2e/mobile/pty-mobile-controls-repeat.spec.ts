@@ -10,7 +10,15 @@ test.describe("L4 mobile / PTY soft controls long-press repeat", () => {
   test.setTimeout(60_000);
 
   test("holding the left arrow button emits multiple ESC[D sequences", async ({ emuPage }) => {
-    await setupPtyChat(emuPage, { sessionId: SESSION_ID, baseUrl: mobileBaseUrl });
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
     await touchPtyTerminalAndWaitForSoftKeyboard(emuPage);

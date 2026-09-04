@@ -1,5 +1,6 @@
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
+import { MESSAGE_ENVELOPE_VERSION, RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 
 // 本地 Vite 默认端口 5173；CI 或外部 relay-served 部署可通过 WEB_BASE_URL 覆盖
 export const BASE_URL = process.env.WEB_BASE_URL ?? "http://localhost:5173";
@@ -123,7 +124,13 @@ export async function installFakeRelay(page: Page): Promise<void> {
     });
   });
 
-  const installFakeRelayInDocument = () => {
+  const installFakeRelayInDocument = ({
+    currentControlProtocolVersion,
+    currentEnvelopeVersion,
+  }: {
+    currentControlProtocolVersion: number;
+    currentEnvelopeVersion: string;
+  }) => {
     if (window.__devAnywhereFakeRelayInstalled) return;
     Object.defineProperty(window, "__devAnywhereFakeRelayInstalled", {
       configurable: true,
@@ -146,34 +153,38 @@ export async function installFakeRelay(page: Page): Promise<void> {
 
     type FakeSession = {
       sessionId: string;
-      kind?: "agent" | "terminal";
+      kind: "agent" | "terminal";
       name?: string;
       state: "idle" | "working" | "waiting_approval" | "error" | "terminated";
       mode: "pty" | "json";
       provider: "claude" | "codex" | "kimi";
       ptyOwner?: "local-terminal" | "proxy-hosted";
       lastActive: number;
-      cwd?: string;
+      cwd: string;
       nameLocked?: boolean;
     };
 
     const defaultSessions: FakeSession[] = [
       {
         sessionId: "claude-pty",
+        kind: "agent",
         name: "/home/dev/projects/sample-app/",
         cwd: "/home/dev/projects/sample-app/",
         state: "idle",
         mode: "pty",
         provider: "claude",
+        ptyOwner: "proxy-hosted",
         lastActive: now - 60_000,
       },
       {
         sessionId: "codex-pty",
+        kind: "agent",
         name: "/home/dev/projects/dev-anywhere/",
         cwd: "/home/dev/projects/dev-anywhere/",
         state: "working",
         mode: "pty",
         provider: "codex",
+        ptyOwner: "proxy-hosted",
         lastActive: now - 120_000,
       },
       ...[
@@ -188,6 +199,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
         "voice-second-turn-sess",
       ].map((sessionId, index) => ({
         sessionId,
+        kind: "agent" as const,
         name: sessionId,
         cwd: `/home/dev/projects/${sessionId}`,
         state: "idle" as const,
@@ -283,6 +295,25 @@ export async function installFakeRelay(page: Page): Promise<void> {
       localStorage.setItem(directoryStorageKey, JSON.stringify([...directories]));
     }
 
+    function parseSessionTerminate(message: FakeRelayMessage): {
+      type: "session_terminate";
+      sessionId: string;
+    } {
+      const keys = Object.keys(message);
+      if (
+        keys.length !== 2 ||
+        !Object.prototype.hasOwnProperty.call(message, "type") ||
+        !Object.prototype.hasOwnProperty.call(message, "sessionId") ||
+        message.type !== "session_terminate" ||
+        typeof message.sessionId !== "string" ||
+        message.sessionId.length === 0 ||
+        message.sessionId.length > 256
+      ) {
+        throw new Error("invalid session_terminate fixture input");
+      }
+      return { type: "session_terminate", sessionId: message.sessionId };
+    }
+
     const history = [
       {
         id: "hist-claude-1",
@@ -300,15 +331,26 @@ export async function installFakeRelay(page: Page): Promise<void> {
       },
     ];
 
-    function envelope(type: string, sessionId: string, payload: unknown) {
+    function sessionEnvelope(type: string, sessionId: string, payload: unknown) {
       return {
         seq: Date.now(),
         sessionId,
         timestamp: Date.now(),
         source: "proxy",
-        version: "1",
+        version: currentEnvelopeVersion,
         type,
         payload,
+      };
+    }
+
+    function sessionListEnvelope() {
+      return {
+        seq: Date.now(),
+        timestamp: Date.now(),
+        source: "proxy",
+        version: currentEnvelopeVersion,
+        type: "session_list",
+        payload: { sessions },
       };
     }
 
@@ -488,7 +530,14 @@ export async function installFakeRelay(page: Page): Promise<void> {
 
         switch (msg.type) {
           case "client_register":
-            this.emitJson({ type: "client_register_response", status: "new" });
+            if (msg.protocolVersion !== currentControlProtocolVersion) {
+              throw new Error("invalid client_register fixture protocolVersion");
+            }
+            this.emitJson({
+              type: "client_register_response",
+              protocolVersion: currentControlProtocolVersion,
+              status: "new",
+            });
             break;
           case "latency_web_relay_ping":
             if (relayLivenessPongEnabled) {
@@ -577,13 +626,16 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           }
-          case "session_list":
+          case "session_list_request":
             setTimeout(() => {
-              this.emitJson(envelope("session_list", "system", { sessions }));
+              this.emitJson(sessionListEnvelope());
             }, sessionListDelayMs);
             break;
           case "session_history_request":
             {
+              if (typeof msg.requestId !== "string" || msg.requestId.length === 0) {
+                throw new Error("invalid session_history_request fixture input");
+              }
               const emitHistory = () => {
                 this.emitJson({
                   type: "session_history_response",
@@ -618,6 +670,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           case "preview_capability_request":
+            if (
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0 ||
+              msg.scope === null ||
+              typeof msg.scope !== "object" ||
+              typeof msg.refreshPath !== "boolean"
+            ) {
+              throw new Error("invalid preview_capability_request fixture input");
+            }
             this.emitJson({
               type: "preview_capability_response",
               requestId: msg.requestId,
@@ -633,7 +694,17 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           case "preview_static_inspect_request": {
-            const path = String(msg.path);
+            if (
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0 ||
+              msg.scope === null ||
+              typeof msg.scope !== "object" ||
+              typeof msg.path !== "string" ||
+              msg.path.length === 0
+            ) {
+              throw new Error("invalid preview_static_inspect_request fixture input");
+            }
+            const path = msg.path;
             const selectedHtml = /\.html?$/i.test(path) ? path.split("/").pop() : undefined;
             this.emitJson({
               type: "preview_static_inspect_response",
@@ -646,6 +717,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
             break;
           }
           case "device_preview_capability_request":
+            if (
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0 ||
+              msg.scope === null ||
+              typeof msg.scope !== "object" ||
+              typeof msg.refreshPath !== "boolean"
+            ) {
+              throw new Error("invalid device_preview_capability_request fixture input");
+            }
             this.emitJson({
               type: "device_preview_capability_response",
               requestId: msg.requestId,
@@ -668,6 +748,15 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           case "device_preview_targets_request":
+            if (
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0 ||
+              msg.scope === null ||
+              typeof msg.scope !== "object" ||
+              typeof msg.refresh !== "boolean"
+            ) {
+              throw new Error("invalid device_preview_targets_request fixture input");
+            }
             this.emitJson({
               type: "device_preview_targets_response",
               requestId: msg.requestId,
@@ -717,12 +806,24 @@ export async function installFakeRelay(page: Page): Promise<void> {
               summary: "代码和表格内容已转换成语音摘要，重点是实现路径和风险。",
             });
             break;
-          case "dir_list_request":
+          case "dir_list_request": {
+            const allowedKeys = new Set(["type", "requestId", "path", "includeHidden"]);
+            if (
+              Object.keys(msg).some((key) => !allowedKeys.has(key)) ||
+              (msg.requestId !== undefined &&
+                (typeof msg.requestId !== "string" ||
+                  msg.requestId.length === 0 ||
+                  msg.requestId.length > 256)) ||
+              typeof msg.path !== "string" ||
+              typeof msg.includeHidden !== "boolean"
+            ) {
+              throw new Error("invalid dir_list_request fixture input");
+            }
             this.emitJson({
               type: "dir_list_response",
               requestId: msg.requestId,
-              path: String(msg.path),
-              includeHidden: msg.includeHidden === true,
+              path: msg.path,
+              includeHidden: msg.includeHidden,
               entries:
                 msg.path === "/home/dev"
                   ? [
@@ -736,6 +837,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
                     ],
             });
             break;
+          }
           case "dir_create_request": {
             const path = String(msg.path ?? "");
             directories.add(path);
@@ -788,15 +890,31 @@ export async function installFakeRelay(page: Page): Promise<void> {
             break;
           }
           case "session_resources_request":
-            this.emitResources(String(msg.sessionId ?? ""), String(msg.requestId ?? ""));
+            if (
+              typeof msg.sessionId !== "string" ||
+              msg.sessionId.length === 0 ||
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0
+            ) {
+              throw new Error("invalid session_resources_request fixture input");
+            }
+            this.emitResources(msg.sessionId, msg.requestId);
             break;
           case "agent_status_request":
+            if (
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0 ||
+              typeof msg.sessionId !== "string" ||
+              msg.sessionId.length === 0
+            ) {
+              throw new Error("invalid agent_status_request fixture input");
+            }
             this.emitJson({
               type: "agent_status_response",
               requestId: msg.requestId,
               statuses: [
                 {
-                  sessionId: String(msg.sessionId ?? "json-sess"),
+                  sessionId: msg.sessionId,
                   payload: {
                     provider: "claude",
                     phase: "idle",
@@ -811,10 +929,17 @@ export async function installFakeRelay(page: Page): Promise<void> {
             emitHistoryPage(this, msg);
             break;
           case "session_subscribe":
-            if (typeof msg.requestId !== "string") break;
+            if (
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0 ||
+              typeof msg.sessionId !== "string" ||
+              msg.sessionId.length === 0
+            ) {
+              throw new Error("invalid session_subscribe fixture input");
+            }
             this.emitJson({
               type: "session_snapshot",
-              sessionId: String(msg.sessionId),
+              sessionId: msg.sessionId,
               requestId: msg.requestId,
               cols: 80,
               rows: 24,
@@ -828,10 +953,25 @@ export async function installFakeRelay(page: Page): Promise<void> {
             });
             break;
           case "session_create": {
+            if (typeof msg.requestId !== "string" || msg.requestId.length === 0) {
+              throw new Error("invalid session_create fixture requestId");
+            }
             if (msg.kind === "terminal") {
+              if (
+                msg.mode !== "pty" ||
+                typeof msg.cols !== "number" ||
+                !Number.isSafeInteger(msg.cols) ||
+                msg.cols <= 0 ||
+                typeof msg.rows !== "number" ||
+                !Number.isSafeInteger(msg.rows) ||
+                msg.rows <= 0
+              ) {
+                throw new Error("invalid terminal session_create fixture input");
+              }
               const sessionId = `created-terminal-${++createCount}`;
               const cwd = "/home/dev/workspace";
               const name = "~/workspace";
+              const lastActive = Date.now();
               sessions.unshift({
                 sessionId,
                 kind: "terminal",
@@ -841,60 +981,95 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 mode: "pty",
                 provider: "claude",
                 ptyOwner: "local-terminal",
-                lastActive: Date.now(),
+                lastActive,
               });
               persistSessions();
               this.emitJson({
                 type: "session_create_response",
                 requestId: msg.requestId,
+                success: true,
                 sessionId,
                 kind: "terminal",
                 name,
+                cwd,
+                lastActive,
                 mode: "pty",
                 provider: "claude",
                 ptyOwner: "local-terminal",
               });
-              this.emitJson(envelope("session_list", "system", { sessions }));
+              this.emitJson(sessionListEnvelope());
               break;
             }
-            const provider =
-              msg.provider === "codex" || msg.provider === "kimi" ? msg.provider : "claude";
-            const mode = msg.mode === "json" ? "json" : "pty";
-            const cwd = String(msg.cwd ?? "");
+            if (
+              msg.kind !== "agent" ||
+              (msg.provider !== "claude" && msg.provider !== "codex" && msg.provider !== "kimi") ||
+              (msg.mode !== "json" && msg.mode !== "pty") ||
+              typeof msg.cwd !== "string" ||
+              (msg.mode === "pty" &&
+                (typeof msg.cols !== "number" ||
+                  !Number.isSafeInteger(msg.cols) ||
+                  msg.cols <= 0 ||
+                  typeof msg.rows !== "number" ||
+                  !Number.isSafeInteger(msg.rows) ||
+                  msg.rows <= 0))
+            ) {
+              throw new Error("invalid session_create fixture input");
+            }
+            const provider = msg.provider;
+            const mode = msg.mode;
+            const cwd = msg.cwd;
             const cwdKey = cwd.replace(/\/+$/, "") || "/";
             if (!directories.has(cwdKey)) {
               this.emitJson({
                 type: "session_create_response",
                 requestId: msg.requestId,
+                success: false,
                 errorCode: "PATH_NOT_FOUND",
                 error: `工作目录不存在或不可访问: ${cwd}`,
               });
               break;
             }
             const sessionId = `created-${provider}-${mode}-${++createCount}`;
+            const lastActive = Date.now();
             sessions.unshift({
               sessionId,
+              kind: "agent",
               name: cwd,
               cwd,
               state: "idle",
               mode,
               provider,
-              lastActive: Date.now(),
+              ...(mode === "pty" ? { ptyOwner: "proxy-hosted" as const } : {}),
+              lastActive,
             });
             persistSessions();
             this.emitJson({
               type: "session_create_response",
               requestId: msg.requestId,
+              success: true,
               sessionId,
+              kind: "agent",
+              cwd,
+              lastActive,
               mode,
               provider,
+              ...(mode === "pty" ? { ptyOwner: "proxy-hosted" } : {}),
             });
-            this.emitJson(envelope("session_list", "system", { sessions }));
+            this.emitJson(sessionListEnvelope());
             break;
           }
           case "session_rename": {
-            const sid = String(msg.sessionId ?? "");
-            const nextName = String(msg.name ?? "").trim();
+            if (
+              typeof msg.requestId !== "string" ||
+              msg.requestId.length === 0 ||
+              typeof msg.sessionId !== "string" ||
+              msg.sessionId.length === 0 ||
+              typeof msg.name !== "string"
+            ) {
+              throw new Error("invalid session_rename fixture input");
+            }
+            const sid = msg.sessionId;
+            const nextName = msg.name.trim();
             const session = sessions.find((s) => s.sessionId === sid);
             if (!session || !nextName) {
               this.emitJson({
@@ -918,18 +1093,20 @@ export async function installFakeRelay(page: Page): Promise<void> {
               success: true,
               name: nextName,
             });
-            this.emitJson(envelope("session_list", "system", { sessions }));
+            this.emitJson(sessionListEnvelope());
             break;
           }
-          case "session_terminate":
+          case "session_terminate": {
+            const command = parseSessionTerminate(msg);
             sessions.splice(
               0,
               sessions.length,
-              ...sessions.filter((s) => s.sessionId !== msg.sessionId),
+              ...sessions.filter((s) => s.sessionId !== command.sessionId),
             );
             persistSessions();
-            this.emitJson(envelope("session_list", "system", { sessions }));
+            this.emitJson(sessionListEnvelope());
             break;
+          }
           case "tool_approve":
           case "tool_deny":
             this.emitJson({
@@ -940,25 +1117,45 @@ export async function installFakeRelay(page: Page): Promise<void> {
               delivered: true,
             });
             break;
-          case "user_input":
+          case "user_input": {
+            const payload = msg.payload;
+            if (
+              typeof msg.sessionId !== "string" ||
+              msg.sessionId.length === 0 ||
+              typeof msg.seq !== "number" ||
+              !Number.isSafeInteger(msg.seq) ||
+              msg.seq < 0 ||
+              typeof msg.timestamp !== "number" ||
+              msg.source !== "client" ||
+              msg.version !== currentEnvelopeVersion ||
+              payload === null ||
+              typeof payload !== "object" ||
+              typeof (payload as { text?: unknown }).text !== "string" ||
+              (payload as { text: string }).text.length === 0 ||
+              ((payload as { messageId?: unknown }).messageId !== undefined &&
+                (typeof (payload as { messageId?: unknown }).messageId !== "string" ||
+                  (payload as { messageId: string }).messageId.length === 0))
+            ) {
+              throw new Error("invalid user_input fixture envelope");
+            }
+            const sessionId = msg.sessionId;
+            const input = payload as { text: string; messageId?: string };
             this.emitJson(
-              envelope("user_input", String(msg.sessionId), {
-                text: String((msg.payload as { text?: string } | undefined)?.text ?? ""),
-                messageId:
-                  (msg.payload as { messageId?: string } | undefined)?.messageId ??
-                  `${String(msg.sessionId)}-user-${Date.now()}`,
+              sessionEnvelope("user_input", sessionId, {
+                text: input.text,
+                ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
               }),
             );
             this.emitJson(
-              envelope("session_status", String(msg.sessionId), {
-                sessionId: String(msg.sessionId),
+              sessionEnvelope("session_status", sessionId, {
+                sessionId,
                 state: "working",
                 lastActive: Date.now(),
               }),
             );
             this.emitJson(
-              envelope("assistant_message", String(msg.sessionId), {
-                turnId: `${String(msg.sessionId)}-fake-turn`,
+              sessionEnvelope("assistant_message", sessionId, {
+                turnId: `${sessionId}-fake-turn`,
                 revision: 1,
                 text: "收到。",
                 status: "completed",
@@ -966,18 +1163,19 @@ export async function installFakeRelay(page: Page): Promise<void> {
             );
             this.emitJson({
               type: "turn_result",
-              sessionId: String(msg.sessionId),
+              sessionId,
               success: true,
               isError: false,
             });
             this.emitJson(
-              envelope("session_status", String(msg.sessionId), {
-                sessionId: String(msg.sessionId),
+              sessionEnvelope("session_status", sessionId, {
+                sessionId,
                 state: "idle",
                 lastActive: Date.now(),
               }),
             );
             break;
+          }
           default:
             break;
         }
@@ -1014,7 +1212,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
           }
           if (session) {
             statusEchoes.push(
-              envelope("session_status", session.sessionId, {
+              sessionEnvelope("session_status", session.sessionId, {
                 sessionId: session.sessionId,
                 state: session.state,
                 lastActive: session.lastActive,
@@ -1025,14 +1223,22 @@ export async function installFakeRelay(page: Page): Promise<void> {
         }
         if (payload.type === "session_status" && typeof payload.payload === "object") {
           const status = payload.payload as {
-            sessionId?: string;
-            state?: string;
-            lastActive?: number;
+            sessionId?: unknown;
+            state?: unknown;
+            lastActive?: unknown;
           };
+          if (
+            typeof status.sessionId !== "string" ||
+            status.sessionId.length === 0 ||
+            typeof status.state !== "string" ||
+            typeof status.lastActive !== "number"
+          ) {
+            throw new Error("invalid session_status fixture payload");
+          }
           const session = sessions.find((s) => s.sessionId === status.sessionId);
-          if (session && typeof status.state === "string") {
+          if (session) {
             session.state = status.state as typeof session.state;
-            session.lastActive = status.lastActive ?? Date.now();
+            session.lastActive = status.lastActive;
             persistSessions();
           }
         }
@@ -1059,6 +1265,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 {
                   proxyId: "proxy-1",
                   name: "Local Mac",
+                  version: "0.9.0",
                   online: proxyOnlineState,
                   sessions: sessions.map((s) => s.sessionId),
                 },
@@ -1092,6 +1299,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
         });
         this.emitJson({
           type: "command_list_push",
+          sessionId,
           commands: [
             {
               name: "/init",
@@ -1221,7 +1429,10 @@ export async function installFakeRelay(page: Page): Promise<void> {
     };
     window.WebSocket = FakeRelayWebSocket as unknown as typeof WebSocket;
   };
-  await page.addInitScript(installFakeRelayInDocument);
+  await page.addInitScript(installFakeRelayInDocument, {
+    currentControlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+    currentEnvelopeVersion: MESSAGE_ENVELOPE_VERSION,
+  });
 }
 
 export async function selectFakeProxy(page: Page): Promise<void> {

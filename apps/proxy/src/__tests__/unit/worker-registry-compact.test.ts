@@ -11,6 +11,7 @@ import {
   createJsonObserverFake,
   createRelayConnectionFake,
   createSessionManagerFake,
+  serializeWorkerHandshake,
 } from "./test-fakes.js";
 
 describe("WorkerRegistry compact command events", () => {
@@ -40,7 +41,17 @@ describe("WorkerRegistry compact command events", () => {
     const onTurnResult = vi.fn();
     const registry = new WorkerRegistry({
       sessionManager: createSessionManagerFake([
-        { id: "s1", mode: "json", state: SessionState.COMPACTING },
+        {
+          id: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: SessionState.COMPACTING,
+          createdAt: 1,
+          updatedAt: 1,
+          cwd: "/tmp",
+          pid: 1,
+        },
       ]),
       permissionBroker: new PermissionBroker(),
       relayConnection: relay.relayConnection,
@@ -53,6 +64,10 @@ describe("WorkerRegistry compact command events", () => {
   async function connectAndWrite(registry: WorkerRegistry, event: Record<string, unknown>) {
     const sock = await registry.connect("s1", sockPath);
     expect(sock).not.toBeNull();
+    acceptedSocket?.write(
+      serializeWorkerHandshake("s1", 1, "claude", { type: "worker_ready", pid: 123 }),
+    );
+    await registry.waitForReady("s1", 1_000);
     acceptedSocket?.write(serializeWorkerMsg({ type: "worker_event", seq: 7, event }));
   }
 
@@ -90,7 +105,19 @@ describe("WorkerRegistry compact command events", () => {
   it("aggregates Claude text deltas into growing full snapshots", async () => {
     const relay = createRelayConnectionFake();
     const registry = new WorkerRegistry({
-      sessionManager: createSessionManagerFake([{ id: "s1", mode: "json", provider: "claude" }]),
+      sessionManager: createSessionManagerFake([
+        {
+          id: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          createdAt: 1,
+          updatedAt: 1,
+          cwd: "/tmp",
+          pid: 1,
+        },
+      ]),
       permissionBroker: new PermissionBroker(),
       relayConnection: relay.relayConnection,
       jsonObserver: createJsonObserverFake(),
@@ -98,6 +125,10 @@ describe("WorkerRegistry compact command events", () => {
     });
     const sock = await registry.connect("s1", sockPath);
     expect(sock).not.toBeNull();
+    acceptedSocket?.write(
+      serializeWorkerHandshake("s1", 1, "claude", { type: "worker_ready", pid: 123 }),
+    );
+    await registry.waitForReady("s1", 1_000);
 
     for (const [seq, text] of [
       [1, "完整"],
