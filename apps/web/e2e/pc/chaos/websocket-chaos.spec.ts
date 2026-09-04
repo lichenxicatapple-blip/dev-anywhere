@@ -457,7 +457,9 @@ test.describe("WebSocket reconnect chaos", () => {
     await expectPtyAtBottom(page);
   });
 
-  test("does not queue request-response session creation while disconnected", async ({ page }) => {
+  test("blocks session creation while disconnected without queueing the request", async ({
+    page,
+  }) => {
     // 移动 UX 单栏路由下 proxy 断线会把"新建会话"对话框整体卸载回退到 proxy-selection,
     // 这条 invariant 在 mobile 路径上以另一种 UX 表达(整个对话被卸载),不是相同测试形态。
     // 限定到桌面视口 + 非触屏环境验证 relay 不入队的契约。
@@ -475,17 +477,20 @@ test.describe("WebSocket reconnect chaos", () => {
     await selectFakeProxy(page);
     await openCreateAgentSessionDialog(page);
     await page.getByLabel("工作目录").fill("/home/dev/projects/sample-app");
+    const dialog = page.getByRole("dialog", { name: "新建会话" });
+    const createButton = dialog.getByRole("button", { name: "创建" });
 
     await holdNextConnectionAndDropSocket(page);
-    await page
-      .getByRole("dialog", { name: "新建会话" })
-      .getByRole("button", { name: "创建" })
-      .click();
+    await expect(
+      page.locator('[data-slot="relay-connection-state"][data-state="unavailable"]'),
+    ).toBeVisible();
+    await expect(dialog).toHaveAttribute("inert", "");
+    await expect(createButton).toBeDisabled();
 
-    await expect(page.getByRole("button", { name: "创建" })).toBeEnabled();
-    await expect(page.getByText("连接已断开")).toBeVisible();
     await releaseHeldConnections(page);
-    await expect(page).toHaveURL(/#\/?$/);
+    await expect(page.locator('[data-slot="relay-connection-state"]')).toHaveCount(0);
+    await expect(dialog).not.toHaveAttribute("inert");
+    await expect(createButton).toBeEnabled();
 
     const sent = await sentFakeRelayMessages(page);
     expect(sent.filter((msg) => msg.type === "session_create")).toHaveLength(0);
