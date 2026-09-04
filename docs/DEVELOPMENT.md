@@ -134,7 +134,7 @@ docs/       长期维护的中文文档和 README 媒体资源
 - `agentCli`
 - `logLevel`
 
-`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin` 和 `kimiBin` 指定 Claude Code、Codex、Kimi Code 的绝对路径；`KIMI_BIN` 可以临时覆盖 `agentCli.kimiBin`。
+`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin` 和 `kimiBin` 指定 Claude Code、Codex、Kimi Code 的绝对路径；对应的 `CLAUDE_BIN`、`CODEX_BIN` 和 `KIMI_BIN` 可以临时覆盖配置。
 
 配置由 Zod schema 校验。新增字段时应同时修改 schema、默认配置、相关测试和用户文档。
 

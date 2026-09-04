@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./apps/web/public/brand-icon.svg" width="96" alt="DEV Anywhere logo">
   <h1>DEV Anywhere</h1>
-  <p>Create, control, and manage Claude Code, Codex, Kimi Code, and Shell sessions on your development machine from a browser.</p>
+  <p>Connect to your development machine from a browser and keep coding with AI from anywhere.</p>
   <p>
     <a href="./README.md">中文</a>
     ·
@@ -22,7 +22,7 @@
 
 ## What it is
 
-DEV Anywhere is a self-hosted remote AI coding workspace. From a browser on any device, you can continue using Claude Code, Codex, or Kimi Code already running in a terminal on your remote development machine, resume their previous sessions, start a new coding agent remotely, or use a Shell directly.
+DEV Anywhere lets you continue using Claude Code, Codex, Kimi Code, and Shell on your development machine from a browser. From another computer, phone, or tablet, you can continue your current session, resume a previous session, or start a new one. You can also preview web apps and interact with running iOS Simulators and Android Emulators on the development machine.
 
 To continue a locally started Claude Code, Codex, or Kimi Code session from the browser, add `dev-anywhere` before the original command. Apart from the prefix, the development experience stays exactly the same. The session also appears in the DEV Anywhere Web interface, so you can continue working anytime and anywhere. You can also create a new coding agent session directly from the Web.
 
@@ -119,7 +119,7 @@ Edit `~/.dev-anywhere/config.json` with the Relay URL and the `RELAY_PROXY_TOKEN
 
 When using a domain, replace `url` with `wss://your-domain`. The deployment script prints a configuration example matching the selected public entry point.
 
-If `kimi` is not on the regular `PATH`, set `KIMI_BIN` for a temporary override or add `agentCli.kimiBin` with its absolute path to the top-level configuration.
+If an agent CLI is not detected automatically, select its executable when creating a session.
 
 Connect the development machine to the Relay:
 
@@ -140,9 +140,7 @@ Once connected, use the browser to take over a coding agent session started in a
 
 When starting Claude Code, Codex, or Kimi Code, add `dev-anywhere` before the original command:
 
-For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. Apart from the `dev-anywhere` prefix, CLI arguments and the local terminal experience remain unchanged, and you can continue the same session later from the Web.
-
-Locally started DEV Anywhere sessions connect to the Proxy automatically, so you do not need to start the Proxy service manually.
+For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. The CLI arguments and local terminal experience stay the same. The session also appears in DEV Anywhere, where you can take it over from a browser at any time.
 
 **With a VPS Relay deployment**
 
@@ -179,9 +177,7 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
-The Proxy automatically follows its connected Relay, so routine upgrades only require updating the VPS from your local DEV Anywhere clone:
-
-Before stopping the old Proxy, an automatic-update restart reloads `PATH` from the development machine's POSIX-compatible interactive login shell. CLIs installed and added to the shell `PATH` after the daemon originally started are therefore detected after the upgrade. If the refresh fails, the restart safely keeps the inherited `PATH`; manual `serve start/restart` continues to inherit the invoking terminal environment directly.
+From the DEV Anywhere project directory, run the following commands to upgrade the Relay:
 
 ```bash
 git pull --ff-only
@@ -191,6 +187,8 @@ bash scripts/deploy/install-relay.sh \
 ```
 
 Keep the last argument consistent with the initial deployment: pass the domain again for a domain deployment, or the public IP for an IP deployment. The installer reuses the existing tokens on the VPS.
+
+After the Relay is updated, DEV Anywhere updates automatically on connected development machines; no per-machine update is needed.
 
 You can then verify the version and connection on any development machine:
 
@@ -218,6 +216,21 @@ For pinned versions or VPS container checks, see the [VPS deployment guide](./do
 The **terminal view** presents the original CLI interface and preserves colors, cursor behavior, keyboard interaction, and full-screen programs. The **chat view** organizes coding agent output, tool calls, approvals, and final responses into messages that are easier to read and operate by touch. Kimi Code chat uses ACP and supports streaming output, tool calls and approvals, cancelling the current turn, and resuming historical sessions.
 
 ![DEV Anywhere terminal and chat views](./docs/assets/readme-session-modes.gif)
+
+### Web and mobile device simulator previews
+
+Select Preview from the New menu to view a web app on the development machine or interact with a running iOS Simulator or Android Emulator.
+
+![Creating a preview and opening the web app](./docs/assets/readme-previews.gif)
+
+- **Web previews** turn a website that is only available on the development machine (for example at `http://localhost` or `http://127.0.0.1`), an HTML file, or a directory containing web pages into a temporary HTTPS link. You can copy the link or, when supported, send it through your browser's system share feature. The link stops working as soon as you stop the preview.
+- **Mobile device simulator previews** let you view and operate a simulator directly in the browser. They support basic touch actions such as tap, long-press, and swipe, as well as rotation, Home, Android Back, and pasting text.
+
+![Creating an iPhone simulator preview and launching Settings](./docs/assets/readme-ios-simulator.gif)
+
+- Web previews require `cloudflared` or `cpolar`; Cpolar must also be authenticated before use.
+- iOS Simulator previews are available only from a macOS development machine and require Baguette 0.1.96 or later.
+- Android Emulator previews require `adb`.
 
 ### Approvals, search, and files
 
@@ -281,15 +294,15 @@ flowchart LR
   desktop -->|"HTTPS / WSS"| relay
   phone -->|"HTTPS / WSS"| relay
   tablet -->|"HTTPS / WSS"| relay
-  relay <-->|"session and terminal data"| proxy
+  relay <-->|"sessions, files, and device-preview data"| proxy
 ```
 
-- **Web client**: provides session lists, terminal and chat interfaces, approvals, file operations, and Voice Pilot.
-- **Relay**: serves the Web application, authenticates connections, and forwards real-time traffic between browsers and development machines.
-- **Proxy**: runs on the development machine and manages coding agents, terminals, session history, and file access.
+- **Web client**: provides session lists, terminal and chat interfaces, web and simulator previews, approvals, file operations, and Voice Pilot.
+- **Relay**: serves the Web application, authenticates browsers and development machines, and forwards session and device-preview data.
+- **Proxy**: runs on the development machine, manages coding agents, terminals, session history, and file access, and provides web and simulator previews.
 - **Coding agent / Shell**: keeps using the CLI, environment variables, repositories, and local permissions on the development machine.
 
-Repositories and coding agent processes remain on the development machine. The Relay server forwards terminal, message, file, and voice data and can read that content, so it must run on infrastructure you trust. The current release does not provide end-to-end encryption.
+Repositories and coding agent processes remain on the development machine. The Relay forwards and can read terminal, message, file, voice, and device-preview data, so it must run on infrastructure you trust. Web-preview pages and assets bypass the Relay and are served through Cloudflare Tunnel or Cpolar; preview commands and metadata still pass through the Relay. The current release does not provide end-to-end encryption.
 
 ## Platform support
 
@@ -303,13 +316,15 @@ Repositories and coding agent processes remain on the development machine. The R
 
 ## Security boundaries
 
-- Coding agents and Shells run with the current development-machine user's permissions. DEV Anywhere does not provide sandboxing.
-- `RELAY_PROXY_TOKEN` authenticates a development machine and goes in the matching Relay's `proxyToken` field in `~/.dev-anywhere/config.json`; `RELAY_CLIENT_TOKEN` authenticates a browser and is entered under Settings → Relay Token on first access. The VPS deployment script generates both; see the [deployment guide](./docs/DEPLOYMENT.md#连接开发机).
-- Removing a machine from the list only clears its offline Relay record; it does not revoke `RELAY_PROXY_TOKEN`. If a machine is lost or sold with its configuration possibly intact, rotate that Relay's Proxy Token and update every development machine you still trust.
-- A public Relay server must use HTTPS/WSS. Tokens are bearer credentials and must be rotated immediately after a leak.
-- The Relay server forwards terminal, message, file, and voice data, so deploy it on infrastructure you trust.
-- Tool approvals remain an important security boundary. `Always Yes` and bypass-approval modes reduce prompts and increase the impact of mistakes.
-- Do not share token-bearing access URLs with untrusted people, and never commit `~/.dev-anywhere/config.json` to a repository.
+- Coding agents and Shells run as the system user who started the Proxy. They can access the files and processes available to that user. DEV Anywhere does not add another sandbox around them.
+- `RELAY_PROXY_TOKEN` authenticates a development machine and is stored in the matching Relay's `proxyToken` field in `~/.dev-anywhere/config.json`. `RELAY_CLIENT_TOKEN` authenticates a browser and is entered under Settings → Relay Token on first access. The VPS deployment script generates both; see the [deployment guide](./docs/DEPLOYMENT.md#连接开发机).
+- Removing an offline development machine from the list only deletes its saved Relay record. It does not invalidate the Proxy Token stored on that machine. If a machine is lost, transferred, or sold with its DEV Anywhere configuration possibly intact, replace the Relay's Proxy Token and update the machines you still use with the new Token.
+- A public Relay must use HTTPS/WSS. A Token is an access credential; anyone who obtains it may be able to connect to DEV Anywhere as the corresponding identity. Replace it immediately if it leaks.
+- The Relay can read the terminal, message, file, voice, and device-preview data that it forwards, as well as web-preview settings and status, so deploy it only on infrastructure you trust.
+- Tool approvals ask for confirmation before an operation that needs authorization. Enabling `Always Yes` or bypassing approvals reduces those confirmations and may increase the impact of mistakes.
+- Web preview links are not protected by the Relay Token. Anyone with a link can access it. When you select an HTML file, other non-hidden files in its folder may also be available through the preview link; when you select a directory, every file that the preview server can serve from that directory may be accessible. Preview only content you are willing to expose, and stop the preview when you are done.
+- Do not share token-bearing access URLs with people you do not trust.
+- `~/.dev-anywhere/config.json` may contain a Proxy Token. Do not put it in a project directory or upload it to GitHub, GitLab, or another code-hosting service.
 
 ## Development
 

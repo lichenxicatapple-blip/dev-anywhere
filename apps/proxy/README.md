@@ -120,14 +120,16 @@ that value in Settings -> Relay Token so the browser client can authenticate.
 
 `dev-anywhere serve start --relay cloud` and `dev-anywhere serve restart --relay cloud` use a named relay without editing the file each time.
 
-`autoUpdate` defaults to `true`. During a Relay-directed update, the restart refreshes `PATH` from the user's POSIX-compatible interactive login shell before stopping the old daemon. A failed refresh falls back to the inherited `PATH`; manual `serve start` and `serve restart` continue to inherit the invoking terminal environment. Set `autoUpdate` to `false` and restart the service to pin a machine.
+`autoUpdate` defaults to `true`. After the connected Relay is upgraded, DEV Anywhere on this machine updates automatically. Set `autoUpdate` to `false` and restart the service to keep the installed version.
 
-If `kimi` is not on the normal `PATH`, set its persistent path under the
-top-level `agentCli` object:
+If DEV Anywhere cannot detect an agent CLI automatically, set its persistent
+path under the top-level `agentCli` object:
 
 ```json
 {
   "agentCli": {
+    "claudeBin": "/absolute/path/to/claude",
+    "codexBin": "/absolute/path/to/codex",
     "kimiBin": "/absolute/path/to/kimi"
   }
 }
@@ -137,8 +139,8 @@ Environment variables are reserved for temporary overrides:
 
 - `RELAY_URL` — relay WebSocket URL
 - `RELAY_PROXY_TOKEN` — auth token
-- `CLAUDE_BIN` — Claude Code CLI path
-- `CODEX_BIN` — Codex CLI path
+- `CLAUDE_BIN` — Claude Code CLI path; overrides `agentCli.claudeBin`
+- `CODEX_BIN` — Codex CLI path; overrides `agentCli.codexBin`
 - `KIMI_BIN` — Kimi Code CLI path; overrides `agentCli.kimiBin`
 
 ## How it works

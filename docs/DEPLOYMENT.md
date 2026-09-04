@@ -138,7 +138,7 @@ dev-anywhere serve status
 
 `status` 应显示 Relay 已连接。默认 profile 的服务日志位于 `~/.dev-anywhere/logs/service.log`。
 
-如果 Claude Code、Codex 或 Kimi Code 不在普通的 `PATH` 中，将下面的字段合并到配置顶层：
+如果 DEV Anywhere 没有自动识别某个 CLI，可以在新建会话时选择它的可执行文件，也可以将对应路径写入配置顶层：
 
 ```json
 {
@@ -150,7 +150,7 @@ dev-anywhere serve status
 }
 ```
 
-也可以使用 `CLAUDE_BIN`、`CODEX_BIN` 或 `KIMI_BIN` 临时覆盖这些路径；其中 `KIMI_BIN` 对应 `agentCli.kimiBin`。
+也可以分别使用 `CLAUDE_BIN`、`CODEX_BIN` 和 `KIMI_BIN` 临时覆盖这些路径。
 
 Kimi Code 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere kimi ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
 
@@ -199,9 +199,7 @@ ssh root@your-vps \
 
 ## 升级
 
-Proxy 默认跟随当前 Relay 自动升级，因此日常只需更新 VPS：
-
-自动升级触发重启时，Proxy 会在停止旧 daemon 前从开发机的 POSIX 兼容交互式 login shell 重新读取 `PATH`；之后安装并加入 shell `PATH` 的 CLI 会由新 daemon 自动识别。读取失败会回退原 `PATH` 并继续重启；手动 `serve start/restart` 仍继承调用终端的环境。
+进入 DEV Anywhere 项目目录，运行以下命令升级 Relay：
 
 ```bash
 git pull --ff-only
@@ -211,6 +209,8 @@ bash scripts/deploy/install-relay.sh \
 ```
 
 部署脚本会复用 `/opt/dev-anywhere/.env` 中已有的 Token。
+
+Relay 更新后，各开发机上的 DEV Anywhere 会自动更新，无需逐台操作。
 
 升级命令的最后一个参数应与首次部署保持一致：首次使用域名就继续传域名，首次使用公网 IP 就继续传公网 IP。
 

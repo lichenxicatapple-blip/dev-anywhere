@@ -1,7 +1,7 @@
 <div align="center">
   <img src="./apps/web/public/brand-icon.svg" width="96" alt="DEV Anywhere 标志">
   <h1>DEV Anywhere</h1>
-  <p>在浏览器中创建、接管和管理开发机上的 Claude Code、Codex、Kimi Code 与 Shell 会话。</p>
+  <p>通过浏览器连接开发机，随时继续 AI coding。</p>
   <p>
     <a href="./README.en.md">English</a>
     ·
@@ -22,7 +22,7 @@
 
 ## 这是什么
 
-DEV Anywhere 是一个自托管的远程 AI coding 工作台。你可以在任意设备的浏览器中，继续操作远程开发机终端里正在运行的 Claude Code、Codex 或 Kimi Code，也可以恢复它们的历史会话、远程启动新的 coding agent，或者直接使用 Shell。
+DEV Anywhere 让你通过浏览器继续使用开发机上的 Claude Code、Codex、Kimi Code 和 Shell。无论手边是另一台电脑、手机还是平板，都能继续当前会话、恢复历史会话或启动新会话。你还可以预览网页效果，并查看和操控开发机上已经启动的 iOS Simulator 与 Android Emulator。
 
 想让本地启动的 Claude Code、Codex 或 Kimi Code 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。除了多了这个前缀，其他都和你原来的开发体验完全一致；但启动后，对应会话会出现在 DEV Anywhere 的 Web 界面里，方便你随时随地继续开发。你也可以直接从 Web 创建新的 coding agent 会话。
 
@@ -119,15 +119,7 @@ dev-anywhere init
 
 使用域名时，将 `url` 换成 `wss://你的域名`。部署脚本会输出与当前入口匹配的配置示例。
 
-如果 `kimi` 不在普通的 `PATH` 中，可以临时设置 `KIMI_BIN`，也可以将下面的 `agentCli` 字段合并到配置顶层：
-
-```json
-{
-  "agentCli": {
-    "kimiBin": "/absolute/path/to/kimi"
-  }
-}
-```
+如果没有自动找到 Agent CLI，可以在新建会话时选择它的可执行文件。
 
 让开发机连接 Relay：
 
@@ -148,9 +140,7 @@ dev-anywhere serve status
 
 启动 Claude Code、Codex 或 Kimi Code 时，只需在原命令前加上 `dev-anywhere`：
 
-例如，原来运行 `claude --permission-mode plan`，接入后只需改为 `dev-anywhere claude --permission-mode plan`。除了增加 `dev-anywhere` 前缀，CLI 参数和本地终端的使用体验保持不变，之后还可以在 Web 中继续同一个会话。
-
-本地启动的 DEV Anywhere 会话会自动连接 Proxy，无需手动启动 Proxy 服务。
+例如，将 `claude --permission-mode plan` 改为 `dev-anywhere claude --permission-mode plan`。CLI 参数和本地终端体验都不变。该会话也会出现在 DEV Anywhere 的 Web 界面中，随时可以从浏览器接管。
 
 **使用 VPS Relay 部署时**
 
@@ -187,9 +177,7 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
-Proxy 默认跟随当前连接的 Relay 自动升级，因此日常只需在本机克隆的 DEV Anywhere 仓库中更新 VPS：
-
-自动升级重启会在停止旧 Proxy 前，从开发机的 POSIX 兼容交互式 login shell 重新读取 `PATH`，因此后来安装并加入 shell `PATH` 的 CLI 会在升级后被新 Proxy 识别。读取失败时会继续使用原 `PATH`，不阻断重启；手动 `serve start/restart` 仍直接继承当前终端环境。
+进入 DEV Anywhere 项目目录，运行以下命令升级 Relay：
 
 ```bash
 git pull --ff-only
@@ -199,6 +187,8 @@ bash scripts/deploy/install-relay.sh \
 ```
 
 最后一个参数应与首次部署时保持一致：使用域名部署就继续传域名，使用公网 IP 部署就传公网 IP。部署脚本会复用 VPS 上已有的 Token。
+
+Relay 更新后，各开发机上的 DEV Anywhere 会自动更新，无需逐台操作。
 
 升级后可在任意开发机确认版本和连接状态：
 
@@ -226,6 +216,21 @@ dev-anywhere serve status
 **终端视图**直接呈现 CLI 的原始界面，保留颜色、光标、键盘交互和全屏程序。**聊天视图**将 coding agent 输出、工具调用、审批和最终回复整理为更易阅读和触摸操作的消息。Kimi Code 的聊天视图使用 ACP，支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
 
 ![DEV Anywhere 的终端与聊天视图](./docs/assets/readme-session-modes.gif)
+
+### 网页与移动设备模拟器预览
+
+从“新建”菜单选择“预览”，可以查看开发机上的网页效果，或直接查看和操控已经启动的 iOS Simulator 与 Android Emulator。
+
+![从新建预览到打开网页效果](./docs/assets/readme-previews.gif)
+
+- **网页预览**：把只能在开发机上打开的网站（例如通过 `http://localhost` 或 `http://127.0.0.1` 访问）、HTML 文件或包含网页文件的目录变成一个临时 HTTPS 链接。你可以复制链接；浏览器支持系统分享时，也可以直接发送给别人。停止预览后，链接立即失效。
+- **移动设备模拟器预览**：直接在浏览器中查看和操作模拟器。支持点击、长按、滑动等基本触控操作，也可以旋转画面、返回主屏幕、使用 Android 返回键和粘贴文字。
+
+![从新建预览到在 iPhone 模拟器中打开“设置”](./docs/assets/readme-ios-simulator.gif)
+
+- 网页预览需要安装 `cloudflared` 或 `cpolar`；使用 Cpolar 前还需要完成账号认证。
+- iOS Simulator 预览仅支持 macOS 开发机，并需要 Baguette 0.1.96 或更高版本。
+- Android Emulator 预览需要 `adb`。
 
 ### 审批、搜索与文件
 
@@ -289,15 +294,15 @@ flowchart LR
   desktop -->|"HTTPS / WSS"| relay
   phone -->|"HTTPS / WSS"| relay
   tablet -->|"HTTPS / WSS"| relay
-  relay <-->|"会话与终端数据"| proxy
+  relay <-->|"会话、文件与设备预览数据"| proxy
 ```
 
-- **Web 客户端**：提供会话列表、终端与聊天界面、审批、文件操作和 Voice Pilot。
-- **Relay**：托管 Web，认证并转发浏览器与开发机之间的实时流量。
-- **Proxy**：运行在开发机上，管理 coding agent、终端、会话历史和文件访问。
+- **Web 客户端**：提供会话列表、终端与聊天界面、网页与移动设备模拟器预览、审批、文件操作和 Voice Pilot。
+- **Relay**：托管 Web，验证浏览器和开发机的身份，并转发会话及设备预览数据。
+- **Proxy**：运行在开发机上，管理 coding agent、终端、会话历史和文件访问，并提供网页及模拟器预览。
 - **Coding agent / Shell**：继续使用开发机上的 CLI、环境变量、仓库和本地权限。
 
-代码仓库和 coding agent 进程都留在开发机上。Relay 服务器会转发终端、消息、文件和语音数据，并且能够读取这些内容，因此必须部署在受信任的服务器上。当前版本不提供端到端加密。
+代码仓库和 coding agent 进程都留在开发机上。Relay 会转发并能读取终端、消息、文件、语音和设备预览数据，因此必须部署在受信任的服务器上。网页预览的页面和资源不经过 Relay，而是由 Cloudflare Tunnel 或 Cpolar 提供临时访问链接；创建预览、同步状态等控制信息仍会经过 Relay。当前版本不提供端到端加密。
 
 ## 平台支持
 
@@ -311,13 +316,15 @@ flowchart LR
 
 ## 安全边界
 
-- Coding agent 与 Shell 以开发机当前用户的权限运行。DEV Anywhere 不提供沙箱隔离。
-- `RELAY_PROXY_TOKEN` 用于认证开发机，写入 `~/.dev-anywhere/config.json` 中对应 Relay 的 `proxyToken`；`RELAY_CLIENT_TOKEN` 用于认证浏览器，首次访问时填入“设置 → Relay Token”。VPS 部署脚本会生成两者，具体见 [部署指南](./docs/DEPLOYMENT.md#连接开发机)。
-- 从开发机列表“移除”只会清理 Relay 中的离线记录，不会吊销 `RELAY_PROXY_TOKEN`。如果开发机丢失、出售且可能保留配置，必须轮换该 Relay 的 Proxy Token，并同步更新仍受信任的开发机。
-- 公网 Relay 服务器必须使用 HTTPS/WSS。Token 是持有者凭据，泄露后应立即轮换。
-- Relay 服务器会转发终端、消息、文件和语音数据，应部署在你信任的服务器上。
-- 工具审批仍然是重要的安全边界。`Always Yes` 和跳过审批模式会减少确认，也会扩大误操作的影响范围。
-- 不要把带 Token 的访问链接发给不受信任的人，也不要将 `~/.dev-anywhere/config.json` 提交到版本库。
+- Coding agent 和 Shell 以启动 Proxy 的系统用户身份运行，可以访问该用户有权访问的文件和进程。DEV Anywhere 不会额外提供沙箱隔离。
+- `RELAY_PROXY_TOKEN` 用于验证开发机身份，保存在 `~/.dev-anywhere/config.json` 对应 Relay 的 `proxyToken` 字段中。`RELAY_CLIENT_TOKEN` 用于验证浏览器身份，首次访问时在“设置 → Relay Token”中填写。VPS 部署脚本会生成这两个 Token，配置方法见 [部署指南](./docs/DEPLOYMENT.md#连接开发机)。
+- 从列表中移除离线开发机，只会删除 Relay 保存的列表记录，不会让该开发机保存的 Proxy Token 失效。如果开发机丢失、转让或出售，并且可能仍保留 DEV Anywhere 配置，请更换 Relay 的 Proxy Token，再把新 Token 更新到仍在使用的开发机上。
+- 公网 Relay 必须使用 HTTPS/WSS。Token 相当于访问凭证，拿到 Token 的人就可能以对应身份接入 DEV Anywhere；一旦泄露，请立即更换。
+- Relay 能读取经其转发的终端、消息、文件、语音、设备预览画面与操作数据，以及网页预览的设置和状态，因此请只将它部署在你信任的服务器上。
+- 工具审批会在需要授权的操作执行前让你确认。启用 `Always Yes` 或跳过审批后，确认会减少，误操作的影响也可能更大。
+- 网页预览链接不受 Relay Token 保护，任何拿到链接的人都能访问。选择 HTML 文件时，其所在文件夹中的其他非隐藏文件也可能通过预览链接访问；选择目录时，目录中可提供的文件都可能被访问。请只预览可以公开的内容，并在使用后及时停止预览。
+- 不要把包含 Token 的访问链接发给不信任的人。
+- `~/.dev-anywhere/config.json` 可能保存着 Proxy Token。不要把它放进项目文件夹，也不要上传到 GitHub、GitLab 等代码托管平台。
 
 ## 开发
 
