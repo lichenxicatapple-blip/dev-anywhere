@@ -357,7 +357,7 @@ stop_ephemeral_pty_screens() {
 }
 
 cleanup_ephemeral_profile() {
-  [[ -n "$EPHEMERAL_PROFILE_DIR" ]] || return
+  [[ -n "$EPHEMERAL_PROFILE_DIR" ]] || return 0
   local source_name source_path
 
   local stop_output stop_ok=1 pid="" profile_root_real profile_dir_real owner_token

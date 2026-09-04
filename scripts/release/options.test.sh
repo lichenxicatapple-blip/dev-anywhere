@@ -48,6 +48,8 @@ grep -q 'DEV_ANYWHERE_E2E_OWNER_TOKEN' <<<"$deep_script"
 grep -q 'export DATA_DIR="$ISOLATED_PROFILE_DIR/relay-data"' <<<"$deep_script"
 grep -q -- '--ephemeral-profile-dir "$ISOLATED_PROFILE_DIR"' <<<"$deep_script"
 grep -q 'MOBILE_STARTED' <<<"$deep_script"
+grep -q '\[\[ -n "$ISOLATED_PROFILE_DIR" \]\] || return 0' <<<"$deep_script"
+grep -q '\[\[ -n "$pids" \]\] || return 0' <<<"$deep_script"
 if grep -qE -- '--profile local|--relay local|--relay-port 3100|--web-port 5173' <<<"$deep_script"; then
   echo "deep release checks must not reuse the developer's local runtime" >&2
   exit 1

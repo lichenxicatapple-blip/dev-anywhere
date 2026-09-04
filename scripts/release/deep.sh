@@ -37,7 +37,7 @@ esac
 
 cleanup_mobile_emulators() {
   if [[ "$MOBILE_STARTED" != "1" || "$RELEASE_MOBILE_KEEP_EMULATORS" == "1" ]]; then
-    return
+    return 0
   fi
   DEV_ANYWHERE_MOBILE_BASE_PORT="$RELEASE_MOBILE_BASE_PORT" \
     bash scripts/test/mobile-emulators.sh stop "$RELEASE_MOBILE_EMULATORS" >/dev/null 2>&1 || true
@@ -119,9 +119,9 @@ setup_isolated_runtime() {
 stop_isolated_port() {
   local port="$1"
   local pids
-  [[ -n "$port" ]] || return
+  [[ -n "$port" ]] || return 0
   pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
-  [[ -n "$pids" ]] || return
+  [[ -n "$pids" ]] || return 0
   kill $pids 2>/dev/null || true
   for _ in $(seq 1 20); do
     pids="$(lsof -tiTCP:"$port" -sTCP:LISTEN 2>/dev/null || true)"
@@ -153,7 +153,7 @@ clear_isolated_runtime_state() {
 
 isolated_pty_screens() {
   local screen_session screen_name
-  [[ -n "$ISOLATED_PROFILE" ]] || return
+  [[ -n "$ISOLATED_PROFILE" ]] || return 0
   if ! command -v screen >/dev/null 2>&1; then
     return 0
   fi
@@ -181,7 +181,7 @@ stop_isolated_pty_screens() {
 }
 
 cleanup_isolated_runtime() {
-  [[ -n "$ISOLATED_PROFILE_DIR" ]] || return
+  [[ -n "$ISOLATED_PROFILE_DIR" ]] || return 0
   local stop_output stop_ok=1 pid="" profile_root_real profile_dir_real owner_token
 
   # chaos.sh owns the inner run and removes the profile only after it has stopped
