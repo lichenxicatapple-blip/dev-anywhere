@@ -9,9 +9,6 @@ import {
   serializeControl,
   type PtySemanticState,
 } from "@dev-anywhere/shared";
-import pkg from "@xterm/headless";
-const { Terminal: HeadlessTerminal } = pkg;
-import { SerializeAddon } from "@xterm/addon-serialize";
 import { serviceLogger } from "../common/logger.js";
 import { findCodexActiveWriter } from "../common/codex-active-writer.js";
 import {
@@ -31,11 +28,12 @@ import {
   decidePtySemanticTransition,
   shouldStartPtyTurnOnInput,
 } from "../common/pty-semantic-machine.js";
-import { capturePtySnapshot } from "../common/pty-snapshot.js";
+import { PtyRenderSequencer } from "../common/pty-render-sequencer.js";
 import {
   createCodexXtermHistoryCompat,
   type CodexXtermHistoryCompat,
 } from "../common/codex-xterm-history-compat.js";
+import { PtySynchronizedOutputCoalescer } from "../common/pty-synchronized-output-coalescer.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
@@ -97,15 +95,14 @@ interface HostedPtySession {
   provider?: ProviderId;
   nativeSessionId?: string;
   child: IPty;
-  terminal: InstanceType<typeof HeadlessTerminal>;
-  serializeAddon: SerializeAddon;
+  renderSequencer: PtyRenderSequencer;
   xtermHistoryCompat: CodexXtermHistoryCompat | null;
   xtermHistoryCompatReported: boolean;
+  synchronizedOutput: PtySynchronizedOutputCoalescer;
   idleTimer: NodeJS.Timeout;
   startedAt: number;
   lastOutputTime: number;
   currentState: PtySemanticState;
-  outputSeq: number;
   ptyStateSeq: number;
   semanticTextTail: string;
   startupOutput: string;
@@ -177,17 +174,7 @@ export class HostedPtyRegistry {
       env,
     });
 
-    const terminal = new HeadlessTerminal({ cols, rows, scrollback: 5000, allowProposedApi: true });
-    const serializeAddon = new SerializeAddon();
-    terminal.loadAddon(serializeAddon);
-    void import("@xterm/addon-unicode-graphemes")
-      .then(({ UnicodeGraphemesAddon }) => terminal.loadAddon(new UnicodeGraphemesAddon()))
-      .catch((err) => {
-        serviceLogger.warn(
-          { sessionId: options.sessionId, error: String(err) },
-          "Unicode addon unavailable",
-        );
-      });
+    const renderSequencer = new PtyRenderSequencer({ cols, rows });
 
     const hosted: HostedPtySession = {
       kind,
@@ -196,19 +183,28 @@ export class HostedPtyRegistry {
         ? {}
         : { nativeSessionId: options.nativeSessionId }),
       child,
-      terminal,
-      serializeAddon,
+      renderSequencer,
       xtermHistoryCompat: createCodexXtermHistoryCompat(
         options.kind === "terminal" ? null : options.provider,
         rows,
         this.deps.getProviderEnv(),
       ),
       xtermHistoryCompatReported: false,
+      synchronizedOutput: new PtySynchronizedOutputCoalescer({
+        // The callback cannot run until child.onData is registered below, after hosted is fully
+        // initialized. Capturing hosted keeps the canonical headless/remote sequence in one place.
+        emit: (data) => this.emitRenderData(options.sessionId, hosted, data),
+        onOverflow: (event) => {
+          serviceLogger.warn(
+            { sessionId: options.sessionId, ...event },
+            "PTY synchronized-output transaction exceeded buffer limit; streaming remainder",
+          );
+        },
+      }),
       idleTimer: setInterval(() => this.checkIdle(options.sessionId), IDLE_CHECK_INTERVAL_MS),
       startedAt: Date.now(),
       lastOutputTime: 0,
       currentState: "turn_complete",
-      outputSeq: 0,
       ptyStateSeq: 0,
       semanticTextTail: "",
       startupOutput: "",
@@ -300,13 +296,20 @@ export class HostedPtyRegistry {
   resize(sessionId: string, cols: number, rows: number): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
-    this.flushPendingRenderData(sessionId, hosted);
+    this.flushPendingRenderData(hosted);
     hosted.xtermHistoryCompat?.setTerminalRows(rows);
-    hosted.child.resize(cols, rows);
-    hosted.terminal.resize(cols, rows);
+    const outputSeq = hosted.renderSequencer.resize(cols, rows);
+    if (outputSeq === null) return false;
     this.deps.relayConnection.sendRaw(
-      serializeControl({ type: "terminal_resize", sessionId, cols, rows }),
+      serializeControl({
+        type: "terminal_resize",
+        sessionId,
+        cols,
+        rows,
+        outputSeq,
+      }),
     );
+    hosted.child.resize(cols, rows);
     serviceLogger.info({ sessionId, cols, rows }, "Hosted PTY resized");
     return true;
   }
@@ -314,7 +317,7 @@ export class HostedPtyRegistry {
   snapshot(sessionId: string, requestId: string): boolean {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
-    capturePtySnapshot(hosted.terminal, hosted.serializeAddon, hosted.outputSeq, (snapshot) => {
+    hosted.renderSequencer.captureSnapshot((snapshot) => {
       if (this.sessions.get(sessionId) !== hosted) return;
       this.deps.relayConnection.sendRaw(
         serializeControl({
@@ -360,7 +363,7 @@ export class HostedPtyRegistry {
     this.deps.touchSessionActivity(sessionId);
     const previousRewriteCount = hosted.xtermHistoryCompat?.stats.rewrittenTransactions ?? 0;
     const renderData = hosted.xtermHistoryCompat?.push(data) ?? data;
-    this.emitRenderData(sessionId, hosted, renderData);
+    hosted.synchronizedOutput.push(renderData);
     this.reportXtermHistoryCompatRewrite(sessionId, hosted, previousRewriteCount);
 
     const oscSequences = extractOscSequences(data);
@@ -497,13 +500,19 @@ export class HostedPtyRegistry {
 
   private emitRenderData(sessionId: string, hosted: HostedPtySession, data: string): void {
     if (!data) return;
-    hosted.outputSeq += 1;
-    hosted.terminal.write(data);
-    this.sendBinary(sessionId, Buffer.from(data, "utf-8"), hosted.outputSeq);
+    const outputSeq = hosted.renderSequencer.write(data);
+    if (outputSeq === null) return;
+    this.sendBinary(sessionId, Buffer.from(data, "utf-8"), outputSeq);
   }
 
-  private flushPendingRenderData(sessionId: string, hosted: HostedPtySession): void {
-    this.emitRenderData(sessionId, hosted, hosted.xtermHistoryCompat?.flush() ?? "");
+  private flushPendingRenderData(hosted: HostedPtySession): void {
+    hosted.synchronizedOutput.push(hosted.xtermHistoryCompat?.flush() ?? "");
+    hosted.synchronizedOutput.flush();
+  }
+
+  private disposePendingRenderData(hosted: HostedPtySession): void {
+    hosted.synchronizedOutput.push(hosted.xtermHistoryCompat?.flush() ?? "");
+    hosted.synchronizedOutput.dispose();
   }
 
   private reportXtermHistoryCompatRewrite(
@@ -530,7 +539,7 @@ export class HostedPtyRegistry {
     const hosted = this.sessions.get(sessionId);
     if (!hosted) return false;
     clearInterval(hosted.idleTimer);
-    this.flushPendingRenderData(sessionId, hosted);
+    this.disposePendingRenderData(hosted);
     if (options.kill) {
       try {
         hosted.child.kill();
@@ -538,7 +547,7 @@ export class HostedPtyRegistry {
         // PTY may already have exited.
       }
     }
-    hosted.terminal.dispose();
+    hosted.renderSequencer.dispose();
     if (options.notify) {
       this.sendPtyState(sessionId, "turn_complete", undefined, hosted);
       this.deps.sessionManager.terminateSession(sessionId);

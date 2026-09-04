@@ -342,7 +342,8 @@ function DeviceToolStatus({
   tool: DevicePreviewToolStatus | undefined;
 }) {
   if (!tool || tool.available) return null;
-  const name = platform === "ios" ? "Baguette" : "Scrcpy";
+  const androidPreviewUnavailable = platform === "android" && Boolean(tool.command);
+  const name = platform === "ios" ? "Baguette" : "adb";
   const status = !tool.supported
     ? "unsupported"
     : platform === "ios" && tool.version
@@ -350,8 +351,9 @@ function DeviceToolStatus({
       : tool.command
         ? "unavailable"
         : "missing";
-  const title =
-    status === "unsupported"
+  const title = androidPreviewUnavailable
+    ? "Android 模拟器预览不可用"
+    : status === "unsupported"
       ? `${PLATFORM_LABEL[platform]} 不可用`
       : status === "outdated"
         ? `需要更新 ${name}`
@@ -362,7 +364,7 @@ function DeviceToolStatus({
     tool.error ??
     (platform === "ios"
       ? "需要先在开发机上安装 Baguette 0.1.96 或更高版本。"
-      : "需要先在开发机上安装 Scrcpy 4.1。");
+      : "需要先在开发机上安装 adb。");
   const showDescription = description.trim() !== title.trim();
   return (
     <div
@@ -379,12 +381,12 @@ function DeviceToolStatus({
               {description}
             </p>
           ) : null}
-          {status !== "unsupported" ? (
+          {status !== "unsupported" && !androidPreviewUnavailable ? (
             <a
               href={
                 platform === "ios"
                   ? "https://github.com/tddworks/baguette#install"
-                  : "https://github.com/Genymobile/scrcpy"
+                  : "https://developer.android.com/tools/releases/platform-tools"
               }
               target="_blank"
               rel="noreferrer"

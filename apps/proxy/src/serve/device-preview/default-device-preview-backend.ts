@@ -9,7 +9,7 @@ import { refreshLoginShellPath } from "../../common/login-shell-path.js";
 import { serviceLogger } from "../../common/logger.js";
 import { findExecutableCandidates } from "../../providers/path-resolver.js";
 import { AndroidEmulatorAdapter, type AndroidEmulatorInput } from "./android-adapter.js";
-import { ScrcpyVideoAdapter, type ScrcpyVideoCapability } from "./scrcpy-video-adapter.js";
+import { ScrcpyVideoAdapter } from "./scrcpy-video-adapter.js";
 import {
   IosSimulatorAdapter,
   type IosSimulatorInput,
@@ -72,7 +72,6 @@ interface DefaultDevicePreviewBackendOptions {
   createAndroidAdapter?: (options: { env: NodeJS.ProcessEnv }) => AndroidEmulatorAdapter;
   createScrcpyVideoAdapter?: (options: {
     adbCommand: string;
-    scrcpyCommand?: string;
     env: NodeJS.ProcessEnv;
   }) => ScrcpyVideoAdapter;
   createIosAdapter?: (options: { command?: string; env: NodeJS.ProcessEnv }) => IosSimulatorAdapter;
@@ -200,9 +199,7 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
   private androidAdapter?: AndroidEmulatorAdapter;
   private iosAdapter?: IosSimulatorAdapter;
   private baguetteSuggestions: string[] = [];
-  private scrcpySuggestions: string[] = [];
   private configuredEnv: NodeJS.ProcessEnv = {};
-  private configuredScrcpyCommand?: string;
   private configuredPath?: string;
   private configuredBaguetteCommand?: string;
   private configurationVersion = 0;
@@ -238,12 +235,11 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
     const androidAdapter = this.androidAdapter!;
     const iosAdapter = this.iosAdapter!;
     const baguetteSuggestions = [...this.baguetteSuggestions];
-    const scrcpySuggestions = [...this.scrcpySuggestions];
     this.retainIosAdapter(iosAdapter);
     let android: DevicePreviewToolStatus;
     let ios: DevicePreviewToolStatus;
     try {
-      android = await this.androidCapability(androidAdapter, scrcpySuggestions);
+      android = await this.androidCapability(androidAdapter);
       ios = await this.iosCapability(iosAdapter, baguetteSuggestions);
     } finally {
       this.releaseIosAdapter(iosAdapter);
@@ -263,12 +259,8 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
     const android = this.androidAdapter!;
     const ios = this.iosAdapter!;
     const configuredEnv = this.configuredEnv;
-    const configuredScrcpyCommand = this.configuredScrcpyCommand;
     const discoveries = [
-      this.settlePlatformDiscovery(
-        "android",
-        this.discoverAndroidTargets(android, configuredEnv, configuredScrcpyCommand),
-      ),
+      this.settlePlatformDiscovery("android", this.discoverAndroidTargets(android, configuredEnv)),
     ];
     if (this.platform === "darwin") {
       discoveries.push(this.settlePlatformDiscovery("ios", this.discoverIosTargets(ios)));
@@ -547,10 +539,6 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
         .filter((candidate) => candidate.length > 0 && candidate.length <= 4_096)
         .slice(0, 32);
       const baguetteCommand = baguetteSuggestions[0];
-      const scrcpySuggestions = this.findCandidates("scrcpy", env)
-        .filter((candidate) => candidate.length > 0 && candidate.length <= 4_096)
-        .slice(0, 32);
-      const scrcpyCommand = scrcpySuggestions[0];
       const androidAdapter = this.createAndroidAdapter({ env });
       const previousIosAdapter = this.iosAdapter;
       const canReuseIosAdapter =
@@ -564,10 +552,8 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
 
       this.androidAdapter = androidAdapter;
       this.baguetteSuggestions = baguetteSuggestions;
-      this.scrcpySuggestions = scrcpySuggestions;
       this.iosAdapter = iosAdapter;
       this.configuredEnv = env;
-      this.configuredScrcpyCommand = scrcpyCommand;
       this.configuredPath = env.PATH;
       this.configuredBaguetteCommand = baguetteCommand;
       this.iosAdapters.add(iosAdapter);
@@ -584,7 +570,6 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
 
   private async androidCapability(
     adapter: AndroidEmulatorAdapter,
-    scrcpySuggestions: string[],
   ): Promise<DevicePreviewToolStatus> {
     const adb = await adapter.inspect();
     if (!adb.available || !adb.command) {
@@ -598,44 +583,30 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
       };
     }
     const scrcpy = await this.createConfiguredScrcpyVideoAdapter(adb.command).inspect();
-    if (!scrcpy.available || !scrcpy.command) {
+    if (!scrcpy.available) {
       return {
         supported: true,
         available: false,
         interactive: false,
-        ...(scrcpy.command ? { command: scrcpy.command } : {}),
-        ...(scrcpy.version ? { version: scrcpy.version.slice(0, 256) } : {}),
-        ...(scrcpySuggestions.length > 0 ? { suggestions: scrcpySuggestions } : {}),
-        error: this.scrcpyCapabilityError(scrcpy),
+        command: adb.command,
+        ...(adb.version ? { version: adb.version.slice(0, 256) } : {}),
+        error: "Android 模拟器预览组件缺失，请重新安装 DEV Anywhere",
       };
     }
     return {
       supported: true,
       available: true,
       interactive: true,
-      command: scrcpy.command,
-      ...(scrcpy.version ? { version: scrcpy.version.slice(0, 256) } : {}),
-      ...(scrcpySuggestions.length > 0 ? { suggestions: scrcpySuggestions } : {}),
+      command: adb.command,
+      ...(adb.version ? { version: adb.version.slice(0, 256) } : {}),
     };
   }
 
   private createConfiguredScrcpyVideoAdapter(adbCommand: string): ScrcpyVideoAdapter {
     return this.createScrcpyVideoAdapter({
       adbCommand,
-      ...(this.configuredScrcpyCommand ? { scrcpyCommand: this.configuredScrcpyCommand } : {}),
       env: this.configuredEnv,
     });
-  }
-
-  private scrcpyCapabilityError(capability: ScrcpyVideoCapability): string {
-    const error = capability.error ?? "";
-    if (/unsupported|exactly\s+4\.1/iu.test(error)) {
-      return "需要 Scrcpy 4.1，请安装或切换到支持的版本";
-    }
-    if (/server/iu.test(error)) {
-      return "Scrcpy 4.1 安装不完整，未找到配套的 scrcpy-server";
-    }
-    return "未找到 Scrcpy 4.1，请先安装后重新检测";
   }
 
   private async iosCapability(
@@ -696,7 +667,6 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
   private async discoverAndroidTargets(
     adapter: AndroidEmulatorAdapter,
     env: NodeJS.ProcessEnv,
-    scrcpyCommand: string | undefined,
   ): Promise<PlatformDiscoverySnapshot> {
     const targets: DevicePreviewTarget[] = [];
     const runtimeTargets = new Map<string, RuntimeTarget>();
@@ -706,7 +676,6 @@ export class DefaultDevicePreviewBackend implements DevicePreviewBackend {
     }
     const videoAdapter = this.createScrcpyVideoAdapter({
       adbCommand: capability.command,
-      ...(scrcpyCommand ? { scrcpyCommand } : {}),
       env,
     });
     const videoCapability = await videoAdapter.inspect();

@@ -132,3 +132,31 @@ describe("app-store session idle notification persistence", () => {
     expect(localStorage.getItem("dev_anywhere_sessionIdleNotificationsEnabled")).toBe("0");
   });
 });
+
+describe("app-store proxy list lifecycle", () => {
+  beforeEach(() => {
+    localStorage.clear();
+    sessionStorage.clear();
+    vi.resetModules();
+  });
+
+  it("invalidates the proxy list in one observable state update", async () => {
+    const { useAppStore } = await import("./app-store");
+    useAppStore
+      .getState()
+      .setProxies([{ proxyId: "proxy-1", name: "DEV Mac", online: true, sessions: [] }]);
+
+    const observed: Array<{ proxiesLength: number; proxyListLoaded: boolean }> = [];
+    const unsubscribe = useAppStore.subscribe((state) => {
+      observed.push({
+        proxiesLength: state.proxies.length,
+        proxyListLoaded: state.proxyListLoaded,
+      });
+    });
+
+    useAppStore.getState().invalidateProxyList();
+    unsubscribe();
+
+    expect(observed).toEqual([{ proxiesLength: 0, proxyListLoaded: false }]);
+  });
+});

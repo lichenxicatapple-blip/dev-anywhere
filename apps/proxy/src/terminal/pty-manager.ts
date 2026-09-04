@@ -7,6 +7,7 @@ interface PtyManagerOptions {
   provider: ProviderAdapter;
   providerArgs: string[];
   cwd: string;
+  initialSize?: { cols: number; rows: number };
   hook?: ProviderHookContext;
   tap: (data: string) => void;
   onInput?: (data: string) => void;
@@ -22,6 +23,7 @@ export class PtyManager {
   private readonly provider: ProviderAdapter;
   private readonly providerArgs: string[];
   private readonly cwd: string;
+  private readonly initialSize?: { cols: number; rows: number };
   private readonly hook?: ProviderHookContext;
   private readonly tap: (data: string) => void;
   private readonly onInput?: (data: string) => void;
@@ -34,6 +36,7 @@ export class PtyManager {
     this.provider = options.provider;
     this.providerArgs = options.providerArgs;
     this.cwd = options.cwd;
+    this.initialSize = options.initialSize;
     this.hook = options.hook;
     this.tap = options.tap;
     this.onInput = options.onInput;
@@ -44,7 +47,7 @@ export class PtyManager {
   }
 
   start(): void {
-    const { cols, rows } = readTtySize(this.stdout);
+    const { cols, rows } = this.initialSize ?? readTtySize(this.stdout);
 
     const command = this.provider.buildTerminalCommand(
       { args: this.providerArgs, hook: this.hook },
@@ -76,6 +79,16 @@ export class PtyManager {
     // PTY -> stdout + tap
     child.onData((data: string) => this.handleData(data));
 
+    let appliedCols = cols;
+    let appliedRows = rows;
+    const applyResize = (newCols: number, newRows: number): void => {
+      if (!this.child || (newCols === appliedCols && newRows === appliedRows)) return;
+      this.child.resize(newCols, newRows);
+      appliedCols = newCols;
+      appliedRows = newRows;
+      this.onResize?.(newCols, newRows);
+    };
+
     // resize 防抖，50ms 窗口合并快速连续的尺寸变化。timer 持有在实例字段上，cleanup 时
     // clearTimeout 防止 PTY 退出后 callback 还在等待，导致 child.resize 调用已 kill 的子进程。
     this.stdout.on("resize", () => {
@@ -84,10 +97,14 @@ export class PtyManager {
         this.resizeTimer = null;
         if (!this.child) return;
         const { cols: newCols, rows: newRows } = readTtySize(this.stdout);
-        this.child.resize(newCols, newRows);
-        this.onResize?.(newCols, newRows);
+        applyResize(newCols, newRows);
       }, 50);
     });
+
+    // initialSize 由调用方在建立会话状态时读取。监听挂载后立即校准一次，覆盖尺寸在
+    // initialSize 读取与 resize listener 挂载之间发生变化、对应事件因而无法被监听的窗口。
+    const currentSize = readTtySize(this.stdout);
+    applyResize(currentSize.cols, currentSize.rows);
 
     // 子进程退出，按 Unix 惯例处理信号退出码，通过回调通知调用方
     child.onExit(({ exitCode, signal }) => {

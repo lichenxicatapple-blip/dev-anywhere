@@ -179,8 +179,7 @@ function ensureReconnectFallback(timers: Timers): void {
     timers.coldStartDone = false;
     previewController.dispose();
     useAppStore.getState().setProxyOnline(false);
-    useAppStore.getState().setProxies([]);
-    useAppStore.getState().resetProxyListLoaded();
+    useAppStore.getState().invalidateProxyList();
     useAppStore.getState().transitionToPhase("connecting");
     router.navigate("/");
   }, RECONNECT_GRACE_PERIOD_MS);
@@ -307,8 +306,7 @@ export function handleWsStatusChange(connected: boolean, timers: Timers, relay: 
     invalidateBindingRecovery(timers);
     previewController.dispose();
     useAppStore.getState().setProxyOnline(false);
-    useAppStore.getState().setProxies([]);
-    useAppStore.getState().resetProxyListLoaded();
+    useAppStore.getState().invalidateProxyList();
     if (s.phase !== "connecting") {
       if (s.phase !== "reconnecting") {
         useAppStore.getState().setPhase("reconnecting");

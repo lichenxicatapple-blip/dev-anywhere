@@ -123,7 +123,7 @@ describe("PTY synchronization correctness contract", () => {
         { requestId, cols: 80, rows: 24, data: "snapshot-S10", outputSeq: 10 },
         target,
       ),
-    ).toEqual({ applied: true, replayedFrames: 1 });
+    ).toEqual({ applied: true, replayedEvents: 1 });
     recovery.handleBinaryFrame({ data: new Uint8Array([13]), outputSeq: 13 }, target);
     recovery.handleBinaryFrame({ data: new Uint8Array([11]), outputSeq: 11 }, target);
     recovery.handleBinaryFrame({ data: new Uint8Array([12]), outputSeq: 12 }, target);
@@ -184,6 +184,163 @@ describe("PTY synchronization correctness contract", () => {
     paintBoundaries.shift()?.();
     expect(onReady).toHaveBeenCalledTimes(1);
 
+    transport.dispose();
+  });
+
+  it("keeps resize between the exact writes even while xterm is still parsing", () => {
+    const harness = createTransportHarness();
+    const target = createControlledTarget();
+    const frameFlushes: FrameRequestCallback[] = [];
+    const transport = attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleFrameFlush: (callback) => {
+        frameFlushes.push(callback);
+        return frameFlushes.length;
+      },
+      cancelFrameFlush: vi.fn(),
+      scheduleReady: (callback) => callback(),
+    });
+
+    harness.emitRelay(snapshotMessage(requestIdAt(harness.sent, 0), 10));
+    target.pendingWriteCallbacks.shift()?.();
+    target.calls.length = 0;
+
+    const beforeResize = new Uint8Array([11]);
+    const afterResize = new Uint8Array([13]);
+    harness.emitBinary(beforeResize, 11);
+    frameFlushes.shift()?.(16);
+    expect(target.calls).toEqual([["write", beforeResize]]);
+
+    // Both later events arrive while xterm has not acknowledged parsing seq=11.
+    harness.emitRelay({
+      type: "terminal_resize",
+      sessionId: "s1",
+      cols: 100,
+      rows: 30,
+      outputSeq: 12,
+    });
+    harness.emitBinary(afterResize, 13);
+    expect(target.calls).toEqual([["write", beforeResize]]);
+    expect(frameFlushes).toHaveLength(0);
+
+    target.pendingWriteCallbacks.shift()?.();
+    expect(target.calls).toEqual([
+      ["write", beforeResize],
+      ["resize", { cols: 100, rows: 30 }],
+    ]);
+    expect(frameFlushes).toHaveLength(1);
+
+    frameFlushes.shift()?.(32);
+    expect(target.calls).toEqual([
+      ["write", beforeResize],
+      ["resize", { cols: 100, rows: 30 }],
+      ["write", afterResize],
+    ]);
+
+    transport.dispose();
+  });
+
+  it("waits for an in-flight live write before reusing an unchanged resume snapshot", () => {
+    const harness = createTransportHarness();
+    const target = createControlledTarget();
+    const frameFlushes: FrameRequestCallback[] = [];
+    const paintBoundaries: Array<() => void> = [];
+    const onReady = vi.fn();
+    const transport = attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      scheduleFrameFlush: (callback) => {
+        frameFlushes.push(callback);
+        return frameFlushes.length;
+      },
+      cancelFrameFlush: vi.fn(),
+      scheduleReady: (callback) => paintBoundaries.push(callback),
+      onReady,
+    });
+
+    harness.emitRelay(snapshotMessage(requestIdAt(harness.sent, 0), 10));
+    target.pendingWriteCallbacks.shift()?.();
+    paintBoundaries.shift()?.();
+    expect(onReady).toHaveBeenCalledTimes(1);
+
+    const inFlight = new Uint8Array([11]);
+    harness.emitBinary(inFlight, 11);
+    frameFlushes.shift()?.(16);
+    expect(target.calls.at(-1)).toEqual(["write", inFlight]);
+
+    transport.pause();
+    transport.resume();
+    harness.emitRelay(snapshotMessage(requestIdAt(harness.sent, 1), 11, "unchanged"));
+
+    // Recovery can reuse the existing xterm, but readiness still fences the parser work which was
+    // already submitted before pause.
+    expect(paintBoundaries).toHaveLength(0);
+    expect(onReady).toHaveBeenCalledTimes(1);
+    target.pendingWriteCallbacks.shift()?.();
+    expect(paintBoundaries).toHaveLength(1);
+    expect(onReady).toHaveBeenCalledTimes(1);
+
+    paintBoundaries.shift()?.();
+    expect(onReady).toHaveBeenCalledTimes(2);
+    transport.dispose();
+  });
+
+  it("waits for an active old write before resetting to a gap-recovery snapshot", () => {
+    const harness = createTransportHarness();
+    const target = createControlledTarget();
+    const frameFlushes: FrameRequestCallback[] = [];
+    const transport = attachPtySessionTransport({
+      sessionId: "s1",
+      ws: harness.ws,
+      relay: harness.relay,
+      target,
+      gapRecoveryDelayMs: 2_000,
+      scheduleFrameFlush: (callback) => {
+        frameFlushes.push(callback);
+        return frameFlushes.length;
+      },
+      cancelFrameFlush: vi.fn(),
+      scheduleReady: (callback) => callback(),
+    });
+
+    harness.emitRelay(snapshotMessage(requestIdAt(harness.sent, 0), 10));
+    target.pendingWriteCallbacks.shift()?.();
+    target.calls.length = 0;
+
+    const oldWrite = new Uint8Array([11]);
+    harness.emitBinary(oldWrite, 11);
+    frameFlushes.shift()?.(16);
+    harness.emitBinary(new Uint8Array([13]), 13);
+    vi.advanceTimersByTime(2_000);
+    expect(harness.sent).toHaveLength(2);
+
+    harness.emitRelay(snapshotMessage(requestIdAt(harness.sent, 1), 13, "authoritative-S13"));
+    expect(target.calls).toEqual([["write", oldWrite]]);
+
+    // The old parser callback releases a real xterm barrier; reset still cannot cross it.
+    target.pendingWriteCallbacks.shift()?.();
+    expect(target.calls).toEqual([
+      ["write", oldWrite],
+      ["write", ""],
+    ]);
+    target.pendingWriteCallbacks.shift()?.();
+    expect(target.calls).toEqual([
+      ["write", oldWrite],
+      ["write", ""],
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "authoritative-S13"],
+    ]);
+
+    const binaryWrites = target.calls.filter(
+      ([operation, value]) => operation === "write" && value instanceof Uint8Array,
+    );
+    expect(binaryWrites).toEqual([["write", oldWrite]]);
     transport.dispose();
   });
 

@@ -44,6 +44,8 @@ if [ "$(head -n 1 apps/proxy/dist/index.js)" != "#!/usr/bin/env node" ]; then
 fi
 PROXY_PACK_JSON="$(cd apps/proxy && npm pack --dry-run --json --ignore-scripts)"
 PACK_JSON="$PROXY_PACK_JSON" node <<'NODE'
+const { createHash } = require("node:crypto");
+const { readFileSync } = require("node:fs");
 const pack = JSON.parse(process.env.PACK_JSON)[0];
 const files = new Set(pack.files.map((file) => file.path));
 
@@ -59,8 +61,24 @@ requireFile("dist/serve.js");
 requireFile("dist/session-worker.js");
 requireFile("dist/update-runner.js");
 requireFile("assets/fonts/sarasa-fixed-sc/result.css");
+requireFile("assets/scrcpy/scrcpy-server-v4.1");
 requireFile("README.md");
 requireFile("LICENSE");
+requireFile("THIRD_PARTY_NOTICES.md");
+requireFile("licenses/Apache-2.0.txt");
+requireFile("licenses/BSD-3-Clause.txt");
+requireFile("licenses/Boost-1.0.txt");
+
+const scrcpyServer = readFileSync("apps/proxy/assets/scrcpy/scrcpy-server-v4.1");
+const scrcpyServerHash = createHash("sha256").update(scrcpyServer).digest("hex");
+const expectedScrcpyServerHash =
+  "deacb991ed2509715160ffdc7907e47b4160eb30d1566217e9047fd5b8850cae";
+if (scrcpyServer.length !== 733706 || scrcpyServerHash !== expectedScrcpyServerHash) {
+  console.error(
+    `Invalid bundled scrcpy server: size=${scrcpyServer.length}, sha256=${scrcpyServerHash}`,
+  );
+  process.exit(1);
+}
 
 const fontShardCount = [...files].filter((file) =>
   file.startsWith("assets/fonts/sarasa-fixed-sc/") && file.endsWith(".woff2"),

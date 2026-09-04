@@ -86,9 +86,8 @@ function scrcpyVideoAdapterFake() {
   return {
     inspect: vi.fn(async () => ({
       available: true,
-      command: "/tools/scrcpy",
       version: "4.1",
-      serverPath: "/tools/scrcpy-server",
+      serverPath: "/package/assets/scrcpy/scrcpy-server-v4.1",
     })),
     stream: vi.fn(),
     requestVideoReset: vi.fn(async () => undefined),
@@ -99,12 +98,12 @@ function scrcpyVideoAdapterFake() {
 }
 
 describe("DefaultDevicePreviewBackend", () => {
-  it("requires Scrcpy 4.1 before publishing Android targets", async () => {
+  it("fails closed when the bundled Android preview component is missing", async () => {
     const android = androidAdapterFake();
     const scrcpy = scrcpyVideoAdapterFake();
     vi.mocked(scrcpy.inspect).mockResolvedValue({
       available: false,
-      error: "Scrcpy 4.1 was not found",
+      error: "The bundled Android preview component is unavailable",
     });
     const backend = new DefaultDevicePreviewBackend({
       platform: "linux",
@@ -118,7 +117,9 @@ describe("DefaultDevicePreviewBackend", () => {
         supported: true,
         available: false,
         interactive: false,
-        error: "未找到 Scrcpy 4.1，请先安装后重新检测",
+        command: "/sdk/platform-tools/adb",
+        version: "Android Debug Bridge version 1.0.41",
+        error: "Android 模拟器预览组件缺失，请重新安装 DEV Anywhere",
       },
     });
     await expect(backend.discoverTargets()).resolves.toEqual([]);
@@ -128,10 +129,13 @@ describe("DefaultDevicePreviewBackend", () => {
   it("returns only currently running Android and Booted iOS targets", async () => {
     const android = androidAdapterFake();
     const ios = iosAdapterFake();
+    const findCandidates = vi.fn((name: string) =>
+      name === "baguette" ? ["/tools/baguette"] : [],
+    );
     const backend = new DefaultDevicePreviewBackend({
       platform: "darwin",
       baseEnv: { PATH: "/tools:/sdk/platform-tools" },
-      findCandidates: vi.fn((name) => (name === "baguette" ? ["/tools/baguette"] : [])),
+      findCandidates,
       createAndroidAdapter: () => android,
       createScrcpyVideoAdapter: () => scrcpyVideoAdapterFake(),
       createIosAdapter: () => ios,
@@ -160,6 +164,8 @@ describe("DefaultDevicePreviewBackend", () => {
       },
     ]);
     expect(ios.discoverDevices).toHaveBeenCalledOnce();
+    expect(findCandidates).toHaveBeenCalledWith("baguette", expect.any(Object));
+    expect(findCandidates).not.toHaveBeenCalledWith("scrcpy", expect.anything());
   });
 
   it("preserves the last Android snapshot when only Android discovery fails", async () => {
@@ -216,7 +222,7 @@ describe("DefaultDevicePreviewBackend", () => {
     expect(ios.sendInput).toHaveBeenCalledWith(IOS_UDID, { type: "home" }, { signal });
   });
 
-  it("keeps an active preview while Scrcpy is unavailable but disconnects after an empty enumeration", async () => {
+  it("keeps an active preview while its video component is unavailable but disconnects after an empty enumeration", async () => {
     const android = androidAdapterFake();
     const scrcpy = scrcpyVideoAdapterFake();
     let markStreamStarted!: () => void;
@@ -265,7 +271,7 @@ describe("DefaultDevicePreviewBackend", () => {
     await streamStarted;
     vi.mocked(scrcpy.inspect).mockResolvedValueOnce({
       available: false,
-      error: "Scrcpy temporarily unavailable",
+      error: "Android video component temporarily unavailable",
     });
 
     await expect(manager.discoverTargets()).resolves.toEqual([

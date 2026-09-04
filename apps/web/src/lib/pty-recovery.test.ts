@@ -54,7 +54,7 @@ describe("PtyRecoveryController", () => {
         },
         target,
       ),
-    ).toEqual({ applied: true, replayedFrames: 0 });
+    ).toEqual({ applied: true, replayedEvents: 0 });
     expect(target.calls.at(-1)).toEqual(["write", "own snapshot"]);
   });
 
@@ -71,7 +71,7 @@ describe("PtyRecoveryController", () => {
       target,
     );
 
-    expect(result).toEqual({ applied: true, replayedFrames: 1 });
+    expect(result).toEqual({ applied: true, replayedEvents: 1 });
     expect(target.calls).toEqual([
       ["reset", null],
       ["resize", { cols: 80, rows: 24 }],
@@ -92,7 +92,7 @@ describe("PtyRecoveryController", () => {
       target,
     );
 
-    expect(result).toEqual({ applied: true, replayedFrames: 0 });
+    expect(result).toEqual({ applied: true, replayedEvents: 0 });
     expect(target.calls).toEqual([
       ["reset", null],
       ["resize", { cols: 80, rows: 24 }],
@@ -130,7 +130,7 @@ describe("PtyRecoveryController", () => {
       onReplaySettled,
     );
 
-    expect(result).toEqual({ applied: true, replayedFrames: 0 });
+    expect(result).toEqual({ applied: true, replayedEvents: 0 });
     expect(target.calls).toEqual([]);
     expect(onReplaySettled).toHaveBeenCalledWith(false);
   });
@@ -248,7 +248,7 @@ describe("PtyRecoveryController", () => {
       target,
     );
 
-    expect(result).toEqual({ applied: true, replayedFrames: 0 });
+    expect(result).toEqual({ applied: true, replayedEvents: 0 });
     expect(recovery.hasAppliedSnapshot()).toBe(false);
     expect(target.calls).toEqual([["barrier", null]]);
 
@@ -321,6 +321,109 @@ describe("PtyRecoveryController", () => {
     ]);
   });
 
+  it("flushes a full out-of-order tail before enforcing the pending-event cap", () => {
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+
+    recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      { requestId: "req-1", cols: 80, rows: 24, data: "snapshot", outputSeq: 0 },
+      target,
+    );
+    target.calls.length = 0;
+
+    // Fill the 1000-event out-of-order allowance, then deliver the one missing predecessor. The
+    // predecessor makes the whole tail contiguous, so none of it should be evicted first.
+    for (let outputSeq = 2; outputSeq <= 1001; outputSeq += 1) {
+      recovery.handleBinaryFrame({ data: new Uint8Array([outputSeq & 0xff]), outputSeq }, target);
+    }
+    expect(recovery.handleBinaryFrame({ data: new Uint8Array([1]), outputSeq: 1 }, target)).toEqual(
+      { written: true, hasGap: false },
+    );
+
+    const writes = target.calls.filter(([operation]) => operation === "write");
+    expect(writes).toHaveLength(1001);
+    expect(writes[0]).toEqual(["write", new Uint8Array([1])]);
+    expect(writes.at(-1)).toEqual(["write", new Uint8Array([1001 & 0xff])]);
+  });
+
+  it("orders resize and output events by their shared outputSeq", () => {
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+
+    recovery.startSnapshotRequest();
+    recovery.applySnapshot(
+      {
+        requestId: "req-1",
+        cols: 80,
+        rows: 24,
+        data: "snapshot",
+        outputSeq: 10,
+      },
+      target,
+    );
+    target.calls.length = 0;
+
+    // Relay control and binary WebSocket delivery can cross in flight. Sequence, not arrival order,
+    // determines the exact render order.
+    expect(recovery.handleResize({ cols: 100, rows: 30, outputSeq: 12 }, target)).toEqual({
+      written: false,
+      hasGap: true,
+    });
+    const beforeResize = new Uint8Array([11]);
+    expect(recovery.handleBinaryFrame({ data: beforeResize, outputSeq: 11 }, target)).toEqual({
+      written: true,
+      hasGap: false,
+    });
+
+    expect(target.calls).toEqual([
+      ["write", beforeResize],
+      ["resize", { cols: 100, rows: 30 }],
+    ]);
+  });
+
+  it("replays resize and output events after a snapshot in sequence order", () => {
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+    const requestId = recovery.startSnapshotRequest();
+    const afterResize = new Uint8Array([12]);
+
+    recovery.handleBinaryFrame({ data: afterResize, outputSeq: 12 }, target);
+    recovery.handleResize({ cols: 100, rows: 30, outputSeq: 11 }, target);
+    const result = recovery.applySnapshot(
+      { requestId, cols: 80, rows: 24, data: "snapshot", outputSeq: 10 },
+      target,
+    );
+
+    expect(result).toEqual({ applied: true, replayedEvents: 2 });
+    expect(target.calls).toEqual([
+      ["reset", null],
+      ["resize", { cols: 80, rows: 24 }],
+      ["write", "snapshot"],
+      ["resize", { cols: 100, rows: 30 }],
+      ["write", afterResize],
+    ]);
+  });
+
+  it("drops a buffered resize already covered by the snapshot watermark", () => {
+    const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
+    const target = createTarget();
+    const requestId = recovery.startSnapshotRequest();
+
+    recovery.handleResize({ cols: 100, rows: 30, outputSeq: 10 }, target);
+    const result = recovery.applySnapshot(
+      { requestId, cols: 100, rows: 30, data: "snapshot", outputSeq: 10 },
+      target,
+    );
+
+    expect(result).toEqual({ applied: true, replayedEvents: 0 });
+    expect(target.calls).toEqual([
+      ["reset", null],
+      ["resize", { cols: 100, rows: 30 }],
+      ["write", "snapshot"],
+    ]);
+  });
+
   it("replays buffered pre-snapshot frames in outputSeq order", () => {
     const recovery = createPtyRecoveryController({ requestIdFactory: () => "req-1" });
     const target = createTarget();
@@ -336,7 +439,7 @@ describe("PtyRecoveryController", () => {
       target,
     );
 
-    expect(result).toEqual({ applied: true, replayedFrames: 2 });
+    expect(result).toEqual({ applied: true, replayedEvents: 2 });
     expect(target.calls.slice(-2)).toEqual([
       ["write", frame11.data],
       ["write", frame12.data],
@@ -395,7 +498,7 @@ describe("PtyRecoveryController", () => {
     ).toEqual({ written: false, hasGap: true });
   });
 
-  it("ignores stale snapshots from older resize or reconnect requests", () => {
+  it("ignores stale snapshots from older recovery requests", () => {
     const requestIds = ["req-old", "req-new"];
     const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
     const target = createTarget();
@@ -416,7 +519,7 @@ describe("PtyRecoveryController", () => {
         { requestId: latestRequestId, cols: 100, rows: 30, data: "new", outputSeq: 2 },
         target,
       ),
-    ).toEqual({ applied: true, replayedFrames: 0 });
+    ).toEqual({ applied: true, replayedEvents: 0 });
     expect(target.calls).toEqual([
       ["reset", null],
       ["resize", { cols: 100, rows: 30 }],
@@ -426,7 +529,7 @@ describe("PtyRecoveryController", () => {
 
   it("does not flush stale replay frames when a new snapshot request supersedes the in-flight write", () => {
     // 复现 race: applySnapshot 把 replay frames 排进 target.write 的异步 callback;
-    // callback 触发前 startSnapshotRequest 又被调用 (resize / 重连), 旧 replay 不应再写到 target。
+    // callback 触发前 startSnapshotRequest 又被调用（例如连接恢复），旧 replay 不应再写到 target。
     const requestIds = ["req-1", "req-2"];
     const recovery = createPtyRecoveryController({ requestIdFactory: () => requestIds.shift()! });
 
@@ -453,7 +556,7 @@ describe("PtyRecoveryController", () => {
       target,
     );
 
-    // callback 还没 fire, 此时新 snapshot request 进来 (resize / 重连触发)
+    // callback 还没 fire，此时连接恢复又发起一轮 snapshot request
     recovery.startSnapshotRequest();
 
     // 现在旧 callback 异步触发——它持有的 replayFrames 是属于 req-1 周期的
@@ -489,7 +592,7 @@ describe("PtyRecoveryController", () => {
         { requestId: second, cols: 80, rows: 24, data: "new", outputSeq: 2 },
         target,
       ),
-    ).toEqual({ applied: true, replayedFrames: 1 });
+    ).toEqual({ applied: true, replayedEvents: 1 });
     expect(target.calls).toEqual([
       ["reset", null],
       ["resize", { cols: 80, rows: 24 }],

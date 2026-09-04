@@ -78,7 +78,7 @@ interface AppStoreState {
   setRelayClientAuthIssue: (issue: RelayClientAuthIssue | null) => void;
   setPhase: (phase: AppPhase) => void;
   setProxies: (proxies: ProxyInfo[]) => void;
-  resetProxyListLoaded: () => void;
+  invalidateProxyList: () => void;
   setPtyFontSize: (fontSize: number) => void;
   adjustPtyFontSize: (delta: number) => void;
   resetPtyFontSize: () => void;
@@ -272,7 +272,7 @@ export const useAppStore = create<AppStoreState>()(
         set({ phase, phaseBeforeDisconnect });
       },
       setProxies: (proxies) => set({ proxies, proxyListLoaded: true }),
-      resetProxyListLoaded: () => set({ proxyListLoaded: false }),
+      invalidateProxyList: () => set({ proxies: [], proxyListLoaded: false }),
       transitionToPhase: (next) => {
         const prev = get().phase;
         cleanStorageForPhaseTransition(prev, next);

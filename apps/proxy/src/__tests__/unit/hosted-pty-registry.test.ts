@@ -2,7 +2,7 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { SessionState } from "@dev-anywhere/shared";
+import { decodeBinaryFrame, SessionState } from "@dev-anywhere/shared";
 import {
   buildHostedPtyArgs,
   HostedPtyRegistry,
@@ -41,7 +41,19 @@ function createRegistry(
   commandPath: string,
   updateTerminalCwd = vi.fn(() => true),
 ) {
-  return new HostedPtyRegistry({
+  return createAgentRegistry(provider, commandPath, updateTerminalCwd).registry;
+}
+
+function createAgentRegistry(
+  provider: "claude" | "codex" | "kimi",
+  commandPath: string,
+  updateTerminalCwd = vi.fn(() => true),
+) {
+  const relayConnection = {
+    sendRaw: vi.fn(),
+    sendBinary: vi.fn(),
+  };
+  const registry = new HostedPtyRegistry({
     sessionManager: {
       getSession: vi.fn(() => ({
         id: "s1",
@@ -53,10 +65,7 @@ function createRegistry(
       })),
       terminateSession: vi.fn(() => ({ success: true })),
     } as never,
-    relayConnection: {
-      sendRaw: vi.fn(),
-      sendBinary: vi.fn(),
-    } as never,
+    relayConnection: relayConnection as never,
     getProviderEnv: () => {
       if (provider === "claude") return { CLAUDE_BIN: commandPath };
       if (provider === "codex") return { CODEX_BIN: commandPath };
@@ -66,6 +75,34 @@ function createRegistry(
     updateTerminalCwd,
     applyPtyStateToSession: vi.fn(),
   });
+  return { registry, relayConnection };
+}
+
+function createShellRegistry(shellPath: string) {
+  const relayConnection = {
+    sendRaw: vi.fn(),
+    sendBinary: vi.fn(),
+  };
+  const registry = new HostedPtyRegistry({
+    sessionManager: {
+      getSession: vi.fn(() => ({
+        id: "terminal-1",
+        kind: "terminal",
+        mode: "pty",
+        provider: "claude",
+        state: SessionState.IDLE,
+        cwd: "/tmp",
+        pid: 2468,
+      })),
+      terminateSession: vi.fn(() => ({ success: true })),
+    } as never,
+    relayConnection: relayConnection as never,
+    getProviderEnv: () => ({ SHELL: shellPath }),
+    touchSessionActivity: vi.fn(() => true),
+    updateTerminalCwd: vi.fn(() => true),
+    applyPtyStateToSession: vi.fn(),
+  });
+  return { registry, relayConnection };
 }
 
 describe("Hosted PTY registry", () => {
@@ -382,6 +419,247 @@ describe("Hosted PTY registry", () => {
       registry.destroyAll();
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("keeps a snapshot on its old watermark and geometry when resize follows immediately", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-hosted-pty-resize-snapshot-"));
+    const shellPath = join(dir, "zsh");
+    writeFileSync(shellPath, "#!/bin/sh\n");
+    chmodSync(shellPath, 0o755);
+    const { registry, relayConnection } = createShellRegistry(shellPath);
+
+    try {
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+        cols: 80,
+        rows: 24,
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+
+      onData("before-resize\r\n");
+      expect(registry.snapshot("terminal-1", "before-request")).toBe(true);
+      expect(registry.resize("terminal-1", 100, 30)).toBe(true);
+      onData("after-resize\r\n");
+
+      await vi.waitFor(() => {
+        const messages = relayConnection.sendRaw.mock.calls.map(([raw]) => JSON.parse(raw));
+        expect(
+          messages.some(
+            (message) =>
+              message.type === "session_snapshot" && message.requestId === "before-request",
+          ),
+        ).toBe(true);
+      });
+      const messages = relayConnection.sendRaw.mock.calls.map(
+        ([raw]) => JSON.parse(raw) as Record<string, unknown>,
+      );
+      const resize = messages.find((message) => message.type === "terminal_resize");
+      const beforeSnapshot = messages.find(
+        (message) => message.type === "session_snapshot" && message.requestId === "before-request",
+      );
+
+      expect(resize).toMatchObject({ cols: 100, rows: 30, outputSeq: 2 });
+      expect(beforeSnapshot).toMatchObject({ cols: 80, rows: 24, outputSeq: 1 });
+      expect(beforeSnapshot?.data).toContain("before-resize");
+      expect(beforeSnapshot?.data).not.toContain("after-resize");
+
+      expect(registry.snapshot("terminal-1", "after-request")).toBe(true);
+      await vi.waitFor(() => {
+        const currentMessages = relayConnection.sendRaw.mock.calls.map(([raw]) => JSON.parse(raw));
+        expect(
+          currentMessages.some(
+            (message) =>
+              message.type === "session_snapshot" && message.requestId === "after-request",
+          ),
+        ).toBe(true);
+      });
+      const afterSnapshot = relayConnection.sendRaw.mock.calls
+        .map(([raw]) => JSON.parse(raw) as Record<string, unknown>)
+        .find(
+          (message) => message.type === "session_snapshot" && message.requestId === "after-request",
+        );
+      expect(afterSnapshot).toMatchObject({ cols: 100, rows: 30, outputSeq: 3 });
+      expect(afterSnapshot?.data).toContain("after-resize");
+    } finally {
+      registry.destroyAll();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("sequences a hosted resize between the preceding and following PTY bytes", () => {
+    withExecutable("zsh", (shellPath) => {
+      const { registry, relayConnection } = createShellRegistry(shellPath);
+
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+
+      onData("before");
+      expect(registry.resize("terminal-1", 100, 30)).toBe(true);
+      onData("after");
+
+      const binarySequences = relayConnection.sendBinary.mock.calls.map(([raw]) => {
+        const decoded = decodeBinaryFrame(raw);
+        if (!decoded) throw new Error("invalid PTY binary frame");
+        return decoded.outputSeq;
+      });
+      const resize = relayConnection.sendRaw.mock.calls
+        .map(([raw]) => JSON.parse(raw as string) as { type?: string; outputSeq?: number })
+        .find((message) => message.type === "terminal_resize");
+
+      expect(binarySequences).toEqual([1, 3]);
+      expect(resize).toMatchObject({ type: "terminal_resize", outputSeq: 2 });
+      expect(spawned.resize).toHaveBeenCalledWith(100, 30);
+      registry.destroyAll();
+    });
+  });
+
+  it("emits a synchronized-output transaction as one hosted render frame", () => {
+    withExecutable("zsh", (shellPath) => {
+      const { registry, relayConnection } = createShellRegistry(shellPath);
+
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+      const syncStart = "\x1b[?2026h";
+      const syncEnd = "\x1b[?2026l";
+
+      onData("before");
+      onData(`${syncStart}first`);
+      onData(`second${syncEnd}after`);
+
+      const frames = relayConnection.sendBinary.mock.calls.map(([raw]) => {
+        const decoded = decodeBinaryFrame(raw);
+        if (!decoded) throw new Error("invalid PTY binary frame");
+        return {
+          outputSeq: decoded.outputSeq,
+          data: Buffer.from(decoded.data).toString("utf8"),
+        };
+      });
+      expect(frames).toEqual([
+        { outputSeq: 1, data: "before" },
+        { outputSeq: 2, data: `${syncStart}firstsecond${syncEnd}` },
+        { outputSeq: 3, data: "after" },
+      ]);
+
+      registry.destroyAll();
+      expect(relayConnection.sendBinary).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  it("coalesces a Kimi-sized synchronized redraw split across PTY chunks", () => {
+    withExecutable("kimi", (kimiBin) => {
+      const { registry, relayConnection } = createAgentRegistry("kimi", kimiBin);
+      registry.start({
+        sessionId: "s1",
+        provider: "kimi",
+        cwd: "/tmp/project",
+        args: [],
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+      const syncStart = "\x1b[?2026h";
+      const syncEnd = "\x1b[?2026l";
+      const targetBytes = 350 * 1024;
+      const body = "kimi-history-line\r\n"
+        .repeat(Math.ceil(targetBytes / 19))
+        .slice(0, targetBytes);
+      const transaction = `${syncStart}\x1b[2J\x1b[H\x1b[3J${body}${syncEnd}`;
+
+      for (let offset = 0; offset < transaction.length; offset += 1_013) {
+        onData(transaction.slice(offset, offset + 1_013));
+      }
+
+      expect(relayConnection.sendBinary).toHaveBeenCalledTimes(1);
+      const decoded = decodeBinaryFrame(relayConnection.sendBinary.mock.calls[0][0]);
+      expect(decoded?.outputSeq).toBe(1);
+      expect(Buffer.from(decoded?.data ?? []).toString("utf8")).toBe(transaction);
+
+      registry.destroyAll();
+      expect(relayConnection.sendBinary).toHaveBeenCalledTimes(1);
+    });
+  });
+
+  it("flushes an incomplete synchronized-output transaction exactly once before resize", () => {
+    withExecutable("zsh", (shellPath) => {
+      const { registry, relayConnection } = createShellRegistry(shellPath);
+
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+      const incomplete = "\x1b[?2026hpartial";
+
+      onData(incomplete);
+      expect(relayConnection.sendBinary).not.toHaveBeenCalled();
+
+      expect(registry.resize("terminal-1", 100, 30)).toBe(true);
+      onData("after");
+
+      const frames = relayConnection.sendBinary.mock.calls.map(([raw]) => {
+        const decoded = decodeBinaryFrame(raw);
+        if (!decoded) throw new Error("invalid PTY binary frame");
+        return {
+          outputSeq: decoded.outputSeq,
+          data: Buffer.from(decoded.data).toString("utf8"),
+        };
+      });
+      expect(frames).toEqual([
+        { outputSeq: 1, data: incomplete },
+        { outputSeq: 3, data: "after" },
+      ]);
+      expect(
+        relayConnection.sendRaw.mock.calls
+          .map(([raw]) => JSON.parse(raw as string) as { type?: string; outputSeq?: number })
+          .find((message) => message.type === "terminal_resize"),
+      ).toMatchObject({ outputSeq: 2 });
+
+      registry.destroyAll();
+      expect(relayConnection.sendBinary).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  it("flushes an incomplete synchronized-output transaction exactly once on close", () => {
+    withExecutable("zsh", (shellPath) => {
+      const { registry, relayConnection } = createShellRegistry(shellPath);
+
+      registry.start({
+        sessionId: "terminal-1",
+        kind: "terminal",
+        cwd: "/tmp",
+        shell: shellPath,
+      });
+      const spawned = ptySpawnMock.mock.results.at(-1)!.value;
+      const onData = spawned.onData.mock.calls[0][0] as (data: string) => void;
+      const incomplete = "\x1b[?2026hpartial";
+
+      onData(incomplete);
+      expect(registry.terminate("terminal-1")).toBe(true);
+      expect(registry.terminate("terminal-1")).toBe(false);
+
+      expect(relayConnection.sendBinary).toHaveBeenCalledTimes(1);
+      const decoded = decodeBinaryFrame(relayConnection.sendBinary.mock.calls[0][0]);
+      expect(decoded?.outputSeq).toBe(1);
+      expect(Buffer.from(decoded?.data ?? []).toString("utf8")).toBe(incomplete);
+    });
   });
 
   it("reports a pure shell terminal working-directory change from OSC 7", () => {

@@ -119,6 +119,101 @@ describe("createPtyFrameWriteBuffer", () => {
     expect(onBarrier).toHaveBeenCalledTimes(1);
   });
 
+  it("serializes bytes, resize, and later bytes across xterm parser callbacks", () => {
+    const queued: FrameRequestCallback[] = [];
+    const target = createTarget();
+    const writeCallbacks: Array<() => void> = [];
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      if (callback) writeCallbacks.push(callback);
+    });
+    const writer = createPtyFrameWriteBuffer(target, {
+      schedule: (callback) => {
+        queued.push(callback);
+        return queued.length;
+      },
+      cancel: vi.fn(),
+    });
+
+    const beforeResize = new Uint8Array([1]);
+    const afterResize = new Uint8Array([2]);
+    writer.target.write(beforeResize);
+    writer.target.resize(100, 30);
+    writer.target.write(afterResize);
+
+    queued.shift()?.(16);
+    expect(target.calls).toEqual([["write", beforeResize]]);
+
+    // A resize cannot overtake bytes which xterm has received but not finished parsing.
+    writeCallbacks.shift()?.();
+    expect(target.calls).toEqual([
+      ["write", beforeResize],
+      ["resize", { cols: 100, rows: 30 }],
+    ]);
+
+    queued.shift()?.(32);
+    expect(target.calls).toEqual([
+      ["write", beforeResize],
+      ["resize", { cols: 100, rows: 30 }],
+      ["write", afterResize],
+    ]);
+  });
+
+  it("does not let a snapshot string overtake an in-flight binary write", () => {
+    const queued: FrameRequestCallback[] = [];
+    const target = createTarget();
+    const writeCallbacks: Array<() => void> = [];
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      if (callback) writeCallbacks.push(callback);
+    });
+    const writer = createPtyFrameWriteBuffer(target, {
+      schedule: (callback) => {
+        queued.push(callback);
+        return queued.length;
+      },
+      cancel: vi.fn(),
+    });
+
+    const liveFrame = new Uint8Array([1]);
+    writer.target.write(liveFrame);
+    writer.target.write("snapshot");
+    queued.shift()?.(16);
+
+    expect(target.calls).toEqual([["write", liveFrame]]);
+    writeCallbacks.shift()?.();
+    expect(target.calls).toEqual([
+      ["write", liveFrame],
+      ["write", "snapshot"],
+    ]);
+  });
+
+  it("splits adjacent binary batches at the byte cap without splitting a large frame", () => {
+    const queued: FrameRequestCallback[] = [];
+    const target = createTarget();
+    const writer = createPtyFrameWriteBuffer(target, {
+      maxBatchBytes: 3,
+      schedule: (callback) => {
+        queued.push(callback);
+        return queued.length;
+      },
+      cancel: vi.fn(),
+    });
+
+    writer.target.write(new Uint8Array([1, 2]));
+    writer.target.write(new Uint8Array([3, 4]));
+    writer.target.write(new Uint8Array([5, 6, 7, 8]));
+
+    queued.shift()?.(16);
+    queued.shift()?.(32);
+    queued.shift()?.(48);
+    expect(target.calls).toEqual([
+      ["write", new Uint8Array([1, 2])],
+      ["write", new Uint8Array([3, 4])],
+      ["write", new Uint8Array([5, 6, 7, 8])],
+    ]);
+  });
+
   it("drops pending binary frames on dispose", () => {
     const queued: FrameRequestCallback[] = [];
     vi.stubGlobal(
@@ -142,6 +237,99 @@ describe("createPtyFrameWriteBuffer", () => {
     expect(target.write).not.toHaveBeenCalled();
     expect(onFramePending).toHaveBeenCalledTimes(1);
     expect(onFrameWritten).not.toHaveBeenCalled();
+  });
+
+  it("suppresses callbacks from a submitted write which settles after dispose", () => {
+    const queued: FrameRequestCallback[] = [];
+    const target = createTarget();
+    const writeCallbacks: Array<() => void> = [];
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      if (callback) writeCallbacks.push(callback);
+    });
+    const onWrite = vi.fn();
+    const onFrameWritten = vi.fn();
+    const writer = createPtyFrameWriteBuffer(target, {
+      onFrameWritten,
+      schedule: (callback) => {
+        queued.push(callback);
+        return queued.length;
+      },
+      cancel: vi.fn(),
+    });
+
+    writer.target.write(new Uint8Array([65]), onWrite);
+    queued.shift()?.(16);
+    expect(target.write).toHaveBeenCalledTimes(1);
+
+    writer.dispose();
+    writeCallbacks.shift()?.();
+
+    expect(onWrite).not.toHaveBeenCalled();
+    expect(onFrameWritten).not.toHaveBeenCalled();
+  });
+
+  it("continues draining after an operation callback throws", () => {
+    const queued: FrameRequestCallback[] = [];
+    const target = createTarget();
+    const writeCallbacks: Array<() => void> = [];
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      if (callback) writeCallbacks.push(callback);
+    });
+    const writer = createPtyFrameWriteBuffer(target, {
+      schedule: (callback) => {
+        queued.push(callback);
+        return queued.length;
+      },
+      cancel: vi.fn(),
+    });
+
+    writer.target.write(new Uint8Array([65]), () => {
+      throw new Error("consumer failed");
+    });
+    writer.target.resize(100, 30);
+    queued.shift()?.(16);
+
+    expect(() => writeCallbacks.shift()?.()).toThrow("consumer failed");
+    expect(target.calls).toEqual([
+      ["write", new Uint8Array([65])],
+      ["resize", { cols: 100, rows: 30 }],
+    ]);
+  });
+
+  it("does not double-complete a synchronous write callback which throws", () => {
+    const queued: FrameRequestCallback[] = [];
+    const target = createTarget();
+    const delayedStringCallbacks: Array<() => void> = [];
+    target.write = vi.fn((data, callback) => {
+      target.calls.push(["write", data]);
+      if (!callback) return;
+      if (data instanceof Uint8Array) callback();
+      else delayedStringCallbacks.push(callback);
+    });
+    const writer = createPtyFrameWriteBuffer(target, {
+      schedule: (callback) => {
+        queued.push(callback);
+        return queued.length;
+      },
+      cancel: vi.fn(),
+    });
+
+    writer.target.write(new Uint8Array([65]), () => {
+      throw new Error("consumer failed synchronously");
+    });
+    writer.target.write("snapshot");
+    writer.target.resize(100, 30);
+
+    expect(() => queued.shift()?.(16)).toThrow("consumer failed synchronously");
+    expect(target.calls).toEqual([
+      ["write", new Uint8Array([65])],
+      ["write", "snapshot"],
+    ]);
+
+    delayedStringCallbacks.shift()?.();
+    expect(target.calls.at(-1)).toEqual(["resize", { cols: 100, rows: 30 }]);
   });
 
   // 模拟 transport.dispose 后 PtyRecoveryController.applySnapshot 的 deferred callback

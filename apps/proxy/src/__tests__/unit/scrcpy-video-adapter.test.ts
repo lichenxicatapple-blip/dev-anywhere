@@ -1,8 +1,8 @@
 import type { ChildProcess } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { mkdir, mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, rm, writeFile } from "node:fs/promises";
 import type { Socket } from "node:net";
-import { dirname, join } from "node:path";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
 import { tmpdir } from "node:os";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -41,28 +41,18 @@ async function temporaryDirectory(): Promise<string> {
   return directory;
 }
 
-async function portableInstallation(): Promise<{ command: string; server: string }> {
+async function portableServer(): Promise<string> {
   const directory = await temporaryDirectory();
-  const command = join(directory, "scrcpy");
   const server = join(directory, "scrcpy-server");
-  await writeFile(command, "test scrcpy");
   await writeFile(server, "test scrcpy server");
-  return { command, server };
-}
-
-function argsKey(args: readonly string[]): string {
-  return args.join("\u0000");
+  return server;
 }
 
 function createExecFile(
-  command: string,
   calls: Array<{ command: string; args: readonly string[] }> = [],
 ): ScrcpyExecFile {
   return vi.fn(async (calledCommand, args) => {
     calls.push({ command: calledCommand, args: [...args] });
-    if (calledCommand === command && argsKey(args) === argsKey(["--version"])) {
-      return result("scrcpy 4.1 <https://github.com/Genymobile/scrcpy>\n");
-    }
     if (calledCommand !== ADB) throw new Error(`Unexpected command: ${calledCommand}`);
     if (args[2] === "forward" && args[3] === "tcp:0") {
       return result(`${FORWARDED_PORT}\n`);
@@ -175,45 +165,40 @@ function splitTouchMessages(value: unknown): Buffer[] {
 }
 
 describe("ScrcpyVideoAdapter resolution", () => {
-  it("reports a missing scrcpy executable", async () => {
+  it("resolves the bundled server without a scrcpy executable in PATH", async () => {
+    const execFile = vi.fn(async () => result()) as ScrcpyExecFile;
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: "/missing/scrcpy",
       env: { PATH: "" },
-      execFile: vi.fn(async () => {
-        throw new Error("ENOENT");
-      }),
+      execFile,
     });
 
-    await expect(adapter.inspect()).resolves.toMatchObject({
-      available: false,
-      error: expect.stringContaining("Scrcpy 4.1 was not found"),
+    const capability = await adapter.inspect();
+    expect(capability).toMatchObject({
+      available: true,
+      version: "4.1",
     });
-    await expect(adapter.resolve()).rejects.toMatchObject({ code: "scrcpy-unavailable" });
+    expect(capability.serverPath).toMatch(/assets\/scrcpy\/scrcpy-server-v4\.1$/u);
+    expect(execFile).not.toHaveBeenCalled();
   });
 
-  it("rejects every version except exactly 4.1", async () => {
-    const { command } = await portableInstallation();
+  it("uses an explicitly injected server path", async () => {
+    const server = await portableServer();
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: vi.fn(async () => result("scrcpy 4.0\n")),
+      serverPath: server,
     });
 
-    await expect(adapter.resolve()).rejects.toMatchObject({
-      code: "scrcpy-version-unsupported",
-      message: expect.stringContaining("exactly 4.1"),
+    await expect(adapter.resolve()).resolves.toEqual({
+      version: "4.1",
+      serverPath: await realpath(server),
     });
   });
 
-  it("fails closed when the matching server cannot be resolved", async () => {
-    const directory = await temporaryDirectory();
-    const command = join(directory, "scrcpy");
-    await writeFile(command, "test scrcpy");
+  it("fails closed when the injected server does not exist", async () => {
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: vi.fn(async () => result("scrcpy 4.1\n")),
+      serverPath: "/missing/scrcpy-server-v4.1",
     });
 
     await expect(adapter.resolve()).rejects.toMatchObject({
@@ -221,60 +206,24 @@ describe("ScrcpyVideoAdapter resolution", () => {
     });
   });
 
-  it("uses SCRCPY_SERVER_PATH as the authoritative server location", async () => {
+  it("rejects a directory in place of the bundled server file", async () => {
     const directory = await temporaryDirectory();
-    const command = join(directory, "scrcpy");
-    const server = join(directory, "custom-server");
-    await writeFile(command, "test scrcpy");
-    await writeFile(server, "test server");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      env: { SCRCPY_SERVER_PATH: server },
-      execFile: vi.fn(async () => result("scrcpy 4.1\n")),
+      serverPath: directory,
     });
 
-    await expect(adapter.resolve()).resolves.toEqual({
-      command,
-      version: "4.1",
-      serverPath: await realpath(server),
-    });
-  });
-
-  it("resolves both portable and prefix server layouts", async () => {
-    const portable = await portableInstallation();
-    const portableAdapter = new ScrcpyVideoAdapter({
-      adbCommand: ADB,
-      scrcpyCommand: portable.command,
-      execFile: vi.fn(async () => result("scrcpy 4.1\n")),
-    });
-    await expect(portableAdapter.resolve()).resolves.toMatchObject({
-      serverPath: await realpath(portable.server),
-    });
-
-    const prefix = await temporaryDirectory();
-    const prefixCommand = join(prefix, "bin", "scrcpy");
-    const prefixServer = join(prefix, "share", "scrcpy", "scrcpy-server");
-    await mkdir(dirname(prefixCommand), { recursive: true });
-    await mkdir(dirname(prefixServer), { recursive: true });
-    await writeFile(prefixCommand, "test scrcpy");
-    await writeFile(prefixServer, "test server");
-    const prefixAdapter = new ScrcpyVideoAdapter({
-      adbCommand: ADB,
-      scrcpyCommand: prefixCommand,
-      execFile: vi.fn(async () => result("scrcpy 4.1\n")),
-    });
-    await expect(prefixAdapter.resolve()).resolves.toMatchObject({
-      serverPath: await realpath(prefixServer),
+    await expect(adapter.resolve()).rejects.toMatchObject({
+      code: "scrcpy-server-unavailable",
     });
   });
 });
 
 describe("ScrcpyVideoAdapter streaming", () => {
   it("parses split frame headers and payloads, preserves flags, and clamps durations", async () => {
-    const { command, server } = await portableInstallation();
+    const server = await portableServer();
     const calls: Array<{ command: string; args: readonly string[] }> = [];
-    const execFile = createExecFile(command, calls);
+    const execFile = createExecFile(calls);
     const { child, kill } = fakeChild();
     const spawn = vi.fn(() => child) as unknown as ScrcpySpawn;
     const videoSocket = fakeSocket();
@@ -283,7 +232,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const connect = createSocketPairConnector(videoSocket, controlSocket);
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
+      serverPath: server,
       execFile,
       spawn,
       connect,
@@ -396,15 +345,15 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("rejects oversized packets before buffering their payload and still cleans up", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const calls: Array<{ command: string; args: readonly string[] }> = [];
     const { child, kill } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command, calls),
+      serverPath: server,
+      execFile: createExecFile(calls),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect: createSocketPairConnector(videoSocket, controlSocket),
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -426,7 +375,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("requests a video reset over the active control socket and coalesces calls for 500ms", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const { child } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
@@ -434,8 +383,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const controlWrite = vi.spyOn(controlSocket, "write");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -489,7 +438,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("pastes UTF-8 text through the active Scrcpy clipboard control message", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const { child } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
@@ -497,8 +446,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const controlWrite = vi.spyOn(controlSocket, "write");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -546,7 +495,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("fails closed when an aborted clipboard write never invokes its socket callback", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const { child } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
@@ -554,8 +503,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const controlWrite = vi.spyOn(controlSocket, "write");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -618,7 +567,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("aborts a pending touch write, drains the queue, and accepts input after stream rebuild", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const firstVideoSocket = fakeSocket();
     const firstControlSocket = fakeSocket();
     const secondVideoSocket = fakeSocket();
@@ -642,8 +591,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
       .mockReturnValueOnce(secondChild) as unknown as ScrcpySpawn;
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -753,7 +702,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("encodes one touch with a fixed internal pointer and safely replaces repeated down", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const { child } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
@@ -761,8 +710,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const controlWrite = vi.spyOn(controlSocket, "write");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -852,7 +801,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("releases the active touch on video rotation, explicit release, and stream abort", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const { child } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
@@ -860,8 +809,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const controlWrite = vi.spyOn(controlSocket, "write");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -927,7 +876,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("fails closed and clears the active touch after a control write callback fails", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const { child } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
@@ -935,8 +884,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const controlWrite = vi.spyOn(controlSocket, "write");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -990,7 +939,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("invalidates the control channel when touch release misses its write deadline", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const { child } = fakeChild();
     const videoSocket = fakeSocket();
     const controlSocket = fakeSocket();
@@ -998,8 +947,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     const controlWrite = vi.spyOn(controlSocket, "write");
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command),
+      serverPath: server,
+      execFile: createExecFile(),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect,
       randomBytes: () => Buffer.from([0x12, 0x34, 0x56, 0x78]),
@@ -1060,7 +1009,7 @@ describe("ScrcpyVideoAdapter streaming", () => {
   });
 
   it("treats abort as a graceful stop and removes the child, forward, and remote jar", async () => {
-    const { command } = await portableInstallation();
+    const server = await portableServer();
     const calls: Array<{ command: string; args: readonly string[] }> = [];
     const { child, kill } = fakeChild();
     const videoSocket = fakeSocket();
@@ -1072,8 +1021,8 @@ describe("ScrcpyVideoAdapter streaming", () => {
     });
     const adapter = new ScrcpyVideoAdapter({
       adbCommand: ADB,
-      scrcpyCommand: command,
-      execFile: createExecFile(command, calls),
+      serverPath: server,
+      execFile: createExecFile(calls),
       spawn: vi.fn(() => child) as unknown as ScrcpySpawn,
       connect: () => {
         connected();

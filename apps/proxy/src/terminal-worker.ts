@@ -1,10 +1,6 @@
 import * as pty from "node-pty";
 import type { IPty } from "node-pty";
-import pkg from "@xterm/headless";
-const { Terminal: HeadlessTerminal } = pkg;
 import { PTY_INITIAL_MIN_COLS, PTY_INITIAL_MIN_ROWS } from "@dev-anywhere/shared";
-import { SerializeAddon } from "@xterm/addon-serialize";
-import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import type { Socket } from "node:net";
 import { setTimeout as sleep } from "node:timers/promises";
 import { existsSync } from "node:fs";
@@ -12,7 +8,8 @@ import { extractOscSignals, extractOscWorkingDirectory } from "./common/osc-extr
 import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
 import { terminalLogger as log } from "./common/logger.js";
 import { SOCK_PATH, STOPPED_PATH } from "./common/paths.js";
-import { capturePtySnapshot } from "./common/pty-snapshot.js";
+import { PtyRenderSequencer } from "./common/pty-render-sequencer.js";
+import { PtySynchronizedOutputCoalescer } from "./common/pty-synchronized-output-coalescer.js";
 import {
   createIpcReader,
   encodeBinaryIpcFrame,
@@ -42,13 +39,12 @@ function normalizeTerminalWorkerEnv(env: NodeJS.ProcessEnv): Record<string, stri
 class ShellTerminalWorker {
   private socket: Socket | null = null;
   private child: IPty | null = null;
-  private readonly terminal: InstanceType<typeof HeadlessTerminal>;
-  private readonly serializeAddon = new SerializeAddon();
-  private outputSeq = 0;
+  private readonly renderSequencer: PtyRenderSequencer;
   private exiting = false;
   private reconnecting = false;
   private currentCwd: string;
   private outputTail = "";
+  private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
 
   constructor(
     private readonly sessionId: string,
@@ -58,14 +54,16 @@ class ShellTerminalWorker {
     rows = PTY_INITIAL_MIN_ROWS,
   ) {
     this.currentCwd = cwd;
-    this.terminal = new HeadlessTerminal({
-      cols,
-      rows,
-      scrollback: 5000,
-      allowProposedApi: true,
+    this.renderSequencer = new PtyRenderSequencer({ cols, rows });
+    this.synchronizedOutput = new PtySynchronizedOutputCoalescer({
+      emit: (data) => this.emitRenderData(data),
+      onOverflow: (event) => {
+        log.warn(
+          { sessionId: this.sessionId, ...event },
+          "PTY synchronized-output transaction exceeded buffer limit; streaming remainder",
+        );
+      },
     });
-    this.terminal.loadAddon(this.serializeAddon);
-    this.terminal.loadAddon(new UnicodeGraphemesAddon());
   }
 
   async run(): Promise<void> {
@@ -106,8 +104,8 @@ class ShellTerminalWorker {
     const shell = process.env.SHELL ?? "/bin/sh";
     const child = pty.spawn(shell, [], {
       name: "xterm-256color",
-      cols: this.terminal.cols,
-      rows: this.terminal.rows,
+      cols: this.renderSequencer.cols,
+      rows: this.renderSequencer.rows,
       cwd: this.cwd,
       env: normalizeTerminalWorkerEnv(process.env),
     });
@@ -126,9 +124,8 @@ class ShellTerminalWorker {
   }
 
   private handlePtyData(data: string): void {
-    this.outputSeq += 1;
     this.outputTail = `${this.outputTail}${data}`.slice(-8_192);
-    this.terminal.write(data);
+    this.synchronizedOutput.push(data);
     const signal = extractOscSignals(data);
     const cwd = extractOscWorkingDirectory(data);
     if (cwd && cwd !== this.currentCwd) {
@@ -142,11 +139,14 @@ class ShellTerminalWorker {
         serializeIpc({ type: "pty_title_change", sessionId: this.sessionId, title: signal.title }),
       );
     }
-    if (this.socket?.writable) {
-      this.socket.write(
-        encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), this.outputSeq),
-      );
-    }
+  }
+
+  private emitRenderData(data: string): void {
+    if (!data) return;
+    const outputSeq = this.renderSequencer.write(data);
+    if (outputSeq === null) return;
+    if (!this.socket?.writable) return;
+    this.socket.write(encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), outputSeq));
   }
 
   private setupSocketHandlers(socket: Socket): void {
@@ -181,7 +181,7 @@ class ShellTerminalWorker {
         {
           const responseSocket = this.socket;
           if (!responseSocket?.writable) break;
-          capturePtySnapshot(this.terminal, this.serializeAddon, this.outputSeq, (snapshot) => {
+          this.renderSequencer.captureSnapshot((snapshot) => {
             if (this.socket !== responseSocket || !responseSocket.writable) return;
             responseSocket.write(
               serializeIpc({
@@ -207,13 +207,21 @@ class ShellTerminalWorker {
   }
 
   private resize(cols: number, rows: number): void {
-    this.child?.resize(cols, rows);
-    this.terminal.resize(cols, rows);
+    this.synchronizedOutput.flush();
+    const outputSeq = this.renderSequencer.resize(cols, rows);
+    if (outputSeq === null) return;
     if (this.socket?.writable) {
       this.socket.write(
-        serializeIpc({ type: "pty_resize", sessionId: this.sessionId, cols, rows }),
+        serializeIpc({
+          type: "pty_resize",
+          sessionId: this.sessionId,
+          cols,
+          rows,
+          outputSeq,
+        }),
       );
     }
+    this.child?.resize(cols, rows);
     log.info({ sessionId: this.sessionId, cols, rows }, "Terminal worker PTY resized");
   }
 
@@ -260,7 +268,8 @@ class ShellTerminalWorker {
     if (this.exiting && !this.child) return;
     this.exiting = true;
     this.child = null;
-    this.terminal.dispose();
+    this.synchronizedOutput.dispose();
+    this.renderSequencer.dispose();
     if (this.socket?.writable) {
       const socket = this.socket;
       const timer = setTimeout(() => process.exit(code), 500);

@@ -67,8 +67,7 @@ function prepareRelayReconnect(): void {
   const hasSelectedProxy = store.selectedProxyId !== null;
   store.setConnected(false);
   store.setProxyOnline(false);
-  store.setProxies([]);
-  store.resetProxyListLoaded();
+  store.invalidateProxyList();
   previewController.dispose();
 
   if (hasSelectedProxy) {

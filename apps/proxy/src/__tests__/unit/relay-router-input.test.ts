@@ -185,7 +185,7 @@ function createRouter(options: {
             supported: true,
             available: false,
             interactive: false,
-            error: "scrcpy not found",
+            error: "adb not found",
           },
         })),
       } as unknown as DevicePreviewManager),

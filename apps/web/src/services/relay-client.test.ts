@@ -1369,7 +1369,7 @@ describe("RelayClient request handling", () => {
           supported: true,
           available: false,
           interactive: false,
-          error: "scrcpy not found",
+          error: "adb not found",
         },
       },
     });

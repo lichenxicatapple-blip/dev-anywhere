@@ -14,6 +14,7 @@ interface MockPty {
 let mockPty: MockPty;
 let onDataCallback: ((data: string) => void) | null = null;
 let onExitCallback: ((e: { exitCode: number; signal?: number }) => void) | null = null;
+let beforeSpawnReturn: (() => void) | null = null;
 
 vi.mock("node-pty", () => ({
   spawn: vi.fn(() => {
@@ -31,6 +32,7 @@ vi.mock("node-pty", () => ({
       }),
       pid: 12345,
     };
+    beforeSpawnReturn?.();
     return mockPty;
   }),
 }));
@@ -40,6 +42,7 @@ describe("PtyManager", () => {
     vi.clearAllMocks();
     onDataCallback = null;
     onExitCallback = null;
+    beforeSpawnReturn = null;
     delete process.env.INIT_CWD;
   });
 
@@ -52,6 +55,8 @@ describe("PtyManager", () => {
       isTTY?: boolean;
       cols?: number;
       rows?: number;
+      initialSize?: { cols: number; rows: number };
+      onResize?: (cols: number, rows: number) => void;
       onSessionExit?: (code: number) => void;
     } = {},
   ) {
@@ -82,10 +87,12 @@ describe("PtyManager", () => {
       provider,
       providerArgs: overrides.providerArgs ?? [],
       cwd: overrides.cwd ?? "/tmp/project",
+      initialSize: overrides.initialSize,
       tap,
       onInput: overrides.onInput,
       stdin,
       stdout,
+      onResize: overrides.onResize,
       onSessionExit: overrides.onSessionExit,
     });
 
@@ -106,6 +113,49 @@ describe("PtyManager", () => {
       ["--help"],
       expect.objectContaining({ cols: 120, rows: 40, cwd: "/tmp/project" }),
     );
+  });
+
+  it("spawns with initialSize and immediately reconciles a missed host resize", async () => {
+    const onResize = vi.fn();
+    const { manager, pty, stdout } = await createManager({
+      cols: 100,
+      rows: 30,
+      initialSize: { cols: 100, rows: 30 },
+      onResize,
+    });
+    // 模拟尺寸在 child spawn 后、stdout resize listener 挂载前发生改变。这个 resize
+    // 事件无法被 PtyManager 收到，只能依靠 listener 挂载后的主动复读补偿。
+    beforeSpawnReturn = () => {
+      stdout.columns = 120;
+      stdout.rows = 40;
+    };
+
+    manager.start();
+
+    expect(pty.spawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.any(Array),
+      expect.objectContaining({ cols: 100, rows: 30 }),
+    );
+    expect(mockPty.resize).toHaveBeenCalledTimes(1);
+    expect(mockPty.resize).toHaveBeenCalledWith(120, 40);
+    expect(onResize).toHaveBeenCalledTimes(1);
+    expect(onResize).toHaveBeenCalledWith(120, 40);
+  });
+
+  it("does not report a startup resize when initialSize still matches stdout", async () => {
+    const onResize = vi.fn();
+    const { manager } = await createManager({
+      cols: 120,
+      rows: 40,
+      initialSize: { cols: 120, rows: 40 },
+      onResize,
+    });
+
+    manager.start();
+
+    expect(mockPty.resize).not.toHaveBeenCalled();
+    expect(onResize).not.toHaveBeenCalled();
   });
 
   it("uses explicit session cwd instead of ambient process cwd", async () => {
@@ -204,6 +254,25 @@ describe("PtyManager", () => {
     expect(mockPty.resize).toHaveBeenCalledTimes(1);
     expect(mockPty.resize).toHaveBeenCalledWith(130, 45);
 
+    vi.useRealTimers();
+  });
+
+  it("ignores debounced resize events that keep the applied dimensions", async () => {
+    vi.useFakeTimers();
+    const onResize = vi.fn();
+    const { manager, stdout } = await createManager({
+      cols: 100,
+      rows: 30,
+      onResize,
+    });
+
+    manager.start();
+    stdout.emit("resize");
+    stdout.emit("resize");
+    vi.advanceTimersByTime(50);
+
+    expect(mockPty.resize).not.toHaveBeenCalled();
+    expect(onResize).not.toHaveBeenCalled();
     vi.useRealTimers();
   });
 

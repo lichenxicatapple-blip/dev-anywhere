@@ -19,6 +19,14 @@ export interface PtyHorizontalScrollMetrics {
   rightGap: number;
 }
 
+export interface PtyVisibleRow {
+  text: string;
+  top: number;
+  bottom: number;
+  height: number;
+  source: "native" | "live-backfill";
+}
+
 export interface PtyRenderedGeometry {
   anchorAtBottom: boolean;
   liveBackfillRequired: boolean;
@@ -126,6 +134,76 @@ export async function readPtyHorizontalScrollMetrics(
       rightGap: maxScrollLeft - node.scrollLeft,
     };
   });
+}
+
+/**
+ * Reads one actually painted PTY row in browser-viewport coordinates.
+ *
+ * A remote PTY can be shorter than the browser viewport. In that case the same logical history
+ * row may move between xterm's native rows and the derived live-backfill projection while the
+ * controller remaps its outer scroll coordinates. Raw `scrollTop` is therefore not a stable
+ * history-position identity; the row's offset from the terminal content edge is.
+ */
+export async function readVisiblePtyRow(
+  page: Page,
+  needle: string,
+): Promise<PtyVisibleRow | null> {
+  return ptyTerminal(page).evaluate((container, targetText) => {
+    const containerRect = container.getBoundingClientRect();
+    const containerStyle = getComputedStyle(container);
+    const contentTop = containerRect.top + (Number.parseFloat(containerStyle.paddingTop) || 0);
+    const contentBottom =
+      containerRect.bottom - (Number.parseFloat(containerStyle.paddingBottom) || 0);
+    const screen = container.querySelector<HTMLElement>('[data-slot="pty-host"] .xterm-screen');
+    if (!screen) return null;
+
+    const matches = Array.from(screen.querySelectorAll<HTMLElement>(".xterm-rows > div"))
+      .filter((row) => !row.closest('[data-slot="pty-review-snapshot"]'))
+      .flatMap((row) => {
+        if (!(row.textContent ?? "").includes(targetText)) return [];
+        const projection = row.closest<HTMLElement>('[data-slot="pty-live-backfill"]');
+        const clipRect = (projection ?? screen).getBoundingClientRect();
+        const rowRect = row.getBoundingClientRect();
+        const paintedTop = Math.max(contentTop, clipRect.top, rowRect.top);
+        const paintedBottom = Math.min(contentBottom, clipRect.bottom, rowRect.bottom);
+        if (paintedBottom <= paintedTop) return [];
+        return [
+          {
+            text: row.textContent ?? "",
+            top: rowRect.top - contentTop,
+            bottom: rowRect.bottom - contentTop,
+            height: rowRect.height,
+            source: projection ? ("live-backfill" as const) : ("native" as const),
+          },
+        ];
+      })
+      .sort((left, right) => left.top - right.top);
+
+    return matches[0] ?? null;
+  }, needle);
+}
+
+export async function waitForStableVisiblePtyRow(
+  page: Page,
+  needle: string,
+): Promise<PtyVisibleRow> {
+  let previous: PtyVisibleRow | null = null;
+  let settled: PtyVisibleRow | null = null;
+  await expect
+    .poll(async () => {
+      const current = await readVisiblePtyRow(page, needle);
+      const stable =
+        current !== null &&
+        previous !== null &&
+        current.text === previous.text &&
+        Math.abs(current.top - previous.top) <= 1;
+      previous = current;
+      if (stable) settled = current;
+      return stable;
+    })
+    .toBe(true);
+  if (!settled) throw new Error(`PTY row did not settle: ${needle}`);
+  return settled;
 }
 
 export async function readPtyDebugSnapshot(page: Page): Promise<PtyDebugSnapshot | null> {
@@ -292,7 +370,10 @@ export async function enterLongHostMode(
     .toBe(rows);
 }
 
-export async function expectPtySessionSubscribeCount(page: Page, minCount: number): Promise<void> {
+export async function expectPtySessionSubscribeCount(
+  page: Page,
+  expectedCount: number,
+): Promise<void> {
   await expect
     .poll(async () =>
       page.evaluate(
@@ -306,5 +387,5 @@ export async function expectPtySessionSubscribeCount(page: Page, minCount: numbe
           }).length,
       ),
     )
-    .toBeGreaterThanOrEqual(minCount);
+    .toBe(expectedCount);
 }

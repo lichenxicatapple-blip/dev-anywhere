@@ -193,6 +193,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
               sessionId: msg.sessionId,
               cols: msg.cols,
               rows: msg.rows,
+              outputSeq: msg.outputSeq,
             }),
           );
           break;

@@ -29,8 +29,10 @@
   "files": [
     "dist",
     "assets",
+    "licenses",
     "README.md",
-    "LICENSE"
+    "LICENSE",
+    "THIRD_PARTY_NOTICES.md"
   ],
   "bin": {
     "dev-anywhere": "./dist/index.js"

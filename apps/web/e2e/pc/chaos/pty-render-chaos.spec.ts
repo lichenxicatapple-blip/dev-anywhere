@@ -64,4 +64,61 @@ test.describe("PTY render chaos: stale render snapshots and outputSeq dedupe", (
     await expect(renderedRows).toContainText("SEQ-4");
     await expect(renderedRows).not.toContainText("STALE SNAPSHOT SHOULD NOT RENDER");
   });
+
+  test("keeps a large synchronized redraw, resize, and following output in one live stream", async ({
+    page,
+  }) => {
+    await setupPtyChat(page, { sessionId: SESSION_ID });
+    await expectPtyTerminalMounted(page);
+    await expect
+      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+      .toContain("PTY SMOKE READY");
+
+    const initialSubscribeCount = await page.evaluate(
+      () =>
+        window.__ptySmoke.sent.filter((raw) => {
+          try {
+            return (JSON.parse(raw) as { type?: string }).type === "session_subscribe";
+          } catch {
+            return false;
+          }
+        }).length,
+    );
+
+    await page.evaluate(() => {
+      const redrawBody = Array.from(
+        { length: 3_500 },
+        (_, index) => `redraw-${index.toString().padStart(4, "0")}-${"x".repeat(84)}\r\n`,
+      ).join("");
+      const kimiStyleRedraw = `\x1b[?2026h\x1b[2J\x1b[H${redrawBody}KIMI-REDRAW-COMMITTED\r\n\x1b[?2026l`;
+
+      window.__ptySmoke.sendPty(kimiStyleRedraw);
+      // emitResize crosses the JSON event loop while the following binary frame arrives now. The
+      // recovery layer must reconstruct seq=redraw, seq=resize, seq=latest before touching xterm.
+      window.__ptySmoke.resize(100, 30);
+      window.__ptySmoke.sendPty("LATEST-AFTER-RESIZE\r\n");
+    });
+
+    await expect
+      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+      .toContain("KIMI-REDRAW-COMMITTED");
+    await expect
+      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
+      .toContain("LATEST-AFTER-RESIZE");
+    await expect
+      .poll(() => page.evaluate((sid) => window.__ccTest?.pty.metrics(sid) ?? null, SESSION_ID))
+      .toMatchObject({ cols: 100, rows: 30 });
+
+    const finalSubscribeCount = await page.evaluate(
+      () =>
+        window.__ptySmoke.sent.filter((raw) => {
+          try {
+            return (JSON.parse(raw) as { type?: string }).type === "session_subscribe";
+          } catch {
+            return false;
+          }
+        }).length,
+    );
+    expect(finalSubscribeCount).toBe(initialSubscribeCount);
+  });
 });

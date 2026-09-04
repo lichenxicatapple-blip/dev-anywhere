@@ -340,6 +340,60 @@ describe("CreateDevicePreviewDialog", () => {
     expect(baseElement.querySelector('[data-slot="device-preview-tool-description"]')).toBeNull();
   });
 
+  it("links a missing Android dependency to the adb installation guide", async () => {
+    const missingAdbCapability: DevicePreviewCapability = {
+      ...capability,
+      android: {
+        supported: true,
+        available: false,
+        interactive: false,
+        error: "未找到 Android Debug Bridge (adb)",
+      },
+    };
+    requestDevicePreviewCapability.mockImplementationOnce(async (candidateScope) => {
+      useDevicePreviewStore.getState().setCapability(candidateScope, missingAdbCapability);
+      return { success: true, capability: missingAdbCapability };
+    });
+    requestDevicePreviewTargets.mockResolvedValueOnce({ success: true, targets: [] });
+
+    const { baseElement } = render(
+      <CreateDevicePreviewDialog open platform="android" onOpenChange={vi.fn()} />,
+    );
+
+    await waitFor(() => slot(baseElement, "device-preview-tool-status"));
+    expect(
+      baseElement.querySelector(
+        'a[href="https://developer.android.com/tools/releases/platform-tools"]',
+      ),
+    ).not.toBeNull();
+  });
+
+  it("does not send users to install another tool when a bundled component is missing", async () => {
+    const damagedInstallCapability: DevicePreviewCapability = {
+      ...capability,
+      android: {
+        supported: true,
+        available: false,
+        interactive: false,
+        command: "/sdk/platform-tools/adb",
+        version: "Android Debug Bridge version 1.0.41",
+        error: "Android 模拟器预览组件缺失，请重新安装 DEV Anywhere",
+      },
+    };
+    requestDevicePreviewCapability.mockImplementationOnce(async (candidateScope) => {
+      useDevicePreviewStore.getState().setCapability(candidateScope, damagedInstallCapability);
+      return { success: true, capability: damagedInstallCapability };
+    });
+    requestDevicePreviewTargets.mockResolvedValueOnce({ success: true, targets: [] });
+
+    const { baseElement } = render(
+      <CreateDevicePreviewDialog open platform="android" onOpenChange={vi.fn()} />,
+    );
+
+    await waitFor(() => slot(baseElement, "device-preview-tool-status"));
+    expect(baseElement.querySelector("a")).toBeNull();
+  });
+
   it("aborts and ignores a capability result that arrives after the dialog closes", async () => {
     const capabilityRequest = deferred<{
       success: true;

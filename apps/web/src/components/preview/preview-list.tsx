@@ -237,7 +237,7 @@ export function PreviewList() {
         id="preview-section-title"
         className="px-4 pb-2 pt-3 text-sm font-semibold text-foreground"
       >
-        前端预览
+        预览
         <span className="ml-1 font-normal text-muted-foreground/70">
           · {previews.length + devicePreviews.length}
         </span>

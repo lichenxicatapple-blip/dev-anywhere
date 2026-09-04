@@ -52,6 +52,7 @@ export function AppShell() {
     route: topLevelRoute,
     surface: "mobile",
     proxiesLength,
+    proxyListLoaded,
     hasProxy,
     sessionCount,
     relayClientAuthIssue,

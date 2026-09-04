@@ -122,4 +122,59 @@ describe("local terminal IPC state ownership", () => {
     expect(updateState).not.toHaveBeenCalled();
     socket.destroy();
   });
+
+  it("forwards the local terminal resize render sequence unchanged", async () => {
+    const session: SessionInfo = {
+      id: "session-1",
+      mode: "pty",
+      provider: "kimi",
+      ptyOwner: "local-terminal",
+      state: SessionState.IDLE,
+      createdAt: 1,
+      updatedAt: 1,
+      cwd: "/tmp",
+      pid: process.pid,
+    };
+    const relayConnection = {
+      sendRaw: vi.fn(),
+      sendBinary: vi.fn(),
+    };
+    const socket = new PassThrough() as unknown as Socket;
+
+    handleTerminalConnection(socket, {
+      sessionManager: { getSession: vi.fn(() => session) },
+      workerRegistry: {},
+      terminalSockets: new Map(),
+      terminalSubscriptionBacklog: {},
+      hostedPtyRegistry: {},
+      relayConnection,
+      permissionBroker: { listSession: vi.fn(() => []) },
+      hookEventRouter: {},
+      createHookContext: vi.fn(),
+      emitAgentStatus: vi.fn(),
+      updateTerminalCwd: vi.fn(),
+      resolveInterruptedApprovals: vi.fn(),
+      config: {},
+    } as never);
+
+    socket.write(
+      serializeIpc({
+        type: "pty_resize",
+        sessionId: session.id,
+        cols: 100,
+        rows: 30,
+        outputSeq: 17,
+      }),
+    );
+
+    await vi.waitFor(() => expect(relayConnection.sendRaw).toHaveBeenCalledOnce());
+    expect(JSON.parse(relayConnection.sendRaw.mock.calls[0][0])).toEqual({
+      type: "terminal_resize",
+      sessionId: session.id,
+      cols: 100,
+      rows: 30,
+      outputSeq: 17,
+    });
+    socket.destroy();
+  });
 });

@@ -16,6 +16,19 @@ async function terminateSessionFromList(page: Page, sessionId: string): Promise<
   await expect(row).toHaveCount(0);
 }
 
+async function selectAgentCli(
+  page: Page,
+  name: "Claude Code" | "Codex" | "Kimi Code",
+): Promise<void> {
+  const trigger = page
+    .getByRole("dialog", { name: "新建会话" })
+    .getByRole("combobox", { name: "Agent CLI" });
+  await trigger.focus();
+  await trigger.press("Enter");
+  await page.getByRole("option", { name, exact: true }).click();
+  await expect(trigger).toHaveText(name);
+}
+
 test.describe("functional browser walkthrough", () => {
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
@@ -53,22 +66,24 @@ test.describe("functional browser walkthrough", () => {
     await openCreateAgentSessionDialog(page);
     await page.getByLabel("工作目录").focus();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toBeVisible();
-    await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();
+    await selectAgentCli(page, "Codex");
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
 
+    const agentCliSelect = page
+      .getByRole("dialog", { name: "新建会话" })
+      .getByRole("combobox", { name: "Agent CLI" });
     await page
       .getByLabel("交互方式")
       .getByRole("button", { name: /聊天模式/ })
       .click();
-    await expect(
-      page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }),
-    ).not.toHaveAttribute("aria-disabled");
+    await expect(agentCliSelect).toBeEnabled();
+    await expect(agentCliSelect).toHaveText("Codex");
     await expect(page.getByText("权限模式")).toBeVisible();
     await page
       .getByLabel("交互方式")
       .getByRole("button", { name: /终端模式/ })
       .click();
-    await page.getByLabel("Agent CLI").getByRole("button", { name: /Codex/ }).click();
+    await expect(agentCliSelect).toHaveText("Codex");
     await page.getByLabel("工作目录").fill("/home/dev/projects/sample-app");
     await page
       .getByRole("dialog", { name: "新建会话" })

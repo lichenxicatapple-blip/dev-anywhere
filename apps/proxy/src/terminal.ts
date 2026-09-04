@@ -6,10 +6,6 @@ import { resolveTerminalCwd } from "./terminal/cwd.js";
 import { ensureService, tryConnect, waitForMessage } from "./terminal/serve-bootstrap.js";
 import { createIdleChecker, type IdleChecker } from "./terminal/idle-checker.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
-import pkg from "@xterm/headless";
-const { Terminal: HeadlessTerminal } = pkg;
-import { SerializeAddon } from "@xterm/addon-serialize";
-import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import {
   appendPtySemanticTextTail,
   extractOscSequences,
@@ -22,11 +18,12 @@ import {
   decidePtySemanticTransition,
   shouldStartPtyTurnOnInput,
 } from "./common/pty-semantic-machine.js";
-import { capturePtySnapshot } from "./common/pty-snapshot.js";
+import { PtyRenderSequencer } from "./common/pty-render-sequencer.js";
 import {
   createCodexXtermHistoryCompat,
   type CodexXtermHistoryCompat,
 } from "./common/codex-xterm-history-compat.js";
+import { PtySynchronizedOutputCoalescer } from "./common/pty-synchronized-output-coalescer.js";
 import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
 import { TerminalState, TERMINAL_TRANSITIONS, createExitHandler } from "./terminal/state.js";
 import { existsSync } from "node:fs";
@@ -81,12 +78,10 @@ class TerminalSession {
   private currentPtyState: PtySemanticState = "turn_complete";
   private semanticTextTail = "";
   private textApprovalWaitActive = false;
-  // headless terminal 在本进程维护，用于按需 serialize() 给远程 client
-  private headlessTerminal: InstanceType<typeof HeadlessTerminal> | null = null;
-  private serializeAddon: SerializeAddon | null = null;
+  private renderSequencer: PtyRenderSequencer | null = null;
   private xtermHistoryCompat: CodexXtermHistoryCompat | null = null;
   private xtermHistoryCompatReported = false;
-  private outputSeq = 0;
+  private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
   private ptyStateSeq = 0;
   private remoteDetached = false;
   // 记录上次 bridge 连接状态，避免重连抖动重复打印 banner；
@@ -99,7 +94,17 @@ class TerminalSession {
   constructor(
     private readonly provider: ProviderAdapter,
     private readonly providerArgs: string[],
-  ) {}
+  ) {
+    this.synchronizedOutput = new PtySynchronizedOutputCoalescer({
+      emit: (data) => this.emitRenderData(data),
+      onOverflow: (event) => {
+        log.warn(
+          { sessionId: this.sessionId, ...event },
+          "PTY synchronized-output transaction exceeded buffer limit; streaming remainder",
+        );
+      },
+    });
+  }
 
   async run(): Promise<void> {
     log.info("Terminal starting");
@@ -107,23 +112,22 @@ class TerminalSession {
     this.socket = await ensureService();
 
     await this.createSession();
-    this.initHeadlessTerminal();
+    const initialSize = this.initRenderSequencer();
     this.cleanupAndExit = createExitHandler({
       fsm: this.fsm,
       getSocket: () => this.socket,
       getSessionId: () => this.sessionId,
       stopIdleChecker: () => this.idleChecker?.stop(),
       disposeRenderResources: () => {
-        this.flushPendingRenderData();
-        this.headlessTerminal?.dispose();
-        this.headlessTerminal = null;
-        this.serializeAddon = null;
+        this.disposePendingRenderData();
+        this.renderSequencer?.dispose();
+        this.renderSequencer = null;
         this.xtermHistoryCompat = null;
       },
     });
 
     this.setupSocketHandlers();
-    this.startPtyManager();
+    this.startPtyManager(initialSize);
 
     this.socket.write(
       serializeIpc({ type: "pty_register", sessionId: this.sessionId!, pid: process.pid }),
@@ -159,30 +163,23 @@ class TerminalSession {
     this.hookContext = response.hook ?? null;
   }
 
-  private initHeadlessTerminal(): void {
+  private initRenderSequencer(): { cols: number; rows: number } {
     const { cols, rows } = readTtySize(process.stdout);
     log.info(
       { sessionId: this.sessionId, cols, rows },
-      "Session created, initializing headless terminal",
+      "Session created, initializing PTY render sequencer",
     );
-    this.headlessTerminal = new HeadlessTerminal({
-      cols,
-      rows,
-      scrollback: 5000,
-      allowProposedApi: true,
-    });
-    this.serializeAddon = new SerializeAddon();
-    // UnicodeGraphemesAddon activate() 里会设置 activeVersion = '15-graphemes'
-    this.headlessTerminal.loadAddon(this.serializeAddon);
-    this.headlessTerminal.loadAddon(new UnicodeGraphemesAddon());
+    this.renderSequencer = new PtyRenderSequencer({ cols, rows });
     this.xtermHistoryCompat = createCodexXtermHistoryCompat(this.provider.id, rows, process.env);
+    return { cols, rows };
   }
 
-  private startPtyManager(): void {
+  private startPtyManager(initialSize: { cols: number; rows: number }): void {
     this.ptyManager = new PtyManager({
       provider: this.provider,
       providerArgs: this.providerArgs,
       cwd: this.sessionCwd,
+      initialSize,
       hook: this.hookContext ?? undefined,
       tap: (data) => this.handlePtyData(data),
       onInput: (data) => this.updateSemanticStateOnInput(data),
@@ -191,14 +188,20 @@ class TerminalSession {
       onResize: (newCols, newRows) => {
         this.flushPendingRenderData();
         this.xtermHistoryCompat?.setTerminalRows(newRows);
-        if (this.headlessTerminal) this.headlessTerminal.resize(newCols, newRows);
-        if (this.socket.writable && this.sessionId) {
+        const outputSeq = this.renderSequencer?.resize(newCols, newRows);
+        if (
+          outputSeq !== null &&
+          outputSeq !== undefined &&
+          this.socket.writable &&
+          this.sessionId
+        ) {
           this.socket.write(
             serializeIpc({
               type: "pty_resize",
               sessionId: this.sessionId,
               cols: newCols,
               rows: newRows,
+              outputSeq,
             }),
           );
         }
@@ -219,7 +222,7 @@ class TerminalSession {
     this.providerOutputTail = `${this.providerOutputTail}${data}`.slice(-8_192);
     const previousRewriteCount = this.xtermHistoryCompat?.stats.rewrittenTransactions ?? 0;
     const renderData = this.xtermHistoryCompat?.push(data) ?? data;
-    this.emitRenderData(renderData);
+    this.synchronizedOutput.push(renderData);
     this.reportXtermHistoryCompatRewrite(previousRewriteCount);
 
     const oscSequences = extractOscSequences(data);
@@ -270,18 +273,24 @@ class TerminalSession {
    */
   private emitRenderData(data: string): void {
     if (!data) return;
-    this.outputSeq += 1;
-    this.headlessTerminal?.write(data);
+    const outputSeq = this.renderSequencer?.write(data);
+    if (outputSeq === null || outputSeq === undefined) return;
 
     if (!this.remoteDetached && this.socket.writable && this.sessionId) {
       this.socket.write(
-        encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), this.outputSeq),
+        encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), outputSeq),
       );
     }
   }
 
   private flushPendingRenderData(): void {
-    this.emitRenderData(this.xtermHistoryCompat?.flush() ?? "");
+    this.synchronizedOutput.push(this.xtermHistoryCompat?.flush() ?? "");
+    this.synchronizedOutput.flush();
+  }
+
+  private disposePendingRenderData(): void {
+    this.synchronizedOutput.push(this.xtermHistoryCompat?.flush() ?? "");
+    this.synchronizedOutput.dispose();
   }
 
   private reportXtermHistoryCompatRewrite(previousRewriteCount: number): void {
@@ -380,34 +389,29 @@ class TerminalSession {
         } else if (msg.type === "bridge_status") {
           this.handleBridgeStatus(msg.connected);
         } else if (msg.type === "pty_subscribe" && msg.sessionId === this.sessionId) {
-          if (this.serializeAddon && this.headlessTerminal) {
+          if (this.renderSequencer) {
             const responseSocket = this.socket;
-            capturePtySnapshot(
-              this.headlessTerminal,
-              this.serializeAddon,
-              this.outputSeq,
-              (snapshot) => {
-                if (this.socket !== responseSocket || !responseSocket.writable) return;
-                responseSocket.write(
-                  serializeIpc({
-                    type: "pty_snapshot",
-                    sessionId: msg.sessionId,
-                    ...snapshot,
-                    requestId: msg.requestId,
-                  }),
-                );
-                log.info(
-                  {
-                    sessionId: this.sessionId,
-                    cols: snapshot.cols,
-                    rows: snapshot.rows,
-                    bytes: snapshot.data.length,
-                    outputSeq: snapshot.outputSeq,
-                  },
-                  "Snapshot sent via IPC",
-                );
-              },
-            );
+            this.renderSequencer.captureSnapshot((snapshot) => {
+              if (this.socket !== responseSocket || !responseSocket.writable) return;
+              responseSocket.write(
+                serializeIpc({
+                  type: "pty_snapshot",
+                  sessionId: msg.sessionId,
+                  ...snapshot,
+                  requestId: msg.requestId,
+                }),
+              );
+              log.info(
+                {
+                  sessionId: this.sessionId,
+                  cols: snapshot.cols,
+                  rows: snapshot.rows,
+                  bytes: snapshot.data.length,
+                  outputSeq: snapshot.outputSeq,
+                },
+                "Snapshot sent via IPC",
+              );
+            });
           }
         }
       },

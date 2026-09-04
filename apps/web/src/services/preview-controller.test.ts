@@ -1589,7 +1589,7 @@ describe("PreviewController scoped capability, target, and inspection wrappers",
     };
     const deviceCapability: DevicePreviewCapability = {
       ios: { supported: true, available: true, interactive: true, command: "baguette" },
-      android: { supported: true, available: true, interactive: true, command: "scrcpy" },
+      android: { supported: true, available: true, interactive: true, command: "adb" },
     };
     fake.api.requestWebPreviewCapability.mockResolvedValue({
       success: true,
@@ -1764,7 +1764,7 @@ describe("PreviewController scoped capability, target, and inspection wrappers",
       success: true,
       capability: {
         ios: { supported: true, available: true, interactive: true, command: "baguette" },
-        android: { supported: true, available: true, interactive: true, command: "scrcpy" },
+        android: { supported: true, available: true, interactive: true, command: "adb" },
       },
     });
 

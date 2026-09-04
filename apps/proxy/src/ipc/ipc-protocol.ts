@@ -191,6 +191,8 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     cols: z.number(),
     rows: z.number(),
+    // Shares the monotonic render-event sequence used by binary PTY frames and snapshots.
+    outputSeq: z.number().int().nonnegative(),
   }),
 
   // serve → terminal worker：Web owns pure terminal geometry, so resize requests flow down.

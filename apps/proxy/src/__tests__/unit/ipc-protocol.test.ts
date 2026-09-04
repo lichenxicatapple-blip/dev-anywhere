@@ -118,6 +118,28 @@ describe("IPC Protocol", () => {
       ).toBe(false);
     });
 
+    it("requires the shared render-event sequence on PTY resize messages", async () => {
+      const { IpcMessageSchema } = await importIpc();
+
+      expect(
+        IpcMessageSchema.parse({
+          type: "pty_resize",
+          sessionId: "sess-1",
+          cols: 100,
+          rows: 30,
+          outputSeq: 8,
+        }),
+      ).toMatchObject({ type: "pty_resize", outputSeq: 8 });
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "pty_resize",
+          sessionId: "sess-1",
+          cols: 100,
+          rows: 30,
+        }).success,
+      ).toBe(false);
+    });
+
     it("accepts PTY detach messages", async () => {
       const { IpcMessageSchema } = await importIpc();
 

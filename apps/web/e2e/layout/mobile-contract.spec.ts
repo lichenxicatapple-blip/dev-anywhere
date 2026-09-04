@@ -193,9 +193,6 @@ test.describe("mobile UX contract", () => {
             })
             .find((rect) => rect.height > 0 && rect.width > 0) ?? null,
         createButton: rectOf('[data-slot="create-session-mobile-trigger"]'),
-        subtitleDisplay: getComputedStyle(
-          document.querySelector<HTMLElement>(".dev-mobile-brand-subtitle")!,
-        ).display,
       };
     });
 
@@ -204,7 +201,6 @@ test.describe("mobile UX contract", () => {
     expect(metrics.createButton).not.toBeNull();
     expect(metrics.hero?.height ?? 0).toBeLessThanOrEqual(84);
     expect(metrics.firstRow?.height ?? 0).toBeGreaterThan(0);
-    expect(metrics.subtitleDisplay).toBe("none");
     expect(metrics.firstRow?.bottom ?? Number.POSITIVE_INFINITY).toBeLessThanOrEqual(
       (metrics.createButton?.top ?? 0) - 8,
     );

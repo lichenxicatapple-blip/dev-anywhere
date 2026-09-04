@@ -12,6 +12,7 @@ import {
   expectPtyScrollable,
   ptyTerminal,
   scrollPtyToTop,
+  waitForStableVisiblePtyRow,
 } from "../../pty-scroll-helpers";
 
 async function holdNextConnectionAndDropSocket(
@@ -385,10 +386,12 @@ test.describe("WebSocket reconnect chaos", () => {
     });
     await expect(page.locator('[data-slot="pty-scrollbar"]')).toHaveClass(/opacity-100/);
 
-    const terminal = page.locator('[data-slot="pty-terminal"]');
     await scrollPtyToTop(page);
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();
-    const scrollTopBeforeReconnect = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+    const visibleAnchorBeforeReconnect = await waitForStableVisiblePtyRow(
+      page,
+      "history line 000",
+    );
 
     await holdNextConnectionAndDropSocket(page);
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute(
@@ -407,10 +410,11 @@ test.describe("WebSocket reconnect chaos", () => {
       .poll(() => page.evaluate(() => window.__ccTest?.pty.serialize("claude-pty") ?? ""))
       .toContain("new output after reconnect");
     await expect(page.locator('[data-slot="back-to-bottom-new-indicator"]')).toBeVisible();
-    const scrollTopAfterReconnectOutput = await terminal.evaluate(
-      (el) => (el as HTMLElement).scrollTop,
+    const visibleAnchorAfterReconnectOutput = await waitForStableVisiblePtyRow(
+      page,
+      "history line 000",
     );
-    expect(scrollTopAfterReconnectOutput).toBeLessThanOrEqual(scrollTopBeforeReconnect + 8);
+    expect(visibleAnchorAfterReconnectOutput.top).toBeCloseTo(visibleAnchorBeforeReconnect.top, 0);
     await expectPtyRendered(page);
   });
 

@@ -88,7 +88,7 @@ export function CreateFrontendPreviewDialog({
         <Dialog key="chooser" open={panelOpen} onOpenChange={(next) => !next && close()}>
           <DialogContent className="sm:max-w-lg" data-slot="create-frontend-preview-dialog">
             <DialogHeader>
-              <DialogTitle>新建前端预览</DialogTitle>
+              <DialogTitle>新建预览</DialogTitle>
               <DialogDescription>选择预览类型。</DialogDescription>
             </DialogHeader>
             {choices}
@@ -103,7 +103,7 @@ export function CreateFrontendPreviewDialog({
             focusSurfaceOnOpen
           >
             <SheetHeader className="px-0 pb-1 pt-0 text-left">
-              <SheetTitle>新建前端预览</SheetTitle>
+              <SheetTitle>新建预览</SheetTitle>
               <SheetDescription>选择预览类型。</SheetDescription>
             </SheetHeader>
             {choices}

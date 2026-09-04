@@ -11,6 +11,7 @@ import { Navigate } from "react-router";
 
 export function SessionListPage() {
   const proxies = useAppStore((s) => s.proxies);
+  const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const sessionCount = useSessionStore((s) => s.sessions.length);
@@ -24,6 +25,7 @@ export function SessionListPage() {
     route: "sessions",
     surface: "desktop",
     proxiesLength: proxies.length,
+    proxyListLoaded,
     hasProxy,
     sessionCount,
     relayClientAuthIssue,

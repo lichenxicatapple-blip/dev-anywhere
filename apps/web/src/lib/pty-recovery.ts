@@ -1,12 +1,11 @@
 type WriteCallback = () => void;
 
-// snapshot 等待期间 frameBuffer 上限。proxy↔relay 长时间断连或 snapshot 一直不到时, 这里
-// 会无限制堆积。超过时丢最老的, 让用户最终拿到 partial recovery 而不是浏览器 OOM。
-const MAX_FRAME_BUFFER = 5000;
-// snapshot 已应用后, pendingFrames 缓存乱序帧。outputSeq 跳过的多 (proxy↔relay 闪断丢帧)
-// 时, 后续帧持续往里塞, 永远 flush 不出去 (gap 没人补)。超过时丢最老的, 让 transport 层
-// 通过 hasGap 信号触发新一轮 snapshot 重新对齐。
-const MAX_PENDING_FRAMES = 1000;
+// A snapshot request can stay in flight while the producer keeps rendering. Bound the pre-snapshot
+// event tail so a broken connection cannot grow browser memory without limit.
+const MAX_EVENT_BUFFER = 5000;
+// After a snapshot, out-of-order render events wait here for their missing predecessor. A persistent
+// gap is surfaced to the transport, which requests a new authoritative snapshot.
+const MAX_PENDING_EVENTS = 1000;
 
 export interface PtyRenderTarget {
   reset: () => void;
@@ -36,9 +35,18 @@ interface StartSnapshotRequestOptions {
   preserveTargetIfUnchanged?: boolean;
 }
 
+type PtyRenderEvent =
+  | { kind: "write"; data: Uint8Array; outputSeq: number }
+  | { kind: "resize"; cols: number; rows: number; outputSeq: number };
+
 type SnapshotResult =
-  | { applied: true; replayedFrames: number }
+  | { applied: true; replayedEvents: number }
   | { applied: false; reason: "stale_snapshot" | "no_active_request" };
+
+interface EventResult {
+  written: boolean;
+  hasGap: boolean;
+}
 
 interface PtyRecoveryController {
   startSnapshotRequest: (options?: StartSnapshotRequestOptions) => string;
@@ -47,7 +55,11 @@ interface PtyRecoveryController {
   handleBinaryFrame: (
     frame: { data: Uint8Array; outputSeq: number },
     target: PtyRenderTarget,
-  ) => { written: boolean; hasGap: boolean };
+  ) => EventResult;
+  handleResize: (
+    resize: { cols: number; rows: number; outputSeq: number },
+    target: PtyRenderTarget,
+  ) => EventResult;
   applySnapshot: (
     snapshot: PtySnapshotMessage,
     target: PtyRenderTarget,
@@ -72,15 +84,17 @@ export function createPtyRecoveryController(
 ): PtyRecoveryController {
   let seq = 0;
   const controllerScope = `${SNAPSHOT_REQUEST_PAGE_SCOPE}-${++snapshotControllerSeq}`;
-  // Relay 用 requestId 将快照精确路由回发起订阅的浏览器。它必须跨页面和 controller
-  // 唯一，既避免请求碰撞，也让接收方拒绝迟到的旧恢复响应。
+  // Relay uses requestId to route a snapshot to the browser which requested it. It must be unique
+  // across controllers and page reloads so a delayed response cannot enter a newer recovery window.
   const requestIdFactory =
     options.requestIdFactory ?? (() => `pty-snapshot-${controllerScope}-${++seq}`);
 
   let activeRequestId: string | null = null;
   let snapshotApplied = false;
-  let frameBuffer: Array<{ data: Uint8Array; outputSeq: number }> = [];
-  const pendingFrames = new Map<number, Uint8Array>();
+  let eventBuffer: PtyRenderEvent[] = [];
+  let droppedBufferedMaxSeq: number | null = null;
+  const pendingEvents = new Map<number, PtyRenderEvent>();
+  let pendingEventsOverflowed = false;
   let appliedOutputSeq = 0;
   let appliedCols: number | null = null;
   let appliedRows: number | null = null;
@@ -89,9 +103,8 @@ export function createPtyRecoveryController(
     cols: number;
     rows: number;
   } | null = null;
-  // 每次 startSnapshotRequest / applySnapshot 都 ++; applySnapshot 把当前值塞进异步 write
-  // callback 闭包, callback 触发时若 generation 已被新 startSnapshotRequest 推进, 说明
-  // 期间发生了新一轮 recovery, 旧 replay frames 不能再写到 target——会污染新窗口。
+  // Every new request/application advances this generation. Deferred parser callbacks from an
+  // older snapshot must not replay their event tail into the new recovery window.
   let snapshotGeneration = 0;
   let targetMayHaveQueuedWrites = false;
 
@@ -103,18 +116,68 @@ export function createPtyRecoveryController(
     callback();
   };
 
-  const flushContiguousFrames = (target: PtyRenderTarget): number => {
+  const applyRenderEvent = (event: PtyRenderEvent, target: PtyRenderTarget): void => {
+    if (event.kind === "write") {
+      target.write(event.data);
+      return;
+    }
+    target.resize(event.cols, event.rows);
+    appliedCols = event.cols;
+    appliedRows = event.rows;
+  };
+
+  const flushContiguousEvents = (target: PtyRenderTarget): number => {
     let written = 0;
     let nextSeq = appliedOutputSeq + 1;
-    while (pendingFrames.has(nextSeq)) {
-      const data = pendingFrames.get(nextSeq)!;
-      pendingFrames.delete(nextSeq);
+    while (pendingEvents.has(nextSeq)) {
+      const event = pendingEvents.get(nextSeq)!;
+      pendingEvents.delete(nextSeq);
       appliedOutputSeq = nextSeq;
-      target.write(data);
+      applyRenderEvent(event, target);
       written += 1;
       nextSeq += 1;
     }
     return written;
+  };
+
+  const hasUnresolvedGap = (): boolean => pendingEvents.size > 0 || pendingEventsOverflowed;
+
+  const trimPendingEvents = (): void => {
+    if (pendingEvents.size <= MAX_PENDING_EVENTS) return;
+    pendingEventsOverflowed = true;
+    // Keep the events nearest to the missing sequence. Dropping by arrival order can discard the
+    // very event which would unlock the whole tail; dropping the farthest future events instead
+    // lets recovery advance as much as possible before it requests an authoritative snapshot.
+    const farthestSequences = [...pendingEvents.keys()].sort((a, b) => b - a);
+    const overflow = pendingEvents.size - MAX_PENDING_EVENTS;
+    for (let index = 0; index < overflow; index += 1) {
+      const sequence = farthestSequences[index];
+      if (sequence !== undefined) pendingEvents.delete(sequence);
+    }
+  };
+
+  const handleRenderEvent = (event: PtyRenderEvent, target: PtyRenderTarget): EventResult => {
+    if (!snapshotApplied) {
+      eventBuffer.push(event);
+      if (eventBuffer.length > MAX_EVENT_BUFFER) {
+        const dropped = eventBuffer.splice(0, eventBuffer.length - MAX_EVENT_BUFFER);
+        for (const droppedEvent of dropped) {
+          droppedBufferedMaxSeq = Math.max(
+            droppedBufferedMaxSeq ?? droppedEvent.outputSeq,
+            droppedEvent.outputSeq,
+          );
+        }
+      }
+      return { written: false, hasGap: false };
+    }
+    if (event.outputSeq <= appliedOutputSeq) {
+      // A stale/duplicate event does not close an existing gap.
+      return { written: false, hasGap: hasUnresolvedGap() };
+    }
+    pendingEvents.set(event.outputSeq, event);
+    const written = flushContiguousEvents(target) > 0;
+    trimPendingEvents();
+    return { written, hasGap: hasUnresolvedGap() };
   };
 
   return {
@@ -136,8 +199,10 @@ export function createPtyRecoveryController(
       const requestId = requestIdFactory();
       activeRequestId = requestId;
       snapshotApplied = false;
-      frameBuffer = [];
-      pendingFrames.clear();
+      eventBuffer = [];
+      droppedBufferedMaxSeq = null;
+      pendingEvents.clear();
+      pendingEventsOverflowed = false;
       snapshotGeneration += 1;
       return requestId;
     },
@@ -147,35 +212,15 @@ export function createPtyRecoveryController(
     },
 
     hasPendingGap() {
-      return snapshotApplied && pendingFrames.size > 0;
+      return snapshotApplied && hasUnresolvedGap();
     },
 
     handleBinaryFrame(frame, target) {
-      if (!snapshotApplied) {
-        frameBuffer.push(frame);
-        if (frameBuffer.length > MAX_FRAME_BUFFER) {
-          frameBuffer.splice(0, frameBuffer.length - MAX_FRAME_BUFFER);
-        }
-        return { written: false, hasGap: false };
-      }
-      if (frame.outputSeq <= appliedOutputSeq) {
-        // A stale/duplicate frame does not change an already pending gap. Returning the real state
-        // prevents transport from cancelling the recovery timer while appliedOutputSeq+1 is still
-        // missing.
-        return { written: false, hasGap: pendingFrames.size > 0 };
-      }
-      pendingFrames.set(frame.outputSeq, frame.data);
-      if (pendingFrames.size > MAX_PENDING_FRAMES) {
-        // Map.keys() 按插入顺序, 删最早进的那条
-        const oldest = pendingFrames.keys().next().value;
-        if (oldest !== undefined) pendingFrames.delete(oldest);
-      }
-      const written = flushContiguousFrames(target) > 0;
-      // hasGap = flush 之后仍有 pendingFrames 没消费，说明 appliedOutputSeq+1 还没到。
-      // proxy↔relay 闪断会让 sendBinary 丢帧但 outputSeq 仍递增，恢复后下一帧 seq 就跳过了
-      // 中间若干个值，当前 frame 来填不到 nextSeq，整流就会卡死直到下次 ws 自然重连。
-      // 把 gap 信号外抛，由 transport 层做超时恢复（短期 gap 来自乱序，不该误触发）。
-      return { written, hasGap: pendingFrames.size > 0 };
+      return handleRenderEvent({ kind: "write", ...frame }, target);
+    },
+
+    handleResize(resize, target) {
+      return handleRenderEvent({ kind: "resize", ...resize }, target);
     },
 
     applySnapshot(snapshot, target, onReplaySettled) {
@@ -186,12 +231,12 @@ export function createPtyRecoveryController(
         return { applied: false, reason: "stale_snapshot" };
       }
 
-      pendingFrames.clear();
+      pendingEvents.clear();
       activeRequestId = null;
       snapshotGeneration += 1;
       const myGeneration = snapshotGeneration;
-      const replayFramesAtApply = frameBuffer
-        .filter((frame) => frame.outputSeq > snapshot.outputSeq)
+      const replayEventsAtApply = eventBuffer
+        .filter((event) => event.outputSeq > snapshot.outputSeq)
         .sort((a, b) => a.outputSeq - b.outputSeq);
       const targetDimensions = target.getDimensions?.() ?? null;
 
@@ -202,42 +247,46 @@ export function createPtyRecoveryController(
         preservedTarget.rows === snapshot.rows &&
         targetDimensions?.cols === snapshot.cols &&
         targetDimensions.rows === snapshot.rows &&
-        replayFramesAtApply.length === 0;
+        (droppedBufferedMaxSeq === null || droppedBufferedMaxSeq <= snapshot.outputSeq) &&
+        replayEventsAtApply.length === 0;
       preservedTarget = null;
       if (canReuseTarget) {
-        frameBuffer = [];
+        eventBuffer = [];
+        droppedBufferedMaxSeq = null;
         snapshotApplied = true;
         appliedOutputSeq = snapshot.outputSeq;
         appliedCols = snapshot.cols;
         appliedRows = snapshot.rows;
         onReplaySettled?.(false);
-        return { applied: true, replayedFrames: 0 };
+        return { applied: true, replayedEvents: 0 };
       }
 
       // Keep snapshotApplied=false while the old parser queue drains and the snapshot is parsed.
-      // Binary frames arriving in either window stay in frameBuffer and are replayed afterwards.
+      // Events arriving in either window stay buffered and replay afterwards.
       const applyAuthoritativeSnapshot = (): void => {
         if (myGeneration !== snapshotGeneration) return;
         targetMayHaveQueuedWrites = true;
         target.reset();
         target.resize(snapshot.cols, snapshot.rows);
         target.write(snapshot.data, () => {
-          // callback 触发前若发生新 startSnapshotRequest / applySnapshot, generation 已推进,
-          // 旧 replay frames 属于上一窗口, 不能再写到 target。
           if (myGeneration !== snapshotGeneration) return;
-          const replayFrames = frameBuffer
-            .filter((frame) => frame.outputSeq > snapshot.outputSeq)
+          const replayEvents = eventBuffer
+            .filter((event) => event.outputSeq > snapshot.outputSeq)
             .sort((a, b) => a.outputSeq - b.outputSeq);
-          frameBuffer = [];
+          eventBuffer = [];
           snapshotApplied = true;
           appliedOutputSeq = snapshot.outputSeq;
           appliedCols = snapshot.cols;
           appliedRows = snapshot.rows;
-          for (const frame of replayFrames) {
-            pendingFrames.set(frame.outputSeq, frame.data);
+          pendingEventsOverflowed =
+            droppedBufferedMaxSeq !== null && droppedBufferedMaxSeq > snapshot.outputSeq;
+          droppedBufferedMaxSeq = null;
+          for (const event of replayEvents) {
+            pendingEvents.set(event.outputSeq, event);
           }
-          flushContiguousFrames(target);
-          onReplaySettled?.(pendingFrames.size > 0);
+          flushContiguousEvents(target);
+          trimPendingEvents();
+          onReplaySettled?.(hasUnresolvedGap());
         });
       };
       if (targetMayHaveQueuedWrites) {
@@ -246,7 +295,7 @@ export function createPtyRecoveryController(
         applyAuthoritativeSnapshot();
       }
 
-      return { applied: true, replayedFrames: replayFramesAtApply.length };
+      return { applied: true, replayedEvents: replayEventsAtApply.length };
     },
   };
 }

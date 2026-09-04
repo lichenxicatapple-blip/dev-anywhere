@@ -174,47 +174,52 @@ describe("attachPtySessionTransport", () => {
     expect(events).toContain("output:xterm-write");
   });
 
-  it("restarts snapshot window on terminal resize and ignores stale snapshots", () => {
+  it("renders an ordered terminal resize without restarting snapshot synchronization", () => {
     const harness = createHarness();
     const target = createTarget();
+    const onSubscribeStarted = vi.fn();
     attachPtySessionTransport({
       sessionId: "s1",
       ws: harness.ws,
       relay: harness.relay,
       target,
       scheduleReady: (cb) => cb(),
+      onSubscribeStarted,
     });
-    const staleRequestId = lastRequestId(harness.sent);
-
-    harness.emitRelay({ type: "terminal_resize", sessionId: "s1", cols: 100, rows: 30 });
-    const freshRequestId = lastRequestId(harness.sent);
-    expect(freshRequestId).not.toBe(staleRequestId);
-
+    const requestId = lastRequestId(harness.sent);
     harness.emitRelay({
       type: "session_snapshot",
       sessionId: "s1",
-      requestId: staleRequestId,
+      requestId,
       cols: 80,
       rows: 24,
-      data: "old",
-      outputSeq: 1,
+      data: "snapshot",
+      outputSeq: 10,
     });
+    target.calls.length = 0;
+
+    // Resize control can arrive before the binary frame that precedes it. Recovery uses the shared
+    // sequence to restore bytes(11) -> resize(12) -> bytes(13).
     harness.emitRelay({
-      type: "session_snapshot",
+      type: "terminal_resize",
       sessionId: "s1",
-      requestId: freshRequestId,
       cols: 100,
       rows: 30,
-      data: "new",
-      outputSeq: 2,
+      outputSeq: 12,
     });
+    const afterResize = new Uint8Array([13]);
+    const beforeResize = new Uint8Array([11]);
+    harness.emitBinary(afterResize, 13);
+    harness.emitBinary(beforeResize, 11);
+    vi.advanceTimersByTime(32);
 
     expect(target.calls).toEqual([
+      ["write", beforeResize],
       ["resize", { cols: 100, rows: 30 }],
-      ["reset", null],
-      ["resize", { cols: 100, rows: 30 }],
-      ["write", "new"],
+      ["write", afterResize],
     ]);
+    expect(harness.sent).toHaveLength(1);
+    expect(onSubscribeStarted).toHaveBeenCalledTimes(1);
   });
 
   it("reports slow snapshot sync before retrying at a lower frequency", () => {
@@ -253,7 +258,7 @@ describe("attachPtySessionTransport", () => {
     expect(onSubscribeDelayed).toHaveBeenCalledTimes(1);
   });
 
-  it("invalidates an already scheduled ready boundary on a new subscribe, pause, and dispose", () => {
+  it("keeps an ordered resize out of connection state and invalidates ready on pause and dispose", () => {
     const createPendingReadyTransport = () => {
       const harness = createHarness();
       const target = createTarget();
@@ -280,16 +285,17 @@ describe("attachPtySessionTransport", () => {
       return { harness, transport, paintBoundaries, onReady };
     };
 
-    const resubscribed = createPendingReadyTransport();
-    resubscribed.harness.emitRelay({
+    const resized = createPendingReadyTransport();
+    resized.harness.emitRelay({
       type: "terminal_resize",
       sessionId: "s1",
       cols: 100,
       rows: 30,
+      outputSeq: 11,
     });
-    resubscribed.paintBoundaries.shift()?.();
-    expect(resubscribed.onReady).not.toHaveBeenCalled();
-    resubscribed.transport.dispose();
+    resized.paintBoundaries.shift()?.();
+    expect(resized.onReady).toHaveBeenCalledTimes(1);
+    resized.transport.dispose();
 
     const paused = createPendingReadyTransport();
     paused.transport.pause();
@@ -339,13 +345,13 @@ describe("attachPtySessionTransport", () => {
     // The replay batch is now in xterm. Frames from the still-running PTY arrive afterwards.
     harness.emitBinary(new Uint8Array([12]), 12);
     harness.emitBinary(new Uint8Array([13]), 13);
-    expect(frameFlushes).toHaveLength(1);
+    expect(frameFlushes).toHaveLength(0);
     target.pendingWriteCallbacks.shift()?.();
 
     expect(paintBoundaries).toHaveLength(1);
     paintBoundaries.shift()?.();
     expect(onReady).toHaveBeenCalledTimes(1);
-    // seq 12/13 still form a later pending batch, proving they did not starve the replay fence.
+    // seq 12/13 now form a later batch, proving they neither crossed nor extended the replay fence.
     expect(frameFlushes).toHaveLength(1);
     transport.dispose();
   });
@@ -485,7 +491,7 @@ describe("attachPtySessionTransport", () => {
   // proxy → relay 闪断时 sendBinary 直接丢帧，但 outputSeq 在 hosted-pty-registry
   // 内仍递增。relay 重连后下一帧带跳过的 seq 到达 web。recovery.flushContiguousFrames
   // 严格按 appliedOutputSeq+1 推进，永远等不到丢失帧 → 屏幕卡住。transport 必须探测
-  // 这个 gap 并主动重订 snapshot 让流恢复，否则用户必须手动 resize / reload 才能继续。
+  // 这个 gap 并主动重订 snapshot 让流恢复，否则用户必须 reload 才能继续。
   it("re-subscribes snapshot when binary frames have a persistent outputSeq gap", () => {
     const harness = createHarness();
     const target = createTarget();

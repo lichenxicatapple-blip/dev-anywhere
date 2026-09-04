@@ -11,6 +11,7 @@ import { getTopLevelSubtitle } from "@/lib/top-level-subtitle";
 
 export function ProxySelectPage() {
   const proxies = useAppStore((s) => s.proxies);
+  const proxyListLoaded = useAppStore((s) => s.proxyListLoaded);
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const relayClientAuthIssue = useAppStore((s) => s.relayClientAuthIssue);
   const sessionCount = useSessionStore((s) => s.sessions.length);
@@ -19,6 +20,7 @@ export function ProxySelectPage() {
     route: "proxy-select",
     surface: "desktop",
     proxiesLength: proxies.length,
+    proxyListLoaded,
     hasProxy,
     sessionCount,
     relayClientAuthIssue,

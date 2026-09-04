@@ -1,4 +1,4 @@
-// PTY 滚动 e2e: back-to-bottom, 新消息提示, approval-wait 视图保持, resize 重新订阅,
+// PTY 滚动 e2e: back-to-bottom, 新消息提示, approval-wait 视图保持, resize 原位生效,
 // 触摸滚动期间不抢回底部.
 import { expect, test, type Page } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "../pty-fixture";
@@ -22,6 +22,7 @@ import {
   sendPtyLines,
   sendPtyOutput,
   setPtyState,
+  waitForStableVisiblePtyRow,
 } from "../pty-scroll-helpers";
 
 const SESSION_ID = "pty-scroll";
@@ -46,7 +47,7 @@ async function waitForAnimationFrames(page: Page, count = 2): Promise<void> {
 }
 
 test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, touch", () => {
-  test("scrolls history, surfaces back-to-bottom, and re-subscribes after resize", async ({
+  test("scrolls history, surfaces back-to-bottom, and applies resize without re-subscribing", async ({
     page,
   }) => {
     await setupPtyChat(page, { sessionId: SESSION_ID, withVisualViewportMock: true });
@@ -63,11 +64,11 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     await expect(backToBottom(page)).toBeVisible();
     await expectBackToBottomClearance(page, { touchEditingSurface });
 
-    const scrollTopBeforeNewFrame = (await readPtyScrollMetrics(page)).scrollTop;
+    const visibleAnchorBeforeNewFrame = await waitForStableVisiblePtyRow(page, "line 00");
     await sendPtyOutput(page, "new output while reviewing history\r\n");
     await expect(backToBottomNewIndicator(page)).toBeVisible();
-    const scrollTopAfterNewFrame = (await readPtyScrollMetrics(page)).scrollTop;
-    expect(scrollTopAfterNewFrame).toBeLessThanOrEqual(scrollTopBeforeNewFrame + 8);
+    const visibleAnchorAfterNewFrame = await waitForStableVisiblePtyRow(page, "line 00");
+    expect(visibleAnchorAfterNewFrame.top).toBeCloseTo(visibleAnchorBeforeNewFrame.top, 0);
 
     await backToBottom(page).click();
     await expect(backToBottom(page)).toHaveJSProperty("inert", true);
@@ -96,7 +97,18 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
 
     await resizePty(page, 100, 30);
     await expectPtyTerminalMounted(page);
-    await expectPtySessionSubscribeCount(page, 2);
+    await expect
+      .poll(() =>
+        page.evaluate(
+          (sessionId) => {
+            const terminal = window.__ccTestPtyTerminals?.get(sessionId);
+            return terminal ? { cols: terminal.cols, rows: terminal.rows } : null;
+          },
+          SESSION_ID,
+        ),
+      )
+      .toEqual({ cols: 100, rows: 30 });
+    await expectPtySessionSubscribeCount(page, 1);
   });
 
   test("discards stale browser positions and resumes the current live tail", async ({ page }) => {

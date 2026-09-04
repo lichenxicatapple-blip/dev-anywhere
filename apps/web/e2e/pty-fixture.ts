@@ -275,7 +275,14 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
         emitResize(cols: number, rows: number): void {
           this.cols = cols;
           this.rows = rows;
-          this.emitJson({ type: "terminal_resize", sessionId, cols, rows });
+          this.outputSeq += 1;
+          this.emitJson({
+            type: "terminal_resize",
+            sessionId,
+            cols,
+            rows,
+            outputSeq: this.outputSeq,
+          });
         }
 
         emitPty(data: string): void {
@@ -310,6 +317,11 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
         setPtyState(state: "working" | "turn_complete" | "approval_wait") {
           this.socket?.emitJson({ type: "pty_state", sessionId, payload: { state } });
           this.socket?.emitJson({
+            seq: Date.now(),
+            sessionId,
+            timestamp: Date.now(),
+            source: "proxy",
+            version: "1",
             type: "session_status",
             payload: {
               sessionId,

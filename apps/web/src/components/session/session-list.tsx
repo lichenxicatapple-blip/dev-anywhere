@@ -528,7 +528,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
         >
           <MonitorSmartphone className="mt-0.5 size-4 text-muted-foreground" aria-hidden="true" />
           <span className="min-w-0 flex-1">
-            <span className="flex items-center gap-1.5 font-medium">前端预览</span>
+            <span className="flex items-center gap-1.5 font-medium">预览</span>
             <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
               在浏览器中预览网页或设备模拟器
             </span>
@@ -635,7 +635,7 @@ function CreateSessionTypeSheet({
               aria-hidden="true"
             />
             <span className="min-w-0">
-              <span className="flex items-center gap-1.5 font-medium">前端预览</span>
+              <span className="flex items-center gap-1.5 font-medium">预览</span>
               <span className="mt-0.5 block text-xs leading-4 text-muted-foreground">
                 在浏览器中预览网页或设备模拟器
               </span>

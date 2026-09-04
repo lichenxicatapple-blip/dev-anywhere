@@ -1349,6 +1349,27 @@ describe("RelayControlSchema", () => {
     expect(ProxyToClientRelayControlTypes.has("terminal_resize_request")).toBe(false);
   });
 
+  it("requires an ordered render sequence on terminal resize events", () => {
+    const result = RelayControlSchema.parse({
+      type: "terminal_resize",
+      sessionId: "s1",
+      cols: 100,
+      rows: 30,
+      outputSeq: 42,
+    });
+
+    expect(result).toMatchObject({ type: "terminal_resize", outputSeq: 42 });
+    expect(ProxyToClientRelayControlTypes.has("terminal_resize")).toBe(true);
+    expect(
+      RelayControlSchema.safeParse({
+        type: "terminal_resize",
+        sessionId: "s1",
+        cols: 100,
+        rows: 30,
+      }).success,
+    ).toBe(false);
+  });
+
   it("parses latency probe controls and keeps relay-local probes out of forwarding sets", () => {
     expect(
       RelayControlSchema.parse({ type: "latency_web_relay_ping", requestId: "latency-1" }),

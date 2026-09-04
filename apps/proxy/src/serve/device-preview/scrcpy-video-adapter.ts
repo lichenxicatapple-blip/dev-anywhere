@@ -8,9 +8,16 @@ import {
 import { randomBytes as nodeRandomBytes } from "node:crypto";
 import { realpath, stat } from "node:fs/promises";
 import { createConnection, type Socket } from "node:net";
-import { delimiter, dirname, isAbsolute, join, resolve, sep } from "node:path";
+import { join } from "node:path";
+import { PROXY_PACKAGE_ROOT } from "../../version.js";
 
-const SUPPORTED_SCRCPY_VERSION = "4.1";
+const SCRCPY_SERVER_VERSION = "4.1";
+const BUNDLED_SCRCPY_SERVER_PATH = join(
+  PROXY_PACKAGE_ROOT,
+  "assets",
+  "scrcpy",
+  `scrcpy-server-v${SCRCPY_SERVER_VERSION}`,
+);
 const COMMAND_TIMEOUT_MS = 5_000;
 const PUSH_TIMEOUT_MS = 15_000;
 const COMMAND_OUTPUT_LIMIT_BYTES = 1024 * 1024;
@@ -49,14 +56,12 @@ export interface ScrcpyVideoPacket {
 }
 
 interface ScrcpyVideoInstallation {
-  command: string;
-  version: typeof SUPPORTED_SCRCPY_VERSION;
+  version: typeof SCRCPY_SERVER_VERSION;
   serverPath: string;
 }
 
 export interface ScrcpyVideoCapability {
   available: boolean;
-  command?: string;
   version?: string;
   serverPath?: string;
   error?: string;
@@ -89,7 +94,7 @@ type ScrcpySocketFactory = (options: { host: string; port: number }) => Socket;
 
 interface ScrcpyVideoAdapterOptions {
   adbCommand: string;
-  scrcpyCommand?: string;
+  serverPath?: string;
   env?: NodeJS.ProcessEnv;
   execFile?: ScrcpyExecFile;
   spawn?: ScrcpySpawn;
@@ -99,8 +104,6 @@ interface ScrcpyVideoAdapterOptions {
 }
 
 type ScrcpyVideoAdapterErrorCode =
-  | "scrcpy-unavailable"
-  | "scrcpy-version-unsupported"
   | "scrcpy-server-unavailable"
   | "invalid-input"
   | "stream-start-failed"
@@ -117,11 +120,6 @@ class ScrcpyVideoAdapterError extends Error {
     super(message, options);
     this.name = "ScrcpyVideoAdapterError";
   }
-}
-
-interface LocatedScrcpy {
-  command: string;
-  version: typeof SUPPORTED_SCRCPY_VERSION;
 }
 
 interface OpenedVideoSocket {
@@ -257,28 +255,6 @@ function touchMessage(
   message.writeUInt32BE(0, 24);
   message.writeUInt32BE(0, 28);
   return message;
-}
-
-function scrcpyCandidates(command: string | undefined, env: NodeJS.ProcessEnv): string[] {
-  const executable = process.platform === "win32" ? "scrcpy.exe" : "scrcpy";
-  const explicit = command?.trim();
-  if (explicit && (isAbsolute(explicit) || explicit.includes(sep))) {
-    return validCommand(explicit) ? [explicit] : [];
-  }
-
-  const name = explicit || executable;
-  if (!validCommand(name)) return [];
-  const candidates = (env.PATH ?? "")
-    .split(delimiter)
-    .filter(Boolean)
-    .map((entry) => join(entry, name));
-  candidates.push(name);
-  return [...new Set(candidates.filter(validCommand))];
-}
-
-function parseScrcpyVersion(stdout: Buffer | string, stderr: Buffer | string): string | null {
-  const combined = `${outputText(stdout)}\n${outputText(stderr)}`;
-  return /^scrcpy\s+v?(\d+\.\d+(?:\.\d+)?)(?:\s|$)/imu.exec(combined)?.[1] ?? null;
 }
 
 function abortError(): Error {
@@ -440,7 +416,7 @@ class ScrcpyFrameParser {
 
 export class ScrcpyVideoAdapter {
   private readonly adbCommand: string;
-  private readonly requestedScrcpyCommand?: string;
+  private readonly requestedServerPath?: string;
   private readonly env: NodeJS.ProcessEnv;
   private readonly execFile: ScrcpyExecFile;
   private readonly spawn: ScrcpySpawn;
@@ -466,7 +442,7 @@ export class ScrcpyVideoAdapter {
     }
 
     this.adbCommand = adbCommand;
-    this.requestedScrcpyCommand = options.scrcpyCommand;
+    this.requestedServerPath = options.serverPath;
     this.env = { ...(options.env ?? process.env) };
     this.execFile = options.execFile ?? defaultExecFile;
     this.spawn = options.spawn ?? defaultSpawn;
@@ -489,9 +465,8 @@ export class ScrcpyVideoAdapter {
 
   async resolve(): Promise<ScrcpyVideoInstallation> {
     if (this.installation) return { ...this.installation };
-    const located = await this.locateScrcpy();
-    const serverPath = await this.resolveServerPath(located.command);
-    this.installation = { ...located, serverPath };
+    const serverPath = await this.resolveServerPath();
+    this.installation = { version: SCRCPY_SERVER_VERSION, serverPath };
     return { ...this.installation };
   }
 
@@ -748,74 +723,15 @@ export class ScrcpyVideoAdapter {
     }
   }
 
-  private async locateScrcpy(): Promise<LocatedScrcpy> {
-    for (const candidate of scrcpyCandidates(this.requestedScrcpyCommand, this.env)) {
-      let result: ScrcpyExecFileResult;
-      try {
-        result = await this.execFile(candidate, ["--version"], {
-          env: this.env,
-          timeout: COMMAND_TIMEOUT_MS,
-          maxBuffer: COMMAND_OUTPUT_LIMIT_BYTES,
-          windowsHide: true,
-        });
-      } catch {
-        continue;
-      }
-
-      const version = parseScrcpyVersion(result.stdout, result.stderr);
-      if (version !== SUPPORTED_SCRCPY_VERSION) {
-        throw new ScrcpyVideoAdapterError(
-          "scrcpy-version-unsupported",
-          version
-            ? `Scrcpy ${version} is unsupported; exactly ${SUPPORTED_SCRCPY_VERSION} is required`
-            : `Could not verify scrcpy ${SUPPORTED_SCRCPY_VERSION}`,
-        );
-      }
-      return { command: candidate, version: SUPPORTED_SCRCPY_VERSION };
-    }
-
-    throw new ScrcpyVideoAdapterError(
-      "scrcpy-unavailable",
-      `Scrcpy ${SUPPORTED_SCRCPY_VERSION} was not found`,
-    );
-  }
-
-  private async resolveServerPath(command: string): Promise<string> {
-    const configured = this.env.SCRCPY_SERVER_PATH?.trim();
-    if (configured) {
-      if (!validCommand(configured)) {
-        throw new ScrcpyVideoAdapterError(
-          "scrcpy-server-unavailable",
-          "SCRCPY_SERVER_PATH is invalid",
-        );
-      }
-      const server = await this.regularFile(configured);
-      if (server) return server;
-      throw new ScrcpyVideoAdapterError(
-        "scrcpy-server-unavailable",
-        `SCRCPY_SERVER_PATH does not point to a regular file: ${configured}`,
-      );
-    }
-
-    let canonicalCommand = command;
-    try {
-      canonicalCommand = await realpath(command);
-    } catch {
-      // A bare command may still have been resolved by the process PATH.
-    }
-    const commandDirectories = [...new Set([dirname(canonicalCommand), dirname(command)])];
-    const candidates = commandDirectories.flatMap((directory) => [
-      join(directory, "scrcpy-server"),
-      resolve(directory, "..", "share", "scrcpy", "scrcpy-server"),
-    ]);
-
-    for (const candidate of [...new Set(candidates)]) {
-      const server = await this.regularFile(candidate);
+  private async resolveServerPath(): Promise<string> {
+    const serverPath = this.requestedServerPath ?? BUNDLED_SCRCPY_SERVER_PATH;
+    if (validCommand(serverPath)) {
+      const server = await this.regularFile(serverPath);
       if (server) return server;
     }
     throw new ScrcpyVideoAdapterError(
       "scrcpy-server-unavailable",
-      `Could not find the scrcpy ${SUPPORTED_SCRCPY_VERSION} server next to ${command}`,
+      "The bundled Android preview component is unavailable",
     );
   }
 

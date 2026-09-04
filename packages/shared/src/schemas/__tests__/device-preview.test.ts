@@ -54,8 +54,8 @@ describe("device preview schemas", () => {
         supported: true,
         available: true,
         interactive: true,
-        command: "/opt/bin/scrcpy",
-        version: "4.1",
+        command: "/opt/android/platform-tools/adb",
+        version: "Android Debug Bridge version 1.0.41",
       },
     ] as const;
     for (const status of valid) {
@@ -78,13 +78,13 @@ describe("device preview schemas", () => {
         supported: true,
         available: true,
         interactive: false,
-        command: "scrcpy",
+        command: "adb",
       },
       {
         supported: true,
         available: true,
         interactive: true,
-        command: "scrcpy",
+        command: "adb",
         error: "mixed state",
       },
     ];
@@ -98,7 +98,7 @@ describe("device preview schemas", () => {
       DevicePreviewCapabilitySchema.safeParse({
         supported: true,
         ios: { supported: true, available: true, interactive: true, command: "baguette" },
-        android: { supported: true, available: true, interactive: true, command: "scrcpy" },
+        android: { supported: true, available: true, interactive: true, command: "adb" },
       }).success,
     ).toBe(false);
   });
@@ -634,7 +634,7 @@ describe("device preview schemas", () => {
         success: true,
         capability: {
           ios: { supported: true, available: true, interactive: true, command: "baguette" },
-          android: { supported: true, available: true, interactive: true, command: "scrcpy" },
+          android: { supported: true, available: true, interactive: true, command: "adb" },
         },
       }),
     ).toMatchObject({ success: true, capability: { ios: { supported: true } } });
@@ -679,7 +679,7 @@ describe("device preview schemas", () => {
         error: "failed",
         capability: {
           ios: { supported: true, available: true, interactive: true, command: "baguette" },
-          android: { supported: true, available: true, interactive: true, command: "scrcpy" },
+          android: { supported: true, available: true, interactive: true, command: "adb" },
         },
       },
     ]) {

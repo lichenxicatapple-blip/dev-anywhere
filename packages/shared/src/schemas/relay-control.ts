@@ -1336,7 +1336,14 @@ const relayControlDefinitions = [
   // 终端尺寸变化，proxy -> client
   control(
     "terminal_resize",
-    { sessionId: IdSchema, cols: z.number().int().positive(), rows: z.number().int().positive() },
+    {
+      sessionId: IdSchema,
+      cols: z.number().int().positive(),
+      rows: z.number().int().positive(),
+      // PTY output and resize events share one ordered render sequence. The client can therefore
+      // place a resize between the exact byte frames that preceded and followed it.
+      outputSeq: z.number().int().nonnegative(),
+    },
     "proxy_to_client",
   ),
   control(

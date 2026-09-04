@@ -93,6 +93,27 @@ describe("phase-machine reconnect timers", () => {
     localStorage.clear();
   });
 
+  it("never exposes an authoritative empty proxy list while disconnecting", () => {
+    const relay = {
+      register: vi.fn(),
+      listProxies: vi.fn(),
+    } as unknown as RelayClient;
+    const timers = reconnectTimers();
+    const observed: Array<{ proxiesLength: number; proxyListLoaded: boolean }> = [];
+    const unsubscribe = useAppStore.subscribe((state) => {
+      observed.push({
+        proxiesLength: state.proxies.length,
+        proxyListLoaded: state.proxyListLoaded,
+      });
+    });
+
+    handleWsStatusChange(false, timers, relay);
+    unsubscribe();
+
+    expect(observed).not.toContainEqual({ proxiesLength: 0, proxyListLoaded: true });
+    expect(useAppStore.getState()).toMatchObject({ proxies: [], proxyListLoaded: false });
+  });
+
   it("keeps one reconnect fallback timer across repeated disconnect notifications", () => {
     const relay = {
       register: vi.fn(),

@@ -248,24 +248,38 @@ export function attachPtySessionTransport(
     scheduleSlowNotice();
   };
 
+  const handleRenderEventResult = (result: { hasGap: boolean }): void => {
+    if (result.hasGap) {
+      if (readyAwaiting && readyGateInFlight) cancelReadyAttemptForGap();
+      armGapRecoveryTimer();
+      return;
+    }
+    clearGapRecovery();
+    tryAdvanceReady();
+  };
+
   const unsubBinary = ws.subscribeBinary(sessionId, (data, outputSeq) => {
     if (disposed || paused) return;
     markPtyOutputReceived(sessionId, data, outputSeq);
     const result = recovery.handleBinaryFrame({ data, outputSeq }, frameWriter.target);
-    if (result.hasGap) {
-      if (readyAwaiting && readyGateInFlight) cancelReadyAttemptForGap();
-      armGapRecoveryTimer();
-    } else {
-      clearGapRecovery();
-      tryAdvanceReady();
-    }
+    handleRenderEventResult(result);
   });
 
   const unsubRelay = relay.onMessage((msg) => {
     if (disposed || paused || msg.sessionId !== sessionId) return;
     if (msg.type === "terminal_resize") {
-      frameWriter.target.resize(msg.cols as number, msg.rows as number);
-      startSnapshotSubscribe();
+      if (
+        typeof msg.cols !== "number" ||
+        typeof msg.rows !== "number" ||
+        typeof msg.outputSeq !== "number"
+      ) {
+        return;
+      }
+      const result = recovery.handleResize(
+        { cols: msg.cols, rows: msg.rows, outputSeq: msg.outputSeq },
+        frameWriter.target,
+      );
+      handleRenderEventResult(result);
       return;
     }
     if (msg.type !== "session_snapshot") return;
