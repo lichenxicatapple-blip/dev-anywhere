@@ -27,3 +27,14 @@ export function compareStableVersions(left: string, right: string): number | nul
   if (a.minor !== b.minor) return Math.sign(a.minor - b.minor);
   return Math.sign(a.patch - b.patch);
 }
+
+export function selectHighestStableVersion(
+  current: string | null,
+  candidate: string,
+): string | null {
+  if (!parseStableVersion(candidate)) {
+    return current && parseStableVersion(current) ? current : null;
+  }
+  if (!current || !parseStableVersion(current)) return candidate;
+  return compareStableVersions(candidate, current) === 1 ? candidate : current;
+}

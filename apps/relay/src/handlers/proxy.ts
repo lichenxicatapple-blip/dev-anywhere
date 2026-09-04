@@ -25,6 +25,10 @@ import {
 } from "../web-preview-route-registry.js";
 import { RELAY_VERSION } from "../version.js";
 import type { DevicePreviewBridge } from "../device-preview-bridge.js";
+import {
+  parseProxyUpgradeBootstrapRequest,
+  sendProxyUpgradeBootstrapResponse,
+} from "../proxy-upgrade-bootstrap.js";
 
 // 扩展 WebSocket 实例存储代理元数据
 interface ProxySocket extends WebSocket {
@@ -199,12 +203,20 @@ export function handleProxyConnection(
   const proxyWs = ws as ProxySocket;
   proxyWs.isAlive = true;
   let registrationCompleted = false;
+  let upgradeBootstrapStarted = false;
+  let initialFrameReceived = false;
 
   proxyWs.on("pong", () => {
     proxyWs.isAlive = true;
   });
 
   proxyWs.on("message", (data: Buffer, isBinary: boolean) => {
+    // Once the version-only bootstrap starts, this socket can never enter the application
+    // protocol. In particular, queued traffic flushed by the source build is discarded.
+    if (upgradeBootstrapStarted) return;
+    const isInitialFrame = !initialFrameReceived;
+    initialFrameReceived = true;
+
     // Binary frames are pass-through; relay only reads the sessionId prefix for routing.
     if (isBinary) {
       if (!proxyWs.proxyId) {
@@ -258,6 +270,22 @@ export function handleProxyConnection(
     }
 
     const raw = data.toString();
+    const upgradeBootstrap = isInitialFrame
+      ? parseProxyUpgradeBootstrapRequest(raw, RELAY_VERSION)
+      : null;
+    if (upgradeBootstrap) {
+      upgradeBootstrapStarted = true;
+      logger.info(
+        {
+          proxyId: upgradeBootstrap.proxyId,
+          proxyVersion: upgradeBootstrap.proxyVersion,
+          relayVersion: RELAY_VERSION,
+        },
+        "Proxy upgrade bootstrap sent",
+      );
+      sendProxyUpgradeBootstrapResponse(proxyWs, RELAY_VERSION);
+      return;
+    }
     const result = parseMessage(raw);
 
     if (result.kind === "control" && result.message.type === "proxy_register") {

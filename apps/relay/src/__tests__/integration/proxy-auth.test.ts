@@ -1,7 +1,13 @@
 import { describe, it, expect, afterEach, beforeEach } from "vitest";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { WebSocket } from "ws";
+import {
+  PROXY_UPGRADE_BOOTSTRAP_VERSION,
+  ProxyUpgradeBootstrapResponseSchema,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+} from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
+import { RELAY_VERSION } from "#src/version.js";
 import { getPort } from "../helpers.js";
 
 const logger = createLogger({ name: "test", silent: true });
@@ -64,6 +70,29 @@ describe("proxy endpoint token auth", () => {
       expect(ok).toBe(false);
     });
 
+    it("protects the HTTP upgrade bootstrap with the same Proxy bearer", async () => {
+      const endpoint = `http://127.0.0.1:${port}/api/proxy-upgrade-bootstrap`;
+      expect((await fetch(endpoint)).status).toBe(401);
+      expect(
+        (
+          await fetch(endpoint, {
+            headers: { authorization: "Bearer wrong" },
+          })
+        ).status,
+      ).toBe(401);
+
+      const response = await fetch(endpoint, {
+        headers: { authorization: "Bearer secret-abc" },
+      });
+      expect(response.status).toBe(200);
+      expect(response.headers.get("cache-control")).toBe("no-store");
+      expect(ProxyUpgradeBootstrapResponseSchema.parse(await response.json())).toEqual({
+        bootstrapVersion: PROXY_UPGRADE_BOOTSTRAP_VERSION,
+        relayVersion: RELAY_VERSION,
+        controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      });
+    });
+
     it("/client endpoint remains open unless clientToken is configured", async () => {
       const ok = await tryConnect(`ws://127.0.0.1:${port}/client`);
       expect(ok).toBe(true);
@@ -123,6 +152,14 @@ describe("proxy endpoint token auth", () => {
     it("accepts /proxy without token", async () => {
       const ok = await tryConnect(`ws://127.0.0.1:${port}/proxy`);
       expect(ok).toBe(true);
+    });
+
+    it("serves the HTTP upgrade bootstrap without auth", async () => {
+      const response = await fetch(`http://127.0.0.1:${port}/api/proxy-upgrade-bootstrap`);
+      expect(response.status).toBe(200);
+      expect(ProxyUpgradeBootstrapResponseSchema.safeParse(await response.json()).success).toBe(
+        true,
+      );
     });
   });
 });

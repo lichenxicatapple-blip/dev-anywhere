@@ -51,6 +51,8 @@ import { RemoteFileStreamManager } from "./serve/remote-file-stream.js";
 import { TerminalSubscriptionBacklog } from "./serve/terminal-subscription-backlog.js";
 import type { ProviderId } from "./providers/types.js";
 import { createRelayAutoUpdater } from "./auto-update.js";
+import { createRelayUpgradeBootstrapMonitor } from "./relay-upgrade-bootstrap.js";
+import { selectHighestStableVersion } from "./common/stable-version.js";
 import { PROXY_VERSION } from "./version.js";
 import { PreviewManager } from "./serve/preview/preview-manager.js";
 import { cleanupStalePreviewRuntimes } from "./serve/preview/stale-preview-runtime.js";
@@ -247,10 +249,20 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   });
   let serviceReadyForAutoUpdate = false;
   let pendingRelayVersion: string | null = null;
-  relayConnection.on("relay_version", (version: string) => {
-    pendingRelayVersion = version;
+  const considerRelayVersion = (version: string): void => {
+    pendingRelayVersion = selectHighestStableVersion(pendingRelayVersion, version);
     if (serviceReadyForAutoUpdate) autoUpdater.considerRelayVersion(version);
+  };
+  const upgradeBootstrap = createRelayUpgradeBootstrapMonitor({
+    relayUrl,
+    token: relayToken,
+    logger: serviceLogger,
+    onVersion: considerRelayVersion,
   });
+  relayConnection.on("relay_version", considerRelayVersion);
+  relayConnection.on("connected", () => upgradeBootstrap.markControlProtocolConnected());
+  relayConnection.on("disconnected", () => upgradeBootstrap.request());
+  upgradeBootstrap.request();
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
   const previewManager = new PreviewManager({
     persistPath: PREVIEWS_PATH,
@@ -502,7 +514,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   const shutdown = createServeShutdown({
     logger: serviceLogger,
-    autoUpdaterDispose: () => autoUpdater.dispose(),
+    autoUpdaterDispose: () => {
+      upgradeBootstrap.dispose();
+      autoUpdater.dispose();
+    },
     sessionManagerStopReaper: () => sessionManager.stopReaper(),
     relayRouterDestroy: () => relayRouter.destroy(),
     previewManagerShutdown: () => previewManager.shutdown(),

@@ -73,6 +73,11 @@ export type {
 export { PreviewScopeSchema } from "./schemas/preview-scope.js";
 export type { PreviewScope } from "./schemas/preview-scope.js";
 export {
+  PROXY_UPGRADE_BOOTSTRAP_VERSION,
+  ProxyUpgradeBootstrapResponseSchema,
+} from "./schemas/proxy-upgrade-bootstrap.js";
+export type { ProxyUpgradeBootstrapResponse } from "./schemas/proxy-upgrade-bootstrap.js";
+export {
   PreviewHtmlEntriesSchema,
   PreviewSourceSchema,
   PreviewStateSchema,

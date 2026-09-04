@@ -6,7 +6,11 @@ import type { ChildProcess } from "node:child_process";
 import type { Logger } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRelayAutoUpdater } from "#src/auto-update.js";
-import { compareStableVersions, parseStableVersion } from "#src/common/stable-version.js";
+import {
+  compareStableVersions,
+  parseStableVersion,
+  selectHighestStableVersion,
+} from "#src/common/stable-version.js";
 import {
   acquireUpdateLock,
   planRelayDirectedUpdate,
@@ -48,6 +52,13 @@ describe("stable Proxy versions", () => {
     expect(compareStableVersions("0.6.3", "0.6.3")).toBe(0);
     expect(compareStableVersions("0.6.3", "0.7.0")).toBe(-1);
     expect(compareStableVersions("invalid", "0.7.0")).toBeNull();
+  });
+
+  it("retains only the highest valid stable version", () => {
+    expect(selectHighestStableVersion(null, "invalid")).toBeNull();
+    expect(selectHighestStableVersion(null, "0.9.2")).toBe("0.9.2");
+    expect(selectHighestStableVersion("0.9.2", "0.9.1")).toBe("0.9.2");
+    expect(selectHighestStableVersion("0.9.2", "0.9.3")).toBe("0.9.3");
   });
 });
 

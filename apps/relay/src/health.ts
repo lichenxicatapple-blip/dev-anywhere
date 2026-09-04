@@ -1,4 +1,8 @@
 import { Router } from "express";
+import {
+  PROXY_UPGRADE_BOOTSTRAP_VERSION,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+} from "@dev-anywhere/shared";
 import type { RelayRegistry } from "./registry.js";
 import { RELAY_VERSION } from "./version.js";
 
@@ -80,6 +84,16 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
     res.status(401).json({ error: "invalid_proxy_token" });
     return false;
   }
+
+  router.get("/api/proxy-upgrade-bootstrap", (req, res) => {
+    if (!requireProxyTokenIfConfigured(req, res)) return;
+    res.setHeader("Cache-Control", "no-store");
+    res.json({
+      bootstrapVersion: PROXY_UPGRADE_BOOTSTRAP_VERSION,
+      relayVersion: RELAY_VERSION,
+      controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+    });
+  });
 
   router.get("/status", (_req, res) => {
     res.json({
