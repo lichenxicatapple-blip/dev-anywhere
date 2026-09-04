@@ -37,7 +37,7 @@ describe("Device Preview Relay data plane", () => {
       clientToken: CLIENT_TOKEN,
       webAssetDir: false,
     });
-    await new Promise<void>((resolve) => relay.httpServer.listen(0, resolve));
+    await new Promise<void>((resolve) => relay.httpServer.listen(0, "127.0.0.1", resolve));
     port = getPort(relay);
   });
 

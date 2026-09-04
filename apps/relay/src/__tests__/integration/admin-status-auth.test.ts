@@ -19,7 +19,7 @@ describe("/api/status, /api/proxies, /api/clients auth", () => {
       ...opts,
     });
     await new Promise<void>((resolve) => {
-      relay.httpServer.listen(0, resolve);
+      relay.httpServer.listen(0, "127.0.0.1", resolve);
     });
     port = getPort(relay);
   }

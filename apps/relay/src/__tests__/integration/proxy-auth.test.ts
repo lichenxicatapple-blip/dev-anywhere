@@ -20,7 +20,7 @@ describe("proxy endpoint token auth", () => {
       clientToken,
     });
     await new Promise<void>((resolve) => {
-      relay.httpServer.listen(0, resolve);
+      relay.httpServer.listen(0, "127.0.0.1", resolve);
     });
     port = getPort(relay);
   }

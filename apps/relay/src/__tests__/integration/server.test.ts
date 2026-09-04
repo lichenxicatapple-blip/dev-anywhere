@@ -61,7 +61,7 @@ describe("Relay Server Integration", () => {
       webAssetDir,
     });
     await new Promise<void>((resolve) => {
-      relay.httpServer.listen(0, resolve);
+      relay.httpServer.listen(0, "127.0.0.1", resolve);
     });
     port = getPort(relay);
   });
@@ -997,7 +997,7 @@ describe("Relay Server Heartbeat", () => {
       logger,
     });
     await new Promise<void>((resolve) => {
-      relay.httpServer.listen(0, resolve);
+      relay.httpServer.listen(0, "127.0.0.1", resolve);
     });
     const addr = relay.httpServer.address();
     const port = typeof addr === "object" && addr !== null ? addr.port : 0;

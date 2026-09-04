@@ -23,7 +23,7 @@ describe("Message routing integration", () => {
   beforeEach(async () => {
     relay = createRelayServer({ port: 0, heartbeatInterval: 60000, logger });
     await new Promise<void>((resolve) => {
-      relay.httpServer.listen(0, resolve);
+      relay.httpServer.listen(0, "127.0.0.1", resolve);
     });
     port = getPort(relay);
   });

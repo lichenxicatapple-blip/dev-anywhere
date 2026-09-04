@@ -39,7 +39,7 @@ const relayOutput = new WeakMap<ChildProcess, { stdout: string; stderr: string }
 async function findFreePort(): Promise<number> {
   return new Promise((resolve) => {
     const server = createServer();
-    server.listen(0, () => {
+    server.listen(0, "127.0.0.1", () => {
       const port = (server.address() as AddressInfo).port;
       server.close(() => resolve(port));
     });
@@ -144,7 +144,7 @@ async function waitForPortRelease(port: number, timeoutMs = 5_000): Promise<void
     const reusable = await new Promise<boolean>((resolve) => {
       const probe = createServer();
       probe.once("error", () => resolve(false));
-      probe.listen(port, () => probe.close(() => resolve(true)));
+      probe.listen(port, "127.0.0.1", () => probe.close(() => resolve(true)));
     });
     if (reusable) return;
     await new Promise((resolve) => setTimeout(resolve, 25));
