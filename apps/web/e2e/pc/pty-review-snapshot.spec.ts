@@ -387,6 +387,7 @@ test("preserves BCE-only padding around Codex prompts while scrolling native row
   await expect
     .poll(() => page.evaluate((sid) => window.__ccTest?.pty.serialize(sid) ?? "", SESSION_ID))
     .toContain("真实 Codex 历史输入");
+  await expectPtyCursorAwareBottom(page);
 
   const targetLine = await ptyTerminal(page).evaluate((container, sessionId) => {
     const terminal = window.__ccTestPtyTerminals?.get(sessionId);
