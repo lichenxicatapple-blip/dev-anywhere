@@ -806,13 +806,13 @@ const SessionCreateResponseSchema = z.discriminatedUnion("success", [
 
 // 中转服务器控制消息，独立于 MessageEnvelope 的传输层协议
 const relayControlDefinitions = [
-  control("proxy_register", {
+  strictControl("proxy_register", {
     protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
     proxyId: IdSchema,
     name: z.string().optional(),
     proxyVersion: z.string().min(1).max(64),
   }),
-  control("proxy_register_response", {
+  strictControl("proxy_register_response", {
     protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
     status: z.enum(["new", "reconnected"]),
     relayVersion: z.string().min(1).max(64),
@@ -1324,7 +1324,7 @@ const relayControlDefinitions = [
   }),
 
   // 客户端注册协议
-  control("client_register", {
+  strictControl("client_register", {
     protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
     clientId: IdSchema,
     userAgent: z.string().optional(),

@@ -75,6 +75,41 @@ describe("RelayControlSchema", () => {
     expect(RelayControlSchema.safeParse({ ...message, protocolVersion: 0 }).success).toBe(false);
   });
 
+  it.each([
+    {
+      type: "proxy_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      proxyId: "proxy-1",
+      proxyVersion: "0.9.0",
+      unexpected: true,
+    },
+    {
+      type: "proxy_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      status: "new",
+      relayVersion: "0.9.0",
+      connectionId: "connection-1",
+      unexpected: true,
+    },
+    {
+      type: "client_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      clientId: "client-1",
+      browserName: "test",
+      osName: "test",
+      deviceKind: "desktop",
+      unexpected: true,
+    },
+    {
+      type: "client_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      status: "new",
+      unexpected: true,
+    },
+  ])("rejects unexpected fields on $type", (message) => {
+    expect(RelayControlSchema.safeParse(message).success).toBe(false);
+  });
+
   it("rejects unknown type", () => {
     expect(() => RelayControlSchema.parse({ type: "unknown_type" })).toThrow();
   });
