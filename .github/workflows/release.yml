@@ -54,7 +54,7 @@ jobs:
         with:
           ref: ${{ needs.resolve-release.outputs.tag }}
 
-      - name: Normalize legacy Docker font asset path
+      - name: Prepare release Docker build inputs
         run: |
           node <<'NODE'
           const fs = require("node:fs");
@@ -69,6 +69,15 @@ jobs:
           }
           if (!contents.includes(corrected)) {
             throw new Error("Relay Dockerfile does not copy the font source directory");
+          }
+          // Published tags stay immutable; image-only recovery can repair missing build inputs.
+          const installHook = "COPY apps/proxy/scripts/postinstall.cjs apps/proxy/scripts/";
+          if (fs.existsSync("apps/proxy/scripts/postinstall.cjs") && !contents.includes(installHook)) {
+            const manifests = "COPY apps/web/package.json apps/web/";
+            if (!contents.includes(manifests)) throw new Error("Docker dependency layer not found");
+            contents = contents.replace(manifests, `${manifests}\n${installHook}`);
+            fs.writeFileSync(dockerfile, contents);
+            console.log("Included the root install hook in the Docker dependency layer");
           }
           NODE
 

@@ -10,6 +10,7 @@ COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
 COPY apps/relay/package.json apps/relay/
 COPY apps/web/package.json apps/web/
+COPY apps/proxy/scripts/postinstall.cjs apps/proxy/scripts/
 
 RUN pnpm install --frozen-lockfile \
   --filter @dev-anywhere/shared \
