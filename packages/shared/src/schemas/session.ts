@@ -22,36 +22,31 @@ const agentStatusPhaseValues = [
 
 /**
  * 在所有会话协议中复用同一组身份约束。调用方只提供自身的公共字段，
- * 这里负责把它们与三种合法的会话形态组成严格 union。
+ * 这里负责约束三种合法的会话形态，同时剥离不认识的描述字段。
  */
 export function createSessionIdentitySchema<T extends z.ZodRawShape>(commonFields: T) {
   return z.union([
-    z
-      .object({
-        ...commonFields,
-        kind: z.literal("agent"),
-        mode: z.literal("json"),
-        provider: z.enum(providerValues),
-      })
-      .strict(),
-    z
-      .object({
-        ...commonFields,
-        kind: z.literal("agent"),
-        mode: z.literal("pty"),
-        provider: z.enum(providerValues),
-        ptyOwner: z.enum(ptyOwnerValues),
-      })
-      .strict(),
-    z
-      .object({
-        ...commonFields,
-        kind: z.literal("terminal"),
-        mode: z.literal("pty"),
-        provider: z.literal("claude"),
-        ptyOwner: z.literal("proxy-hosted"),
-      })
-      .strict(),
+    z.object({
+      ...commonFields,
+      kind: z.literal("agent"),
+      mode: z.literal("json"),
+      provider: z.enum(providerValues),
+      ptyOwner: z.never().optional(),
+    }),
+    z.object({
+      ...commonFields,
+      kind: z.literal("agent"),
+      mode: z.literal("pty"),
+      provider: z.enum(providerValues),
+      ptyOwner: z.enum(ptyOwnerValues),
+    }),
+    z.object({
+      ...commonFields,
+      kind: z.literal("terminal"),
+      mode: z.literal("pty"),
+      provider: z.literal("claude"),
+      ptyOwner: z.literal("proxy-hosted"),
+    }),
   ]);
 }
 
@@ -70,23 +65,19 @@ export const SessionInfoSchema = createSessionIdentitySchema({
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;
 
 // 会话列表
-export const SessionListPayloadSchema = z
-  .object({
-    sessions: z.array(SessionInfoSchema),
-  })
-  .strict();
+export const SessionListPayloadSchema = z.object({
+  sessions: z.array(SessionInfoSchema),
+});
 
 export type SessionListPayload = z.infer<typeof SessionListPayloadSchema>;
 
 // 会话状态变更
 // lastActive: 触发本次状态迁移或活动刷新的时间戳 (ms)，用于列表相对时间显示。
-export const SessionStatusPayloadSchema = z
-  .object({
-    sessionId: IdSchema,
-    state: z.enum(sessionStateValues),
-    lastActive: z.number(),
-  })
-  .strict();
+export const SessionStatusPayloadSchema = z.object({
+  sessionId: IdSchema,
+  state: z.enum(sessionStateValues),
+  lastActive: z.number(),
+});
 
 export type SessionStatusPayload = z.infer<typeof SessionStatusPayloadSchema>;
 

@@ -33,6 +33,13 @@ const assertPinnedCiNode = (workflow, path) => {
 assert.match(mainWorkflow, /name: Main Verification/);
 assert.match(mainWorkflow, /group: main-verification-\$\{\{ github\.ref \}\}/);
 assert.match(mainWorkflow, /cancel-in-progress: true/);
+assert.equal(
+  mainWorkflow.match(
+    /if: \$\{\{ !contains\(github\.event\.head_commit\.message, '\[skip tests\]'\) \}\}/g,
+  )?.length,
+  2,
+  "both Main Verification jobs must respect the explicit emergency test skip marker",
+);
 assert.match(mainWorkflow, /permissions:\s*\n\s*contents: read/);
 assert.match(mainWorkflow, /uses: \.\/\.github\/workflows\/ci\.yml/);
 assert.match(mainWorkflow, /RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1/);
@@ -75,5 +82,6 @@ assert.match(publishWorkflow, /provenance: false/);
 assert.match(publishWorkflow, /sbom: false/);
 assert.match(publishWorkflow, /type=raw,value=\$\{\{ needs\.resolve-release\.outputs\.tag \}\}/);
 assert.match(publishWorkflow, /Ensure GitHub Release/);
+assert.doesNotMatch(publishWorkflow, /\[skip tests\]/);
 
 console.log(`release config test passed (${rootPackage.version})`);

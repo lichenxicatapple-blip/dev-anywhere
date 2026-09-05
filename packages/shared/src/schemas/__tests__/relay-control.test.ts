@@ -106,9 +106,35 @@ describe("RelayControlSchema", () => {
       status: "new",
       unexpected: true,
     },
-  ])("rejects unexpected fields on $type", (message) => {
-    expect(RelayControlSchema.safeParse(message).success).toBe(false);
+  ])("ignores extra registration fields but still validates known fields on $type", (message) => {
+    const known: Record<string, unknown> = { ...message };
+    delete known.unexpected;
+    expect(RelayControlSchema.parse(message)).toEqual(known);
+    for (const key of Object.keys(known)) {
+      const incomplete: Record<string, unknown> = { ...known, futureInfo: { display: true } };
+      delete incomplete[key];
+      expect(RelayControlSchema.safeParse(incomplete).success).toBe(false);
+      expect(
+        RelayControlSchema.safeParse({ ...known, [key]: null, futureInfo: true }).success,
+      ).toBe(false);
+    }
   });
+
+  it.each(["restored", "proxy_offline"] as const)(
+    "keeps the binding on an extensible %s registration response",
+    (status) => {
+      const response = {
+        type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status,
+        proxyId: "proxy-1",
+        bindingId: "binding-1",
+      };
+      expect(RelayControlSchema.parse({ ...response, futureInfo: { label: "extra" } })).toEqual(
+        response,
+      );
+    },
+  );
 
   it("rejects unknown type", () => {
     expect(() => RelayControlSchema.parse({ type: "unknown_type" })).toThrow();

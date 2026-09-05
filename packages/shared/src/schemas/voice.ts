@@ -5,17 +5,18 @@ export const voiceRegionValues = ["cn", "intl"] as const;
 export const voiceOptionSourceValues = ["official", "custom"] as const;
 export const voiceOptionGenderValues = ["male", "female", "unknown"] as const;
 
-export const VoiceProviderConfigSchema = z
-  .object({
-    provider: z.enum(voiceProviderValues),
-    configured: z.boolean(),
-    region: z.enum(voiceRegionValues),
-    asrModel: z.string().min(1),
-    ttsModel: z.string().min(1),
-    ttsVoice: z.string().min(1),
-    turnIdleSeconds: z.number().int().positive().safe().default(3),
-  })
-  .strict();
+export const VoiceProviderConfigSchema = z.object({
+  provider: z.enum(voiceProviderValues),
+  configured: z.boolean(),
+  region: z.enum(voiceRegionValues),
+  asrModel: z.string().min(1),
+  ttsModel: z.string().min(1),
+  ttsVoice: z.string().min(1),
+  turnIdleSeconds: z.number().int().positive().safe().default(3),
+  // 密钥及其写入操作不属于可公开的配置描述。
+  apiKey: z.never().optional(),
+  clearApiKey: z.never().optional(),
+});
 export type VoiceProviderConfig = z.infer<typeof VoiceProviderConfigSchema>;
 
 export const VoiceConfigUpdateSchema = z
@@ -32,27 +33,23 @@ export const VoiceConfigUpdateSchema = z
   .strict();
 export type VoiceConfigUpdate = z.infer<typeof VoiceConfigUpdateSchema>;
 
-export const VoiceOptionSchema = z
-  .object({
-    value: z.string().min(1),
-    label: z.string().min(1),
-    description: z.string().min(1).optional(),
-    gender: z.enum(voiceOptionGenderValues).optional(),
-    age: z.string().min(1).optional(),
-    model: z.string().min(1).optional(),
-    source: z.enum(voiceOptionSourceValues),
-  })
-  .strict();
+export const VoiceOptionSchema = z.object({
+  value: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().min(1).optional(),
+  gender: z.enum(voiceOptionGenderValues).optional(),
+  age: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+  source: z.enum(voiceOptionSourceValues),
+});
 export type VoiceOption = z.infer<typeof VoiceOptionSchema>;
 
-export const VoiceCapabilitiesSchema = z
-  .object({
-    asrModels: z.array(VoiceOptionSchema),
-    ttsModels: z.array(VoiceOptionSchema),
-    ttsVoices: z.array(VoiceOptionSchema),
-    fetchedAt: z.number().optional(),
-  })
-  .strict();
+export const VoiceCapabilitiesSchema = z.object({
+  asrModels: z.array(VoiceOptionSchema),
+  ttsModels: z.array(VoiceOptionSchema),
+  ttsVoices: z.array(VoiceOptionSchema),
+  fetchedAt: z.number().optional(),
+});
 export type VoiceCapabilities = z.infer<typeof VoiceCapabilitiesSchema>;
 
 // Official snapshot from Alibaba Cloud Bailian docs, captured 2026-05-18.

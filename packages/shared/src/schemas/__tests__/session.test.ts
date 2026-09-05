@@ -2,6 +2,26 @@ import { describe, it, expect } from "vitest";
 import { SessionListPayloadSchema, SessionStatusPayloadSchema } from "../session.js";
 
 describe("SessionListPayloadSchema", () => {
+  it.each([
+    { kind: "agent", mode: "json", provider: "codex" },
+    { kind: "agent", mode: "pty", provider: "kimi", ptyOwner: "local-terminal" },
+    { kind: "terminal", mode: "pty", provider: "claude", ptyOwner: "proxy-hosted" },
+  ])("strips list and $kind/$mode entry descriptions", (identity) => {
+    const session = {
+      ...identity,
+      sessionId: "s1",
+      state: "idle",
+      cwd: "/project",
+      lastActive: 1,
+    };
+    expect(
+      SessionListPayloadSchema.parse({
+        sessions: [{ ...session, displayGroup: "Project" }],
+        displayOrder: "recent",
+      }),
+    ).toEqual({ sessions: [session] });
+  });
+
   it("accepts valid session list", () => {
     const result = SessionListPayloadSchema.parse({
       sessions: [

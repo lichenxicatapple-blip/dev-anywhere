@@ -297,6 +297,124 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     }
   });
 
+  it.each(["new", "reconnected"])(
+    "accepts future registration response fields for %s connections without retrying",
+    async (status) => {
+      vi.useFakeTimers();
+      const mod = (await import("ws")) as unknown as MockWsModule;
+      const initialSocketCount = mod.default.instances.length;
+      const conn = new RelayConnection("ws://test:1234", {
+        proxyIdPath: "/tmp/test-proxy-id",
+        readyTimeoutMs: 20,
+        heartbeatIntervalMs: 0,
+      });
+      const connected = vi.fn();
+      const disconnected = vi.fn();
+      const relayVersion = vi.fn();
+      const streamConnection = vi.fn();
+      const message = vi.fn();
+      conn.on("connected", connected);
+      conn.on("disconnected", disconnected);
+      conn.on("relay_version", relayVersion);
+      conn.on("stream_connection", streamConnection);
+      conn.on("message", message);
+      const queued = { type: "session_list", sessions: [] };
+      conn.sendRaw(JSON.stringify(queued));
+
+      try {
+        conn.connect();
+        const socket = mod.default.lastInstance;
+        if (!socket) throw new Error("mock WebSocket did not capture instance");
+        socket.readyState = mod.default.OPEN;
+        socket.emit("open");
+        socket.emit(
+          "message",
+          Buffer.from(
+            JSON.stringify({
+              type: "proxy_register_response",
+              protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+              status,
+              relayVersion: "0.9.0",
+              connectionId: "connection-with-extensions",
+              futureDescription: { label: "Future relay metadata" },
+              futureCapabilities: ["optional-feature"],
+            }),
+          ),
+        );
+
+        expect(conn.getStatus()).toMatchObject({
+          connectionState: RelayConnectionState.SYNCED,
+          connected: true,
+          reconnectAttempt: 0,
+          queueDepth: 0,
+          protocolAdmissionDirection: ProxyProtocolAdmissionDirection.COMPATIBLE,
+        });
+        expect(connected).toHaveBeenCalledTimes(1);
+        expect(relayVersion).toHaveBeenCalledExactlyOnceWith("0.9.0");
+        expect(streamConnection).toHaveBeenCalledExactlyOnceWith("connection-with-extensions");
+        expect(socket.send.mock.calls.map(([raw]) => JSON.parse(String(raw)))).toEqual([
+          expect.objectContaining({ type: "proxy_register" }),
+          queued,
+        ]);
+        expect(message).not.toHaveBeenCalled();
+
+        const forwarded = { type: "session_list_request", requestId: "after-admission" };
+        socket.emit("message", Buffer.from(JSON.stringify(forwarded)));
+        expect(message).toHaveBeenCalledExactlyOnceWith(forwarded);
+
+        await vi.advanceTimersByTimeAsync(2_000);
+        expect(socket.close).not.toHaveBeenCalled();
+        expect(socket.terminate).not.toHaveBeenCalled();
+        expect(disconnected).not.toHaveBeenCalled();
+        expect(mod.default.instances).toHaveLength(initialSocketCount + 1);
+        expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
+      } finally {
+        conn.close();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it.each([
+    { field: "status", value: "unsupported" },
+    { field: "relayVersion", value: 9 },
+    { field: "connectionId", value: null },
+  ])(
+    "still rejects invalid $field alongside future registration fields",
+    async ({ field, value }) => {
+      const { conn, fakeWs } = await connectAndGrabWs();
+      const connected = vi.fn();
+      conn.on("connected", connected);
+      try {
+        fakeWs.readyState = 1;
+        fakeWs.emit("open");
+        fakeWs.emit(
+          "message",
+          Buffer.from(
+            JSON.stringify({
+              type: "proxy_register_response",
+              protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+              status: "new",
+              relayVersion: "0.9.0",
+              connectionId: "connection-1",
+              futureDescription: { label: "Future relay metadata" },
+              [field]: value,
+            }),
+          ),
+        );
+
+        expect(fakeWs.close).toHaveBeenCalledWith(
+          RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+          ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH,
+        );
+        expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
+        expect(connected).not.toHaveBeenCalled();
+      } finally {
+        conn.close();
+      }
+    },
+  );
+
   it("emits the dedicated stream connection nonce from a successful registration", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
     const nonces: string[] = [];

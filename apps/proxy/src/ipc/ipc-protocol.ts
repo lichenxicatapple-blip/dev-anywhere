@@ -67,23 +67,24 @@ const TerminalSessionCreateRequestSchema = z.discriminatedUnion("kind", [
 ]);
 
 const TerminalSessionCreateResponseSchema = z.discriminatedUnion("success", [
-  z
-    .object({
-      type: z.literal("session_create_response"),
-      success: z.literal(true),
-      sessionId: z.string().min(1),
-      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
-      hook: ProviderHookContextSchema.optional(),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("session_create_response"),
-      success: z.literal(false),
-      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
-      error: z.string().min(1),
-    })
-    .strict(),
+  // Responses may add descriptive fields within the same protocol generation. Validate known
+  // fields and discard extensions, while rejecting fields that contradict the success branch.
+  z.object({
+    type: z.literal("session_create_response"),
+    success: z.literal(true),
+    sessionId: z.string().min(1),
+    protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
+    hook: ProviderHookContextSchema.optional(),
+    error: z.never().optional(),
+  }),
+  z.object({
+    type: z.literal("session_create_response"),
+    success: z.literal(false),
+    protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
+    error: z.string().min(1),
+    sessionId: z.never().optional(),
+    hook: z.never().optional(),
+  }),
 ]);
 
 // IPC 消息 schema，客户端与服务端通过 Unix domain socket 使用 NDJSON 通信
@@ -226,25 +227,22 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
 export const WorkerMessageSchema = z.discriminatedUnion("type", [
   // worker → serve: every socket connection begins with this protocol and process identity.
   // Readiness is reported separately because provider bootstrap can fail after IPC negotiation.
-  z
-    .object({
-      type: z.literal("worker_protocol_hello"),
-      protocolVersion: z.literal(WORKER_IPC_PROTOCOL_VERSION),
-      sessionId: z.string().min(1),
-      provider: z.enum(providerValues),
-      pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-    })
-    .strict(),
+  // Hello extensions are informational; the required version and identity remain authoritative.
+  z.object({
+    type: z.literal("worker_protocol_hello"),
+    protocolVersion: z.literal(WORKER_IPC_PROTOCOL_VERSION),
+    sessionId: z.string().min(1),
+    provider: z.enum(providerValues),
+    pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  }),
 
   // serve → worker: the worker also rejects a daemon from another IPC generation.
-  z
-    .object({
-      type: z.literal("serve_protocol_hello"),
-      protocolVersion: z.literal(WORKER_IPC_PROTOCOL_VERSION),
-      sessionId: z.string().min(1),
-      pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
-    })
-    .strict(),
+  z.object({
+    type: z.literal("serve_protocol_hello"),
+    protocolVersion: z.literal(WORKER_IPC_PROTOCOL_VERSION),
+    sessionId: z.string().min(1),
+    pid: z.number().int().positive().max(Number.MAX_SAFE_INTEGER),
+  }),
 
   // serve → worker: 发送用户输入给 claude
   z.object({

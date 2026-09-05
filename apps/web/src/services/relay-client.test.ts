@@ -165,6 +165,69 @@ describe("RelayClient request handling", () => {
     expect(ws.permanentFailure).toBeNull();
   });
 
+  it.each(["new", "restored", "proxy_offline"] as const)(
+    "accepts extra registration descriptions for %s without exposing them to consumers",
+    (status) => {
+      const { relay, ws } = createClient(false);
+      const handler = vi.fn();
+      relay.onMessage(handler);
+      relay.register();
+      const response = {
+        type: "client_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status,
+        ...(status === "new" ? {} : { proxyId: "proxy-a", bindingId: "binding-a" }),
+      };
+
+      ws.emit({ ...response, relayDescription: { name: "Development Relay" } });
+
+      expect(ws.protocolReadyCount).toBe(1);
+      expect(ws.closed).toBe(false);
+      expect(ws.permanentFailure).toBeNull();
+      expect(handler).toHaveBeenCalledExactlyOnceWith(response);
+      expect(relay.getPreviewScope()).toEqual(
+        status === "new" ? null : { proxyId: "proxy-a", bindingId: "binding-a" },
+      );
+    },
+  );
+
+  it.each([
+    ["missing status", {}],
+    ["unknown status", { status: "ready" }],
+    ["non-string status", { status: 1 }],
+    ["new client with a proxy binding", { status: "new", proxyId: "proxy-a" }],
+    ["new client with a binding id", { status: "new", bindingId: "binding-a" }],
+    ["missing restored binding", { status: "restored", proxyId: "proxy-a" }],
+    ["missing offline proxy", { status: "proxy_offline", bindingId: "binding-a" }],
+    ["invalid proxy type", { status: "restored", proxyId: 1, bindingId: "binding-a" }],
+    ["empty binding", { status: "proxy_offline", proxyId: "proxy-a", bindingId: "" }],
+  ])(
+    "rejects a registration response with %s even alongside extra descriptions",
+    (_label, fields) => {
+      const warn = vi.spyOn(console, "warn").mockImplementation(() => {});
+      try {
+        const { relay, ws } = createClient(false);
+        const handler = vi.fn();
+        relay.onMessage(handler);
+        relay.register();
+
+        ws.emit({
+          type: "client_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+          ...fields,
+          relayDescription: { name: "Development Relay" },
+        });
+
+        expect(ws.permanentFailure).toBe("protocol_mismatch");
+        expect(ws.protocolReadyCount).toBe(0);
+        expect(handler).not.toHaveBeenCalled();
+        expect(relay.getPreviewScope()).toBeNull();
+      } finally {
+        warn.mockRestore();
+      }
+    },
+  );
+
   it("does not enter the normal message flow before registration succeeds", () => {
     const { relay, ws } = createClient(false);
     const handler = vi.fn();

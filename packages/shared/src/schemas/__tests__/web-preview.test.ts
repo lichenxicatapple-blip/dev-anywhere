@@ -39,6 +39,9 @@ describe("web preview schemas", () => {
     } as const;
     expect(WebPreviewTunnelStatusSchema.parse(ready)).toEqual(ready);
     expect(WebPreviewTunnelStatusSchema.parse(unavailable)).toEqual(unavailable);
+    expect(WebPreviewTunnelStatusSchema.parse({ ...ready, displayName: "Cloudflare" })).toEqual(
+      ready,
+    );
 
     for (const status of [
       { available: true },
@@ -46,7 +49,6 @@ describe("web preview schemas", () => {
       { available: false },
       { available: false, command: "cloudflared", error: "not runnable" },
       { available: false, version: "2026.8.1", error: "not runnable" },
-      { ...ready, extra: true },
     ]) {
       expect(WebPreviewTunnelStatusSchema.safeParse(status).success).toBe(false);
     }
@@ -64,14 +66,17 @@ describe("web preview schemas", () => {
     });
   });
 
-  it("rejects the removed top-level preview support flag", () => {
+  it("strips capability and nested tunnel descriptions", () => {
     expect(
-      WebPreviewCapabilitySchema.safeParse({
-        supported: true,
-        cloudflared: { available: true, command: "cloudflared" },
-        cpolar: { available: false, error: "not found" },
-      }).success,
-    ).toBe(false);
+      WebPreviewCapabilitySchema.parse({
+        displayName: "Web preview",
+        cloudflared: { available: true, command: "cloudflared", displayName: "Cloudflare" },
+        cpolar: { available: false, error: "not found", displayName: "Cpolar" },
+      }),
+    ).toEqual({
+      cloudflared: { available: true, command: "cloudflared" },
+      cpolar: { available: false, error: "not found" },
+    });
   });
 
   it("accepts only supported tunnel provider ids", () => {
@@ -204,7 +209,7 @@ describe("web preview schemas", () => {
     }
   });
 
-  it("rejects unknown fields in source inputs and summaries", () => {
+  it("keeps source inputs strict while stripping summary and source descriptions", () => {
     expect(
       WebPreviewSourceInputSchema.safeParse({
         kind: "local",
@@ -212,7 +217,19 @@ describe("web preview schemas", () => {
         extra: true,
       }).success,
     ).toBe(false);
-    expect(PreviewSummarySchema.safeParse({ ...readyPreview, extra: true }).success).toBe(false);
+    expect(
+      PreviewSummarySchema.parse({
+        ...readyPreview,
+        displayHint: "Project",
+        source: { ...readyPreview.source, displayHint: "Local site" },
+      }),
+    ).toEqual(readyPreview);
+    expect(
+      PreviewSummarySchema.safeParse({
+        ...readyPreview,
+        source: { ...readyPreview.source, rootPath: "/project", displayHint: "Local site" },
+      }).success,
+    ).toBe(false);
   });
 
   it.each([
@@ -814,10 +831,11 @@ describe("web preview relay controls", () => {
         errorCode: "UNKNOWN",
       },
     ] as const;
-    for (const message of valid) expect(RelayControlSchema.safeParse(message).success).toBe(true);
+    for (const message of valid) {
+      expect(RelayControlSchema.parse({ ...message, displayHint: "Preview" })).toEqual(message);
+    }
 
     const invalid = [
-      { ...staticBase, success: true, rootPath: "/project/output", htmlEntries: [] },
       {
         ...staticBase,
         success: true,
@@ -832,14 +850,12 @@ describe("web preview relay controls", () => {
         rootPath: "/project/output",
       },
       { ...staticBase, success: false, error: "not found" },
-      { type: "preview_rename_response", ...mutationBase, success: true, name: "legacy echo" },
       {
         type: "preview_rename_response",
         ...mutationBase,
         success: false,
         error: "",
         errorCode: "UNKNOWN",
-        name: "old",
       },
       {
         type: "preview_rename_response",
@@ -856,16 +872,21 @@ describe("web preview relay controls", () => {
       },
     ] as const;
     for (const message of invalid)
-      expect(RelayControlSchema.safeParse(message).success).toBe(false);
+      expect(RelayControlSchema.safeParse({ ...message, displayHint: "Preview" }).success).toBe(
+        false,
+      );
   });
 
-  it("rejects unknown top-level fields on scoped Web Preview protocol objects", () => {
-    const messages = [
-      {
+  it("keeps scoped Web Preview requests strict but accepts response and push descriptions", () => {
+    expect(
+      RelayControlSchema.safeParse({
         type: "preview_list_request",
         requestId: "list-1",
         scope: previewScope,
-      },
+        extra: true,
+      }).success,
+    ).toBe(false);
+    const messages = [
       {
         type: "preview_list_response",
         requestId: "list-1",
@@ -889,7 +910,13 @@ describe("web preview relay controls", () => {
       },
     ] as const;
     for (const message of messages) {
-      expect(RelayControlSchema.safeParse({ ...message, legacy: true }).success).toBe(false);
+      expect(
+        RelayControlSchema.parse({
+          ...message,
+          displayHint: "Preview",
+          ...("preview" in message ? { preview: { ...message.preview, displayHint: "Site" } } : {}),
+        }),
+      ).toEqual(message);
     }
   });
 

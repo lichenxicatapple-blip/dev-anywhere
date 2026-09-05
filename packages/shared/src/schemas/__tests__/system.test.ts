@@ -1,5 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { SyncRequestPayloadSchema, SyncResponsePayloadSchema } from "../system.js";
+import {
+  AuthPayloadSchema,
+  SyncRequestPayloadSchema,
+  SyncResponsePayloadSchema,
+} from "../system.js";
+
+it("keeps authentication and synchronization request parameters strict", () => {
+  expect(AuthPayloadSchema.safeParse({ token: "token", unknownOption: true }).success).toBe(false);
+  expect(SyncRequestPayloadSchema.safeParse({ lastSeq: 0, unknownOption: true }).success).toBe(
+    false,
+  );
+});
 
 describe("SyncRequestPayloadSchema", () => {
   it("rejects negative lastSeq", () => {

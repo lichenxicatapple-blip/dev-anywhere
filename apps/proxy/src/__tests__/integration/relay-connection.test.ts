@@ -1,11 +1,11 @@
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from "vitest";
-import type WebSocket from "ws";
+import { WebSocketServer, type WebSocket } from "ws";
 import { mkdtempSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "@dev-anywhere/relay/server";
-import { buildMessage } from "@dev-anywhere/shared";
+import { buildMessage, RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 import {
   RELAY_CONNECTION_WEBSOCKET_OPTIONS,
   RelayConnection,
@@ -92,6 +92,81 @@ describe("RelayConnection", () => {
     expect(relay.registry.listProxiesWithName()).toContainEqual(
       expect.objectContaining({ proxyId: conn.getProxyId(), version: "0.6.2" }),
     );
+  });
+
+  it("completes real WebSocket registration with future response fields and exchanges messages", async () => {
+    const futureRelay = new WebSocketServer({ host: "127.0.0.1", port: 0 });
+    const received: Record<string, unknown>[] = [];
+    const connected = vi.fn();
+    const disconnected = vi.fn();
+    const relayVersion = vi.fn();
+    const streamConnection = vi.fn();
+    const message = vi.fn();
+    const forwarded = { type: "session_list_request", requestId: "after-admission" };
+    const queued = { type: "session_list", sessions: [] };
+    let connectionCount = 0;
+    futureRelay.on("connection", (socket) => {
+      connectionCount += 1;
+      socket.on("message", (data) => {
+        const request = JSON.parse(data.toString()) as Record<string, unknown>;
+        received.push(request);
+        if (request.type !== "proxy_register") return;
+        socket.send(
+          JSON.stringify({
+            type: "proxy_register_response",
+            protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+            status: "new",
+            relayVersion: "0.9.0",
+            connectionId: "connection-with-extensions",
+            futureDescription: { label: "Future relay metadata" },
+            futureCapabilities: ["optional-feature"],
+          }),
+        );
+        socket.send(JSON.stringify(forwarded));
+      });
+    });
+
+    try {
+      await new Promise<void>((resolve) => futureRelay.once("listening", resolve));
+      const address = futureRelay.address();
+      if (!address || typeof address === "string") throw new Error("test relay did not listen");
+      const tmpDir = mkdtempSync(join(tmpdir(), "relay-future-fields-test-"));
+      conn = new RelayConnection(`ws://127.0.0.1:${address.port}`, {
+        proxyIdPath: join(tmpDir, "proxy-id"),
+      });
+      conn.on("connected", connected);
+      conn.on("disconnected", disconnected);
+      conn.on("relay_version", relayVersion);
+      conn.on("stream_connection", streamConnection);
+      conn.on("message", message);
+      conn.sendRaw(JSON.stringify(queued));
+      conn.connect();
+
+      await vi.waitFor(() => expect(message).toHaveBeenCalledExactlyOnceWith(forwarded));
+      await vi.waitFor(() => expect(received).toContainEqual(queued));
+      expect(received).toHaveLength(2);
+      expect(received[0]).toMatchObject({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: conn.getProxyId(),
+      });
+      expect(conn.getStatus()).toMatchObject({
+        connectionState: RelayConnectionState.SYNCED,
+        connected: true,
+        reconnectAttempt: 0,
+        queueDepth: 0,
+      });
+      expect(connected).toHaveBeenCalledTimes(1);
+      expect(relayVersion).toHaveBeenCalledExactlyOnceWith("0.9.0");
+      expect(streamConnection).toHaveBeenCalledExactlyOnceWith("connection-with-extensions");
+      expect(disconnected).not.toHaveBeenCalled();
+      expect(connectionCount).toBe(1);
+    } finally {
+      conn?.close();
+      conn = null;
+      for (const socket of futureRelay.clients) socket.terminate();
+      await new Promise<void>((resolve) => futureRelay.close(() => resolve()));
+    }
   });
 
   it("sends MessageEnvelope to relay via sendEnvelope()", async () => {

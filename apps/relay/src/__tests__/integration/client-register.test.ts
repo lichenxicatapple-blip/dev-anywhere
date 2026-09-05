@@ -105,6 +105,126 @@ describe("client_register protocol", () => {
     expect(response.bindingId).toBeUndefined();
   });
 
+  it("accepts Proxy registration metadata without adopting it and continues routing", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    const registered = waitForMessageType(proxy, "proxy_register_response");
+    proxy.send(
+      JSON.stringify({
+        ...proxyRegister("extended-proxy"),
+        name: "Development machine",
+        metadata: { platform: "win32", proxyId: "forged-proxy" },
+        connectionId: "forged-connection",
+        sessions: ["forged-session"],
+      }),
+    );
+    const registration = JSON.parse(await registered);
+    expect(registration).toEqual({
+      type: "proxy_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      status: "new",
+      relayVersion: expect.any(String),
+      connectionId: expect.any(String),
+    });
+    expect(registration.connectionId).not.toBe("forged-connection");
+    expect(relay.registry.hasProxy("forged-proxy")).toBe(false);
+
+    const client = connectClient();
+    await waitForOpen(client);
+    const clientRegistered = waitForMessageType(client, "client_register_response");
+    client.send(JSON.stringify(clientRegister("proxy-metadata-observer")));
+    await clientRegistered;
+
+    const listed = waitForMessageType(client, "proxy_list_response");
+    client.send(JSON.stringify({ type: "proxy_list_request", requestId: "metadata-proxies" }));
+    expect(JSON.parse(await listed).proxies).toEqual([
+      {
+        proxyId: "extended-proxy",
+        name: "Development machine",
+        version: "0.9.0",
+        online: true,
+        sessions: [],
+      },
+    ]);
+
+    const selected = waitForMessageType(client, "proxy_select_response");
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "extended-proxy" }));
+    expect(JSON.parse(await selected)).toMatchObject({ success: true });
+
+    const requested = waitForMessageType(proxy, "session_list_request");
+    client.send(JSON.stringify({ type: "session_list_request" }));
+    expect(JSON.parse(await requested)).toEqual({ type: "session_list_request" });
+
+    const delivered = waitForMessageType(client, "assistant_message");
+    const message = {
+      type: "assistant_message",
+      version: MESSAGE_ENVELOPE_VERSION,
+      source: "proxy",
+      seq: 1,
+      timestamp: Date.now(),
+      sessionId: "actual-session",
+      payload: { turnId: "turn-1", revision: 1, text: "hello", status: "completed" },
+    };
+    proxy.send(JSON.stringify(message));
+    expect(JSON.parse(await delivered)).toEqual(message);
+  });
+
+  it("accepts client registration metadata without granting a supplied identity or binding", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    const proxyRegistered = waitForMessageType(proxy, "proxy_register_response");
+    proxy.send(JSON.stringify(proxyRegister()));
+    await proxyRegistered;
+
+    const client = connectClient();
+    await waitForOpen(client);
+    const registered = waitForMessageType(client, "client_register_response");
+    client.send(
+      JSON.stringify({
+        ...clientRegister("extended-client"),
+        metadata: { clientId: "forged-client", browserName: "Forged browser" },
+        proxyId: "p1",
+        boundProxyId: "p1",
+        bindingId: "forged-binding",
+        remoteAddress: "203.0.113.99",
+      }),
+    );
+    expect(JSON.parse(await registered)).toEqual({
+      type: "client_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      status: "new",
+    });
+    expect(relay.registry.getClientBinding("extended-client")).toBeUndefined();
+    expect(relay.registry.getConnectedClientDetails()).toEqual([
+      {
+        clientId: "extended-client",
+        connectedAt: expect.any(Number),
+        browserName: "Chrome",
+        osName: "macOS",
+        deviceKind: "desktop",
+        remoteAddress: "127.0.0.1",
+      },
+    ]);
+
+    const unbound = waitForMessageType(client, "relay_error");
+    client.send(JSON.stringify({ type: "session_list_request" }));
+    expect(JSON.parse(await unbound)).toMatchObject({ code: "NOT_BOUND" });
+
+    const selected = waitForMessageType(client, "proxy_select_response");
+    client.send(JSON.stringify({ type: "proxy_select", proxyId: "p1" }));
+    const selection = JSON.parse(await selected);
+    expect(selection).toMatchObject({
+      success: true,
+      proxyId: "p1",
+      bindingId: expect.any(String),
+    });
+    expect(selection.bindingId).not.toBe("forged-binding");
+
+    const requested = waitForMessageType(proxy, "session_list_request");
+    client.send(JSON.stringify({ type: "session_list_request" }));
+    expect(JSON.parse(await requested)).toEqual({ type: "session_list_request" });
+  });
+
   it("does not broadcast proxy state to a raw client before its registration response", async () => {
     const client = connectClient();
     await waitForOpen(client);

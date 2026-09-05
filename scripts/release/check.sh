@@ -4,7 +4,23 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
+STATIC_ONLY=0
+while [[ "$#" -gt 0 ]]; do
+  case "$1" in
+    --static-only)
+      STATIC_ONLY=1
+      shift
+      ;;
+    *)
+      echo "usage: bash scripts/release/check.sh [--static-only]" >&2
+      echo "ERROR: unexpected argument: $1" >&2
+      exit 2
+      ;;
+  esac
+done
+
 echo "=== Check release scripts ==="
+bash -n scripts/release/check.sh
 bash -n scripts/release/release.sh
 bash -n scripts/release/smoke.sh
 bash -n scripts/release/deep.sh
@@ -13,7 +29,6 @@ bash -n scripts/quality/check.sh
 bash -n scripts/deploy/install-relay.sh
 bash -n scripts/lib/install-relay-render.sh
 bash -n scripts/deploy/check-prerequisite.sh
-bash scripts/deploy/install-relay-render.test.sh
 bash -n scripts/dev/restart.sh
 bash -n scripts/dev/health.sh
 bash -n scripts/dev/relay-restart.sh
@@ -21,8 +36,13 @@ bash -n scripts/dev/chaos.sh
 node --check scripts/tools/emu-debug.mjs
 node --check scripts/quality/check-source-comment-refs.mjs
 node --check scripts/lib/resolve-dev-profile.mjs
-bash scripts/release/options.test.sh
-node scripts/release/config.test.mjs
+if [[ "$STATIC_ONLY" != "1" ]]; then
+  bash scripts/deploy/install-relay-render.test.sh
+  bash scripts/release/options.test.sh
+  node scripts/release/config.test.mjs
+else
+  echo "=== Static-only release check: skipping test scripts and runtime smoke ==="
+fi
 if ! grep -F 'REGISTRY_BASE="${REGISTRY_BASE:-crpi-ibzynlurwxb2ye5w.cn-guangzhou.personal.cr.aliyuncs.com/lichenxicatapple-blip}"' scripts/deploy/install-relay.sh >/dev/null; then
   echo "Release installer must default to the Aliyun ACR deployment registry" >&2
   exit 1
@@ -31,6 +51,23 @@ if grep -R "SKIP_PULL" scripts/deploy/install-relay.sh .github/workflows/release
   echo "Release installer must always pull published images; SKIP_PULL is not allowed" >&2
   exit 1
 fi
+
+echo "=== Check package version consistency ==="
+node <<'NODE'
+const files = [
+  "package.json",
+  "apps/proxy/package.json",
+  "apps/relay/package.json",
+  "apps/web/package.json",
+  "packages/shared/package.json",
+];
+const expected = require("./package.json").version;
+if (!/^\d+\.\d+\.\d+$/.test(expected)) throw new Error(`Invalid package version: ${expected}`);
+for (const file of files) {
+  const actual = require(`./${file}`).version;
+  if (actual !== expected) throw new Error(`${file}: expected ${expected}, got ${actual}`);
+}
+NODE
 
 echo ""
 echo "=== Build release artifacts ==="
@@ -142,6 +179,11 @@ console.log(
   `relay files=${pack.files.length}, size=${pack.size}, webAssets=${webAssetCount}, fontShards=${fontShardCount}`,
 );
 NODE
+
+if [[ "$STATIC_ONLY" == "1" ]]; then
+  echo "release static package checks passed (tests and runtime smoke skipped)"
+  exit 0
+fi
 
 echo ""
 echo "=== Check installed command behavior with isolated HOME ==="

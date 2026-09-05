@@ -18,12 +18,36 @@ fi
 
 grep -q -- "--emergency" <<<"$release_script"
 grep -q "RELEASE_EMERGENCY" <<<"$release_script"
-grep -q "EMERGENCY RELEASE: skipping release:smoke" <<<"$release_script"
+grep -q "EMERGENCY RELEASE: skipping all tests, runtime smoke, Chaos and Android" <<<"$release_script"
 grep -q "pnpm release:check" <<<"$release_script"
+grep -q 'pnpm release:check --static-only' <<<"$release_script"
+grep -Fq 'git commit -m "release: ${TAG}" -m "[skip tests]"' <<<"$release_script"
 grep -q "Run mandatory process Chaos release gate" <<<"$release_script"
 grep -q "RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep" <<<"$release_script"
 grep -q "Run mandatory Android Chrome release gate" <<<"$release_script"
 grep -q "RELEASE_DEEP_SCOPE=mobile RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep" <<<"$release_script"
+
+emergency_checks="$(sed -n '/^if \[\[ "\$EMERGENCY" == "1" \]\]; then$/,/^fi$/p' scripts/release/release.sh | sed -n '/EMERGENCY RELEASE:/,/^else$/p')"
+grep -q 'pnpm format:check' <<<"$emergency_checks"
+grep -q 'pnpm lint' <<<"$emergency_checks"
+grep -q 'pnpm typecheck' <<<"$emergency_checks"
+grep -q 'pnpm release:check --static-only' <<<"$emergency_checks"
+[[ "$emergency_checks" == *"pnpm release:check --static-only"*"pnpm typecheck"* ]]
+if grep -qE '^[[:space:]]*(pnpm (test|release:smoke|release:deep)|RELEASE_DEEP_SCOPE=)' <<<"$emergency_checks"; then
+  echo "emergency release must not run test, smoke, Chaos or Android gates" >&2
+  exit 1
+fi
+
+check_script="$(cat scripts/release/check.sh)"
+grep -q -- '--static-only)' <<<"$check_script"
+grep -q 'Check package version consistency' <<<"$check_script"
+grep -q '^pnpm build$' <<<"$check_script"
+grep -q 'npm pack --dry-run --json --ignore-scripts' <<<"$check_script"
+grep -q 'release static package checks passed (tests and runtime smoke skipped)' <<<"$check_script"
+test_checks="$(sed -n '/^if \[\[ "\$STATIC_ONLY" != "1" \]\]; then$/,/^fi$/p' scripts/release/check.sh)"
+grep -q 'bash scripts/deploy/install-relay-render.test.sh' <<<"$test_checks"
+grep -q 'bash scripts/release/options.test.sh' <<<"$test_checks"
+grep -q 'node scripts/release/config.test.mjs' <<<"$test_checks"
 
 smoke_script="$(cat scripts/release/smoke.sh)"
 deep_script="$(cat scripts/release/deep.sh)"
@@ -89,6 +113,7 @@ grep -q 'profiles: {}' <<<"$main_workflow"
 grep -q 'relays: {}' <<<"$main_workflow"
 grep -q 'group: main-verification-' <<<"$main_workflow"
 grep -q 'cancel-in-progress: true' <<<"$main_workflow"
+[[ "$(grep -Fc "if: \${{ !contains(github.event.head_commit.message, '[skip tests]') }}" <<<"$main_workflow")" == "2" ]]
 grep -q '~/.dev-anywhere' <<<"$main_workflow"
 grep -q 'include-hidden-files: true' <<<"$main_workflow"
 if grep -q 'service_status | grep -q' <<<"$chaos_script"; then

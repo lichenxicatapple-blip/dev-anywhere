@@ -73,7 +73,7 @@ export function routeProxyMessage(
 
   // session-scoped envelope 在 proxy 与 sessionId 间建立关联; 全局广播 (session_list /
   // heartbeat / auth / sync_*) 没有 sessionId, 直接广播给所有 client。
-  if ("sessionId" in message) {
+  if (typeof message.sessionId === "string") {
     registry.addSessionToProxy(proxyId, message.sessionId);
   }
 

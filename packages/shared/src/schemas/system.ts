@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 // 心跳消息，空 payload
-export const HeartbeatPayloadSchema = z.object({}).strict();
+export const HeartbeatPayloadSchema = z.object({});
 
 export type HeartbeatPayload = z.infer<typeof HeartbeatPayloadSchema>;
 
@@ -25,10 +25,8 @@ export const SyncRequestPayloadSchema = z
 export type SyncRequestPayload = z.infer<typeof SyncRequestPayloadSchema>;
 
 // 同步响应，使用 z.unknown 数组避免循环引用；恢复协议稳定后再收紧类型
-export const SyncResponsePayloadSchema = z
-  .object({
-    messages: z.array(z.record(z.string(), z.unknown())),
-  })
-  .strict();
+export const SyncResponsePayloadSchema = z.object({
+  messages: z.array(z.record(z.string(), z.unknown())),
+});
 
 export type SyncResponsePayload = z.infer<typeof SyncResponsePayloadSchema>;

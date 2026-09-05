@@ -45,6 +45,20 @@ describe("ToolUseRequestPayloadSchema", () => {
     });
   });
 
+  it("strips nested approval descriptions but preserves arbitrary tool parameters", () => {
+    const parameters = { path: "README.md", options: { includeMetadata: true } };
+    const option = { optionId: "yes", name: "Continue once", kind: "allow_once" };
+    expect(
+      ToolUseRequestPayloadSchema.parse({
+        toolName: "Read",
+        toolId: "tool-1",
+        parameters,
+        displayHint: "Read a file",
+        options: [{ ...option, icon: "file" }],
+      }),
+    ).toEqual({ toolName: "Read", toolId: "tool-1", parameters, options: [option] });
+  });
+
   it("rejects missing toolName", () => {
     expect(() =>
       ToolUseRequestPayloadSchema.parse({

@@ -24,48 +24,40 @@ const DevicePreviewToolSuggestionsSchema = z
   .optional();
 
 export const DevicePreviewToolStatusSchema = z.union([
-  z
-    .object({
-      supported: z.literal(false),
-      available: z.literal(false),
-      interactive: z.literal(false),
-      command: z.never().optional(),
-      version: z.never().optional(),
-      error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
-      suggestions: DevicePreviewToolSuggestionsSchema,
-    })
-    .strict(),
-  z
-    .object({
-      supported: z.literal(true),
-      available: z.literal(false),
-      interactive: z.literal(false),
-      command: z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH).optional(),
-      version: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
-      error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
-      suggestions: DevicePreviewToolSuggestionsSchema,
-    })
-    .strict(),
-  z
-    .object({
-      supported: z.literal(true),
-      available: z.literal(true),
-      interactive: z.literal(true),
-      command: z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH),
-      version: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
-      error: z.never().optional(),
-      suggestions: DevicePreviewToolSuggestionsSchema,
-    })
-    .strict(),
+  z.object({
+    supported: z.literal(false),
+    available: z.literal(false),
+    interactive: z.literal(false),
+    command: z.never().optional(),
+    version: z.never().optional(),
+    error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
+    suggestions: DevicePreviewToolSuggestionsSchema,
+  }),
+  z.object({
+    supported: z.literal(true),
+    available: z.literal(false),
+    interactive: z.literal(false),
+    command: z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH).optional(),
+    version: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
+    error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
+    suggestions: DevicePreviewToolSuggestionsSchema,
+  }),
+  z.object({
+    supported: z.literal(true),
+    available: z.literal(true),
+    interactive: z.literal(true),
+    command: z.string().min(1).max(DEVICE_PREVIEW_PATH_MAX_LENGTH),
+    version: z.string().min(1).max(DEVICE_PREVIEW_VERSION_MAX_LENGTH).optional(),
+    error: z.never().optional(),
+    suggestions: DevicePreviewToolSuggestionsSchema,
+  }),
 ]);
 export type DevicePreviewToolStatus = z.infer<typeof DevicePreviewToolStatusSchema>;
 
-export const DevicePreviewCapabilitySchema = z
-  .object({
-    ios: DevicePreviewToolStatusSchema,
-    android: DevicePreviewToolStatusSchema,
-  })
-  .strict();
+export const DevicePreviewCapabilitySchema = z.object({
+  ios: DevicePreviewToolStatusSchema,
+  android: DevicePreviewToolStatusSchema,
+});
 export type DevicePreviewCapability = z.infer<typeof DevicePreviewCapabilitySchema>;
 
 const DevicePreviewTargetBaseSchema = z.object({
@@ -87,11 +79,11 @@ export const DevicePreviewTargetSchema = z.union([
   DevicePreviewTargetBaseSchema.extend({
     width: DevicePreviewScreenEdgeSchema,
     height: DevicePreviewScreenEdgeSchema,
-  }).strict(),
+  }),
   DevicePreviewTargetBaseSchema.extend({
     width: z.never().optional(),
     height: z.never().optional(),
-  }).strict(),
+  }),
 ]);
 export type DevicePreviewTarget = z.infer<typeof DevicePreviewTargetSchema>;
 
@@ -114,11 +106,11 @@ export const DevicePreviewSummarySchema = z.discriminatedUnion("state", [
   DevicePreviewSummaryBaseSchema.extend({
     state: z.literal("ready"),
     error: z.never().optional(),
-  }).strict(),
+  }),
   DevicePreviewSummaryBaseSchema.extend({
     state: z.literal("disconnected"),
     error: z.never().optional(),
-  }).strict(),
+  }),
 ]);
 export type DevicePreviewSummary = z.infer<typeof DevicePreviewSummarySchema>;
 
@@ -201,29 +193,24 @@ export type DevicePreviewInput = z.infer<typeof DevicePreviewInputSchema>;
 // `/proxy-stream` is a dedicated, authenticated image data channel. Its small JSON handshake and
 // flow-control messages deliberately stay outside RelayControlSchema: they must never be accepted
 // on the main `/proxy` or `/client` sockets.
-export const DevicePreviewStreamRegisterSchema = z
-  .object({
-    type: z.literal("device_preview_stream_register"),
-    proxyId: IdSchema,
-    connectionId: IdSchema,
-  })
-  .strict();
+export const DevicePreviewStreamRegisterSchema = z.object({
+  type: z.literal("device_preview_stream_register"),
+  proxyId: IdSchema,
+  connectionId: IdSchema,
+});
 export type DevicePreviewStreamRegister = z.infer<typeof DevicePreviewStreamRegisterSchema>;
 
 export const DevicePreviewStreamRegisterResponseSchema = z.discriminatedUnion("success", [
-  z
-    .object({
-      type: z.literal("device_preview_stream_register_response"),
-      success: z.literal(true),
-    })
-    .strict(),
-  z
-    .object({
-      type: z.literal("device_preview_stream_register_response"),
-      success: z.literal(false),
-      error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
-    })
-    .strict(),
+  z.object({
+    type: z.literal("device_preview_stream_register_response"),
+    success: z.literal(true),
+    error: z.never().optional(),
+  }),
+  z.object({
+    type: z.literal("device_preview_stream_register_response"),
+    success: z.literal(false),
+    error: z.string().min(1).max(DEVICE_PREVIEW_ERROR_MAX_LENGTH),
+  }),
 ]);
 export type DevicePreviewStreamRegisterResponse = z.infer<
   typeof DevicePreviewStreamRegisterResponseSchema

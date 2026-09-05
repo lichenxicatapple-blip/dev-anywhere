@@ -184,7 +184,7 @@ describe("Web Preview routing integration", () => {
     ]);
   });
 
-  it("routes scoped Web capability requests and strict responses", async () => {
+  it("preserves capability response metadata with authoritative scope and validated known fields", async () => {
     const { proxy, clientA, scopeA } = await setup();
     const forwardedPromise = waitForMessage(proxy);
     clientA.send(
@@ -204,6 +204,24 @@ describe("Web Preview routing integration", () => {
       refreshPath: false,
     });
 
+    const invalidResponse = waitForMessageType(proxy, "relay_error");
+    const unexpectedResponse = collectMessages(clientA, 1, 100);
+    proxy.send(
+      JSON.stringify({
+        type: "preview_capability_response",
+        requestId: forwarded.requestId,
+        scope: untrustedProxyScope,
+        success: true,
+        metadata: { generation: 2 },
+        capability: {
+          cloudflared: { available: "yes", command: "/usr/local/bin/cloudflared" },
+          cpolar: { available: false, error: "Cpolar not found" },
+        },
+      }),
+    );
+    expect(JSON.parse(await invalidResponse)).toMatchObject({ code: "INVALID_MESSAGE" });
+    expect(await unexpectedResponse).toEqual([]);
+
     const responsePromise = waitForMessageType(clientA, "preview_capability_response");
     proxy.send(
       JSON.stringify({
@@ -211,8 +229,13 @@ describe("Web Preview routing integration", () => {
         requestId: forwarded.requestId,
         scope: untrustedProxyScope,
         success: true,
+        metadata: { generation: 2 },
         capability: {
-          cloudflared: { available: true, command: "/usr/local/bin/cloudflared" },
+          cloudflared: {
+            available: true,
+            command: "/usr/local/bin/cloudflared",
+            diagnostics: { build: "future-build" },
+          },
           cpolar: { available: false, error: "Cpolar not found" },
         },
       }),
@@ -223,8 +246,13 @@ describe("Web Preview routing integration", () => {
       requestId: "capability-client-request",
       scope: scopeA,
       success: true,
+      metadata: { generation: 2 },
       capability: {
-        cloudflared: { available: true, command: "/usr/local/bin/cloudflared" },
+        cloudflared: {
+          available: true,
+          command: "/usr/local/bin/cloudflared",
+          diagnostics: { build: "future-build" },
+        },
         cpolar: { available: false, error: "Cpolar not found" },
       },
     });
@@ -325,6 +353,9 @@ describe("Web Preview routing integration", () => {
     proxy.send(
       JSON.stringify({
         type: "preview_state_event",
+        scope: untrustedProxyScope,
+        requestId: "forged-event-request",
+        metadata: { generation: 2 },
         epoch: "epoch-1",
         revision: 1,
         preview: {
@@ -335,6 +366,7 @@ describe("Web Preview routing integration", () => {
           tunnelProvider: "cloudflare",
           createdAt: 100,
           updatedAt: 100,
+          diagnostics: { build: "future-build" },
         },
       }),
     );
@@ -344,10 +376,20 @@ describe("Web Preview routing integration", () => {
       type: "preview_state_push",
       scope: scopeA,
       revision: 1,
+      metadata: { generation: 2 },
+      preview: { diagnostics: { build: "future-build" } },
     });
+    expect(receivedByA.at(-1)).not.toHaveProperty("requestId");
     expect(receivedByB).toEqual([
-      expect.objectContaining({ type: "preview_state_push", scope: scopeB, revision: 1 }),
+      expect.objectContaining({
+        type: "preview_state_push",
+        scope: scopeB,
+        revision: 1,
+        metadata: { generation: 2 },
+        preview: expect.objectContaining({ diagnostics: { build: "future-build" } }),
+      }),
     ]);
+    expect(receivedByB[0]).not.toHaveProperty("requestId");
   });
 
   it("drops unmatched and wrong-type responses instead of broadcasting them", async () => {
@@ -492,6 +534,7 @@ describe("Web Preview routing integration", () => {
         type: "preview_list_response",
         requestId: oldRequest.requestId,
         scope: untrustedProxyScope,
+        metadata: { generation: 2 },
         epoch: "old-epoch",
         revision: 1,
         previews: [],

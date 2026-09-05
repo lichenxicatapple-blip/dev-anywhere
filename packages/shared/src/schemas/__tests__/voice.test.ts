@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   VoiceConfigUpdateSchema,
+  VoiceCapabilitiesSchema,
   VoiceProviderConfigSchema,
   createBundledBailianVoiceCapabilities,
   voiceProviderValues,
@@ -43,7 +44,10 @@ describe("VoiceProviderConfigSchema", () => {
     ).toBe(3);
   });
 
-  it("rejects API keys in config responses", () => {
+  it.each([
+    ["apiKey", "sk-secret"],
+    ["clearApiKey", true],
+  ])("rejects write-only %s in config responses", (field, value) => {
     expect(() =>
       VoiceProviderConfigSchema.parse({
         provider: "aliyun-bailian",
@@ -52,9 +56,40 @@ describe("VoiceProviderConfigSchema", () => {
         asrModel: "qwen3-asr-flash-realtime",
         ttsModel: "cosyvoice-v3-flash",
         ttsVoice: "longanyang",
-        apiKey: "sk-secret",
+        [field]: value,
       }),
     ).toThrow();
+  });
+
+  it("strips descriptive config extensions without hiding invalid known fields", () => {
+    const config = {
+      provider: "aliyun-bailian",
+      configured: true,
+      region: "cn",
+      asrModel: "qwen3-asr-flash-realtime",
+      ttsModel: "cosyvoice-v3-flash",
+      ttsVoice: "longanyang",
+      turnIdleSeconds: 3,
+    };
+    expect(VoiceProviderConfigSchema.parse({ ...config, displayName: "Voice" })).toEqual(config);
+    expect(
+      VoiceProviderConfigSchema.safeParse({ ...config, configured: "yes", displayName: "Voice" })
+        .success,
+    ).toBe(false);
+  });
+});
+
+describe("VoiceCapabilitiesSchema", () => {
+  it("strips descriptions at both capability and option levels", () => {
+    const option = { value: "model-1", label: "Model", source: "official" };
+    expect(
+      VoiceCapabilitiesSchema.parse({
+        asrModels: [{ ...option, languages: ["en"] }],
+        ttsModels: [{ ...option, languages: ["en"] }],
+        ttsVoices: [{ ...option, languages: ["en"] }],
+        displayName: "Speech",
+      }),
+    ).toEqual({ asrModels: [option], ttsModels: [option], ttsVoices: [option] });
   });
 });
 

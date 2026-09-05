@@ -688,6 +688,52 @@ describe("Device Preview Relay data plane", () => {
     });
   });
 
+  it("preserves Device target metadata after validating known fields and replacing the scope", async () => {
+    const { proxy } = await setupProxy();
+    const client = await setupClient("device-target-metadata");
+    const forwardedPromise = waitForMessageType(proxy, "device_preview_targets_request");
+    client.send(
+      JSON.stringify({
+        type: "device_preview_targets_request",
+        requestId: "targets-with-metadata",
+        scope: previewScope(client),
+        refresh: false,
+      }),
+    );
+    const forwarded = JSON.parse(await forwardedPromise);
+    const target = {
+      targetId: "ios:simulator-a",
+      platform: "ios",
+      name: "Test phone",
+      model: "iPhone 17 Pro",
+      osVersion: "26.0",
+      interactive: true,
+      diagnostics: { build: "future-build" },
+    };
+    const response = {
+      type: "device_preview_targets_response",
+      requestId: forwarded.requestId,
+      scope: untrustedProxyScope,
+      success: true,
+      metadata: { generation: 2 },
+      targets: [target],
+    };
+
+    const invalidResponse = waitForMessageType(proxy, "relay_error");
+    const unexpectedResponse = collectMessages(client, 1, 100);
+    proxy.send(JSON.stringify({ ...response, targets: [{ ...target, interactive: "yes" }] }));
+    expect(JSON.parse(await invalidResponse)).toMatchObject({ code: "INVALID_MESSAGE" });
+    expect(await unexpectedResponse).toEqual([]);
+
+    const responsePromise = waitForMessageType(client, "device_preview_targets_response");
+    proxy.send(JSON.stringify(response));
+    expect(JSON.parse(await responsePromise)).toEqual({
+      ...response,
+      requestId: "targets-with-metadata",
+      scope: previewScope(client),
+    });
+  });
+
   it("never forwards Relay-internal stream lifecycle messages from a malicious client", async () => {
     const { proxy } = await setupProxy();
     const client = await setupClient("device-malicious-client");
@@ -1033,6 +1079,7 @@ describe("Device Preview Relay data plane", () => {
         leaseId: accessA.leaseId,
         inputSeq: 1,
         success: true,
+        metadata: { generation: 2 },
       }),
     );
     expect(await unexpectedDelayedAck).toEqual([]);
@@ -1045,13 +1092,17 @@ describe("Device Preview Relay data plane", () => {
         leaseId: accessA.leaseId,
         inputSeq: 2,
         success: true,
+        requestId: "forged-input-request",
+        metadata: { generation: 2 },
       }),
     );
-    expect(JSON.parse(await currentInputAckPromise)).toMatchObject({
+    expect(JSON.parse(await currentInputAckPromise)).toEqual({
+      type: "device_preview_input_ack",
       leaseId: accessA.leaseId,
       inputSeq: 2,
       success: true,
       scope: previewScope(clientA),
+      metadata: { generation: 2 },
     });
 
     abortA.abort();

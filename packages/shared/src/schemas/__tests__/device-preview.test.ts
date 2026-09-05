@@ -93,14 +93,29 @@ describe("device preview schemas", () => {
     }
   });
 
-  it("rejects the removed top-level preview support flag", () => {
+  it("strips capability and nested tool descriptions", () => {
     expect(
-      DevicePreviewCapabilitySchema.safeParse({
-        supported: true,
-        ios: { supported: true, available: true, interactive: true, command: "baguette" },
-        android: { supported: true, available: true, interactive: true, command: "adb" },
-      }).success,
-    ).toBe(false);
+      DevicePreviewCapabilitySchema.parse({
+        displayName: "Devices",
+        ios: {
+          supported: true,
+          available: true,
+          interactive: true,
+          command: "baguette",
+          displayName: "iOS",
+        },
+        android: {
+          supported: true,
+          available: true,
+          interactive: true,
+          command: "adb",
+          displayName: "Android",
+        },
+      }),
+    ).toEqual({
+      ios: { supported: true, available: true, interactive: true, command: "baguette" },
+      android: { supported: true, available: true, interactive: true, command: "adb" },
+    });
   });
 
   it("requires one Preview scope on every management request", () => {
@@ -223,7 +238,7 @@ describe("device preview schemas", () => {
     ).toMatchObject({ previewId: "preview-ios" });
   });
 
-  it("requires target dimensions as a pair and rejects removed target fields", () => {
+  it("requires paired target dimensions while stripping descriptive extensions", () => {
     const target = {
       targetId: "ios:simulator",
       platform: "ios",
@@ -234,20 +249,24 @@ describe("device preview schemas", () => {
     } as const;
 
     expect(DevicePreviewTargetSchema.safeParse(target).success).toBe(true);
+    expect(DevicePreviewTargetSchema.parse({ ...target, displayGroup: "Phone" })).toEqual(target);
     expect(
       DevicePreviewTargetSchema.safeParse({ ...target, width: 402, height: 874 }).success,
     ).toBe(true);
     for (const invalid of [
       { ...target, width: 402 },
       { ...target, height: 874 },
-      { ...target, state: "booted" },
-      { ...target, runtime: "iOS-26-4" },
     ]) {
-      expect(DevicePreviewTargetSchema.safeParse(invalid).success).toBe(false);
+      expect(
+        DevicePreviewTargetSchema.safeParse({ ...invalid, displayGroup: "Phone" }).success,
+      ).toBe(false);
     }
   });
 
   it("keeps capture errors out of the persistent preview summary", () => {
+    expect(
+      DevicePreviewSummarySchema.parse({ ...readyDevicePreview, displayGroup: "Phone" }),
+    ).toEqual(readyDevicePreview);
     expect(
       DevicePreviewSummarySchema.safeParse({
         ...readyDevicePreview,
@@ -259,7 +278,6 @@ describe("device preview schemas", () => {
       { ...readyDevicePreview, state: "disconnected", error: "mixed state" },
       { ...readyDevicePreview, state: "failed", error: "capture stopped" },
       { ...readyDevicePreview, state: "failed" },
-      { ...readyDevicePreview, targetName: "removed" },
     ]) {
       expect(DevicePreviewSummarySchema.safeParse(preview).success).toBe(false);
     }
@@ -350,7 +368,14 @@ describe("device preview schemas", () => {
     };
     expect(DevicePreviewStreamRegisterSchema.parse(register)).toEqual(register);
     expect(
-      DevicePreviewStreamRegisterSchema.safeParse({ ...register, unknownField: true }).success,
+      DevicePreviewStreamRegisterSchema.parse({ ...register, displayName: "Device stream" }),
+    ).toEqual(register);
+    expect(
+      DevicePreviewStreamRegisterSchema.safeParse({
+        ...register,
+        connectionId: 1,
+        displayName: "Device stream",
+      }).success,
     ).toBe(false);
     expect(
       DevicePreviewStreamFlowSchema.safeParse({
@@ -398,19 +423,15 @@ describe("device preview schemas", () => {
       expect(DevicePreviewStreamFlowSchema.safeParse(invalid).success).toBe(false);
     }
     expect(RelayControlSchema.safeParse(register).success).toBe(false);
-    expect(
-      DevicePreviewStreamRegisterResponseSchema.safeParse({
-        type: "device_preview_stream_register_response",
-        success: true,
-      }).success,
-    ).toBe(true);
-    expect(
-      DevicePreviewStreamRegisterResponseSchema.safeParse({
-        type: "device_preview_stream_register_response",
-        success: false,
-        error: "registration failed",
-      }).success,
-    ).toBe(true);
+    for (const result of [{ success: true }, { success: false, error: "registration failed" }]) {
+      const response = { type: "device_preview_stream_register_response", ...result };
+      expect(
+        DevicePreviewStreamRegisterResponseSchema.parse({
+          ...response,
+          displayName: "Device stream",
+        }),
+      ).toEqual(response);
+    }
     for (const invalid of [
       { type: "device_preview_stream_register_response", success: false },
       { type: "device_preview_stream_register_response", success: false, error: "" },
@@ -751,7 +772,9 @@ describe("device preview schemas", () => {
         errorCode: "UNKNOWN",
       },
     ] as const;
-    for (const message of valid) expect(RelayControlSchema.safeParse(message).success).toBe(true);
+    for (const message of valid) {
+      expect(RelayControlSchema.parse({ ...message, displayHint: "Device" })).toEqual(message);
+    }
 
     const invalid = [
       {
@@ -776,17 +799,13 @@ describe("device preview schemas", () => {
         success: false,
         error: "failed",
       },
-      {
-        type: "device_preview_rename_response",
-        ...mutationBase,
-        success: true,
-        name: "legacy echo",
-      },
       { type: "device_preview_reconnect_response", ...mutationBase, success: false, error: "" },
       { type: "device_preview_close_response", ...mutationBase, success: false },
     ] as const;
     for (const message of invalid)
-      expect(RelayControlSchema.safeParse(message).success).toBe(false);
+      expect(RelayControlSchema.safeParse({ ...message, displayHint: "Device" }).success).toBe(
+        false,
+      );
   });
 
   it("enforces strict stream, input, and control response states", () => {
@@ -855,7 +874,9 @@ describe("device preview schemas", () => {
       { ...claimIdentity, success: true, controlMode: "controller" },
       { ...claimIdentity, success: false, error: "failed", errorCode: "UNKNOWN" },
     ] as const;
-    for (const message of valid) expect(RelayControlSchema.safeParse(message).success).toBe(true);
+    for (const message of valid) {
+      expect(RelayControlSchema.parse({ ...message, displayHint: "Stream" })).toEqual(message);
+    }
 
     const invalid = [
       { ...urlIdentity, success: true, url: "/stream/token", leaseId: "lease-1" },
@@ -901,14 +922,7 @@ describe("device preview schemas", () => {
         error: "failed",
       },
       { type: "device_preview_stream_complete", ...streamIdentity, success: true },
-      {
-        type: "device_preview_stream_complete",
-        ...streamIdentity,
-        success: false,
-        error: "failed",
-        errorCode: "UNKNOWN",
-      },
-      { ...inputIdentity, success: false, error: "", errorCode: "UNKNOWN", legacy: true },
+      { ...inputIdentity, success: false, error: "", errorCode: "UNKNOWN" },
       { ...inputIdentity, success: false, error: "failed" },
       { ...claimIdentity, success: true, controlMode: "view_only" },
       {
@@ -921,7 +935,9 @@ describe("device preview schemas", () => {
       { ...claimIdentity, success: false, error: "failed" },
     ] as const;
     for (const message of invalid)
-      expect(RelayControlSchema.safeParse(message).success).toBe(false);
+      expect(RelayControlSchema.safeParse({ ...message, displayHint: "Stream" }).success).toBe(
+        false,
+      );
   });
 
   it("limits authoritative Device Preview states to persisted outcomes", () => {
@@ -932,13 +948,16 @@ describe("device preview schemas", () => {
     }
   });
 
-  it("rejects unknown top-level fields on scoped Device Preview protocol objects", () => {
-    const messages = [
-      {
+  it("keeps scoped Device Preview requests strict but accepts response and push descriptions", () => {
+    expect(
+      RelayControlSchema.safeParse({
         type: "device_preview_list_request",
         requestId: "list-1",
         scope: previewScope,
-      },
+        extra: true,
+      }).success,
+    ).toBe(false);
+    const messages = [
       {
         type: "device_preview_list_response",
         requestId: "list-1",
@@ -962,7 +981,15 @@ describe("device preview schemas", () => {
       },
     ] as const;
     for (const message of messages) {
-      expect(RelayControlSchema.safeParse({ ...message, legacy: true }).success).toBe(false);
+      expect(
+        RelayControlSchema.parse({
+          ...message,
+          displayHint: "Device",
+          ...("preview" in message
+            ? { preview: { ...message.preview, displayHint: "Phone" } }
+            : {}),
+        }),
+      ).toEqual(message);
     }
   });
 

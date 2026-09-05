@@ -11,10 +11,9 @@
 #   bash scripts/release/release.sh 0.2.2
 #   bash scripts/release/release.sh --emergency 0.2.2
 #
-# release:smoke 只包含确定性的单测、布局和桌面浏览器门禁，供开发阶段快速反馈。
-# Chaos 与 Android Chrome 是正式发布硬门禁，分别通过 release:deep 的 chaos/mobile scope
-# 执行。真实文件链路仍按需运行。紧急发布只跳过 release:smoke；构建、Chaos 和 Android
-# 均不可跳过。
+# 正常发布运行 release:smoke、Chaos 与 Android Chrome 全部门禁。
+# 紧急发布跳过所有测试和 CLI 运行型 smoke，仅运行格式、lint、类型、语法、构建与包检查。
+# 两种模式都验证版本、发布源、CHANGELOG、工作区和 tag；真实文件链路仍按需运行。
 # 也可以用 RELEASE_EMERGENCY=1 bash scripts/release/release.sh 0.2.2。
 # 幂等: 失败重跑会检测 commit / tag 是否已存在并跳过, 不会创建重复 commit。
 set -euo pipefail
@@ -54,7 +53,7 @@ if [[ -z "$TARGET_VERSION" ]]; then
   echo "usage: bash scripts/release/release.sh <version>" >&2
   echo "       bash scripts/release/release.sh --emergency <version>" >&2
   echo "  example: bash scripts/release/release.sh 0.2.2" >&2
-  echo "  emergency: skips release:smoke only; release:check, Chaos and Android still run" >&2
+  echo "  emergency: static quality, build and package checks only; skips all tests and runtime smoke" >&2
   exit 2
 fi
 
@@ -93,7 +92,7 @@ CURRENT_VERSION="$(node -p "require('./package.json').version")"
 echo "Current version: $CURRENT_VERSION"
 echo "Target version:  $TARGET_VERSION"
 if [[ "$EMERGENCY" == "1" ]]; then
-  echo "Mode:            emergency (release:smoke skipped)"
+  echo "Mode:            emergency (all tests and runtime smoke skipped)"
 fi
 
 if [[ "$CURRENT_VERSION" == "$TARGET_VERSION" ]]; then
@@ -142,21 +141,28 @@ if git ls-remote --tags origin "${TAG}" 2>/dev/null | grep -q "refs/tags/${TAG}\
   exit 1
 fi
 
-echo "=== Run release:check ==="
-pnpm release:check
-
 if [[ "$EMERGENCY" == "1" ]]; then
-  echo "=== EMERGENCY RELEASE: skipping release:smoke ==="
+  echo "=== EMERGENCY RELEASE: skipping all tests, runtime smoke, Chaos and Android ==="
+  echo "=== Run static code quality checks ==="
+  pnpm format:check
+  pnpm lint
+  echo "=== Run static release package checks ==="
+  pnpm release:check --static-only
+  echo "=== Typecheck against built workspace packages ==="
+  pnpm typecheck
 else
+  echo "=== Run release:check ==="
+  pnpm release:check
+
   echo "=== Run release:smoke ==="
   pnpm release:smoke
+
+  echo "=== Run mandatory process Chaos release gate ==="
+  RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
+
+  echo "=== Run mandatory Android Chrome release gate ==="
+  RELEASE_DEEP_SCOPE=mobile RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
 fi
-
-echo "=== Run mandatory process Chaos release gate ==="
-RELEASE_DEEP_SCOPE=chaos RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
-
-echo "=== Run mandatory Android Chrome release gate ==="
-RELEASE_DEEP_SCOPE=mobile RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
 
 echo "=== Bump package versions to ${TARGET_VERSION} ==="
 for f in "${PKG_FILES[@]}"; do
@@ -186,7 +192,12 @@ if git diff --cached --quiet; then
     exit 1
   fi
 else
-  git commit -m "release: ${TAG}"
+  if [[ "$EMERGENCY" == "1" ]]; then
+    # Skip Main Verification tests without GitHub's [skip ci], which would also suppress publishing.
+    git commit -m "release: ${TAG}" -m "[skip tests]"
+  else
+    git commit -m "release: ${TAG}"
+  fi
 fi
 
 RELEASE_SHA="$(git rev-parse HEAD)"
@@ -220,8 +231,8 @@ if [[ "${RELEASE_SKIP_PUSH:-}" == "1" ]]; then
   exit 0
 fi
 
-# 所有门禁过了 (release:check / release:smoke / Chaos / Android / tag不存在 / dirty 限定),
-# 直接推; 想跳过推的话用 RELEASE_SKIP_PUSH=1。
+# 当前模式的检查及发布源/tag/工作区校验已通过，直接推。
+# 正常模式包含全部测试；紧急模式仅静态检查。想跳过推的话用 RELEASE_SKIP_PUSH=1。
 echo ""
 echo "=== Pushing commit and tag ==="
 git push origin "$(git rev-parse --abbrev-ref HEAD)"

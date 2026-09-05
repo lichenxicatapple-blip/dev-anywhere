@@ -66,6 +66,7 @@ function previewEvents(): Array<Record<string, unknown>> {
         state: "ready",
         tunnelProvider: "cloudflare",
         publicUrl: "https://vite-preview.trycloudflare.com",
+        diagnostics: { build: "future-build" },
         createdAt: 1,
         updatedAt: 2,
       },
@@ -91,6 +92,7 @@ function previewEvents(): Array<Record<string, unknown>> {
         interactive: true,
         createdAt: 1,
         updatedAt: 2,
+        diagnostics: { build: "future-build" },
       },
     },
     {
@@ -99,7 +101,12 @@ function previewEvents(): Array<Record<string, unknown>> {
       revision: 2,
       previewId: "device-preview",
     },
-  ];
+  ].map((event) => ({
+    ...event,
+    scope: { proxyId: "forged-proxy", bindingId: "forged-binding" },
+    requestId: "forged-event-request",
+    metadata: { generation: 2 },
+  }));
 }
 
 function delayedChaos(): { chaos: RelayChaos; flush: () => void } {
@@ -467,6 +474,12 @@ describe("Proxy preview push routing", () => {
         bindingId: expect.any(String),
       })),
     );
+    for (const raw of client.sent) {
+      const push = JSON.parse(raw);
+      expect(push.metadata).toEqual({ generation: 2 });
+      expect(push).not.toHaveProperty("requestId");
+      if (push.preview) expect(push.preview.diagnostics).toEqual({ build: "future-build" });
+    }
 
     devicePreviewBridge.dispose();
     webPreviewRoutes.dispose();
@@ -635,6 +648,7 @@ describe("Proxy preview push routing", () => {
       type: "preview_list_response",
       requestId: "web-upstream",
       scope: { proxyId: "forged-proxy", bindingId: "forged-binding" },
+      metadata: { generation: 2 },
       epoch: "epoch-a",
       revision: 1,
       previews: [],
@@ -782,6 +796,7 @@ describe("Proxy preview push routing", () => {
       type: "device_preview_list_response",
       requestId: forwarded?.requestId,
       scope: { proxyId: "forged-proxy", bindingId: "forged-binding" },
+      metadata: { generation: 2 },
       epoch: "epoch-a",
       revision: 1,
       previews: [],

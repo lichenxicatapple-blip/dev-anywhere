@@ -10,25 +10,21 @@ export const ApprovalOptionKindSchema = z.enum([
 
 export type ApprovalOptionKind = z.infer<typeof ApprovalOptionKindSchema>;
 
-export const ApprovalOptionSchema = z
-  .object({
-    optionId: IdSchema,
-    name: z.string().min(1),
-    kind: ApprovalOptionKindSchema,
-  })
-  .strict();
+export const ApprovalOptionSchema = z.object({
+  optionId: IdSchema,
+  name: z.string().min(1),
+  kind: ApprovalOptionKindSchema,
+});
 
 export type ApprovalOption = z.infer<typeof ApprovalOptionSchema>;
 
 // 工具调用请求
-export const ToolUseRequestPayloadSchema = z
-  .object({
-    toolName: z.string(),
-    toolId: IdSchema,
-    parameters: z.record(z.string(), z.unknown()),
-    options: z.array(ApprovalOptionSchema).optional(),
-  })
-  .strict();
+export const ToolUseRequestPayloadSchema = z.object({
+  toolName: z.string(),
+  toolId: IdSchema,
+  parameters: z.record(z.string(), z.unknown()),
+  options: z.array(ApprovalOptionSchema).optional(),
+});
 
 export type ToolUseRequestPayload = z.infer<typeof ToolUseRequestPayloadSchema>;
 
@@ -51,12 +47,10 @@ export const ToolDenyPayloadSchema = z.object({
 export type ToolDenyPayload = z.infer<typeof ToolDenyPayloadSchema>;
 
 // 工具调用结果
-export const ToolResultPayloadSchema = z
-  .object({
-    toolId: IdSchema,
-    result: z.unknown(),
-    isError: z.boolean(),
-  })
-  .strict();
+export const ToolResultPayloadSchema = z.object({
+  toolId: IdSchema,
+  result: z.unknown(),
+  isError: z.boolean(),
+});
 
 export type ToolResultPayload = z.infer<typeof ToolResultPayloadSchema>;

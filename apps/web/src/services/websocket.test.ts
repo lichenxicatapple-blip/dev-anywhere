@@ -1,5 +1,11 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { encodeBinaryFrame, RelayCloseCode, RelayProtocolRejectReason } from "@dev-anywhere/shared";
+import {
+  encodeBinaryFrame,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  RelayCloseCode,
+  RelayProtocolRejectReason,
+} from "@dev-anywhere/shared";
+import { RelayClient } from "./relay-client";
 import { WebSocketManager } from "./websocket";
 
 class FakeWebSocket extends EventTarget {
@@ -87,6 +93,85 @@ describe("WebSocketManager", () => {
     expect(manager.isConnected()).toBe(true);
     expect(sockets[0]?.sent).toEqual(["client-register", "queued-user-input"]);
     manager.close();
+  });
+
+  it("admits an extended registration response and keeps the same connection past the ready deadline", async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: false });
+    const relay = new RelayClient(manager, "client-1");
+    manager.onStatusChange((_connected, status) => {
+      if (status?.transportOpen && !status.protocolReady) relay.register();
+    });
+    manager.connect("ws://relay/client");
+    expect(manager.send("queued-user-input", { queueWhenDisconnected: true })).toBe(false);
+    const ws = sockets[0]!;
+
+    try {
+      ws.open();
+      expect(ws.sent).toHaveLength(1);
+      expect(JSON.parse(ws.sent[0]!)).toMatchObject({ type: "client_register" });
+      ws.receive(
+        JSON.stringify({
+          type: "client_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+          status: "new",
+          relayDescription: { name: "Development Relay" },
+        }),
+      );
+
+      expect(manager.isConnected()).toBe(true);
+      expect(ws.sent).toHaveLength(2);
+      expect(ws.sent[1]).toBe("queued-user-input");
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(sockets).toHaveLength(1);
+      expect(ws.readyState).toBe(FakeWebSocket.OPEN);
+      expect(manager.isConnected()).toBe(true);
+    } finally {
+      manager.close();
+    }
+  });
+
+  it("stops without retrying when an extended registration response has invalid known fields", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(console, "warn").mockImplementation(() => {});
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: false });
+    const relay = new RelayClient(manager, "client-1");
+    const statuses: Array<{ connected: boolean; disconnectReason?: string }> = [];
+    manager.onStatusChange((connected, status) => {
+      statuses.push({ connected, ...status });
+      if (status?.transportOpen && !status.protocolReady) relay.register();
+    });
+    manager.connect("ws://relay/client");
+    manager.send("queued-user-input", { queueWhenDisconnected: true });
+    const ws = sockets[0]!;
+
+    try {
+      ws.open();
+      ws.receive(
+        JSON.stringify({
+          type: "client_register_response",
+          protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+          status: "restored",
+          proxyId: "proxy-a",
+          relayDescription: { name: "Development Relay" },
+        }),
+      );
+
+      expect(manager.isConnected()).toBe(false);
+      expect(ws.readyState).toBe(FakeWebSocket.CLOSED);
+      expect(ws.sent).toHaveLength(1);
+      expect(statuses.at(-1)).toMatchObject({
+        connected: false,
+        willReconnect: false,
+        disconnectReason: "protocol_mismatch",
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      expect(sockets).toHaveLength(1);
+    } finally {
+      manager.close();
+    }
   });
 
   it("times out a desktop connection which never becomes protocol-ready and uses backoff", async () => {

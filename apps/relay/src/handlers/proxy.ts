@@ -9,7 +9,6 @@ import {
   RelayCloseCode,
   RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
-  type PreviewScope,
   type ProxyProtocolRejectDirection,
   type RelayControlMessage,
 } from "@dev-anywhere/shared";
@@ -23,9 +22,9 @@ import type { PtySnapshotRouteRegistry } from "../pty-snapshot-route-registry.js
 import type { SessionHistoryRouteRegistry } from "../session-history-route-registry.js";
 import {
   isWebPreviewResponseMessage,
-  type WebPreviewResponseMessage,
   type WebPreviewRouteRegistry,
 } from "../web-preview-route-registry.js";
+import { rewriteForwardedControl } from "../forwarded-control.js";
 import { RELAY_VERSION } from "../version.js";
 import type { DevicePreviewBridge } from "../device-preview-bridge.js";
 import {
@@ -82,19 +81,16 @@ function isPreviewPushType(type: string): boolean {
   return PREVIEW_PUSH_TYPES.has(type);
 }
 
-function previewPushFromEvent(
-  event: PreviewEventMessage,
-  scope: PreviewScope,
-): RelayControlMessage {
+function previewPushType(event: PreviewEventMessage): RelayControlMessage["type"] {
   switch (event.type) {
     case "preview_state_event":
-      return { ...event, type: "preview_state_push", scope };
+      return "preview_state_push";
     case "preview_removed_event":
-      return { ...event, type: "preview_removed_push", scope };
+      return "preview_removed_push";
     case "device_preview_state_event":
-      return { ...event, type: "device_preview_state_push", scope };
+      return "device_preview_state_push";
     case "device_preview_removed_event":
-      return { ...event, type: "device_preview_removed_push", scope };
+      return "device_preview_removed_push";
   }
 }
 
@@ -102,6 +98,7 @@ function broadcastPreviewEvent(
   proxyId: string,
   sourceProxyWs: WebSocket,
   event: PreviewEventMessage,
+  raw: string,
   registry: RelayRegistry,
   chaos?: RelayChaos,
 ): number {
@@ -115,12 +112,12 @@ function broadcastPreviewEvent(
       registry.isCurrentClientBinding(clientWs.clientId, clientWs, scope);
     if (!isCurrentRoute()) continue;
 
-    const pushMessage = previewPushFromEvent(event, scope);
-    const push = serializeControl(pushMessage);
+    const type = previewPushType(event);
+    const push = rewriteForwardedControl(raw, { type, scope });
     if (chaos) {
       chaos.send(clientWs, push, {
         direction: "proxy_to_client",
-        type: pushMessage.type,
+        type,
         guard: isCurrentRoute,
       });
     } else if (isCurrentRoute() && clientWs.readyState === WebSocket.OPEN) {
@@ -490,6 +487,7 @@ export function handleProxyConnection(
           proxyWs.proxyId,
           proxyWs,
           result.message,
+          raw,
           registry,
           chaos,
         );
@@ -506,7 +504,7 @@ export function handleProxyConnection(
           rejectNotRegistered(proxyWs);
           return;
         }
-        devicePreviewBridge.handleProxyControl(proxyWs.proxyId, proxyWs, result.message);
+        devicePreviewBridge.handleProxyControl(proxyWs.proxyId, proxyWs, result.message, raw);
         return;
       }
       if (proxyWs.proxyId && result.message.type === "remote_file_stream_response") {
@@ -569,8 +567,8 @@ export function handleProxyConnection(
           let delivered = 0;
           for (const target of route.targets) {
             if (target.clientWs.readyState !== WebSocket.OPEN) continue;
-            const response = serializeControl({
-              ...result.message,
+            const response = rewriteForwardedControl(raw, {
+              type: result.message.type,
               requestId: target.requestId,
             });
             if (chaos) {
@@ -632,12 +630,11 @@ export function handleProxyConnection(
             );
             return;
           }
-          const response = {
-            ...result.message,
+          const responseRaw = rewriteForwardedControl(raw, {
+            type: result.message.type,
             requestId: route.clientRequestId,
             scope: route.scope,
-          } as WebPreviewResponseMessage;
-          const responseRaw = serializeControl(response);
+          });
           if (chaos) {
             chaos.send(route.clientWs, responseRaw, {
               direction: "proxy_to_client",

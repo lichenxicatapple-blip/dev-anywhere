@@ -634,7 +634,7 @@ describe("Message routing integration", () => {
     expect(clientReceived.entries[0].name).toBe("src");
   });
 
-  it("routes session_history_request/response full round trip", async () => {
+  it("preserves history response metadata while restoring the client request ID", async () => {
     const { proxy, client } = await setupBoundPair();
     const requestId = "history-round-trip";
 
@@ -651,17 +651,39 @@ describe("Message routing integration", () => {
       JSON.stringify({
         type: "session_history_response",
         requestId: proxyReceived.requestId,
+        scope: { proxyId: "forged-proxy", bindingId: "forged-binding" },
         success: true,
+        metadata: { catalogGeneration: 2 },
         sessions: [
-          { id: "s1", title: "test", projectDir: "/proj", updatedAt: 123, provider: "claude" },
+          {
+            id: "s1",
+            title: "test",
+            projectDir: "/proj",
+            updatedAt: 123,
+            provider: "claude",
+            providerMetadata: { model: "future-model" },
+          },
         ],
       }),
     );
 
     const clientReceived = JSON.parse(await clientMsgPromise);
-    expect(clientReceived.type).toBe("session_history_response");
-    expect(clientReceived.requestId).toBe(requestId);
-    expect(clientReceived.sessions[0].id).toBe("s1");
+    expect(clientReceived).toEqual({
+      type: "session_history_response",
+      requestId,
+      success: true,
+      metadata: { catalogGeneration: 2 },
+      sessions: [
+        {
+          id: "s1",
+          title: "test",
+          projectDir: "/proj",
+          updatedAt: 123,
+          provider: "claude",
+          providerMetadata: { model: "future-model" },
+        },
+      ],
+    });
   });
 
   it("fans concurrent session history requests into one upstream response and preserves client IDs", async () => {

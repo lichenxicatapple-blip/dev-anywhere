@@ -65,33 +65,27 @@ const WebPreviewTunnelSuggestionsSchema = z
   .optional();
 
 export const WebPreviewTunnelStatusSchema = z.discriminatedUnion("available", [
-  z
-    .object({
-      available: z.literal(true),
-      command: z.string().min(1).max(WEB_PREVIEW_PATH_MAX_LENGTH),
-      version: z.string().min(1).max(256).optional(),
-      error: z.never().optional(),
-      suggestions: WebPreviewTunnelSuggestionsSchema,
-    })
-    .strict(),
-  z
-    .object({
-      available: z.literal(false),
-      command: z.never().optional(),
-      version: z.never().optional(),
-      error: z.string().min(1).max(WEB_PREVIEW_ERROR_MAX_LENGTH),
-      suggestions: WebPreviewTunnelSuggestionsSchema,
-    })
-    .strict(),
+  z.object({
+    available: z.literal(true),
+    command: z.string().min(1).max(WEB_PREVIEW_PATH_MAX_LENGTH),
+    version: z.string().min(1).max(256).optional(),
+    error: z.never().optional(),
+    suggestions: WebPreviewTunnelSuggestionsSchema,
+  }),
+  z.object({
+    available: z.literal(false),
+    command: z.never().optional(),
+    version: z.never().optional(),
+    error: z.string().min(1).max(WEB_PREVIEW_ERROR_MAX_LENGTH),
+    suggestions: WebPreviewTunnelSuggestionsSchema,
+  }),
 ]);
 export type WebPreviewTunnelStatus = z.infer<typeof WebPreviewTunnelStatusSchema>;
 
-export const WebPreviewCapabilitySchema = z
-  .object({
-    cloudflared: WebPreviewTunnelStatusSchema,
-    cpolar: WebPreviewTunnelStatusSchema,
-  })
-  .strict();
+export const WebPreviewCapabilitySchema = z.object({
+  cloudflared: WebPreviewTunnelStatusSchema,
+  cpolar: WebPreviewTunnelStatusSchema,
+});
 export type WebPreviewCapability = z.infer<typeof WebPreviewCapabilitySchema>;
 
 export const WebPreviewSourceInputSchema = z.discriminatedUnion("kind", [
@@ -112,19 +106,18 @@ export const WebPreviewSourceInputSchema = z.discriminatedUnion("kind", [
 export type WebPreviewSourceInput = z.infer<typeof WebPreviewSourceInputSchema>;
 
 export const PreviewSourceSchema = z.discriminatedUnion("kind", [
-  z
-    .object({
-      kind: z.literal("local"),
-      url: LoopbackHttpUrlSchema,
-    })
-    .strict(),
-  z
-    .object({
-      kind: z.literal("static"),
-      rootPath: WebPreviewPathSchema,
-      entryPath: WebPreviewPathSchema,
-    })
-    .strict(),
+  z.object({
+    kind: z.literal("local"),
+    rootPath: z.never().optional(),
+    entryPath: z.never().optional(),
+    url: LoopbackHttpUrlSchema,
+  }),
+  z.object({
+    kind: z.literal("static"),
+    url: z.never().optional(),
+    rootPath: WebPreviewPathSchema,
+    entryPath: WebPreviewPathSchema,
+  }),
 ]);
 export type PreviewSource = z.infer<typeof PreviewSourceSchema>;
 
@@ -157,25 +150,25 @@ export const PreviewSummarySchema = z
     PreviewSummaryBaseSchema.extend({
       state: z.literal("starting"),
       ...PreviewSummaryInactiveShape,
-    }).strict(),
+    }),
     PreviewSummaryBaseSchema.extend({
       state: z.literal("ready"),
       publicUrl: PublicPreviewUrlSchema,
       error: z.never().optional(),
-    }).strict(),
+    }),
     PreviewSummaryBaseSchema.extend({
       state: z.literal("disconnected"),
       ...PreviewSummaryInactiveShape,
-    }).strict(),
+    }),
     PreviewSummaryBaseSchema.extend({
       state: z.literal("failed"),
       publicUrl: z.never().optional(),
       error: z.string().min(1).max(WEB_PREVIEW_ERROR_MAX_LENGTH),
-    }).strict(),
+    }),
     PreviewSummaryBaseSchema.extend({
       state: z.literal("stopping"),
       ...PreviewSummaryInactiveShape,
-    }).strict(),
+    }),
   ])
   .superRefine((preview, context) => {
     if (preview.state !== "ready") return;

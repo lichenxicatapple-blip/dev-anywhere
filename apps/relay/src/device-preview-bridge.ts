@@ -31,6 +31,7 @@ import {
   type DevicePreviewResponseMessage,
 } from "./device-preview-route-registry.js";
 import type { RelayRegistry } from "./registry.js";
+import { rewriteForwardedControl } from "./forwarded-control.js";
 
 const DEFAULT_TOKEN_TTL_MS = 20_000;
 const DEFAULT_START_TIMEOUT_MS = 10_000;
@@ -400,10 +401,15 @@ export class DevicePreviewBridge {
     }
   }
 
-  handleProxyControl(proxyId: string, proxyWs: WebSocket, message: RelayControlMessage): boolean {
+  handleProxyControl(
+    proxyId: string,
+    proxyWs: WebSocket,
+    message: RelayControlMessage,
+    raw: string,
+  ): boolean {
     if (!this.isCurrentProxyConnection(proxyId, proxyWs)) return this.isDeviceMessage(message);
     if (isDevicePreviewResponseMessage(message)) {
-      this.resolveManagementResponse(proxyId, proxyWs, message);
+      this.resolveManagementResponse(proxyId, proxyWs, message, raw);
       return true;
     }
     switch (message.type) {
@@ -414,7 +420,7 @@ export class DevicePreviewBridge {
         this.handleStreamComplete(proxyId, message);
         return true;
       case "device_preview_input_ack":
-        this.handleInputAck(proxyId, message);
+        this.handleInputAck(proxyId, message, raw);
         return true;
       default:
         // Every device_preview_* message has an explicit Relay-owned route. Never let an
@@ -776,6 +782,7 @@ export class DevicePreviewBridge {
     proxyId: string,
     proxyWs: WebSocket,
     message: DevicePreviewResponseMessage,
+    raw: string,
   ): void {
     if (message.type === "device_preview_close_response" && message.success) {
       // The current Proxy's authoritative resource cleanup applies even if the requesting
@@ -794,12 +801,12 @@ export class DevicePreviewBridge {
       this.isCurrentProxyConnection(proxyId, proxyWs) &&
       this.options.registry.isCurrentClientBinding(route.clientId, route.clientWs, route.scope);
     if (route.clientWs.readyState !== WebSocket.OPEN || !isCurrentRoute()) return;
-    const response = {
-      ...message,
+    const response = rewriteForwardedControl(raw, {
+      type: message.type,
       requestId: route.clientRequestId,
       scope: route.scope,
-    } as DevicePreviewResponseMessage;
-    this.sendClient(route.clientWs, serializeControl(response), message.type, isCurrentRoute);
+    });
+    this.sendClient(route.clientWs, response, message.type, isCurrentRoute);
   }
 
   private issueStreamUrl(
@@ -1200,6 +1207,7 @@ export class DevicePreviewBridge {
   private handleInputAck(
     proxyId: string,
     message: ControlMessage<"device_preview_input_ack">,
+    raw: string,
   ): void {
     const lease = this.leases.get(message.leaseId);
     if (
@@ -1210,11 +1218,11 @@ export class DevicePreviewBridge {
     ) {
       return;
     }
-    const response = {
-      ...message,
+    const response = rewriteForwardedControl(raw, {
+      type: message.type,
       scope: { proxyId: lease.proxyId, bindingId: lease.bindingId },
-    } as ControlMessage<"device_preview_input_ack">;
-    this.sendClient(lease.clientWs, serializeControl(response), message.type, () => {
+    });
+    this.sendClient(lease.clientWs, response, message.type, () => {
       return (
         this.leases.get(lease.leaseId) === lease &&
         lease.controller &&

@@ -47,15 +47,19 @@ describe("MessageEnvelopeSchema", () => {
       expect(() => MessageEnvelopeSchema.parse(env)).not.toThrow();
     });
 
-    it("rejects removed sessionId on a global envelope", () => {
+    it.each([
+      ["heartbeat", {}],
+      ["session_list", { sessions: [] }],
+      ["sync_response", { messages: [] }],
+    ])("rejects sessionId on the global %s envelope", (type, payload) => {
       expect(() =>
         MessageEnvelopeSchema.parse(
-          makeEnvelope("heartbeat", {}, { sessionId: "removed-session-scope" }),
+          makeEnvelope(type, payload, { sessionId: "unexpected-session-scope" }),
         ),
       ).toThrow();
     });
 
-    it("rejects unknown top-level fields on a session-scoped envelope", () => {
+    it("rejects unknown top-level fields on an operation envelope", () => {
       expect(() =>
         MessageEnvelopeSchema.parse(
           makeSessionEnvelope("user_input", { text: "hello" }, { proxyId: "unexpected" }),
@@ -104,6 +108,46 @@ describe("MessageEnvelopeSchema", () => {
         makeEnvelope("heartbeat", {}, { source: "client" }),
       );
       expect(result.source).toBe("client");
+    });
+  });
+
+  describe("descriptive extensions", () => {
+    it.each([
+      ["assistant_message", { turnId: "turn-1", revision: 1, text: "hello", status: "completed" }],
+      ["thinking", { text: "reasoning" }],
+      [
+        "tool_use_request",
+        { toolId: "tool-1", toolName: "Read", parameters: { path: "README.md" } },
+      ],
+      [
+        "assistant_tool_use",
+        { toolId: "tool-1", toolName: "Read", parameters: { path: "README.md" } },
+      ],
+      ["tool_result", { toolId: "tool-1", result: { content: "read result" }, isError: false }],
+      ["session_status", { sessionId: "test-session", state: "idle", lastActive: 1 }],
+    ])("strips extra envelope and payload descriptions from %s", (type, payload) => {
+      const expected = makeSessionEnvelope(type, payload);
+      const parsed = MessageEnvelopeSchema.parse({
+        ...expected,
+        diagnostic: { label: "trace" },
+        payload: { ...payload, displayHint: "details" },
+      });
+      expect(parsed).toEqual(expected);
+    });
+
+    it.each([
+      ["heartbeat", {}],
+      ["session_list", { sessions: [] }],
+      ["sync_response", { messages: [{ content: "history", providerDetails: { count: 1 } }] }],
+    ])("strips descriptions from global %s without changing its payload data", (type, payload) => {
+      const expected = makeEnvelope(type, payload);
+      expect(
+        MessageEnvelopeSchema.parse({
+          ...expected,
+          diagnostic: { label: "trace" },
+          payload: { ...payload, displayHint: "details" },
+        }),
+      ).toEqual(expected);
     });
   });
 

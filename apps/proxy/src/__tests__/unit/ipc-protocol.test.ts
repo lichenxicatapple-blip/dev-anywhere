@@ -201,6 +201,51 @@ describe("IPC Protocol", () => {
       ).toBe(false);
     });
 
+    it.each([
+      { success: true, sessionId: "s1", error: "contradictory failure" },
+      { success: false, error: "registration rejected", sessionId: "s1" },
+      {
+        success: false,
+        error: "registration rejected",
+        hook: {
+          provider: "claude",
+          sessionId: "s1",
+          hookUrl: "http://127.0.0.1:17654/hook",
+          marker: "marker-1",
+          token: "token-1",
+        },
+      },
+    ])("rejects conflicting known fields in an otherwise complete response: %j", async (fields) => {
+      const { IpcMessageSchema } = await importIpc();
+      expect(
+        IpcMessageSchema.safeParse({
+          type: "session_create_response",
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+          ...fields,
+          futureDescription: "Future response metadata",
+        }).success,
+      ).toBe(false);
+    });
+
+    it.each(["agent", "terminal"])(
+      "still rejects unknown fields in %s session create requests",
+      async (kind) => {
+        const { IpcMessageSchema } = await importIpc();
+        expect(
+          IpcMessageSchema.safeParse({
+            type: "session_create_request",
+            protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+            kind,
+            mode: "pty",
+            provider: "claude",
+            cwd: "/tmp/test",
+            pid: 12345,
+            futureLaunchOption: true,
+          }).success,
+        ).toBe(false);
+      },
+    );
+
     it("requires PTY subscribe and snapshot requestId round-trip fields", async () => {
       const { IpcMessageSchema } = await importIpc();
 
@@ -341,6 +386,87 @@ describe("IPC Protocol", () => {
   });
 
   describe("createIpcReader", () => {
+    it.each([
+      { success: true, sessionId: "s1" },
+      { success: false, error: "registration rejected" },
+    ])("reads an extended response and continues with notifications: %j", async (fields) => {
+      const { createIpcReader } = await importIpc();
+      const stream = new PassThrough();
+      const messages: unknown[] = [];
+      const protocolError = vi.fn();
+      const response = {
+        type: "session_create_response",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        ...fields,
+      };
+      const notification = { type: "bridge_status", connected: true };
+      const dispose = createIpcReader(
+        stream,
+        (msg) => messages.push(msg),
+        undefined,
+        protocolError,
+      );
+      try {
+        stream.end(
+          JSON.stringify({
+            ...response,
+            futureDescription: { label: "Future daemon metadata" },
+          }) +
+            "\n" +
+            JSON.stringify(notification) +
+            "\n",
+        );
+
+        await vi.waitFor(() => expect(messages).toEqual([response, notification]));
+        expect(protocolError).not.toHaveBeenCalled();
+      } finally {
+        dispose();
+        stream.destroy();
+      }
+    });
+
+    it.each([
+      { success: true, sessionId: "s1" },
+      { success: false, error: "registration rejected" },
+    ])("still rejects invalid known response fields with extensions: %j", async (fields) => {
+      const { createIpcReader } = await importIpc();
+      const stream = new PassThrough();
+      const messages: unknown[] = [];
+      const protocolError = vi.fn();
+      const response = {
+        type: "session_create_response",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        ...fields,
+        futureDescription: "Future daemon metadata",
+      };
+      const requiredField = fields.success ? "sessionId" : "error";
+      const notification = { type: "bridge_status", connected: true };
+      const dispose = createIpcReader(
+        stream,
+        (msg) => messages.push(msg),
+        undefined,
+        protocolError,
+      );
+      try {
+        const invalid = [
+          { ...response, protocolVersion: undefined },
+          { ...response, protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION + 1 },
+          { ...response, [requiredField]: undefined },
+          { ...response, [requiredField]: 123 },
+        ];
+        stream.end([...invalid, notification].map((item) => JSON.stringify(item) + "\n").join(""));
+
+        await vi.waitFor(() => expect(messages).toEqual([notification]));
+        expect(protocolError).toHaveBeenCalledTimes(invalid.length);
+        for (const [error] of protocolError.mock.calls) {
+          expect(error.message).toMatch(/IPC message validation failed/);
+        }
+      } finally {
+        dispose();
+        stream.destroy();
+      }
+    });
+
     it("parses complete NDJSON messages from a stream", async () => {
       const { createIpcReader, serializeIpc } = await importIpc();
       const stream = new PassThrough();
@@ -736,6 +862,80 @@ describe("Worker Protocol", () => {
   });
 
   describe("createWorkerReader", () => {
+    it.each(["worker_protocol_hello", "serve_protocol_hello"])(
+      "reads extended %s and continues with the next message",
+      async (type) => {
+        const { createWorkerReader, WORKER_IPC_PROTOCOL_VERSION } = await importIpc();
+        const stream = new PassThrough();
+        const messages: unknown[] = [];
+        const protocolError = vi.fn();
+        const hello = {
+          type,
+          protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+          sessionId: "s1",
+          pid: 12345,
+          ...(type === "worker_protocol_hello" ? { provider: "claude" } : {}),
+        };
+        const next =
+          type === "worker_protocol_hello"
+            ? { type: "worker_ready", pid: 12345 }
+            : { type: "worker_input", content: "continue" };
+        createWorkerReader(stream, (msg) => messages.push(msg), protocolError);
+        try {
+          const raw = JSON.stringify({
+            ...hello,
+            futureDescription: { label: "Future peer metadata" },
+          });
+          const splitPoint = Math.floor(raw.length / 2);
+          stream.write(raw.slice(0, splitPoint));
+          stream.end(raw.slice(splitPoint) + "\n" + JSON.stringify(next) + "\n");
+
+          await vi.waitFor(() => expect(messages).toEqual([hello, next]));
+          expect(protocolError).not.toHaveBeenCalled();
+        } finally {
+          stream.destroy();
+        }
+      },
+    );
+
+    it.each(["worker_protocol_hello", "serve_protocol_hello"])(
+      "still rejects invalid known %s fields with extensions",
+      async (type) => {
+        const { createWorkerReader, WORKER_IPC_PROTOCOL_VERSION } = await importIpc();
+        const stream = new PassThrough();
+        const messages: unknown[] = [];
+        const protocolError = vi.fn();
+        const hello = {
+          type,
+          protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+          sessionId: "s1",
+          pid: 12345,
+          ...(type === "worker_protocol_hello" ? { provider: "claude" } : {}),
+          futureDescription: "Future peer metadata",
+        };
+        createWorkerReader(stream, (msg) => messages.push(msg), protocolError);
+        try {
+          const invalid = [
+            { ...hello, protocolVersion: undefined },
+            { ...hello, protocolVersion: WORKER_IPC_PROTOCOL_VERSION + 1 },
+            { ...hello, sessionId: undefined },
+            { ...hello, pid: "12345" },
+            ...(type === "worker_protocol_hello" ? [{ ...hello, provider: undefined }] : []),
+          ];
+          const next = { type: "worker_stop" };
+          stream.end([...invalid, next].map((item) => JSON.stringify(item) + "\n").join(""));
+
+          await vi.waitFor(() => expect(messages).toEqual([next]));
+          expect(protocolError).toHaveBeenCalledTimes(invalid.length);
+          for (const [error] of protocolError.mock.calls) {
+            expect(error.message).toMatch(/Worker message validation failed/);
+          }
+        } finally {
+          stream.destroy();
+        }
+      },
+    );
+
     it("parses complete worker messages from a stream", async () => {
       const { WORKER_IPC_PROTOCOL_VERSION, createWorkerReader, serializeWorkerMsg } =
         await importIpc();
