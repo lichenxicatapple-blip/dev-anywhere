@@ -118,4 +118,5 @@ jobs:
             'src/__tests__/integration/daemon-cli-lifecycle-process.test.ts',
             'src/__tests__/integration/windows-process.test.ts'
           )
-          pnpm --filter @dev-anywhere/proxy exec vitest run @tests --testTimeout=60000 --hookTimeout=30000
+          # Native process suites share the runner's PowerShell/CIM capacity.
+          pnpm --filter @dev-anywhere/proxy exec vitest run @tests --maxWorkers=1 --testTimeout=60000 --hookTimeout=30000
