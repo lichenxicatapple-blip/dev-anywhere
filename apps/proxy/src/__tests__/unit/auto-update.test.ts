@@ -263,7 +263,11 @@ describe("auto-update restart recovery", () => {
     const failed = expect(pending).rejects.toThrow("timed out");
     expect(vi.mocked(spawn).mock.calls[0]?.[0]).toMatch(/cmd\.exe$/i);
     expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual([
-      "/d", "/s", "/v:off", "/c", expect.stringContaining("npm.cmd"),
+      "/d",
+      "/s",
+      "/v:off",
+      "/c",
+      expect.stringContaining("npm.cmd"),
     ]);
     expect(vi.mocked(spawn).mock.calls[0]?.[2]).toMatchObject({
       windowsHide: true,
