@@ -96,6 +96,34 @@ if grep -q 'service_status | grep -q' <<<"$chaos_script"; then
   exit 1
 fi
 
+start_proxy_serve_function="$(sed -n '/^start_proxy_serve() {$/,/^}$/p' scripts/dev/chaos.sh)"
+bash -s -- "$start_proxy_serve_function" <<'EOF'
+set -euo pipefail
+eval "$1"
+ROOT="$PWD"
+proxy_serve_action() {
+  printf '%s\n' '> tsx src/index.ts serve start' "$start_output"
+  return "$start_exit"
+}
+sleep() { return 0; }
+start_output='Service ready (PID 2428)'
+start_exit=0
+start_proxy_serve >/dev/null
+[[ "$STARTED_PROXY_PID" == 2428 ]]
+for start_output in 'Service started in background (PID 2428)' 'Service stopped'; do
+  if start_proxy_serve >/dev/null 2>&1; then
+    echo "Chaos accepted a non-ready CLI startup result" >&2
+    exit 1
+  fi
+done
+start_output='Service ready (PID 2428)'
+start_exit=1
+if start_proxy_serve >/dev/null 2>&1; then
+  echo "Chaos ignored the CLI startup exit code" >&2
+  exit 1
+fi
+EOF
+
 real_backend_config="$(cat apps/web/e2e/fixtures/real-backend-config.ts)"
 real_backend_specs="$(cat \
   apps/web/e2e/pc/chaos/integration/real-local-pty-chaos.spec.ts \

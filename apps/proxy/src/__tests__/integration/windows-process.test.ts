@@ -1,10 +1,45 @@
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { readProcessArgv } from "#src/common/managed-session-process.js";
 import { readParentProcessId } from "#src/common/process-ancestry.js";
 import { probeProcess } from "#src/common/process-probe.js";
 import { terminateOwnedProcessTree } from "#src/common/process-termination.js";
+
+const queries = vi.hoisted(
+  () =>
+    [] as Array<{
+      elapsedMs: number;
+      status: number | null;
+      signal: NodeJS.Signals | null;
+      errorCode?: string;
+      stdout: string;
+      stderr: string;
+    }>,
+);
+
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  return {
+    ...actual,
+    // Preserve every real call and return value; only retain bounded evidence for failed assertions.
+    spawnSync: (...args: Parameters<typeof actual.spawnSync>) => {
+      const started = performance.now();
+      const result = actual.spawnSync(...args);
+      if (args[0] === "powershell.exe") {
+        queries.push({
+          elapsedMs: Math.round(performance.now() - started),
+          status: result.status,
+          signal: result.signal,
+          errorCode: (result.error as NodeJS.ErrnoException | undefined)?.code,
+          stdout: String(result.stdout ?? "").slice(-2_048),
+          stderr: String(result.stderr ?? "").slice(-2_048),
+        });
+      }
+      return result;
+    },
+  };
+});
 
 describe.skipIf(process.platform !== "win32")("native Windows process management", () => {
   it("reads native argv and terminates only the directly owned process subtree", async () => {
@@ -25,9 +60,12 @@ describe.skipIf(process.platform !== "win32")("native Windows process management
       const [chunk] = await once(child.stdout, "data");
       const descendantPid = Number(String(chunk).trim());
       expect(descendantPid).toBeGreaterThan(0);
-      expect(readProcessArgv(child.pid!)?.slice(-args.length)).toEqual(args);
-      expect(readParentProcessId(child.pid!)).toBe(process.pid);
-      expect(readParentProcessId(descendantPid)).toBe(child.pid);
+      expect(
+        readProcessArgv(child.pid!)?.slice(-args.length),
+        JSON.stringify(queries.at(-1)),
+      ).toEqual(args);
+      expect(readParentProcessId(child.pid!), JSON.stringify(queries.at(-1))).toBe(process.pid);
+      expect(readParentProcessId(descendantPid), JSON.stringify(queries.at(-1))).toBe(child.pid);
       expect(terminateOwnedProcessTree(child)).toBe(true);
       await closed;
       expect(probeProcess(descendantPid).status).toBe("not-found");

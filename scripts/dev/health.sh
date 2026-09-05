@@ -194,9 +194,9 @@ check_proxy_status() {
   fi
 
   printf '%s\n' "$output" | indent
-  SERVICE_PID="$(printf '%s\n' "$output" | sed -n 's/.*Service: running (PID \([0-9][0-9]*\)).*/\1/p' | head -n 1)"
+  SERVICE_PID="$(printf '%s\n' "$output" | sed -n 's/.*Service: ready (PID \([0-9][0-9]*\)).*/\1/p' | head -n 1)"
 
-  if printf '%s\n' "$output" | grep -q "Service: running"; then
+  if printf '%s\n' "$output" | grep -q "Service: ready"; then
     ok "proxy serve daemon is running"
   else
     fail "proxy serve daemon is not running"

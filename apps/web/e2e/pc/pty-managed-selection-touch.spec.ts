@@ -721,7 +721,19 @@ test("a real touch drag moves one handle while a later light tap clears selectio
     await expect(page.locator('[data-slot="pty-selection-handle"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="pty-managed-selection-overlay"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="pty-selection-toolbar"]')).toHaveCount(0);
+  } finally {
+    await client.detach();
+  }
+});
 
+test("touch scrolling hides the selection toolbar and an outside tap clears selection", async ({
+  page,
+}) => {
+  const sessionId = "gate-managed-touch-outside-tap";
+  await prepareTerminal(page, sessionId);
+  const client = await page.context().newCDPSession(page);
+  try {
+    const terminalBox = await terminalRect(page);
     await establishSelection(page, client, sessionId);
     const quickPanStart = {
       x: terminalBox.left + terminalBox.width * 0.75,

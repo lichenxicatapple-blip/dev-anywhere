@@ -147,7 +147,10 @@ describe("service control", () => {
 
   it("rejects connections beyond the bounded pending-command capacity", async () => {
     const path = socketPath();
-    await managedServer(path);
+    const getStatus = vi.fn(() => status);
+    const onStop = vi.fn();
+    const server = await startServiceControl({ socketPath: path, getStatus, onStop });
+    cleanups.push(() => server.close());
     const sockets = Array.from({ length: 64 }, () => connect(path));
     cleanups.push(() => {
       for (const socket of sockets) socket.destroy();
@@ -161,7 +164,13 @@ describe("service control", () => {
           }),
       ),
     );
-    await expect(requestServiceControl(path, "status", 500)).rejects.toThrow("without a response");
+    // Destroying a socket with an unread request can surface as EOF or a reset, depending on OS.
+    await expect(requestServiceControl(path, "status", 500)).rejects.toThrow(
+      /^(Service control closed without a response|read ECONNRESET)$/,
+    );
+    expect(sockets.every((socket) => !socket.destroyed)).toBe(true);
+    expect(getStatus).not.toHaveBeenCalled();
+    expect(onStop).not.toHaveBeenCalled();
   });
 
   it("reassembles a fragmented response", async () => {

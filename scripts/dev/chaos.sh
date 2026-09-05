@@ -675,7 +675,7 @@ service_log_since_marker() {
 }
 
 service_pid() {
-  service_status | sed -n 's/.*Service: running (PID \([0-9][0-9]*\)).*/\1/p' | head -n 1
+  service_status | sed -n 's/.*Service: ready (PID \([0-9][0-9]*\)).*/\1/p' | head -n 1
 }
 
 proxy_relay_connected() {
@@ -709,7 +709,7 @@ proxy_relay_disconnect_observed() {
 }
 
 proxy_service_running() {
-  service_status | grep "Service: running" >/dev/null
+  service_status | grep "Service: ready" >/dev/null
 }
 
 started_proxy_process_alive() {
@@ -744,7 +744,7 @@ start_proxy_serve() {
     set -e
     printf '%s\n' "$output"
     STARTED_PROXY_PID="$(
-      printf '%s\n' "$output" | sed -n 's/.*Service started in background (PID \([0-9][0-9]*\)).*/\1/p' | tail -n 1
+      printf '%s\n' "$output" | sed -n 's/^Service ready (PID \([0-9][0-9]*\))$/\1/p' | tail -n 1
     )"
     if [ "$code" -eq 0 ] && [ -n "$STARTED_PROXY_PID" ]; then
       return 0

@@ -201,7 +201,7 @@ smoke_require_local_real_chain() {
     exit 1
   fi
 
-  if ! printf '%s\n' "$status" | grep -q "Service: running"; then
+  if ! printf '%s\n' "$status" | grep -q "Service: ready"; then
     echo "ERROR: local proxy serve daemon is not running" >&2
     printf '%s\n' "$status" >&2
     echo "Run: pnpm dev:restart" >&2
