@@ -18,6 +18,10 @@ import { fileURLToPath } from "node:url";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import { afterEach, describe, expect, it } from "vitest";
 import { tryAcquireFileLock } from "#src/common/file-lock.js";
+import {
+  processArgvMatchesManagedSession,
+  readProcessArgv,
+} from "#src/common/managed-session-process.js";
 import { buildProxyProfilePaths } from "#src/common/paths.js";
 import { requestServiceControl, type ServiceStatus } from "#src/common/service-control.js";
 
@@ -213,7 +217,7 @@ function runtimeIsFree(fixture: Fixture): boolean {
   lock.release();
   return true;
 }
-function fixtureLogTails(fixture: Fixture): string {
+function fixtureFailureLogs(fixture: Fixture, sessionId?: string): string {
   try {
     return readdirSync(fixture.paths.logDir, { withFileTypes: true })
       .filter((entry) => entry.isFile() && /^(service|terminal)-.*\.log$/.test(entry.name))
@@ -224,7 +228,28 @@ function fixtureLogTails(fixture: Fixture): string {
       }))
       .sort((a, b) => b.modified - a.modified)
       .slice(0, 4)
-      .map(({ name, path }) => `${name}:\n${readFileSync(path).subarray(-2_048).toString("utf8")}`)
+      .map(({ name, path }) => {
+        const contents = readFileSync(path, "utf8");
+        const related = contents
+          .split(/\r?\n/)
+          .filter(
+            (line) =>
+              (sessionId !== undefined && line.includes(sessionId)) ||
+              /process identity|identityVerified|load|pending|handshake|foreign.generation|handover/i.test(
+                line,
+              ),
+          );
+        if (related.length === 0) {
+          return `${name} (no matching events; head/tail):\n${contents.slice(0, 4_096)}\n...\n${contents.slice(-2_048)}`;
+        }
+        const events = related.join("\n");
+        // Preserve startup/load events even when later relay retries fill the end of the file.
+        const excerpt =
+          events.length <= 8_192
+            ? events
+            : `${events.slice(0, 6_144)}\n...[matching events truncated]...\n${events.slice(-2_048)}`;
+        return `${name} (${related.length} matching events):\n${excerpt}`;
+      })
       .join("\n");
   } catch (error) {
     return `Fixture logs unavailable: ${String(error)}`;
@@ -508,23 +533,43 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       throw new Error(`Timed out waiting for fixture output: ${output}`);
     };
     let agentPid: number | undefined;
+    let sessionId: string | undefined;
     let failed = false;
     let failure: unknown;
     let failureDetails = "";
-    const captureFailure = (): string =>
-      `Local terminal preservation failed during ${phase}:\n${JSON.stringify({
+    const captureFailure = (): string => {
+      const processState = {
         terminalPid: terminal.pid,
         terminalAlive: processIsAlive(terminal.pid),
         terminalExited: exited,
         agentPid,
         agentAlive: agentPid === undefined ? null : processIsAlive(agentPid),
-      })}\nTerminal output tail:\n${output.slice(-2_048)}\nFixture log tails:\n${fixtureLogTails(fixture).slice(0, 6_144)}`;
+      };
+      // This single query diagnoses the still-owned fixture, not the earlier daemon's decision.
+      const queryStarted = performance.now();
+      const argv = readProcessArgv(terminal.pid);
+      const postFailureIdentity = {
+        elapsedMs: Math.round(performance.now() - queryStarted),
+        argv,
+        matches:
+          argv === null || sessionId === undefined
+            ? null
+            : processArgvMatchesManagedSession(argv, {
+                id: sessionId,
+                mode: "pty",
+                provider: "kimi",
+                ptyOwner: "local-terminal",
+              }),
+      };
+      return `Local terminal preservation failed during ${phase}:\n${JSON.stringify(processState)}\nPost-failure identity query:\n${JSON.stringify(postFailureIdentity)}\nTerminal output tail:\n${output.slice(-2_048)}\nFixture lifecycle events:\n${fixtureFailureLogs(fixture, sessionId)}`;
+    };
     try {
       const ready = await waitForOutput(/FAKE_AGENT_READY:(\d+)/);
       agentPid = Number(ready[1]);
       const original = await readyService(fixture);
       expect(original.info?.sessions).toHaveLength(1);
       const originalSession = original.info!.sessions[0];
+      sessionId = originalSession.id;
       expect(originalSession.mode).toBe("pty");
       expect(originalSession.hasWorker).toBe(false);
       expect(JSON.parse(readFileSync(fixture.paths.sessionsPath, "utf8"))).toEqual(
