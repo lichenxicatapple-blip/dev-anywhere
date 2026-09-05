@@ -661,7 +661,7 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     writeFileSync(
       agentBin,
       process.platform === "win32"
-        ? `@echo off\r\n"${process.execPath}" "${agentPath}" %*\r\n`
+        ? `@echo off\r\n"${process.execPath}" "%~dp0fake-agent.mjs" %*\r\n`
         : `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agentPath)} "$@"\n`,
       { mode: 0o755 },
     );
