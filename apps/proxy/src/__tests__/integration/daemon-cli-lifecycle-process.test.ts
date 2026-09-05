@@ -461,17 +461,10 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     expect(replacement.info?.config.relayUrlSource).toBe("env");
   }, 30_000);
 
-  it("keeps a local terminal session and its original PTY child alive across restart", async ({
-    onTestFailed,
-  }) => {
+  it("keeps a local terminal session and its original PTY child alive across restart", async () => {
     const fixture = await createFixture();
     let phase = "ready";
-    onTestFailed(() => {
-      console.error(
-        `Local terminal preservation failed during ${phase}:\n${fixtureLogTails(fixture)}`,
-      );
-    });
-    // Keep this fixture's file logs so a native PTY failure remains diagnosable after cleanup.
+    // Enable real fixture file logs for failure diagnostics.
     delete fixture.env.VITEST;
     const agentPath = join(fixture.root, "fake-agent.mjs");
     copyFileSync(FAKE_AGENT_SOURCE, agentPath);
@@ -517,7 +510,15 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     let agentPid: number | undefined;
     let failed = false;
     let failure: unknown;
-    let failurePhase: string | undefined;
+    let failureDetails = "";
+    const captureFailure = (): string =>
+      `Local terminal preservation failed during ${phase}:\n${JSON.stringify({
+        terminalPid: terminal.pid,
+        terminalAlive: processIsAlive(terminal.pid),
+        terminalExited: exited,
+        agentPid,
+        agentAlive: agentPid === undefined ? null : processIsAlive(agentPid),
+      })}\nTerminal output tail:\n${output.slice(-2_048)}\nFixture log tails:\n${fixtureLogTails(fixture).slice(0, 6_144)}`;
     try {
       const ready = await waitForOutput(/FAKE_AGENT_READY:(\d+)/);
       agentPid = Number(ready[1]);
@@ -559,7 +560,8 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     } catch (error) {
       failed = true;
       failure = error;
-      failurePhase = phase;
+      failureDetails = captureFailure();
+      console.error(failureDetails);
     } finally {
       phase = "exit";
       try {
@@ -573,20 +575,14 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
         } else {
           failed = true;
           failure = error;
-          failurePhase = phase;
+          failureDetails = captureFailure();
+          console.error(failureDetails);
         }
       }
     }
     if (failed) {
-      phase = failurePhase ?? phase;
-      const logs = `Local terminal preservation failed during ${phase}:\n${fixtureLogTails(fixture)}`;
-      if (failure instanceof Error) {
-        // JSON reporters preserve errors, but may omit captured console output.
-        failure.stack = `${failure.stack ?? String(failure)}\n${logs}`;
-      } else {
-        console.error(logs);
-      }
-      throw failure;
+      // Preserve the original failure and put pre-cleanup evidence in the reporter's message.
+      throw new Error(`${String(failure)}\n${failureDetails}`, { cause: failure });
     }
   }, 30_000);
 });
