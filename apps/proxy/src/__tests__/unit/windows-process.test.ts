@@ -40,7 +40,12 @@ describe("Windows process query", () => {
     expect(spawnSync).toHaveBeenCalledWith(
       "powershell.exe",
       ["-NoProfile", "-NonInteractive", "-Command", expect.stringContaining("ProcessId = 123")],
-      expect.objectContaining({ timeout: 3_000, windowsHide: true }),
+      expect.objectContaining({ timeout: 5_000, windowsHide: true }),
+    );
+    expect(vi.mocked(spawnSync).mock.calls[0][1]).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("-Property ProcessId,ParentProcessId,CommandLine"),
+      ]),
     );
   });
 

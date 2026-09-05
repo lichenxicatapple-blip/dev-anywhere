@@ -12,14 +12,15 @@ export function readWindowsProcess(pid: number): WindowsProcess | null {
   const script = [
     "$ErrorActionPreference = 'Stop'",
     "[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)",
-    `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' | Select-Object ProcessId, ParentProcessId, CommandLine | ConvertTo-Json -Compress`,
+    `Get-CimInstance Win32_Process -Filter 'ProcessId = ${pid}' -Property ProcessId,ParentProcessId,CommandLine | Select-Object ProcessId, ParentProcessId, CommandLine | ConvertTo-Json -Compress`,
   ].join("; ");
   const result = spawnSync(
     "powershell.exe",
     ["-NoProfile", "-NonInteractive", "-Command", script],
     {
       encoding: "utf8",
-      timeout: 3_000,
+      // Include PowerShell/CIM cold startup in the bounded query budget.
+      timeout: 5_000,
       maxBuffer: 128 * 1024,
       windowsHide: true,
       stdio: ["ignore", "pipe", "ignore"],

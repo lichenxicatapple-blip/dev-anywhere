@@ -70,6 +70,10 @@ describe.skipIf(process.platform !== "win32")("native Windows process management
       await closed;
       expect(probeProcess(descendantPid).status).toBe("not-found");
       expect(probeProcess(process.pid).status).toBe("alive");
+      console.info(
+        "Native Windows process query durations (ms):",
+        queries.map((q) => q.elapsedMs),
+      );
     } finally {
       if (child.exitCode === null && child.signalCode === null) terminateOwnedProcessTree(child);
       await closed;
