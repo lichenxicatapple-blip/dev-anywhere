@@ -1252,20 +1252,16 @@ describe("SessionManager", () => {
       });
 
       expect(terminateManagedSession).not.toHaveBeenCalled();
-      expect(inspectManagedProcess).toHaveBeenCalledWith(4242, {
-        id: "same-generation-terminal",
-        mode: "pty",
-        provider: "claude",
-        ptyOwner: "local-terminal",
-      });
+      expect(inspectManagedProcess).not.toHaveBeenCalled();
       expect(reconnected.source).toBe("pending");
       expect(reconnected.session.id).toBe("same-generation-terminal");
       manager2.stopReaper();
     });
 
-    it("cleans an alive same-generation local PTY whose process identity is unverified", () => {
+    it("reserves a live local PTY without relying on an OS command-line query", () => {
       const removedIds: string[] = [];
       const terminateManagedSession = vi.fn();
+      const inspectManagedProcess = vi.fn(() => false);
       manager.createSession(
         "agent",
         "pty",
@@ -1281,15 +1277,37 @@ describe("SessionManager", () => {
         persistPath,
         allowSessionRuntimeHandover: { terminal: true, worker: true },
         isProcessAlive: () => true,
-        isManagedSessionProcess: () => false,
+        isManagedSessionProcess: inspectManagedProcess,
         terminateManagedSession,
         onSessionRemoved: (id) => removedIds.push(id),
       });
 
       expect(manager2.listSessions()).toEqual([]);
-      expect(removedIds).toEqual(["unverified-terminal"]);
+      expect(removedIds).toEqual([]);
+      expect(inspectManagedProcess).not.toHaveBeenCalled();
       expect(terminateManagedSession).not.toHaveBeenCalled();
-      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([
+        expect.objectContaining({ id: "unverified-terminal", pid: 4242 }),
+      ]);
+      // Even a new CLI with a reused PID must not inherit the pending session without its ID.
+      const fresh = manager2.claimLocalPtySession({
+        kind: "agent",
+        provider: "claude",
+        cwd: "/tmp/test",
+        pid: 4242,
+      });
+      expect(fresh.source).toBe("created");
+      expect(fresh.session.id).not.toBe("unverified-terminal");
+      expect(manager2.listSessions()).toEqual([fresh.session]);
+      const claimed = manager2.claimLocalPtySession({
+        kind: "agent",
+        provider: "claude",
+        cwd: "/tmp/test",
+        pid: 4242,
+        sessionId: "unverified-terminal",
+      });
+      expect(claimed.source).toBe("pending");
+      expect(manager2.getSession("unverified-terminal")).toEqual(claimed.session);
       manager2.stopReaper();
     });
 
@@ -1407,11 +1425,13 @@ describe("SessionManager", () => {
     });
 
     it.each([
-      ["provider", "codex", 4242],
-      ["pid", "claude", 4243],
+      ["provider", { provider: "codex" }],
+      ["pid", { pid: 4243 }],
+      ["cwd", { cwd: "/tmp/other" }],
+      ["kind", { kind: "terminal" }],
     ] as const)(
       "rejects a PTY reconnect whose %s differs from the persisted identity",
-      (_field, provider, pid) => {
+      (_field, changedIdentity) => {
         manager.createSession(
           "agent",
           "pty",
@@ -1432,11 +1452,12 @@ describe("SessionManager", () => {
         expect(() =>
           manager2.claimLocalPtySession({
             kind: "agent",
-            provider,
+            provider: "claude",
             cwd: "/tmp/test",
-            pid,
+            pid: 4242,
             name: "same generation",
             sessionId: "current-terminal",
+            ...changedIdentity,
           }),
         ).toThrow("PTY reconnect identity does not match the session owner");
         expect(manager2.getSession("current-terminal")).toBeUndefined();

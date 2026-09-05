@@ -878,16 +878,10 @@ export class SessionManager {
           continue;
         }
         const processAlive = this.isProcessAlive(info.pid);
-        const identityVerified =
-          processAlive &&
-          this.managedSessionProcess(info.pid, {
-            id: info.id,
-            mode: "pty",
-            provider: info.provider,
-            ptyOwner: "local-terminal",
-          });
-        if (identityVerified) {
-          // terminal 进程仍存活，会重连，保留磁盘数据但不加载到内存
+        if (processAlive) {
+          // This only reserves metadata; it neither activates a session nor signals its PID.
+          // The returning terminal must claim the exact persisted identity through IPC. An OS
+          // command-line query is not needed here and its failure must not discard a live PTY.
           this.pendingPtyReconnectMetadata.set(info.id, info);
           this.pendingPtyReconnectDeadlines.set(
             info.id,
@@ -901,8 +895,8 @@ export class SessionManager {
           // terminal 进程已死，清理数据
           this.onSessionRemoved?.(info.id);
           serviceLogger.info(
-            { sessionId: info.id, pid: info.pid, processAlive, identityVerified },
-            "PTY session cleaned on load because its process identity is unavailable",
+            { sessionId: info.id, pid: info.pid },
+            "PTY session cleaned on load because its process is no longer alive",
           );
         }
         continue;
