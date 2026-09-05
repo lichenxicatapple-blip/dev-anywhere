@@ -107,7 +107,10 @@ describe("Windows native argument decoding", () => {
     [String.raw`node.exe a\\\b d"e f"g h`, ["node.exe", String.raw`a\\\b`, "de fg", "h"]],
     [String.raw`node.exe a\\\"b c d`, ["node.exe", String.raw`a\"b`, "c", "d"]],
     [String.raw`node.exe a\\\\"b c" d e`, ["node.exe", String.raw`a\\b c`, "d", "e"]],
-    [String.raw`node.exe "C:\folder with spaces\\" next`, ["node.exe", "C:\\folder with spaces\\", "next"]],
+    [
+      String.raw`node.exe "C:\folder with spaces\\" next`,
+      ["node.exe", "C:\\folder with spaces\\", "next"],
+    ],
     [String.raw`node.exe C:\folder\ next`, ["node.exe", "C:\\folder\\", "next"]],
     [String.raw`node.exe "a""b"`, ["node.exe", 'a"b']],
   ])("decodes %s", (command, expected) => {
