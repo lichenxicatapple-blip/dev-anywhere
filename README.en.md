@@ -214,7 +214,7 @@ npm install -g @dev-anywhere/proxy@0.9.2
 dev-anywhere serve start --relay cloud
 ```
 
-After all development machines are updated, refresh the browser and restart any sessions that were still running before the upgrade.
+This upgrade ends terminal sessions started before the upgrade. After all development machines are updated, refresh the browser and restart those terminal sessions.
 
 You can then verify the version and connection on any development machine:
 

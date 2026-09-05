@@ -214,7 +214,7 @@ npm install -g @dev-anywhere/proxy@0.9.2
 dev-anywhere serve start --relay cloud
 ```
 
-全部开发机更新完成后，刷新浏览器，并重新启动升级前仍在运行的会话。
+本次升级会结束升级前启动的终端会话。全部开发机更新完成后，请刷新浏览器并重新启动这些终端会话。
 
 升级后可在任意开发机确认版本和连接状态：
 

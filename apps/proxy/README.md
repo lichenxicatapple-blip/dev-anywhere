@@ -142,7 +142,7 @@ npm install -g @dev-anywhere/proxy@0.9.2
 dev-anywhere serve start --relay cloud
 ```
 
-See the [upgrade guide](https://github.com/lichenxicatapple-blip/dev-anywhere/blob/main/README.en.md#upgrading) for the full steps and session impact.
+This upgrade ends existing terminal sessions; restart them after updating. See the [upgrade guide](https://github.com/lichenxicatapple-blip/dev-anywhere/blob/main/README.en.md#upgrading) for the full steps.
 
 If DEV Anywhere cannot detect an agent CLI automatically, set its persistent
 path under the top-level `agentCli` object:
