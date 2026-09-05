@@ -12,12 +12,9 @@ import { execFileSync } from "node:child_process";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
-import {
-  normalizeHistoryTitle,
-  readSessionMessagesPage,
-  readSessionMessages,
-  scanSessionHistory,
-} from "#src/serve/session-history.js";
+import { readSessionMessagesPage, readSessionMessages } from "#src/serve/session-history.js";
+import { normalizeHistoryTitle } from "#src/serve/history/title.js";
+import { scanSessionHistory } from "#src/serve/history/catalog.js";
 
 // 用临时目录模拟 ~/.claude/projects/ 结构进行测试
 // 实际结构: ~/.claude/projects/<encoded-path>/<session-id>.jsonl
@@ -47,11 +44,20 @@ describe("scanSessionHistory", () => {
     }
   });
 
-  function writeSession(encodedProject: string, sessionId: string, lines: string[]): string {
+  function writeSession(
+    encodedProject: string,
+    sessionId: string,
+    lines: string[],
+    cwd: string | null = "/test/myproject",
+  ): string {
     const projectDir = join(testDir, ".claude", "projects", encodedProject);
     mkdirSync(projectDir, { recursive: true });
     const filePath = join(projectDir, `${sessionId}.jsonl`);
-    writeFileSync(filePath, lines.join("\n") + "\n");
+    // Record a real cwd without guessing it from the encoded storage directory. Earlier
+    // native cwd records in a fixture remain authoritative; null explicitly omits cwd.
+    const records =
+      cwd === null ? lines : [...lines, JSON.stringify({ type: "progress", sessionId, cwd })];
+    writeFileSync(filePath, records.join("\n") + "\n");
     return filePath;
   }
 
@@ -68,13 +74,25 @@ describe("scanSessionHistory", () => {
     sessionId: string,
     state: { cwd: string; title?: string; lastPrompt?: string; updatedAt?: number },
   ): void {
-    const sessionDir = join(testDir, ".kimi-code", "sessions", "wd-test", sessionId);
+    const kimiHome = process.env.KIMI_CODE_HOME ?? join(testDir, ".kimi-code");
+    const sessionDir = join(kimiHome, "sessions", "wd-test", sessionId);
     mkdirSync(join(sessionDir, "agents", "main"), { recursive: true });
     writeFileSync(
       join(sessionDir, "state.json"),
       JSON.stringify({ id: sessionId, createdAt: 1, ...state }),
     );
-    writeFileSync(join(sessionDir, "agents", "main", "wire.jsonl"), "");
+    writeFileSync(
+      join(sessionDir, "agents", "main", "wire.jsonl"),
+      `${JSON.stringify({
+        type: "turn.prompt",
+        agentId: "main",
+        origin: { kind: "user" },
+        input: [
+          { type: "text", text: state.lastPrompt ?? state.title ?? "Continue this conversation" },
+        ],
+        time: state.updatedAt ?? 2,
+      })}\n`,
+    );
   }
 
   function countOpenFileDescriptors(): number | null {
@@ -158,7 +176,7 @@ describe("scanSessionHistory", () => {
     });
   });
 
-  it("keeps metadata-backed history entries when deduplicating repeated native sessions", async () => {
+  it("applies an explicit rename only to the matching native session identity", async () => {
     writeSession("-test-myproject", "claude-json-old", [
       JSON.stringify({ type: "user", message: { role: "user", content: "Same title" } }),
     ]);
@@ -177,6 +195,7 @@ describe("scanSessionHistory", () => {
           mode: "json",
           cwd: "/test/myproject",
           title: "Renamed JSON chat",
+          nameLocked: true,
           updatedAt: 123,
         },
       ]),
@@ -184,6 +203,7 @@ describe("scanSessionHistory", () => {
 
     const result = await scanSessionHistory({ metadataPath });
 
+    expect(result).toHaveLength(2);
     expect(result.find((session) => session.id === "claude-json-old")).toMatchObject({
       id: "claude-json-old",
       title: "Renamed JSON chat",
@@ -221,15 +241,14 @@ describe("scanSessionHistory", () => {
     expect(result[0].title).toBe("Hello");
   });
 
-  it("handles malformed JSONL gracefully", async () => {
+  it("excludes malformed and empty JSONL without hiding a valid conversation", async () => {
     writeSession("-test-proj", "good", [JSON.stringify({ type: "user", message: "Good session" })]);
     const projectDir = join(testDir, ".claude", "projects", "-test-proj");
     writeFileSync(join(projectDir, "bad.jsonl"), "{ not valid json }}}\n");
+    writeFileSync(join(projectDir, "empty.jsonl"), "");
 
     const result = await scanSessionHistory();
-    expect(result).toHaveLength(2);
-    expect(result.find((r) => r.id === "good")!.title).toBe("Good session");
-    expect(result.find((r) => r.id === "bad")!.title).toBe("未命名会话");
+    expect(result).toEqual([expect.objectContaining({ id: "good", title: "Good session" })]);
   });
 
   it("sorts results by updatedAt descending", async () => {
@@ -315,6 +334,17 @@ describe("scanSessionHistory", () => {
     expect(result[0].title).toBe("Check the DAG");
   });
 
+  it("does not invent a cwd from an encoded directory when native cwd is missing", async () => {
+    writeSession(
+      "-home-dev-projects-analytics-demo-jobs",
+      "missing-cwd",
+      [JSON.stringify({ type: "user", message: "Check the DAG" })],
+      null,
+    );
+
+    expect(await scanSessionHistory()).toEqual([]);
+  });
+
   it("filters restorable history entries whose cwd is under temporary directories", async () => {
     const privateTmpDir = tmpdir().startsWith("/private/") ? tmpdir() : join("/private", tmpdir());
 
@@ -383,7 +413,7 @@ describe("scanSessionHistory", () => {
     expect(result[0].title).toBe("What is this project about?");
   });
 
-  it("deduplicates sessions with same title + projectDir, keeps newest", async () => {
+  it("keeps different native IDs with the same title and project directory, newest first", async () => {
     const older = writeSession("-test-proj", "old1", [
       JSON.stringify({ type: "progress", cwd: "/test/proj", sessionId: "old1" }),
       JSON.stringify({ type: "user", message: "Same question" }),
@@ -396,14 +426,14 @@ describe("scanSessionHistory", () => {
     utimesSync(newer, new Date(2_000), new Date(2_000));
 
     const result = await scanSessionHistory();
-    expect(result).toHaveLength(1);
-    expect(result[0].id).toBe("new1");
-    expect(result[0].title).toBe("Same question");
+    expect(result.map((session) => ({ id: session.id, title: session.title }))).toEqual([
+      { id: "new1", title: "Same question" },
+      { id: "old1", title: "Same question" },
+    ]);
   });
 
-  it("does NOT dedup untitled sessions in the same project (keys fall back to session id)", async () => {
-    // All user messages are metadata, so the title falls back to the sessionId prefix.
-    const older = writeSession("-test-proj", "aaaaaaaa-1111", [
+  it("excludes metadata-only sessions instead of inventing unnamed conversations", async () => {
+    writeSession("-test-proj", "metadata-only", [
       JSON.stringify({
         type: "user",
         isMeta: true,
@@ -418,29 +448,39 @@ describe("scanSessionHistory", () => {
         },
       }),
     ]);
-    const newer = writeSession("-test-proj", "bbbbbbbb-2222", [
+    writeSession("-test-proj", "snapshot-only", [
+      JSON.stringify({ type: "file-history-snapshot" }),
+    ]);
+
+    expect(await scanSessionHistory()).toEqual([]);
+  });
+
+  it("keeps real conversations without a usable title as separate unnamed sessions", async () => {
+    writeSession("-test-proj", "assistant-only", [
+      JSON.stringify({ type: "assistant", message: { role: "assistant", content: "Done" } }),
+    ]);
+    writeSession("-test-proj", "single-character", [
+      JSON.stringify({ type: "user", message: { role: "user", content: "好" } }),
+    ]);
+    writeSession("-test-proj", "image-only", [
       JSON.stringify({
         type: "user",
-        isMeta: true,
-        message: { role: "user", content: "<command-name>/clear</command-name>" },
-      }),
-      JSON.stringify({
-        type: "user",
-        isMeta: true,
         message: {
           role: "user",
-          content: [{ type: "text", text: "Base directory for this skill" }],
+          content: [
+            { type: "image", source: { type: "url", url: "https://example.test/demo.png" } },
+          ],
         },
       }),
     ]);
-    utimesSync(older, new Date(1_000), new Date(1_000));
-    utimesSync(newer, new Date(2_000), new Date(2_000));
 
     const result = await scanSessionHistory();
-    // 没有真实标题时统一显示未命名，但去重键回退到 session id，避免不同会话被误折叠成一条。
-    expect(result).toHaveLength(2);
-    expect(result.map((r) => r.id).sort()).toEqual(["aaaaaaaa-1111", "bbbbbbbb-2222"]);
-    expect(result.every((r) => r.title === "未命名会话")).toBe(true);
+    expect(result.map((session) => session.id).sort()).toEqual([
+      "assistant-only",
+      "image-only",
+      "single-character",
+    ]);
+    expect(result.every((session) => session.title === "未命名会话")).toBe(true);
   });
 
   it("includes Codex sessions from ~/.codex/sessions", async () => {
@@ -734,22 +774,11 @@ describe("scanSessionHistory", () => {
 
   it("honors KIMI_CODE_HOME when listing Kimi sessions", async () => {
     process.env.KIMI_CODE_HOME = join(testDir, "custom-kimi-home");
-    const sessionDir = join(
-      process.env.KIMI_CODE_HOME,
-      "sessions",
-      "wd-custom",
-      "session_kimi_custom",
-    );
-    mkdirSync(join(sessionDir, "agents", "main"), { recursive: true });
-    writeFileSync(
-      join(sessionDir, "state.json"),
-      JSON.stringify({
-        id: "session_kimi_custom",
-        cwd: "/workspace/custom",
-        title: "自定义数据目录",
-        updatedAt: 123,
-      }),
-    );
+    writeKimiSession("session_kimi_custom", {
+      cwd: "/workspace/custom",
+      title: "自定义数据目录",
+      updatedAt: 123,
+    });
 
     const result = await scanSessionHistory();
 

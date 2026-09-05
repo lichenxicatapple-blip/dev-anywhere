@@ -2,7 +2,7 @@ import { readdir, mkdir } from "node:fs/promises";
 import { join, isAbsolute, normalize } from "node:path";
 import { ControlErrorCode, serializeControl, type CommandEntry } from "@dev-anywhere/shared";
 import type { SessionManager } from "../session-manager.js";
-import { scanSessionHistory } from "../session-history.js";
+import { scanSessionHistory } from "../history/catalog.js";
 import { discoverCommands } from "../command-discovery.js";
 import { serviceLogger } from "../../common/logger.js";
 import { classifyPathError } from "../path-errors.js";

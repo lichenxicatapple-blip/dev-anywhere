@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SessionManager } from "#src/serve/session-manager.js";
+import * as historyMetadata from "#src/serve/session-history-metadata.js";
 import { sessionRuntimeIpcVersionMatches } from "#src/common/session-runtime-ipc-version.js";
 import {
   TERMINAL_IPC_PROTOCOL_VERSION,
@@ -608,7 +609,7 @@ describe("SessionManager", () => {
       expect(manager.getSession(s.id)!.claudeSessionId).toBe("claude-abc");
     });
 
-    it("records restore metadata for JSON sessions when Claude session ID is captured", () => {
+    it("records the restore mode without saving an automatic session name as a user title", () => {
       const s = manager.createSession(
         "agent",
         "json",
@@ -628,9 +629,68 @@ describe("SessionManager", () => {
           provider: "claude",
           mode: "json",
           cwd: "/tmp/test",
-          title: "chat session",
         }),
       ]);
+      expect(data[0]).not.toHaveProperty("title");
+      expect(data[0]).not.toHaveProperty("nameLocked");
+      expect(manager.getSession(s.id)?.name).toBe("chat session");
+    });
+
+    it.each(["claude", "codex", "kimi"] as const)(
+      "records an explicit creation name when the %s native ID is captured",
+      (provider) => {
+        const session = manager.createSession(
+          "agent",
+          "json",
+          provider,
+          "/tmp/test",
+          ALIVE_PID,
+          "User title",
+          undefined,
+          undefined,
+          true,
+        );
+
+        if (provider === "claude") manager.setClaudeSessionId(session.id, "native-session");
+        else manager.setHistorySessionId(session.id, "native-session");
+
+        expect(historyMetadata.readSessionHistoryMetadata(historyMetadataPath)).toEqual([
+          expect.objectContaining({
+            nativeSessionId: "native-session",
+            provider,
+            title: "User title",
+            nameLocked: true,
+          }),
+        ]);
+      },
+    );
+
+    it("does not erase a stored user title when a resumed runtime gets an automatic name", () => {
+      const original = manager.createSession("agent", "json", "kimi", "/tmp/test", ALIVE_PID);
+      manager.setHistorySessionId(original.id, "native-kimi");
+      manager.renameSession(original.id, "Saved name");
+      manager.terminateSession(original.id);
+      const resumed = manager.createSession(
+        "agent",
+        "json",
+        "kimi",
+        "/tmp/test",
+        ALIVE_PID,
+        "~/test",
+      );
+
+      manager.setHistorySessionId(resumed.id, "native-kimi");
+
+      expect(historyMetadata.readSessionHistoryMetadata(historyMetadataPath)).toEqual([
+        expect.objectContaining({
+          nativeSessionId: "native-kimi",
+          devAnywhereSessionId: resumed.id,
+          title: "Saved name",
+          nameLocked: true,
+        }),
+      ]);
+      expect(manager.getSession(resumed.id)).toMatchObject({ name: "~/test" });
+      expect(manager.getSession(resumed.id)?.nameLocked).toBeUndefined();
     });
 
     it("stores resumed history session separately from the active Claude session", () => {
@@ -726,6 +786,64 @@ describe("SessionManager", () => {
   });
 
   describe("renameSession", () => {
+    it.each(["codex", "kimi"] as const)(
+      "persists a user rename through the %s historySessionId",
+      (provider) => {
+        const session = manager.createSession("agent", "json", provider, "/tmp/test", ALIVE_PID);
+        manager.setHistorySessionId(session.id, "native-session");
+
+        manager.renameSession(session.id, "User title");
+
+        expect(historyMetadata.readSessionHistoryMetadata(historyMetadataPath)).toEqual([
+          expect.objectContaining({
+            nativeSessionId: "native-session",
+            provider,
+            title: "User title",
+            nameLocked: true,
+          }),
+        ]);
+      },
+    );
+
+    it("updates both the source and current native IDs of a resumed Claude conversation", () => {
+      const session = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
+      manager.setHistorySessionId(session.id, "source-native");
+      manager.setClaudeSessionId(session.id, "current-native");
+
+      manager.renameSession(session.id, "User title");
+
+      const records = historyMetadata.readSessionHistoryMetadata(historyMetadataPath);
+      expect(records.map((record) => record.nativeSessionId).sort()).toEqual([
+        "current-native",
+        "source-native",
+      ]);
+      expect(records.every((record) => record.title === "User title" && record.nameLocked)).toBe(
+        true,
+      );
+    });
+
+    it("writes a rename once when the source and current native IDs are identical", () => {
+      const session = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID);
+      manager.setHistorySessionId(session.id, "same-native");
+      manager.setClaudeSessionId(session.id, "same-native");
+      const upsert = vi.spyOn(historyMetadata, "upsertSessionHistoryMetadata");
+      try {
+        manager.renameSession(session.id, "User title");
+
+        expect(upsert).toHaveBeenCalledTimes(1);
+        expect(upsert).toHaveBeenCalledWith(
+          historyMetadataPath,
+          expect.objectContaining({
+            nativeSessionId: "same-native",
+            title: "User title",
+            nameLocked: true,
+          }),
+        );
+      } finally {
+        upsert.mockRestore();
+      }
+    });
+
     it("stores a user locked display name and persists it", () => {
       const s = manager.createSession(
         "agent",

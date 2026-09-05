@@ -571,8 +571,8 @@ export class SessionManager {
     session.name = trimmed;
     session.nameLocked = true;
     this.save();
-    if (session.claudeSessionId) {
-      this.recordRestoreMetadata(session, session.claudeSessionId);
+    for (const nativeSessionId of new Set([session.claudeSessionId, session.historySessionId])) {
+      if (nativeSessionId) this.recordRestoreMetadata(session, nativeSessionId);
     }
     serviceLogger.info({ sessionId: id }, "Session renamed");
     return { success: true, name: trimmed };
@@ -585,7 +585,9 @@ export class SessionManager {
       provider: session.provider,
       mode: session.mode,
       cwd: session.cwd,
-      ...(session.name !== undefined ? { title: session.name } : {}),
+      ...(session.nameLocked === true && session.name !== undefined
+        ? { title: session.name, nameLocked: true }
+        : {}),
       updatedAt: Date.now(),
     });
   }

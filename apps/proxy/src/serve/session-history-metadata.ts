@@ -9,6 +9,7 @@ interface SessionHistoryMetadataRecord {
   mode: "pty" | "json";
   cwd: string;
   title?: string;
+  nameLocked?: boolean;
   updatedAt: number;
 }
 
@@ -49,6 +50,7 @@ function normalizeMetadataRecord(value: unknown): SessionHistoryMetadataRecord |
     ...(typeof record.title === "string" && record.title.trim()
       ? { title: record.title.trim() }
       : {}),
+    ...(record.nameLocked === true ? { nameLocked: true } : {}),
     updatedAt,
   };
 }
@@ -83,8 +85,12 @@ export function upsertSessionHistoryMetadata(
   if (!metadataPath) return;
   const records = readSessionHistoryMetadata(metadataPath);
   const key = metadataKey(record.provider, record.nativeSessionId);
+  const existing = records.find(
+    (candidate) => metadataKey(candidate.provider, candidate.nativeSessionId) === key,
+  );
+  const title = explicitTitle(record) ?? explicitTitle(existing);
   const next = [
-    record,
+    { ...record, title, nameLocked: title !== undefined ? true : undefined },
     ...records.filter(
       (existing) => metadataKey(existing.provider, existing.nativeSessionId) !== key,
     ),
@@ -105,15 +111,19 @@ export function applySessionHistoryMetadata<T extends HistorySessionLike>(
   }
   return sessions.map((session) => {
     const record = byNativeSession.get(metadataKey(session.provider, session.id));
+    const title = explicitTitle(record);
     return record
       ? {
           ...session,
-          title: record.title ?? session.title,
-          projectDir: record.cwd || session.projectDir,
+          ...(title !== undefined ? { title } : {}),
           preferredMode: record.mode,
         }
       : session;
   });
+}
+
+function explicitTitle(record: SessionHistoryMetadataRecord | undefined): string | undefined {
+  return record?.nameLocked === true ? record.title?.trim() || undefined : undefined;
 }
 
 function metadataKey(provider: ProviderId, nativeSessionId: string): string {

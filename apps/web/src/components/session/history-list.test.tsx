@@ -132,6 +132,99 @@ describe("HistoryList", () => {
     expect(groupHeaders[0].textContent).toContain("2");
   });
 
+  it.each(["claude", "codex", "kimi"] as const)(
+    "restores same-title %s histories using each row's native session ID",
+    async (provider) => {
+      const histories: HistorySession[] = ["native-first", "native-second"].map((id) => ({
+        id,
+        title: "Shared history title",
+        projectDir: "/Users/dev/project",
+        updatedAt: 1,
+        provider,
+        preferredMode: "json",
+      }));
+      for (const history of histories) {
+        createSession.mockResolvedValueOnce({
+          type: "session_create_response",
+          success: true,
+          sessionId: `restored-${history.id}`,
+          cwd: history.projectDir,
+          lastActive: 1,
+          kind: "agent",
+          mode: "json",
+          provider,
+        });
+      }
+      const { container } = renderHistoryList(histories);
+      expandHistory(container);
+
+      expect(container.querySelectorAll('[data-slot="history-group-header"]')).toHaveLength(1);
+      const rowName = `恢复会话：${histories[0].title}`;
+      expect(screen.getAllByRole("button", { name: rowName })).toHaveLength(2);
+
+      for (const [index, history] of histories.entries()) {
+        fireEvent.click(screen.getAllByRole("button", { name: rowName })[index]);
+        fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+
+        await waitFor(() => {
+          expect(navigateMock).toHaveBeenNthCalledWith(
+            index + 1,
+            `/chat/restored-${history.id}?mode=json`,
+          );
+        });
+        expect(createSession).toHaveBeenNthCalledWith(
+          index + 1,
+          expect.objectContaining({
+            kind: "agent",
+            provider,
+            cwd: history.projectDir,
+            mode: "json",
+            resumeSessionId: history.id,
+          }),
+        );
+      }
+      expect(createSession).toHaveBeenCalledTimes(2);
+      expect(useSessionStore.getState().sessions.map((session) => session.sessionId)).toEqual(
+        histories.map((history) => `restored-${history.id}`),
+      );
+    },
+  );
+
+  it("keeps same-title histories in their respective project directory groups", () => {
+    const projectDirs = ["/Users/dev/project-a", "/Users/dev/project-b"];
+    const { container } = renderHistoryList(
+      [projectDirs[0], projectDirs[1], projectDirs[0]].map((projectDir, index) => ({
+        id: `native-${index}`,
+        title: "Shared history title",
+        projectDir,
+        updatedAt: 3 - index,
+        provider: "codex",
+      })),
+    );
+    const sectionHeader = container.querySelector<HTMLElement>(
+      '[data-slot="history-section-header"]',
+    );
+    if (!sectionHeader) throw new Error("missing history section header");
+    fireEvent.click(sectionHeader);
+
+    const groupHeaders = Array.from(
+      container.querySelectorAll<HTMLElement>('[data-slot="history-group-header"]'),
+    );
+    expect(
+      groupHeaders.map((header) => header.querySelector("[title]")?.getAttribute("title")),
+    ).toEqual(projectDirs);
+
+    fireEvent.click(groupHeaders[0]);
+    expect(screen.getAllByRole("button", { name: "恢复会话：Shared history title" })).toHaveLength(
+      2,
+    );
+    fireEvent.click(groupHeaders[0]);
+    fireEvent.click(groupHeaders[1]);
+    expect(screen.getAllByRole("button", { name: "恢复会话：Shared history title" })).toHaveLength(
+      1,
+    );
+  });
+
   it("shows an honest initial loading placeholder and disables refresh", () => {
     const { container } = renderHistoryList([], "loading");
 

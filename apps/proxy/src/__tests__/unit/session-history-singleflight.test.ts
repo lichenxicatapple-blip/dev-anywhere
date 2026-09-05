@@ -1,9 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { createControlMessageHandlers } from "#src/serve/handlers/control-messages.js";
-import { scanSessionHistory } from "#src/serve/session-history.js";
+import { scanSessionHistory } from "#src/serve/history/catalog.js";
 import { createSessionManagerFake } from "./test-fakes.js";
 
-vi.mock("#src/serve/session-history.js", () => ({
+vi.mock("#src/serve/history/catalog.js", () => ({
   scanSessionHistory: vi.fn(),
 }));
 
