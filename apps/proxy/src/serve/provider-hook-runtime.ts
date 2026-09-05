@@ -28,6 +28,10 @@ interface ProviderHookRuntime {
     sessionId: string,
     provider: ProviderHookContext["provider"],
   ) => ProviderHookContext;
+  createTerminalHookContext: (
+    sessionId: string,
+    provider: ProviderHookContext["provider"],
+  ) => ProviderHookContext | undefined;
 }
 
 export async function createProviderHookRuntime(
@@ -45,7 +49,7 @@ export async function createProviderHookRuntime(
     port,
     registry: hookRegistry,
     permissionBroker: options.permissionBroker,
-    isSessionActive: (sessionId) => !!options.sessionManager.getSession(sessionId),
+    isSessionActive: (sessionId) => !!options.sessionManager.getRuntimeSession(sessionId),
     onEvent: (event) => {
       serviceLogger.info(
         {
@@ -87,5 +91,9 @@ export async function createProviderHookRuntime(
     hookEventRouter,
     hookServer,
     createHookContext,
+    // A live CLI retains its hook credentials in argv/env. Rebinding its IPC socket
+    // must not invalidate those credentials, including after a daemon restart.
+    createTerminalHookContext: (sessionId, provider) =>
+      hookRegistry.getSession(sessionId) ? undefined : createHookContext(sessionId, provider),
   };
 }

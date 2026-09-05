@@ -77,6 +77,11 @@ export class HookServer {
 
   close(): Promise<void> {
     if (!this.server) return Promise.resolve();
+    // HTTP approval requests belong to this daemon connection, not the CLI's lifetime.
+    // Settle them explicitly so an unanswered prompt cannot prevent a Proxy restart.
+    this.options.permissionBroker.cancelHookRequests(
+      "DEV Anywhere is restarting. Please request approval again.",
+    );
     const server = this.server;
     this.server = null;
     return new Promise((resolve, reject) => {

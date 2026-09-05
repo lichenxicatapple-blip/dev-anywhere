@@ -7,7 +7,7 @@ import {
   type SessionRuntimeIpcVersions,
 } from "./session-runtime-ipc-version.js";
 
-export function readLiveLocalPtySessionIds(
+export function readLivePtySessionIds(
   sessionsPath: string,
   sessionRuntimeIpcVersionPath: string,
   expectedProtocolVersions: SessionRuntimeIpcVersions,
@@ -36,7 +36,7 @@ export function readLiveLocalPtySessionIds(
     const result = PersistedSessionRecordSchema.safeParse(item);
     if (!result.success) continue;
     const session = result.data;
-    if (session.mode !== "pty" || session.ptyOwner !== "local-terminal") continue;
+    if (session.mode !== "pty") continue;
     if (probe(session.pid).status !== "not-found") ids.add(session.id);
   }
   return [...ids];

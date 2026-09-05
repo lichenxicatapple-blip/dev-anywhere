@@ -152,7 +152,7 @@ describe("session broadcast state source", () => {
       process.pid,
       undefined,
       undefined,
-      "local-terminal",
+      "proxy-hosted",
     );
     const envelopes: Array<{
       type: string;

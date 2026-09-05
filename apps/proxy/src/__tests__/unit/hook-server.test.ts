@@ -22,7 +22,7 @@ async function createTestServer(
   servers.push(server);
   const port = server.getListeningPort();
   if (!port) throw new Error("Hook test server did not expose a port");
-  return { registry, permissionBroker, url: `http://127.0.0.1:${port}/hook` };
+  return { server, registry, permissionBroker, url: `http://127.0.0.1:${port}/hook` };
 }
 
 async function waitForPendingPermission(
@@ -37,6 +37,26 @@ afterEach(async () => {
 });
 
 describe("HookServer", () => {
+  it("settles in-flight hook approvals when closing without discarding CLI credentials", async () => {
+    const { server, registry, permissionBroker, url } = await createTestServer();
+    const credentials = registry.registerSession("live-cli", "claude");
+    const response = fetch(url, {
+      method: "POST",
+      headers: { authorization: `Bearer ${credentials.token}`, "content-type": "application/json" },
+      body: JSON.stringify({
+        ...credentials,
+        token: undefined,
+        event: "PermissionRequest",
+        requestId: "before-restart",
+        payload: {},
+      }),
+    });
+    await waitForPendingPermission(permissionBroker, "live-cli");
+    await server.close();
+    expect((await (await response).json()).hookSpecificOutput.decision.behavior).toBe("deny");
+    expect(permissionBroker.listSession("live-cli")).toEqual([]);
+    expect(registry.verify(credentials)).not.toBeNull();
+  });
   it("accepts authenticated provider hook events", async () => {
     const events: AuthenticatedHookEvent[] = [];
     const { registry, url } = await createTestServer((event) => events.push(event));

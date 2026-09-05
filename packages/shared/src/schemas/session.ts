@@ -49,7 +49,7 @@ export function createSessionIdentitySchema<T extends z.ZodRawShape>(commonField
         kind: z.literal("terminal"),
         mode: z.literal("pty"),
         provider: z.literal("claude"),
-        ptyOwner: z.literal("local-terminal"),
+        ptyOwner: z.literal("proxy-hosted"),
       })
       .strict(),
   ]);

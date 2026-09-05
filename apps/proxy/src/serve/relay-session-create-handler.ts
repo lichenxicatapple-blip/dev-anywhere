@@ -31,7 +31,7 @@ import {
   resolveKimiAcpMode,
 } from "../providers/kimi.js";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
-import { buildHostedPtyArgs, type HostedPtyRegistry } from "./hosted-pty-registry.js";
+import { buildHostedPtyArgs } from "../common/pty-runtime.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
@@ -57,7 +57,6 @@ interface RelaySessionCreateHandlerDeps {
   relaySend: RelaySend;
   workerRegistry: WorkerRegistry;
   sessionManager: SessionManager;
-  hostedPtyRegistry: HostedPtyRegistry;
   terminalWorkerSpawner: TerminalWorkerSpawner;
   controlHandlers: ControlMessageHandlers;
   permissionBroker: PermissionBroker;
@@ -532,19 +531,22 @@ export class RelaySessionCreateHandler {
     const { cols, rows } = msg;
     const geometry = resolveInitialPtyGeometry({ cols, rows });
     let session: SessionInfo;
+    let startup: ReturnType<TerminalWorkerSpawner["start"]> | undefined;
     try {
       const hook = supportsProviderHooks(provider)
         ? this.deps.createHookContext(pendingId, provider)
         : undefined;
-      const pid = this.deps.hostedPtyRegistry.start({
+      startup = this.deps.terminalWorkerSpawner.start({
         sessionId: pendingId,
         kind: "agent",
         provider,
         cwd,
+        name,
         args: buildHostedPtyArgs(provider, resumeSessionId),
         permissionMode,
         nativeSessionId: resumeSessionId,
         hook,
+        env: this.deps.getProviderEnv(),
         ...geometry,
       });
       session = this.deps.sessionManager.createSession(
@@ -552,13 +554,14 @@ export class RelaySessionCreateHandler {
         "pty",
         provider,
         cwd,
-        pid,
+        startup.pid,
         name,
         pendingId,
         "proxy-hosted",
         nameLocked,
       );
     } catch (err) {
+      startup?.abort();
       this.cleanupPendingHostedPtySession(pendingId);
       const error = err instanceof Error ? err.message : String(err);
       this.deps.relaySend(
@@ -621,13 +624,12 @@ export class RelaySessionCreateHandler {
   }
 
   private cleanupPendingHostedPtySession(sessionId: string): void {
-    const killed = this.deps.hostedPtyRegistry.abortStartup(sessionId);
     rmSync(sessionPaths(sessionId).dir, { recursive: true, force: true });
     this.deps.cleanupHookContext(sessionId);
     this.deps.permissionBroker.cleanupSession(sessionId, "Hosted PTY failed to start");
     this.deps.agentStatusRegistry.delete(sessionId);
     serviceLogger.warn(
-      { sessionId, killed },
+      { sessionId },
       "Cleaned up pending hosted PTY session after startup failure",
     );
   }
@@ -640,10 +642,12 @@ export class RelaySessionCreateHandler {
     const nameLocked = requestedName !== undefined;
     const { cols, rows } = msg;
     const geometry = resolveInitialPtyGeometry({ cols, rows });
-
+    let startup: ReturnType<TerminalWorkerSpawner["start"]> | undefined;
     try {
-      const pid = this.deps.terminalWorkerSpawner.start({
+      startup = this.deps.terminalWorkerSpawner.start({
         sessionId: pendingId,
+        kind: "terminal",
+        provider: "claude",
         cwd,
         name,
         ...geometry,
@@ -653,10 +657,10 @@ export class RelaySessionCreateHandler {
         "pty",
         "claude",
         cwd,
-        pid,
+        startup.pid,
         name,
         pendingId,
-        "local-terminal",
+        "proxy-hosted",
         nameLocked,
       );
       this.deps.relaySend(
@@ -672,13 +676,14 @@ export class RelaySessionCreateHandler {
           kind: "terminal",
           mode: "pty",
           provider: "claude",
-          ptyOwner: "local-terminal",
+          ptyOwner: "proxy-hosted",
         }),
       );
       this.deps.broadcastSessionSync();
       this.deps.broadcastSessionList();
       serviceLogger.info({ sessionId: session.id, cwd }, "Shell terminal session created");
     } catch (err) {
+      startup?.abort();
       const error = err instanceof Error ? err.message : String(err);
       this.deps.relaySend(
         serializeControl({

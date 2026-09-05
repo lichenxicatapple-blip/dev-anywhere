@@ -29,7 +29,7 @@ export function toSessionListPayload(s: SessionInfo): SessionListEntry {
       kind: "terminal",
       mode: "pty",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
     };
   }
   if (s.mode === "pty") {
@@ -58,7 +58,7 @@ export function toSessionSyncEntry(s: SessionInfo): SessionSyncEntry {
       kind: "terminal",
       mode: "pty",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
     };
   }
   if (s.mode === "pty") {

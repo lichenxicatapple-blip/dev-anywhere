@@ -39,9 +39,7 @@ import { JsonObserver } from "./serve/json-observer.js";
 import { PermissionBroker } from "./serve/permission-broker.js";
 import { HookEventRouter } from "./serve/hook-event-router.js";
 import { AgentStatusRegistry } from "./serve/agent-status-registry.js";
-import { HostedPtyRegistry } from "./serve/hosted-pty-registry.js";
 import { TerminalWorkerSpawner } from "./serve/terminal-worker-spawner.js";
-import { applyPtyStateToSession, type PtySessionBridgeDeps } from "./serve/pty-session-bridge.js";
 import { broadcastSessionList, broadcastSessionSync } from "./serve/session-broadcast.js";
 import { createEventBridge } from "./serve/event-bridge.js";
 import { claimServiceRuntime, getProxyName } from "./serve/service-files.js";
@@ -144,7 +142,18 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const instanceId = randomUUID();
   await cleanupStalePreviewRuntimes(PREVIEW_RUN_DIR);
 
-  const permissionBroker = new PermissionBroker();
+  const permissionBroker = new PermissionBroker((sessionId) => {
+    const socket = terminalSockets.get(sessionId);
+    if (socket?.writable) {
+      socket.write(
+        serializeIpc({
+          type: "pty_approval_context",
+          sessionId,
+          waiting: permissionBroker.listSession(sessionId).length > 0,
+        }),
+      );
+    }
+  });
   const agentStatusRegistry = new AgentStatusRegistry();
   let unregisterHookSession: (sessionId: string) => void = () => {};
   // SessionManager 在构造期会清理磁盘中的失效记录；此时 relay/control runtime 尚未建立。
@@ -197,6 +206,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   sessionManager.startReaper();
 
   const terminalSockets = new Map<string, Socket>();
+  const terminalClaims = new Map<string, Socket>();
   const proxyName = getProxyName();
 
   // 连接中转服务器：优先用调用方传入的 relayUrl，否则从配置文件读取
@@ -353,7 +363,10 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     controlHandlers,
     permissionBroker,
   });
-  cleanupRemovedSessionRuntime = eventBridge.cleanupSessionResources;
+  cleanupRemovedSessionRuntime = (sessionId) => {
+    terminalClaims.delete(sessionId);
+    eventBridge.cleanupSessionResources(sessionId);
+  };
   const jsonObserver = new JsonObserver({
     changeSessionState: eventBridge.changeSessionState,
     emitAgentStatus: eventBridge.emitAgentStatus,
@@ -378,28 +391,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     getProviderEnv,
     setProviderCommands: (sessionId, commands) =>
       controlHandlers.setProviderCommands(sessionId, commands),
-  });
-  const ptyBridgeDeps: PtySessionBridgeDeps = {
-    changeSessionState: eventBridge.changeSessionState,
-    getSession: (sessionId) => sessionManager.getSession(sessionId),
-    getPendingApprovalCount: (sessionId) => permissionBroker.listSession(sessionId).length,
-    resolveInterruptedApprovals: (sessionId) =>
-      resolveInterruptedApprovals(
-        permissionBroker,
-        hookRuntime.hookEventRouter,
-        relayConnection,
-        sessionId,
-      ),
-    emitAgentStatus: eventBridge.emitAgentStatus,
-  };
-  const hostedPtyRegistry = new HostedPtyRegistry({
-    sessionManager,
-    relayConnection,
-    getProviderEnv,
-    touchSessionActivity: eventBridge.touchSessionActivity,
-    updateTerminalCwd: eventBridge.updateTerminalCwd,
-    applyPtyStateToSession: (sessionId, ptyState) =>
-      applyPtyStateToSession(ptyBridgeDeps, sessionId, ptyState),
   });
   const terminalWorkerSpawner = new TerminalWorkerSpawner();
   const terminalSubscriptionBacklog = new TerminalSubscriptionBacklog();
@@ -436,7 +427,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnection,
     relaySend,
     terminalSockets,
-    hostedPtyRegistry,
     terminalWorkerSpawner,
     broadcastSessionList: () => broadcastSessionList(relayConnection, sessionManager),
     broadcastSessionSync: () => broadcastSessionSync(relayConnection, sessionManager),
@@ -501,12 +491,13 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   const terminalConnectionDeps = {
     sessionManager,
     terminalSockets,
+    terminalClaims,
     terminalSubscriptionBacklog,
-    hostedPtyRegistry,
     relayConnection,
     permissionBroker,
     hookEventRouter: hookRuntime.hookEventRouter,
-    createHookContext: hookRuntime.createHookContext,
+    createHookContext: hookRuntime.createTerminalHookContext,
+    getProviderEnv,
     emitAgentStatus: eventBridge.emitAgentStatus,
     updateTerminalCwd: eventBridge.updateTerminalCwd,
     resolveInterruptedApprovals: (sessionId: string) =>
@@ -562,7 +553,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     hookServerClose: () => hookRuntime.hookServer.close(),
     relayConnectionClose: () => relayConnection.close(),
     workerRegistryDestroyAll: () => workerRegistry.destroyAll(),
-    hostedPtyRegistryDestroyAll: () => hostedPtyRegistry.destroyAll(),
     terminalAdmissionDestroyAll: () => terminalAdmission.destroyAll(),
     ipcServerClose: () => server.close(),
     sockPath: SOCK_PATH,

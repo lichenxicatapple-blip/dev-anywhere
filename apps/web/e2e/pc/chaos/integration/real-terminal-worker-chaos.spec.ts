@@ -175,7 +175,7 @@ test.describe("real terminal worker chaos", () => {
       rows: 24,
     });
     expect(session.kind).toBe("terminal");
-    expect(session.ptyOwner).toBe("local-terminal");
+    expect(session.ptyOwner).toBe("proxy-hosted");
 
     const output = new PtyOutputCapture(session);
     try {

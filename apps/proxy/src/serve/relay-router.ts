@@ -20,7 +20,6 @@ import type { ProviderHookContext, ProviderId } from "../providers/index.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import type { HookEventRouter } from "./hook-event-router.js";
 import type { AgentStatusRegistry } from "./agent-status-registry.js";
-import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import { terminateSessionByOwnership } from "./session-termination.js";
 import { RelayInputHandlers } from "./relay-input-handlers.js";
 import { RelayHistoryHandlers } from "./relay-history-handlers.js";
@@ -47,7 +46,6 @@ interface RelayRouterDeps {
   relayConnection: RelayConnection;
   relaySend: RelaySend;
   terminalSockets: Map<string, Socket>;
-  hostedPtyRegistry: HostedPtyRegistry;
   terminalWorkerSpawner: TerminalWorkerSpawner;
   broadcastSessionList: () => void;
   broadcastSessionSync: () => void;
@@ -98,7 +96,6 @@ export class RelayRouter {
       workerRegistry: deps.workerRegistry,
       relayConnection: deps.relayConnection,
       terminalSockets: deps.terminalSockets,
-      hostedPtyRegistry: deps.hostedPtyRegistry,
       jsonObserver: deps.jsonObserver,
       remoteFileStreamManager: deps.remoteFileStreamManager,
       remoteFileUploadManager: deps.remoteFileUploadManager,
@@ -121,7 +118,6 @@ export class RelayRouter {
       relaySend: deps.relaySend,
       workerRegistry: deps.workerRegistry,
       sessionManager: deps.sessionManager,
-      hostedPtyRegistry: deps.hostedPtyRegistry,
       terminalWorkerSpawner: deps.terminalWorkerSpawner,
       controlHandlers: deps.controlHandlers,
       permissionBroker: deps.permissionBroker,
@@ -450,9 +446,7 @@ export class RelayRouter {
     if (session.mode === "pty") {
       // PTY 会话直接把 Ctrl+C 写入 PTY stdin，避免杀掉 terminal wrapper 进程
       const ts = this.deps.terminalSockets.get(sid);
-      if (this.deps.hostedPtyRegistry.write(sid, "\x03")) {
-        serviceLogger.info({ sessionId: sid }, "session_worker_abort: Ctrl+C sent to hosted PTY");
-      } else if (ts?.writable) {
+      if (ts?.writable) {
         ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x03" }));
         serviceLogger.info({ sessionId: sid }, "session_worker_abort: Ctrl+C sent to PTY");
       } else {
@@ -500,12 +494,7 @@ export class RelayRouter {
     // PTY 会话：发 Shift+Tab (CSI Z) 让 claude CLI 循环 permission mode
     // mode 字段当前保留但不使用 —— Claude CLI 仅支持循环键，无法一键直选档位
     const ts = this.deps.terminalSockets.get(sid);
-    if (this.deps.hostedPtyRegistry.write(sid, "\x1b[Z")) {
-      serviceLogger.info(
-        { sessionId: sid, mode },
-        "Permission mode cycle: Shift+Tab sent to hosted PTY",
-      );
-    } else if (ts?.writable) {
+    if (ts?.writable) {
       ts.write(serializeIpc({ type: "pty_input", sessionId: sid, data: "\x1b[Z" }));
       serviceLogger.info({ sessionId: sid, mode }, "Permission mode cycle: Shift+Tab sent to PTY");
     } else {
@@ -522,9 +511,7 @@ export class RelayRouter {
     if (!sid) return;
 
     const ts = this.deps.terminalSockets.get(sid);
-    if (this.deps.hostedPtyRegistry.snapshot(sid, requestId)) {
-      serviceLogger.info({ sessionId: sid, requestId }, "Subscribe handled by hosted PTY");
-    } else if (ts?.writable) {
+    if (ts?.writable) {
       ts.write(serializeIpc({ type: "pty_subscribe", sessionId: sid, requestId }));
       serviceLogger.info({ sessionId: sid, requestId }, "Subscribe forwarded to terminal");
     } else {
@@ -538,9 +525,6 @@ export class RelayRouter {
     const cols = msg.cols;
     const rows = msg.rows;
     if (!sid || !cols || !rows) return;
-    if (this.deps.hostedPtyRegistry.resize(sid, cols, rows)) {
-      return;
-    }
     const ts = this.deps.terminalSockets.get(sid);
     if (ts?.writable) {
       ts.write(serializeIpc({ type: "pty_resize_request", sessionId: sid, cols, rows }));

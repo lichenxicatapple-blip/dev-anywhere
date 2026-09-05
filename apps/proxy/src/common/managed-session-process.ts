@@ -2,11 +2,13 @@ import { execFileSync } from "node:child_process";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { closeSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "../cli-args.js";
+import { parseTerminalWorkerCliArgs } from "../terminal-worker-args.js";
 import type { ProviderId } from "../providers/types.js";
 import { parseWindowsCommandLine, readWindowsProcess } from "./windows-process.js";
 
 export interface ManagedSessionProcessIdentity {
   id: string;
+  kind?: "agent" | "terminal";
   mode: "pty" | "json";
   provider?: ProviderId;
   ptyOwner?: "local-terminal" | "proxy-hosted";
@@ -73,35 +75,6 @@ function readOption(args: readonly string[], name: string): string | null {
   return value && !value.startsWith("--") ? value : null;
 }
 
-function terminalWorkerSessionId(args: readonly string[]): string | null {
-  let index = 0;
-  while (index < args.length) {
-    const arg = args[index];
-    if (arg === "--profile") {
-      if (!args[index + 1]) return null;
-      index += 2;
-      continue;
-    }
-    if (arg?.startsWith("--profile=")) {
-      if (arg.length === "--profile=".length) return null;
-      index += 1;
-      continue;
-    }
-    if (arg === "--") {
-      index += 1;
-    }
-    break;
-  }
-
-  const workerArgs = args.slice(index);
-  if (workerArgs.length !== 5) return null;
-  const [sessionId, cwd, name, cols, rows] = workerArgs;
-  if (!sessionId || !cwd || !name) return null;
-  if (!Number.isInteger(Number(cols)) || Number(cols) <= 0) return null;
-  if (!Number.isInteger(Number(rows)) || Number(rows) <= 0) return null;
-  return sessionId;
-}
-
 export function processArgvMatchesManagedSession(
   argv: readonly string[],
   identity: ManagedSessionProcessIdentity,
@@ -117,14 +90,18 @@ export function processArgvMatchesManagedSession(
     return readOption(controlArgs, "--provider") === identity.provider;
   }
 
-  if (identity.ptyOwner !== "local-terminal") return false;
-  const terminalWorkerIndex = findEntryIndex(argv, "terminal-worker");
-  if (terminalWorkerIndex >= 0) {
+  if (identity.ptyOwner === "proxy-hosted") {
+    const terminalWorkerIndex = findEntryIndex(argv, "terminal-worker");
+    if (terminalWorkerIndex < 0) return false;
+    const worker = parseTerminalWorkerCliArgs(argv.slice(terminalWorkerIndex + 1));
     return (
-      identity.provider === "claude" &&
-      terminalWorkerSessionId(argv.slice(terminalWorkerIndex + 1)) === identity.id
+      worker !== null &&
+      worker.sessionId === identity.id &&
+      worker.kind === identity.kind &&
+      worker.provider === identity.provider
     );
   }
+  if (identity.ptyOwner !== "local-terminal") return false;
 
   // A terminal started from the local CLI learns its session id only after it is running, so the
   // id cannot be present in argv. Parse the actual DEV Anywhere invocation and require its command

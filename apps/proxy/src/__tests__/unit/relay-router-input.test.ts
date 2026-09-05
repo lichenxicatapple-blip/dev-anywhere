@@ -48,7 +48,6 @@ function createRouter(options: {
   mode: "json" | "pty";
   workerSend?: ReturnType<typeof vi.fn>;
   terminalWrite?: ReturnType<typeof vi.fn>;
-  hostedWrite?: ReturnType<typeof vi.fn>;
   jsonTurnStart?: ReturnType<typeof vi.fn>;
   relaySend?: (data: string) => void;
   relayConnection?: ReturnType<typeof createRelayConnectionFake>;
@@ -141,16 +140,14 @@ function createRouter(options: {
     relayConnection: (options.relayConnection ?? createRelayConnectionFake()).relayConnection,
     relaySend: options.relaySend ?? vi.fn(),
     terminalSockets,
-    hostedPtyRegistry: {
-      start: options.hostedStart ?? vi.fn(() => 1234),
-      write: options.hostedWrite ?? vi.fn(() => false),
-      snapshot: vi.fn(() => false),
-      resize: vi.fn(() => false),
-      terminate: vi.fn(() => false),
-      abortStartup: options.hostedAbortStartup ?? vi.fn(() => false),
-    } as never,
     terminalWorkerSpawner: {
-      start: options.terminalWorkerStart ?? vi.fn(() => 5678),
+      start: (config: { kind: string; sessionId: string }) => ({
+        pid:
+          config.kind === "terminal"
+            ? (options.terminalWorkerStart ?? (() => 5678))(config)
+            : (options.hostedStart ?? (() => 1234))(config),
+        abort: () => options.hostedAbortStartup?.(config.sessionId),
+      }),
     } as never,
     broadcastSessionList: options.broadcastSessionList ?? (() => {}),
     broadcastSessionSync: () => {},
@@ -483,9 +480,6 @@ describe("RelayRouter input routing", () => {
       } as never,
       workerRegistry: createWorkerRegistryFake({ send: workerSend }),
       terminalSockets: new Map(),
-      hostedPtyRegistry: {
-        write: vi.fn(() => false),
-      } as never,
       jsonObserver: jsonObserver as never,
       relayConnection: relay.relayConnection,
       remoteFileStreamManager: createRemoteFileStreamManagerFake(),
@@ -537,9 +531,6 @@ describe("RelayRouter input routing", () => {
       } as never,
       workerRegistry: createWorkerRegistryFake({ send: workerSend }),
       terminalSockets: new Map(),
-      hostedPtyRegistry: {
-        write: vi.fn(() => false),
-      } as never,
       jsonObserver: jsonObserver as never,
       relayConnection: relay.relayConnection,
       remoteFileStreamManager: createRemoteFileStreamManagerFake(),
@@ -1455,7 +1446,7 @@ describe("RelayRouter input routing", () => {
         kind: "terminal",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "local-terminal",
+        ptyOwner: "proxy-hosted",
         state: SessionState.IDLE,
         cwd: sessionCwd,
         pid,
@@ -1504,7 +1495,7 @@ describe("RelayRouter input routing", () => {
       5678,
       terminalName,
       expect.any(String),
-      "local-terminal",
+      "proxy-hosted",
       false,
     );
     const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
@@ -1514,7 +1505,7 @@ describe("RelayRouter input routing", () => {
       sessionId: "terminal-session",
       kind: "terminal",
       mode: "pty",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
       name: terminalName,
     });
   });
@@ -1595,7 +1586,7 @@ describe("RelayRouter input routing", () => {
       errorCode: ControlErrorCode.PROCESS_START_FAILED,
       error: "spawn EBADF",
     });
-    expect(hostedAbortStartup).toHaveBeenCalledWith(pendingId);
+    expect(hostedAbortStartup).not.toHaveBeenCalled();
     expect(cleanupHookContext).toHaveBeenCalledWith(pendingId);
     expect(existsSync(sessionPaths(pendingId).dir)).toBe(false);
   });
@@ -1856,17 +1847,21 @@ describe("RelayRouter input routing", () => {
     }
   });
 
-  it("forwards remote_input_raw to hosted PTY when no terminal socket is attached", () => {
-    const hostedWrite = vi.fn(() => true);
-    const router = createRouter({ mode: "pty", hostedWrite });
-
+  it("forwards hosted PTY input through the terminal worker socket", () => {
+    const terminalWrite = vi.fn();
+    const router = createRouter({ mode: "pty", terminalWrite });
     router.handle({
       type: "remote_input_raw",
       sessionId: "s1",
       data: "abc",
+      traceId: "hosted-input",
     });
-
-    expect(hostedWrite).toHaveBeenCalledWith("s1", "abc");
+    expect(JSON.parse(terminalWrite.mock.calls[0][0])).toMatchObject({
+      type: "pty_input",
+      sessionId: "s1",
+      data: "abc",
+      traceId: "hosted-input",
+    });
   });
 
   it("routes remote file upload stream controls to the upload manager", () => {

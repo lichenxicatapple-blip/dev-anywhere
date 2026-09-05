@@ -22,7 +22,7 @@ export type PtyFakeRelayOptions =
   | (PtyFakeRelayOptionsBase & {
       sessionKind: "terminal";
       provider: "claude";
-      ptyOwner: "local-terminal";
+      ptyOwner: "proxy-hosted";
     });
 
 const PTY_FAKE_RELAY_ACTIVE_KEY = "__dev_anywhere_pty_fake_relay_active";

@@ -13,7 +13,7 @@ import { setDesiredDaemonRelay } from "./common/daemon-env.js";
 import { getErrorMessage } from "./common/process-probe.js";
 import { TERMINAL_IPC_PROTOCOL_VERSION, WORKER_IPC_PROTOCOL_VERSION } from "./ipc/ipc-protocol.js";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "./cli-args.js";
-import { readLiveLocalPtySessionIds, waitForSessionHandover } from "./common/restart-handover.js";
+import { readLivePtySessionIds, waitForSessionHandover } from "./common/restart-handover.js";
 import { PROXY_VERSION } from "./version.js";
 import { createProfileServiceLifecycle } from "./common/profile-service.js";
 import { ServiceLifecycleError } from "./common/service-lifecycle.js";
@@ -75,7 +75,7 @@ async function runServiceCommand(
     } else {
       const expectedSessionIds =
         action === "restart"
-          ? readLiveLocalPtySessionIds(SESSIONS_PATH, SESSION_RUNTIME_IPC_VERSION_PATH, {
+          ? readLivePtySessionIds(SESSIONS_PATH, SESSION_RUNTIME_IPC_VERSION_PATH, {
               terminal: TERMINAL_IPC_PROTOCOL_VERSION,
               worker: WORKER_IPC_PROTOCOL_VERSION,
             })

@@ -16,7 +16,17 @@ import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import { spawn as spawnPty, type IPty } from "node-pty";
+import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
+import { createRelayServer } from "@dev-anywhere/relay/server";
+import { createLogger } from "@dev-anywhere/shared/logger";
+import {
+  decodeBinaryFrame,
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  type ControlMessage,
+  type RelayControlMessage,
+  type RelayControlType,
+} from "@dev-anywhere/shared";
 import { tryAcquireFileLock } from "#src/common/file-lock.js";
 import {
   processArgvMatchesManagedSession,
@@ -219,17 +229,23 @@ function runtimeIsFree(fixture: Fixture): boolean {
 }
 function fixtureFailureLogs(fixture: Fixture, sessionId?: string): string {
   try {
-    return readdirSync(fixture.paths.logDir, { withFileTypes: true })
+    const files = readdirSync(fixture.paths.logDir, { withFileTypes: true })
       .filter((entry) => entry.isFile() && /^(service|terminal)-.*\.log$/.test(entry.name))
       .map((entry) => ({
         name: entry.name,
         path: join(fixture.paths.logDir, entry.name),
         modified: statSync(join(fixture.paths.logDir, entry.name)).mtimeMs,
       }))
-      .sort((a, b) => b.modified - a.modified)
-      .slice(0, 4)
+      .sort((a, b) => b.modified - a.modified);
+    // A failed worker can exit before newer CLI/service logs are created. Keep its
+    // own log even when several management commands follow the failure.
+    return ["terminal", "service"]
+      .flatMap((kind) => files.filter((file) => file.name.startsWith(`${kind}-`)).slice(0, 2))
       .map(({ name, path }) => {
         const contents = readFileSync(path, "utf8");
+        if (name.startsWith("terminal-")) {
+          return `${name} (worker/terminal head/tail):\n${contents.slice(0, 4_096)}\n...\n${contents.slice(-2_048)}`;
+        }
         const related = contents
           .split(/\r?\n/)
           .filter(
@@ -630,4 +646,289 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       throw new Error(`${String(failure)}\n${failureDetails}`, { cause: failure });
     }
   }, 30_000);
+
+  it("preserves a hosted Agent's worker, PTY and offline output until explicit termination", async () => {
+    const fixture = await createFixture("hosted");
+    delete fixture.env.VITEST;
+    const workDir = join(fixture.root, "工作 目录");
+    mkdirSync(workDir);
+    const agentPath = join(workDir, "fake-agent.mjs");
+    const agentBin = join(workDir, process.platform === "win32" ? "kimi.cmd" : "kimi");
+    const journalPath = join(fixture.root, "agent-journal.txt");
+    const controlPath = join(fixture.root, "agent-control.txt");
+    copyFileSync(FAKE_AGENT_SOURCE, agentPath);
+    const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
+    writeFileSync(
+      agentBin,
+      process.platform === "win32"
+        ? `@echo off\r\n"${process.execPath}" "${agentPath}" %*\r\n`
+        : `#!/bin/sh\nexec ${shellQuote(process.execPath)} ${shellQuote(agentPath)} "$@"\n`,
+      { mode: 0o755 },
+    );
+    Object.assign(fixture.env, {
+      KIMI_BIN: agentBin,
+      DA_LIFECYCLE_AGENT_JOURNAL: journalPath,
+      DA_LIFECYCLE_AGENT_CONTROL: controlPath,
+    });
+    const relay = createRelayServer({
+      logger: createLogger({ name: "hosted-lifecycle-fixture", silent: true }),
+      dataDir: join(fixture.root, "relay"),
+      webAssetDir: false,
+      heartbeatInterval: 60_000,
+    });
+    let client: WebSocket | undefined;
+    const messages: RelayControlMessage[] = [];
+    const output: Array<{ sessionId: string; outputSeq: number; text: string }> = [];
+    let phase = "start";
+    let requestNumber = 0;
+    let proxyId: string | undefined;
+    let sessionId: string | undefined;
+    let workerPid: number | undefined;
+    let agentPid: number | undefined;
+    let socketError: string | undefined;
+    let failure: unknown;
+    const journal = () => (existsSync(journalPath) ? readFileSync(journalPath, "utf8") : "");
+    const persistedSessions = () =>
+      (existsSync(fixture.paths.sessionsPath)
+        ? JSON.parse(readFileSync(fixture.paths.sessionsPath, "utf8"))
+        : []) as Array<{ id: string; pid: number; ptyOwner: string }>;
+    const send = (message: RelayControlMessage) => {
+      if (client?.readyState !== WebSocket.OPEN) throw new Error("Fixture Web client is closed");
+      client.send(JSON.stringify(message));
+    };
+    const waitForMessage = async <T extends RelayControlType>(type: T, requestId?: string) => {
+      const find = () =>
+        messages.find(
+          (message) =>
+            message.type === type &&
+            (requestId === undefined ||
+              ("requestId" in message && message.requestId === requestId)),
+        ) as ControlMessage<T> | undefined;
+      await expect.poll(find, { timeout: 15_000, message: `Waiting for ${type}` }).toBeDefined();
+      return find()!;
+    };
+    const snapshot = async () => {
+      if (!sessionId) throw new Error("Fixture session was not created");
+      const requestId = `snapshot-${++requestNumber}`;
+      send({ type: "session_subscribe", sessionId, requestId });
+      return waitForMessage("session_snapshot", requestId);
+    };
+    const selectProxy = async () => {
+      if (!proxyId) throw new Error("Fixture Proxy did not register");
+      await expect.poll(() => relay.registry.getProxy(proxyId!), { timeout: 10_000 }).toBeDefined();
+      const requestId = `select-${++requestNumber}`;
+      send({ type: "proxy_select", proxyId, requestId });
+      expect(await waitForMessage("proxy_select_response", requestId)).toMatchObject({
+        success: true,
+      });
+    };
+    const expectSameSession = async () => {
+      await expect
+        .poll(
+          async () => (await observeService(fixture))?.info?.sessions.map((session) => session.id),
+          { timeout: 15_000 },
+        )
+        .toEqual([sessionId]);
+      expect(persistedSessions()).toEqual([
+        expect.objectContaining({ id: sessionId, pid: workerPid, ptyOwner: "proxy-hosted" }),
+      ]);
+      expect(processIsAlive(workerPid!)).toBe(true);
+      expect(processIsAlive(agentPid!)).toBe(true);
+      expect(journal().match(/FAKE_AGENT_READY:/g)).toHaveLength(1);
+      // Relay unbinds clients while a Proxy is offline. Match the browser's selection
+      // handshake before requesting the reconnected terminal's snapshot.
+      await selectProxy();
+    };
+    const cleanupOwnedProcesses = async () => {
+      // This out-of-band exit is only failure cleanup for our fake CLI, never the assertion
+      // path. It does not use or signal the developer's active Proxy or terminal processes.
+      writeFileSync(controlPath, "exit");
+      agentPid ??= Number(journal().match(/FAKE_AGENT_READY:(\d+)/)?.[1]) || undefined;
+      if (agentPid !== undefined && !(await waitForProcessToExit(agentPid))) {
+        const argv = readProcessArgv(agentPid);
+        if (!argv?.includes(agentPath)) {
+          throw new Error("Refusing to clean up an unverified fixture Agent");
+        }
+        process.kill(agentPid, "SIGKILL");
+        expect(await waitForProcessToExit(agentPid)).toBe(true);
+      }
+      if (workerPid !== undefined && !(await waitForProcessToExit(workerPid))) {
+        const argv = readProcessArgv(workerPid);
+        if (
+          !sessionId ||
+          !argv ||
+          !processArgvMatchesManagedSession(argv, {
+            id: sessionId,
+            kind: "agent",
+            mode: "pty",
+            provider: "kimi",
+            ptyOwner: "proxy-hosted",
+          })
+        ) {
+          throw new Error("Refusing to clean up an unverified fixture worker");
+        }
+        process.kill(workerPid, "SIGTERM");
+        expect(await waitForProcessToExit(workerPid)).toBe(true);
+      }
+    };
+
+    try {
+      await new Promise<void>((resolve, reject) => {
+        relay.httpServer.once("error", reject);
+        relay.httpServer.listen(0, "127.0.0.1", resolve);
+      });
+      const address = relay.httpServer.address();
+      if (!address || typeof address === "string") throw new Error("Fixture Relay has no port");
+      fixture.env.RELAY_URL = `ws://127.0.0.1:${address.port}`;
+      expectSuccess(await runCli(fixture, ["serve", "start", "--json"]));
+      const original = await readyService(fixture);
+      proxyId = readFileSync(fixture.paths.proxyIdPath, "utf8").trim();
+
+      client = new WebSocket(`ws://127.0.0.1:${address.port}/client`);
+      client.on("error", (error) => (socketError = String(error)));
+      client.on("message", (data, isBinary) => {
+        if (isBinary) {
+          const buffer = Buffer.isBuffer(data)
+            ? data
+            : Array.isArray(data)
+              ? Buffer.concat(data)
+              : Buffer.from(data);
+          const frame = decodeBinaryFrame(buffer);
+          if (frame)
+            output.push({
+              sessionId: frame.sessionId,
+              outputSeq: frame.outputSeq,
+              text: Buffer.from(frame.data).toString("utf8"),
+            });
+          if (output.length > 1_024) output.shift();
+        } else {
+          messages.push(JSON.parse(data.toString()) as RelayControlMessage);
+          if (messages.length > 256) messages.shift();
+        }
+      });
+      await expect.poll(() => client?.readyState, { timeout: 5_000 }).toBe(WebSocket.OPEN);
+      send({
+        type: "client_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        clientId: "hosted-lifecycle-browser",
+        browserName: "Chrome",
+        osName: process.platform === "win32" ? "Windows" : "macOS",
+        deviceKind: "desktop",
+      });
+      await waitForMessage("client_register_response");
+      await selectProxy();
+
+      phase = "create hosted Agent";
+      send({
+        type: "session_create",
+        requestId: "create-hosted",
+        kind: "agent",
+        provider: "kimi",
+        mode: "pty",
+        cwd: workDir,
+        cols: 100,
+        rows: 30,
+      });
+      const created = await waitForMessage("session_create_response", "create-hosted");
+      expect(created).toMatchObject({
+        success: true,
+        kind: "agent",
+        mode: "pty",
+        ptyOwner: "proxy-hosted",
+      });
+      if (!created.success) throw new Error(created.error);
+      sessionId = created.sessionId;
+      workerPid = persistedSessions().find((session) => session.id === sessionId)?.pid;
+      await expect.poll(() => journal(), { timeout: 10_000 }).toMatch(/FAKE_AGENT_READY:\d+/);
+      agentPid = Number(journal().match(/FAKE_AGENT_READY:(\d+)/)![1]);
+      expect(workerPid).toBeGreaterThan(0);
+      expect(workerPid).not.toBe(agentPid);
+      expect(workerPid).not.toBe(original.pid);
+      const initialSnapshot = await snapshot();
+
+      phase = "restart";
+      const restarted = await runCli(fixture, ["serve", "restart", "--json"]);
+      expectSuccess(restarted);
+      expect(JSON.parse(restarted.stdout)).toMatchObject({
+        status: "ready",
+        missingSessionIds: [],
+      });
+      const replacement = await readyService(fixture);
+      expect(replacement.pid).not.toBe(original.pid);
+      expect(await waitForProcessToExit(original.pid)).toBe(true);
+      await expectSameSession();
+      const restartedSnapshot = await snapshot();
+      expect(restartedSnapshot).toMatchObject({ sessionId, cols: 100, rows: 30 });
+      expect(restartedSnapshot.data).toContain(`FAKE_AGENT_READY:${agentPid}`);
+      expect(restartedSnapshot.outputSeq).toBeGreaterThanOrEqual(initialSnapshot.outputSeq);
+
+      phase = "output while Proxy is stopped";
+      expectSuccess(await runCli(fixture, ["serve", "stop", "--json"]));
+      expect(await waitForProcessToExit(replacement.pid)).toBe(true);
+      expect(await observeService(fixture)).toBeNull();
+      writeFileSync(controlPath, "offline");
+      await expect
+        .poll(() => journal().match(/FAKE_AGENT_OFFLINE:/g)?.length ?? 0, { timeout: 5_000 })
+        .toBeGreaterThanOrEqual(3);
+      writeFileSync(controlPath, "");
+      const offlineLine = journal()
+        .match(/FAKE_AGENT_OFFLINE:\d+:\d+/g)!
+        .at(-1)!;
+      expect(await observeService(fixture)).toBeNull();
+      expect(processIsAlive(workerPid!)).toBe(true);
+      expect(processIsAlive(agentPid)).toBe(true);
+
+      phase = "reattach snapshot and input";
+      expectSuccess(await runCli(fixture, ["serve", "start", "--json"]));
+      await expectSameSession();
+      const reattachedSnapshot = await snapshot();
+      expect(reattachedSnapshot).toMatchObject({ sessionId, cols: 100, rows: 30 });
+      expect(reattachedSnapshot.data).toContain(offlineLine);
+      expect(reattachedSnapshot.outputSeq).toBeGreaterThan(restartedSnapshot.outputSeq);
+      send({ type: "remote_input_raw", sessionId, data: "ping\r" });
+      await expect
+        .poll(
+          () =>
+            output
+              .filter(
+                (frame) =>
+                  frame.sessionId === sessionId && frame.outputSeq > reattachedSnapshot.outputSeq,
+              )
+              .map((frame) => frame.text)
+              .join(""),
+          { timeout: 5_000 },
+        )
+        .toContain(`FAKE_AGENT_PONG:${agentPid}`);
+
+      phase = "explicit session termination";
+      send({ type: "session_terminate", sessionId });
+      expect(await waitForProcessToExit(agentPid)).toBe(true);
+      expect(await waitForProcessToExit(workerPid!)).toBe(true);
+      await expect.poll(() => persistedSessions().map((session) => session.id)).toEqual([]);
+      expectSuccess(await runCli(fixture, ["serve", "restart", "--json"]));
+      expect((await readyService(fixture)).info?.sessions).toEqual([]);
+      expect(journal().match(/FAKE_AGENT_READY:/g)).toHaveLength(1);
+    } catch (error) {
+      failure = new Error(
+        `${String(error)}\nHosted lifecycle failed during ${phase}.\n` +
+          `runtime=${process.version}, executable=${process.execPath}\n` +
+          `sessionId=${sessionId}, workerPid=${workerPid}, agentPid=${agentPid}, socketError=${socketError}\n` +
+          `Agent journal:\n${journal().slice(-4_096)}\n` +
+          `Web messages:\n${JSON.stringify(messages.slice(-8)).slice(-4_096)}\n` +
+          fixtureFailureLogs(fixture, sessionId),
+        { cause: error },
+      );
+    } finally {
+      try {
+        await cleanupOwnedProcesses();
+      } catch (error) {
+        if (failure) console.error(`Hosted fixture cleanup also failed: ${String(error)}`);
+        else failure = error;
+      } finally {
+        client?.terminate();
+        await relay.close();
+      }
+    }
+    if (failure) throw failure;
+  }, 90_000);
 });

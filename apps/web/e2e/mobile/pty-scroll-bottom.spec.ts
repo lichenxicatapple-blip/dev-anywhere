@@ -824,7 +824,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       baseUrl: mobileBaseUrl,
       sessionKind: "terminal",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
       cols: 80,
       rows: 24,
     });
@@ -856,7 +856,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       baseUrl: mobileBaseUrl,
       sessionKind: "terminal",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
       cols: 80,
       rows: 24,
     });
@@ -888,7 +888,7 @@ test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
       baseUrl: mobileBaseUrl,
       sessionKind: "terminal",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
       cols: 80,
       rows: 24,
     });

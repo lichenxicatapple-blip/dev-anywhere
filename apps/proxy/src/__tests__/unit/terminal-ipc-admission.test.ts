@@ -309,6 +309,20 @@ describe("terminal IPC admission", () => {
     expect(accepted).not.toHaveBeenCalled();
   });
 
+  it("admits a worker with a bound session id independently of the PTY business kind", async () => {
+    const { port, accepted } = await listen();
+    const socket = await open(port);
+    await requestTerminalAdmission(socket, {
+      clientKind: "terminal-worker",
+      terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+      sessionId: "hosted-agent-1",
+    });
+    expect(accepted.mock.calls[0]?.[1]).toEqual({
+      clientKind: "terminal-worker",
+      sessionId: "hosted-agent-1",
+    });
+  });
+
   it("rejects a worker admission that does not bind a session id", async () => {
     const { port, accepted } = await listen();
     const socket = await open(port);

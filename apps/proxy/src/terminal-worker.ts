@@ -1,15 +1,11 @@
-import * as pty from "node-pty";
-import { defaultShell, normalizeProcessEnvironment } from "./common/executable.js";
-import { prepareCommandLaunch } from "./common/command-launch.js";
-import type { IPty } from "node-pty";
 import type { Socket } from "node:net";
 import { existsSync } from "node:fs";
-import { extractOscSignals, extractOscWorkingDirectory } from "./common/osc-extractor.js";
-import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
+import { flushLogger } from "@dev-anywhere/shared/logger";
+import { ControlErrorCode } from "@dev-anywhere/shared";
 import { terminalLogger as log } from "./common/logger.js";
 import { SOCK_PATH, STOPPED_PATH } from "./common/paths.js";
-import { PtyRenderSequencer } from "./common/pty-render-sequencer.js";
-import { PtySynchronizedOutputCoalescer } from "./common/pty-synchronized-output-coalescer.js";
+import { PtyRuntime, type PtyRuntimeExit } from "./common/pty-runtime.js";
+import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
 import {
   createIpcReader,
   encodeBinaryIpcFrame,
@@ -17,7 +13,12 @@ import {
   TERMINAL_IPC_PROTOCOL_VERSION,
   type IpcMessage,
 } from "./ipc/ipc-protocol.js";
-import { parseTerminalWorkerCliArgs } from "./terminal-worker-args.js";
+import {
+  parseTerminalWorkerBootstrap,
+  parseTerminalWorkerCliArgs,
+  type TerminalWorkerBootstrap,
+  type TerminalWorkerCliArgs,
+} from "./terminal-worker-args.js";
 import {
   ensureService,
   IpcProtocolError,
@@ -31,166 +32,145 @@ import {
   TerminalAdmissionRetiredError,
 } from "./terminal/admission-client.js";
 
-const RECONNECT_INITIAL_DELAY_MS = 1_000;
-const RECONNECT_MAX_DELAY_MS = 5_000;
-const SPAWN_FAILURE_THRESHOLD = 3;
+class TerminalRegistrationRejectedError extends Error {}
 
-class TerminalRegistrationRejectedError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = "TerminalRegistrationRejectedError";
-  }
-}
-
-function normalizeTerminalWorkerEnv(env: NodeJS.ProcessEnv): Record<string, string> {
-  const normalized: Record<string, string> = {};
-  for (const [key, value] of Object.entries(normalizeProcessEnvironment(env))) {
-    if (value !== undefined) normalized[key] = value;
-  }
-  delete normalized.NO_COLOR;
-  if (normalized.CLICOLOR === "0") delete normalized.CLICOLOR;
-  normalized.TERM = "xterm-256color";
-  normalized.COLORTERM = "truecolor";
-  normalized.CLICOLOR = "1";
-  return normalized;
-}
-
-class ShellTerminalWorker {
+class TerminalWorker {
   private socket: Socket | null = null;
-  private child: IPty | null = null;
-  private readonly renderSequencer: PtyRenderSequencer;
+  private runtime: PtyRuntime | null = null;
   private exiting = false;
-  private readonly reconnectSupervisor = new ReconnectSupervisor({
-    initialDelayMs: RECONNECT_INITIAL_DELAY_MS,
-    maxDelayMs: RECONNECT_MAX_DELAY_MS,
-  });
+  private approvalWaiting = false;
   private currentCwd: string;
-  private outputTail = "";
-  private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
+  private readonly reconnectSupervisor = new ReconnectSupervisor({
+    initialDelayMs: 1_000,
+    maxDelayMs: 5_000,
+  });
 
   constructor(
-    private readonly sessionId: string,
-    private readonly cwd: string,
-    private readonly name: string,
-    cols: number,
-    rows: number,
+    private readonly identity: TerminalWorkerCliArgs,
+    private readonly bootstrap: TerminalWorkerBootstrap,
   ) {
-    this.currentCwd = cwd;
-    this.renderSequencer = new PtyRenderSequencer({ cols, rows });
-    this.synchronizedOutput = new PtySynchronizedOutputCoalescer({
-      emit: (data) => this.emitRenderData(data),
-      onOverflow: (event) => {
-        log.warn(
-          { sessionId: this.sessionId, ...event },
-          "PTY synchronized-output transaction exceeded buffer limit; streaming remainder",
-        );
-      },
-    });
+    this.currentCwd = bootstrap.cwd;
   }
 
   async run(): Promise<void> {
-    // A managed worker belongs to an already-running daemon. It must never clear an explicit
-    // STOPPED marker or resurrect the service during its own bootstrap.
-    this.socket = await ensureService("connect-only");
-    await requestTerminalAdmission(this.socket, {
-      clientKind: "terminal-worker",
-      terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-      sessionId: this.sessionId,
-    });
-    this.setupSocketHandlers(this.socket);
-    await this.registerWithServe();
-    this.startPty();
-
     process.on("SIGTERM", () => this.shutdown(143));
     process.on("SIGINT", () => this.shutdown(130));
+    // This worker belongs to an existing daemon; bootstrap must not revive a stopped service.
+    this.socket = await ensureService("connect-only");
+    await this.admit(this.socket);
+    this.setupSocketHandlers(this.socket);
+    await this.registerWithServe();
+    try {
+      this.startPty();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      log.error(
+        { sessionId: this.identity.sessionId, error: message },
+        "Terminal worker PTY failed to start",
+      );
+      this.exit({
+        exitCode: 1,
+        errorTail: sanitizeProviderErrorTail(message),
+        runtimeError: { errorCode: ControlErrorCode.PROCESS_START_FAILED, error: message },
+      });
+    }
+  }
+
+  private async admit(socket: Socket): Promise<void> {
+    await requestTerminalAdmission(socket, {
+      clientKind: "terminal-worker",
+      terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+      sessionId: this.identity.sessionId,
+    });
   }
 
   private async registerWithServe(): Promise<void> {
     if (!this.socket?.writable) throw new Error("Serve socket is not writable");
     const responsePromise = waitForMessage(this.socket, "session_create_response");
+    const registration = {
+      type: "session_create_request" as const,
+      protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+      mode: "pty" as const,
+      cwd: this.currentCwd,
+      pid: process.pid,
+      sessionId: this.identity.sessionId,
+      name: this.bootstrap.name,
+    };
     this.socket.write(
-      serializeIpc({
-        type: "session_create_request",
-        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        mode: "pty",
-        provider: "claude",
-        cwd: this.currentCwd,
-        pid: process.pid,
-        sessionId: this.sessionId,
-        name: this.name,
-        kind: "terminal",
-      }),
+      serializeIpc(
+        this.identity.kind === "terminal"
+          ? { ...registration, kind: "terminal", provider: "claude" }
+          : { ...registration, kind: "agent", provider: this.identity.provider },
+      ),
     );
     let response: Awaited<typeof responsePromise>;
     try {
       response = await responsePromise;
     } catch (error) {
-      if (error instanceof IpcProtocolError) {
+      if (error instanceof IpcProtocolError)
         throw new TerminalRegistrationRejectedError(error.message);
-      }
       throw error;
     }
-    if (!response.success) {
-      this.socket.destroy();
+    if (!response.success)
       throw new TerminalRegistrationRejectedError(
         `Failed to register terminal worker: ${response.error}`,
       );
-    }
     this.socket.write(
-      serializeIpc({ type: "pty_register", sessionId: this.sessionId, pid: process.pid }),
+      serializeIpc({ type: "pty_register", sessionId: this.identity.sessionId, pid: process.pid }),
     );
-    log.info({ sessionId: this.sessionId }, "Terminal worker registered with serve");
+    this.runtime?.replaySemanticState();
+    log.info({ sessionId: this.identity.sessionId }, "Terminal worker registered with serve");
   }
 
   private startPty(): void {
-    if (this.child) return;
-    const shell = defaultShell();
-    const launch = prepareCommandLaunch(shell, [], process.env, process.platform, this.cwd);
-    const child = pty.spawn(launch.command, launch.ptyArgs ?? launch.args, {
-      name: "xterm-256color",
-      cols: this.renderSequencer.cols,
-      rows: this.renderSequencer.rows,
-      cwd: this.cwd,
-      env: normalizeTerminalWorkerEnv(launch.env),
-    });
-    this.child = child;
-    child.onData((data) => this.handlePtyData(data));
-    child.onExit(({ exitCode, signal }) => {
-      const code = signal ? 128 + signal : exitCode;
-      log.info({ sessionId: this.sessionId, code }, "Terminal worker PTY exited");
-      const errorTail = code === 0 ? "" : sanitizeProviderErrorTail(this.outputTail);
-      this.exit(code, errorTail || undefined);
-    });
-    log.info(
-      { sessionId: this.sessionId, pid: child.pid, shell, cwd: this.cwd },
-      "Terminal worker PTY started",
+    if (this.runtime) return;
+    const { sessionId } = this.identity;
+    const bootstrap = this.bootstrap;
+    const base = {
+      sessionId,
+      cwd: bootstrap.cwd,
+      cols: bootstrap.cols,
+      rows: bootstrap.rows,
+      env: process.env,
+    };
+    this.runtime = new PtyRuntime(
+      bootstrap.kind === "terminal"
+        ? { ...base, kind: "terminal", shell: bootstrap.shell }
+        : {
+            ...base,
+            kind: "agent",
+            provider: bootstrap.provider,
+            args: bootstrap.args,
+            permissionMode: bootstrap.permissionMode,
+            nativeSessionId: bootstrap.nativeSessionId,
+            hook: bootstrap.hook,
+          },
+      {
+        output: (data, outputSeq) => {
+          if (this.socket?.writable)
+            this.socket.write(
+              encodeBinaryIpcFrame(sessionId, Buffer.from(data, "utf8"), outputSeq),
+            );
+        },
+        resize: (cols, rows, outputSeq) =>
+          this.send({ type: "pty_resize", sessionId, cols, rows, outputSeq }),
+        title: (title) => this.send({ type: "pty_title_change", sessionId, title }),
+        cwd: (cwd) => {
+          if (cwd === this.currentCwd) return;
+          this.currentCwd = cwd;
+          this.send({ type: "pty_cwd_change", sessionId, cwd });
+        },
+        semantic: (state, seq, meta) =>
+          this.send({ type: "pty_semantic_event", sessionId, state, seq, ...meta }),
+        exit: (event) => this.exit(event),
+      },
     );
+    this.runtime.setApprovalWaiting(this.approvalWaiting);
+    this.runtime.start();
   }
 
-  private handlePtyData(data: string): void {
-    this.outputTail = `${this.outputTail}${data}`.slice(-8_192);
-    this.synchronizedOutput.push(data);
-    const signal = extractOscSignals(data);
-    const cwd = extractOscWorkingDirectory(data);
-    if (cwd && cwd !== this.currentCwd) {
-      this.currentCwd = cwd;
-      if (this.socket?.writable) {
-        this.socket.write(serializeIpc({ type: "pty_cwd_change", sessionId: this.sessionId, cwd }));
-      }
-    }
-    if (signal?.title && this.socket?.writable) {
-      this.socket.write(
-        serializeIpc({ type: "pty_title_change", sessionId: this.sessionId, title: signal.title }),
-      );
-    }
-  }
-
-  private emitRenderData(data: string): void {
-    if (!data) return;
-    const outputSeq = this.renderSequencer.write(data);
-    if (outputSeq === null) return;
-    if (!this.socket?.writable) return;
-    this.socket.write(encodeBinaryIpcFrame(this.sessionId, Buffer.from(data, "utf-8"), outputSeq));
+  private send(message: IpcMessage): void {
+    if (this.socket?.writable) this.socket.write(serializeIpc(message));
   }
 
   private setupSocketHandlers(socket: Socket): void {
@@ -203,43 +183,56 @@ class ShellTerminalWorker {
       },
     );
     socket.on("close", () => {
-      if (this.exiting) return;
+      if (this.exiting || this.socket !== socket) return;
       log.info(
-        { sessionId: this.sessionId },
+        { sessionId: this.identity.sessionId },
         "Serve socket closed; terminal worker will reconnect",
       );
-      void this.reconnectToServe();
+      this.reconnectToServe();
     });
-    socket.on("error", (err) => {
-      log.warn({ sessionId: this.sessionId, err: err.message }, "Terminal worker socket error");
-    });
+    socket.on("error", (err) =>
+      log.warn(
+        { sessionId: this.identity.sessionId, err: err.message },
+        "Terminal worker socket error",
+      ),
+    );
   }
 
   private handleServeMessage(msg: IpcMessage): void {
-    if ("sessionId" in msg && msg.sessionId !== this.sessionId) return;
+    if ("sessionId" in msg && msg.sessionId !== this.identity.sessionId) return;
     switch (msg.type) {
       case "pty_input":
-        this.child?.write(msg.data);
+        this.runtime?.write(msg.data);
+        log.debug(
+          { sessionId: this.identity.sessionId, traceId: msg.traceId, bytes: msg.data.length },
+          "Raw PTY input written to worker PTY",
+        );
         break;
-      case "pty_subscribe":
-        {
-          const responseSocket = this.socket;
-          if (!responseSocket?.writable) break;
-          this.renderSequencer.captureSnapshot((snapshot) => {
-            if (this.socket !== responseSocket || !responseSocket.writable) return;
-            responseSocket.write(
-              serializeIpc({
-                type: "pty_snapshot",
-                sessionId: this.sessionId,
-                ...snapshot,
-                requestId: msg.requestId,
-              }),
-            );
-          });
-        }
+      case "pty_subscribe": {
+        const responseSocket = this.socket;
+        if (!responseSocket?.writable) break;
+        this.runtime?.snapshot((snapshot) => {
+          if (this.socket !== responseSocket || !responseSocket.writable) return;
+          responseSocket.write(
+            serializeIpc({
+              type: "pty_snapshot",
+              sessionId: this.identity.sessionId,
+              ...snapshot,
+              requestId: msg.requestId,
+            }),
+          );
+        });
         break;
+      }
       case "pty_resize_request":
-        this.resize(msg.cols, msg.rows);
+        this.runtime?.resize(msg.cols, msg.rows);
+        break;
+      case "pty_approval_context":
+        this.approvalWaiting = msg.waiting;
+        this.runtime?.setApprovalWaiting(msg.waiting);
+        break;
+      case "bridge_status":
+        if (msg.connected) this.runtime?.replaySemanticState();
         break;
       case "pty_terminate":
         this.shutdown(0);
@@ -250,140 +243,128 @@ class ShellTerminalWorker {
     }
   }
 
-  private resize(cols: number, rows: number): void {
-    this.synchronizedOutput.flush();
-    const outputSeq = this.renderSequencer.resize(cols, rows);
-    if (outputSeq === null) return;
-    if (this.socket?.writable) {
-      this.socket.write(
-        serializeIpc({
-          type: "pty_resize",
-          sessionId: this.sessionId,
-          cols,
-          rows,
-          outputSeq,
-        }),
-      );
-    }
-    this.child?.resize(cols, rows);
-    log.info({ sessionId: this.sessionId, cols, rows }, "Terminal worker PTY resized");
-  }
-
   private reconnectToServe(): void {
     let consecutiveSpawnFailures = 0;
     const run = this.reconnectSupervisor.request({
       shouldStop: () => this.exiting,
       attempt: async (attempt) => {
-        const stopped = existsSync(STOPPED_PATH);
-        const degraded = consecutiveSpawnFailures >= SPAWN_FAILURE_THRESHOLD;
-        const passive = stopped || degraded;
+        const passive = existsSync(STOPPED_PATH) || consecutiveSpawnFailures >= 3;
+        let candidate: Socket | null = null;
         try {
-          const newSocket = passive
-            ? await tryConnect(SOCK_PATH)
-            : await ensureService("reconnect");
-          if (!newSocket) return "retry";
-          await requestTerminalAdmission(newSocket, {
-            clientKind: "terminal-worker",
-            terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-            sessionId: this.sessionId,
-          });
+          candidate = passive ? await tryConnect(SOCK_PATH) : await ensureService("reconnect");
+          if (!candidate) return "retry";
+          await this.admit(candidate);
           consecutiveSpawnFailures = 0;
-          this.socket = this.socket ? swapServeSocket(this.socket, newSocket) : newSocket;
+          this.socket = this.socket ? swapServeSocket(this.socket, candidate) : candidate;
           this.setupSocketHandlers(this.socket);
           await this.registerWithServe();
-          log.info({ sessionId: this.sessionId, attempt }, "Terminal worker reconnected to serve");
+          log.info(
+            { sessionId: this.identity.sessionId, attempt },
+            "Terminal worker reconnected to serve",
+          );
           return "connected";
         } catch (err) {
-          const failedSocket = this.socket;
-          this.socket = null;
-          failedSocket?.destroy();
+          candidate?.destroy();
+          if (this.socket === candidate) this.socket = null;
           log.warn(
             {
-              sessionId: this.sessionId,
+              sessionId: this.identity.sessionId,
               attempt,
               err: err instanceof Error ? err.message : String(err),
             },
             "Terminal worker reconnect failed",
           );
-          if (err instanceof TerminalRegistrationRejectedError) {
-            // The daemon understood this protocol generation and rejected the identity. Retrying
-            // the same registration cannot succeed; stop the owned PTY instead of looping forever.
+          if (
+            err instanceof TerminalRegistrationRejectedError ||
+            err instanceof TerminalAdmissionRetiredError
+          ) {
             this.shutdown(1);
             return "stop";
           }
-          if (err instanceof TerminalAdmissionRetiredError) {
-            this.shutdown(1);
-            return "stop";
-          }
-          if (!passive) {
-            consecutiveSpawnFailures += 1;
-            if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
-              log.warn(
-                { sessionId: this.sessionId, failures: consecutiveSpawnFailures },
-                "Terminal worker daemon auto-start disabled after repeated failures",
-              );
-            }
+          if (!passive && ++consecutiveSpawnFailures === 3) {
+            log.warn(
+              { sessionId: this.identity.sessionId, failures: consecutiveSpawnFailures },
+              "Terminal worker daemon auto-start disabled after repeated failures",
+            );
           }
           return "retry";
         }
       },
     });
-    if (!run.started) return;
-    void run.completion.catch((err: unknown) => {
-      log.error(
-        { sessionId: this.sessionId, err: err instanceof Error ? err.message : String(err) },
-        "Terminal worker reconnect loop failed",
-      );
-      this.shutdown(1);
-    });
+    if (run.started)
+      void run.completion.catch((err: unknown) => {
+        log.error(
+          {
+            sessionId: this.identity.sessionId,
+            err: err instanceof Error ? err.message : String(err),
+          },
+          "Terminal worker reconnect loop failed",
+        );
+        this.shutdown(1);
+      });
   }
 
-  private shutdown(code: number): void {
+  private shutdown(exitCode: number): void {
+    if (this.exiting) return;
+    this.runtime?.terminate();
+    this.exit({ exitCode });
+  }
+
+  private exit(event: PtyRuntimeExit): void {
     if (this.exiting) return;
     this.exiting = true;
-    try {
-      this.child?.kill();
-    } catch {
-      // PTY may already have exited.
-    }
-    this.exit(code);
-  }
-
-  private exit(code: number, errorTail?: string): void {
-    if (this.exiting && !this.child) return;
-    this.exiting = true;
-    this.child = null;
-    this.synchronizedOutput.dispose();
-    this.renderSequencer.dispose();
+    this.runtime?.terminate();
+    this.runtime = null;
+    log.info({ sessionId: this.identity.sessionId, ...event }, "Terminal worker PTY exited");
     if (this.socket?.writable) {
-      const socket = this.socket;
-      const timer = setTimeout(() => process.exit(code), 500);
-      socket.end(
-        serializeIpc({
-          type: "pty_deregister",
-          sessionId: this.sessionId,
-          exitCode: code,
-          ...(errorTail ? { errorTail } : {}),
-        }),
+      const timer = setTimeout(() => process.exit(event.exitCode), 500);
+      this.socket.end(
+        serializeIpc({ type: "pty_deregister", sessionId: this.identity.sessionId, ...event }),
         () => {
           clearTimeout(timer);
-          process.exit(code);
+          process.exit(event.exitCode);
         },
       );
-      return;
-    }
-    process.exit(code);
+    } else process.exit(event.exitCode);
   }
 }
 
-const parsedArgs = parseTerminalWorkerCliArgs(process.argv.slice(2));
-if (!parsedArgs) {
-  console.error("Usage: terminal-worker [--profile <name>] <sessionId> <cwd> <name> <cols> <rows>");
-  process.exit(1);
+function readBootstrap(): Promise<string> {
+  return new Promise((resolve, reject) => {
+    let raw = "";
+    const timer = setTimeout(() => reject(new Error("Terminal worker bootstrap timed out")), 5_000);
+    process.stdin.setEncoding("utf8");
+    process.stdin.on("data", (chunk: string) => {
+      raw += chunk;
+      if (raw.length > 65_536) {
+        clearTimeout(timer);
+        reject(new Error("Terminal worker bootstrap exceeds size limit"));
+        process.stdin.destroy();
+      }
+    });
+    process.stdin.once("end", () => {
+      clearTimeout(timer);
+      resolve(raw);
+    });
+    process.stdin.once("error", (error) => {
+      clearTimeout(timer);
+      reject(error);
+    });
+  });
 }
 
-const { sessionId, cwd, name, cols, rows } = parsedArgs;
-new ShellTerminalWorker(sessionId, cwd, name, cols, rows).run().catch((err) => {
+async function main(): Promise<void> {
+  const identity = parseTerminalWorkerCliArgs(process.argv.slice(2));
+  if (!identity)
+    throw new Error(
+      "Usage: terminal-worker --profile <name> --session <id> --kind <agent|terminal> --provider <provider>",
+    );
+  const bootstrap = parseTerminalWorkerBootstrap(await readBootstrap(), identity);
+  await new TerminalWorker(identity, bootstrap).run();
+}
+
+void main().catch(async (err: unknown) => {
   log.error({ err: err instanceof Error ? err.message : String(err) }, "Terminal worker failed");
+  await flushLogger(log);
   process.exit(1);
 });

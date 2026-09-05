@@ -20,9 +20,6 @@ function createDeps(session: unknown, options?: { terminalWrite?: ReturnType<typ
       terminateProcess: vi.fn(() => true),
     },
     terminalSockets,
-    hostedPtyRegistry: {
-      terminate: vi.fn(() => false),
-    },
   };
 }
 
@@ -45,7 +42,6 @@ describe("terminateSessionByOwnership", () => {
       preserveProviderHooks: true,
     });
     expect(deps.workerRegistry.send).not.toHaveBeenCalled();
-    expect(deps.hostedPtyRegistry.terminate).not.toHaveBeenCalled();
     expect(deps.terminalSockets.has("s1")).toBe(false);
     expect(IpcMessageSchema.parse(JSON.parse(terminalWrite.mock.calls[0][0].trim()))).toEqual({
       type: "pty_detach",
@@ -60,7 +56,7 @@ describe("terminateSessionByOwnership", () => {
         id: "s1",
         kind: "terminal",
         mode: "pty",
-        ptyOwner: "local-terminal",
+        ptyOwner: "proxy-hosted",
       },
       { terminalWrite },
     );
@@ -83,7 +79,7 @@ describe("terminateSessionByOwnership", () => {
         kind: "terminal",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "local-terminal",
+        ptyOwner: "proxy-hosted",
         cwd: "/tmp",
         pid: 4242,
       }),
@@ -96,9 +92,10 @@ describe("terminateSessionByOwnership", () => {
     expect(result).toEqual({ success: true, action: "terminate_terminal_worker" });
     expect(deps.isManagedSessionProcess).toHaveBeenCalledWith(4242, {
       id: "s1",
+      kind: "terminal",
       mode: "pty",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
     });
     expect(kill).not.toHaveBeenCalled();
     expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
@@ -112,7 +109,7 @@ describe("terminateSessionByOwnership", () => {
         kind: "terminal",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "local-terminal",
+        ptyOwner: "proxy-hosted",
         cwd: "/tmp",
         pid: 4242,
       }),
@@ -128,20 +125,21 @@ describe("terminateSessionByOwnership", () => {
     kill.mockRestore();
   });
 
-  it("terminates hosted PTY through HostedPtyRegistry", () => {
-    const deps = createDeps({
-      id: "s1",
-      mode: "pty",
-      ptyOwner: "proxy-hosted",
+  it("terminates hosted Agent PTYs through their worker socket", () => {
+    const terminalWrite = vi.fn();
+    const deps = createDeps(
+      { id: "s1", kind: "agent", mode: "pty", provider: "kimi", ptyOwner: "proxy-hosted" },
+      { terminalWrite },
+    );
+    expect(terminateSessionByOwnership(deps as never, "s1")).toEqual({
+      success: true,
+      action: "terminate_terminal_worker",
     });
-    deps.hostedPtyRegistry.terminate.mockReturnValue(true);
-
-    const result = terminateSessionByOwnership(deps as never, "s1");
-
-    expect(result).toEqual({ success: true, action: "terminate_hosted_pty" });
-    expect(deps.hostedPtyRegistry.terminate).toHaveBeenCalledWith("s1");
-    expect(deps.sessionManager.terminateSession).not.toHaveBeenCalled();
-    expect(deps.workerRegistry.send).not.toHaveBeenCalled();
+    expect(JSON.parse(terminalWrite.mock.calls[0][0])).toEqual({
+      type: "pty_terminate",
+      sessionId: "s1",
+    });
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
   });
 
   it("terminates JSON workers through worker_stop", () => {

@@ -1639,7 +1639,7 @@ describe("RelayControlSchema", () => {
         kind: "terminal",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "proxy-hosted",
+        ptyOwner: "local-terminal",
         cwd: "/tmp/test",
         state: "idle",
       },

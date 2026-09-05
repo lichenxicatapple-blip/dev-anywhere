@@ -29,7 +29,7 @@ describe("persisted session schema", () => {
       kind: "terminal",
       mode: "pty",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
     },
   ])("accepts a complete current session identity", (record) => {
     expect(PersistedSessionRecordSchema.safeParse(record).success).toBe(true);
@@ -81,7 +81,7 @@ describe("persisted session schema", () => {
       kind: "terminal",
       mode: "pty",
       provider: "claude",
-      ptyOwner: "proxy-hosted",
+      ptyOwner: "local-terminal",
     },
   ])("rejects impossible pure-terminal identities", (record) => {
     expect(PersistedSessionRecordSchema.safeParse({ ...identity, ...record }).success).toBe(false);

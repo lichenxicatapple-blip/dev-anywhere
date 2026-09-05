@@ -37,7 +37,7 @@ describe("sessionTerminationCopy", () => {
         mode: "pty",
         provider: "claude",
         state: "idle",
-        ptyOwner: "local-terminal",
+        ptyOwner: "proxy-hosted",
         cwd: "/tmp/project",
         lastActive: 1,
       }),

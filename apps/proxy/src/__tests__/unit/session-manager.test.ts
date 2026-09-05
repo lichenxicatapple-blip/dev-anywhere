@@ -745,7 +745,7 @@ describe("SessionManager", () => {
         ALIVE_PID,
         undefined,
         undefined,
-        "local-terminal",
+        "proxy-hosted",
       );
 
       expect(manager.updateTerminalCwd(session.id, "/Users/dev/My Project/../repo")).toBe(true);
@@ -764,7 +764,7 @@ describe("SessionManager", () => {
         ALIVE_PID,
         undefined,
         undefined,
-        "local-terminal",
+        "proxy-hosted",
       );
       const agent = manager.createSession(
         "agent",
@@ -1269,7 +1269,7 @@ describe("SessionManager", () => {
       manager2.stopReaper();
     });
 
-    it("removes a foreign-generation proxy-hosted PTY without retaining it for handover", () => {
+    it("terminates an identity-verified foreign-generation hosted worker", () => {
       const terminateManagedSession = vi.fn();
       const inspectManagedProcess = vi.fn(() => true);
       const removedIds: string[] = [];
@@ -1300,8 +1300,14 @@ describe("SessionManager", () => {
         onSessionRemoved: (id) => removedIds.push(id),
       });
 
-      expect(inspectManagedProcess).not.toHaveBeenCalled();
-      expect(terminateManagedSession).not.toHaveBeenCalled();
+      expect(inspectManagedProcess).toHaveBeenCalledWith(5353, {
+        id: "foreign-proxy-hosted-terminal",
+        kind: "agent",
+        mode: "pty",
+        provider: "kimi",
+        ptyOwner: "proxy-hosted",
+      });
+      expect(terminateManagedSession).toHaveBeenCalledExactlyOnceWith(5353);
       expect(removedIds).toEqual(["foreign-proxy-hosted-terminal"]);
       expect(manager2.listSessions()).toEqual([]);
       expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
@@ -1360,7 +1366,8 @@ describe("SessionManager", () => {
         isManagedSessionProcess: inspectManagedProcess,
         terminateManagedSession,
       });
-      const reconnected = manager2.claimLocalPtySession({
+      const reconnected = manager2.claimPtySession({
+        ptyOwner: "local-terminal",
         kind: "agent",
         provider: "claude",
         cwd: "/tmp/test",
@@ -1408,7 +1415,8 @@ describe("SessionManager", () => {
         expect.objectContaining({ id: "unverified-terminal", pid: 4242 }),
       ]);
       // Even a new CLI with a reused PID must not inherit the pending session without its ID.
-      const fresh = manager2.claimLocalPtySession({
+      const fresh = manager2.claimPtySession({
+        ptyOwner: "local-terminal",
         kind: "agent",
         provider: "claude",
         cwd: "/tmp/test",
@@ -1417,7 +1425,8 @@ describe("SessionManager", () => {
       expect(fresh.source).toBe("created");
       expect(fresh.session.id).not.toBe("unverified-terminal");
       expect(manager2.listSessions()).toEqual([fresh.session]);
-      const claimed = manager2.claimLocalPtySession({
+      const claimed = manager2.claimPtySession({
+        ptyOwner: "local-terminal",
         kind: "agent",
         provider: "claude",
         cwd: "/tmp/test",
@@ -1429,8 +1438,9 @@ describe("SessionManager", () => {
       manager2.stopReaper();
     });
 
-    it("expires an unclaimed local PTY handover without signalling its process", () => {
+    it("keeps a live unclaimed PTY indefinitely and reaps it only after confirmed exit", () => {
       vi.useFakeTimers();
+      let alive = true;
       const removedIds: string[] = [];
       const terminateManagedSession = vi.fn();
       manager.createSession(
@@ -1447,15 +1457,20 @@ describe("SessionManager", () => {
       const manager2 = new SessionManager({
         persistPath,
         allowSessionRuntimeHandover: { terminal: true, worker: true },
-        isProcessAlive: () => true,
+        isProcessAlive: () => alive,
         isManagedSessionProcess: () => true,
         terminateManagedSession,
-        localPtyReconnectTimeoutMs: 1_000,
         onSessionRemoved: (id) => removedIds.push(id),
       });
 
       expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toHaveLength(1);
-      vi.advanceTimersByTime(1_001);
+      manager2.startReaper(1_000);
+      vi.advanceTimersByTime(120_000);
+      expect(removedIds).toEqual([]);
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toHaveLength(1);
+      expect(manager2.listSessions()).toEqual([]);
+      alive = false;
+      vi.advanceTimersByTime(1_000);
       expect(removedIds).toEqual(["expiring-terminal"]);
       expect(terminateManagedSession).not.toHaveBeenCalled();
       expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
@@ -1475,7 +1490,8 @@ describe("SessionManager", () => {
         "local-terminal",
       );
 
-      const claimed = manager.claimLocalPtySession({
+      const claimed = manager.claimPtySession({
+        ptyOwner: "local-terminal",
         kind: "agent",
         provider: "kimi",
         cwd: "/tmp/project",
@@ -1484,7 +1500,8 @@ describe("SessionManager", () => {
       });
       expect(claimed).toEqual({ session: active, source: "active" });
       expect(() =>
-        manager.claimLocalPtySession({
+        manager.claimPtySession({
+          ptyOwner: "local-terminal",
           kind: "agent",
           provider: "kimi",
           cwd: "/tmp/project",
@@ -1497,7 +1514,8 @@ describe("SessionManager", () => {
 
     it("rejects an unknown caller-supplied local PTY session id", () => {
       expect(() =>
-        manager.claimLocalPtySession({
+        manager.claimPtySession({
+          ptyOwner: "local-terminal",
           kind: "agent",
           provider: "claude",
           cwd: "/tmp/project",
@@ -1508,8 +1526,9 @@ describe("SessionManager", () => {
       expect(manager.getSession("not-active-or-pending")).toBeUndefined();
     });
 
-    it("removes same-generation proxy-hosted PTYs instead of waiting for an impossible reconnect", () => {
+    it("retains a live hosted worker for exact IPC reclaim without an OS query", () => {
       const removedIds: string[] = [];
+      const inspectManagedProcess = vi.fn(() => false);
       writeFileSync(
         persistPath,
         JSON.stringify([
@@ -1532,21 +1551,33 @@ describe("SessionManager", () => {
         persistPath,
         allowSessionRuntimeHandover: { terminal: true, worker: true },
         isProcessAlive: () => true,
+        isManagedSessionProcess: inspectManagedProcess,
         terminateManagedSession: vi.fn(),
         onSessionRemoved: (id) => removedIds.push(id),
       });
 
       expect(manager2.listSessions()).toEqual([]);
-      expect(removedIds).toEqual(["same-generation-proxy-hosted"]);
-      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      expect(removedIds).toEqual([]);
+      expect(inspectManagedProcess).not.toHaveBeenCalled();
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toHaveLength(1);
+      const claim = manager2.claimPtySession({
+        sessionId: "same-generation-proxy-hosted",
+        kind: "agent",
+        provider: "kimi",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/test",
+        pid: 5353,
+      });
+      expect(claim.source).toBe("pending");
+      expect(manager2.listSessions()).toEqual([claim.session]);
       manager2.stopReaper();
     });
 
     it.each([
       ["provider", { provider: "codex" }],
       ["pid", { pid: 4243 }],
-      ["cwd", { cwd: "/tmp/other" }],
-      ["kind", { kind: "terminal" }],
+      ["kind", { kind: "terminal", ptyOwner: "proxy-hosted" }],
+      ["owner", { ptyOwner: "proxy-hosted" }],
     ] as const)(
       "rejects a PTY reconnect whose %s differs from the persisted identity",
       (_field, changedIdentity) => {
@@ -1568,7 +1599,8 @@ describe("SessionManager", () => {
           isManagedSessionProcess: () => true,
         });
         expect(() =>
-          manager2.claimLocalPtySession({
+          manager2.claimPtySession({
+            ptyOwner: "local-terminal",
             kind: "agent",
             provider: "claude",
             cwd: "/tmp/test",
@@ -1627,7 +1659,8 @@ describe("SessionManager", () => {
       });
       expect(manager2.getSession(pty.id)).toBeUndefined();
 
-      const reconnected = manager2.claimLocalPtySession({
+      const reconnected = manager2.claimPtySession({
+        ptyOwner: "local-terminal",
         kind: "agent",
         provider: "claude",
         cwd: "/tmp/project",
@@ -1747,11 +1780,174 @@ describe("SessionManager", () => {
     });
   });
 
+  describe("PTY binding lifecycle", () => {
+    it.each(["pending", "active"] as const)(
+      "accepts a Shell cwd change on %s reconnect",
+      (binding) => {
+        const claim = {
+          kind: "terminal" as const,
+          provider: "claude" as const,
+          ptyOwner: "proxy-hosted" as const,
+          cwd: "/tmp/first",
+          pid: ALIVE_PID,
+        };
+        const { session } = manager.claimPtySession(claim);
+        if (binding === "pending") manager.releasePtyBinding(session.id, ALIVE_PID);
+        const restored = manager.claimPtySession({
+          ...claim,
+          sessionId: session.id,
+          cwd: "/tmp/second",
+        });
+        expect(restored.source).toBe(binding);
+        expect(restored.session.cwd).toBe("/tmp/second");
+        expect(JSON.parse(readFileSync(persistPath, "utf-8"))[0].cwd).toBe("/tmp/second");
+      },
+    );
+
+    it.each([
+      { kind: "agent", provider: "claude", ptyOwner: "local-terminal" },
+      { kind: "agent", provider: "claude", ptyOwner: "proxy-hosted" },
+      { kind: "agent", provider: "codex", ptyOwner: "proxy-hosted" },
+      { kind: "agent", provider: "kimi", ptyOwner: "proxy-hosted" },
+      { kind: "terminal", provider: "claude", ptyOwner: "proxy-hosted" },
+    ] as const)("retains $kind/$provider/$ptyOwner through repeated binding loss", (identity) => {
+      const onSessionRemoved = vi.fn();
+      manager = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
+        onSessionRemoved,
+      });
+      const claim = { ...identity, cwd: "/tmp/project", pid: ALIVE_PID, name: "Project" };
+      const created = manager.claimPtySession(claim).session;
+      manager.setHistorySessionId(created.id, "native-history");
+      manager.setClaudeSessionId(created.id, "native-current");
+      manager.renameSession(created.id, "My session");
+      const original = { ...manager.getSession(created.id)! };
+
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        expect(manager.releasePtyBinding(created.id, ALIVE_PID + 1)).toBe(false);
+        expect(manager.releasePtyBinding(created.id, ALIVE_PID)).toBe(true);
+        expect(manager.releasePtyBinding(created.id, ALIVE_PID)).toBe(true);
+        expect(manager.listSessions()).toEqual([]);
+        expect(manager.getSession(created.id)).toBeUndefined();
+        expect(manager.getRuntimeSession(created.id)).toMatchObject({
+          ...identity,
+          name: original.name,
+          nameLocked: true,
+          historySessionId: "native-history",
+          claudeSessionId: "native-current",
+        });
+        expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toHaveLength(1);
+
+        const rebound = manager.claimPtySession({ ...claim, sessionId: created.id });
+        expect(rebound.source).toBe("pending");
+        expect(rebound.session).toEqual(original);
+        expect(onSessionRemoved).not.toHaveBeenCalled();
+      }
+    });
+
+    it("keeps unbound metadata when another session is saved and the Proxy reloads", () => {
+      const first = manager.claimPtySession({
+        kind: "agent",
+        provider: "kimi",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/project",
+        pid: ALIVE_PID,
+        name: "Automatic title",
+      }).session;
+      manager.releasePtyBinding(first.id, ALIVE_PID);
+      manager.createSession("agent", "json", "claude", "/tmp/other", DEAD_PID);
+      const restored = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
+      });
+      const rebound = restored.claimPtySession({
+        kind: "agent",
+        provider: "kimi",
+        ptyOwner: "proxy-hosted",
+        cwd: first.cwd,
+        pid: first.pid,
+        sessionId: first.id,
+      });
+      expect(rebound.source).toBe("pending");
+      expect(rebound.session.name).toBe("Automatic title");
+    });
+
+    it("explicitly removes pending PTYs without leaving records to reclaim", () => {
+      const onSessionRemoved = vi.fn();
+      manager = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
+        onSessionRemoved,
+      });
+      const claim = {
+        kind: "terminal" as const,
+        provider: "claude" as const,
+        ptyOwner: "proxy-hosted" as const,
+        cwd: "/tmp/project",
+        pid: ALIVE_PID,
+      };
+      const { session } = manager.claimPtySession(claim);
+      manager.releasePtyBinding(session.id, ALIVE_PID);
+      expect(manager.terminateSession(session.id)).toEqual({ success: true, pid: ALIVE_PID });
+      expect(manager.getRuntimeSession(session.id)).toBeUndefined();
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([]);
+      expect(onSessionRemoved).toHaveBeenCalledExactlyOnceWith(session.id, undefined);
+      expect(() => manager.claimPtySession({ ...claim, sessionId: session.id })).toThrow();
+      expect(manager.releasePtyBinding(session.id, ALIVE_PID)).toBe(false);
+    });
+
+    it("does not release JSON sessions as PTY bindings", () => {
+      const session = manager.createSession("agent", "json", "claude", "/tmp", ALIVE_PID);
+      expect(manager.releasePtyBinding(session.id, ALIVE_PID)).toBe(false);
+      expect(manager.getSession(session.id)).toEqual(session);
+    });
+  });
+
   describe("reaper", () => {
+    it.each(["EPERM", "EIO"])(
+      "does not discard a pending PTY when process inspection returns %s",
+      (code) => {
+        vi.useFakeTimers();
+        const { session } = manager.claimPtySession({
+          kind: "agent",
+          provider: "kimi",
+          ptyOwner: "proxy-hosted",
+          cwd: "/tmp/project",
+          pid: ALIVE_PID,
+        });
+        manager.releasePtyBinding(session.id, ALIVE_PID);
+        const killSpy = vi.spyOn(process, "kill").mockImplementation(() => {
+          throw Object.assign(new Error(code), { code });
+        });
+        try {
+          manager.startReaper(1_000);
+          vi.advanceTimersByTime(1_000);
+          expect(manager.getRuntimeSession(session.id)).toBeDefined();
+        } finally {
+          killSpy.mockRestore();
+        }
+      },
+    );
+
+    it("reaps an active PTY after confirmed owner exit", () => {
+      vi.useFakeTimers();
+      const { session } = manager.claimPtySession({
+        kind: "terminal",
+        provider: "claude",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/project",
+        pid: DEAD_PID,
+      });
+      manager.startReaper(1_000);
+      vi.advanceTimersByTime(1_000);
+      expect(manager.getRuntimeSession(session.id)).toBeUndefined();
+    });
+
     it("removes dead JSON sessions from registry", () => {
       vi.useFakeTimers();
       const killSpy = vi.spyOn(process, "kill").mockImplementation((_pid, _signal?) => {
-        throw new Error("ESRCH");
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
       });
 
       const s = manager.createSession("agent", "json", "claude", "/tmp/test", 99999);
@@ -1794,7 +1990,7 @@ describe("SessionManager", () => {
       manager.stopReaper();
 
       const killSpy = vi.spyOn(process, "kill").mockImplementation((_pid, _signal?) => {
-        throw new Error("ESRCH");
+        throw Object.assign(new Error("ESRCH"), { code: "ESRCH" });
       });
 
       vi.advanceTimersByTime(5000);

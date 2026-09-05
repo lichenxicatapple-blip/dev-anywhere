@@ -50,27 +50,29 @@ export type SessionInfo =
       kind: "terminal";
       mode: "pty";
       provider: "claude";
-      ptyOwner: "local-terminal";
+      ptyOwner: "proxy-hosted";
     });
 
-type LocalPtySessionClaimCommon = {
+type PtySessionClaimCommon = {
   cwd: string;
   pid: number;
   name?: string;
   sessionId?: string;
 };
 
-export type LocalPtySessionClaim =
-  | (LocalPtySessionClaimCommon & {
+export type PtySessionClaim =
+  | (PtySessionClaimCommon & {
       kind: "agent";
       provider: ProviderId;
+      ptyOwner: "local-terminal" | "proxy-hosted";
     })
-  | (LocalPtySessionClaimCommon & {
+  | (PtySessionClaimCommon & {
       kind: "terminal";
       provider: "claude";
+      ptyOwner: "proxy-hosted";
     });
 
-export interface LocalPtySessionClaimResult {
+export interface PtySessionClaimResult {
   session: SessionInfo;
   source: "created" | "active" | "pending";
 }
@@ -82,7 +84,6 @@ interface SessionManagerOptions {
   allowSessionRuntimeHandover: { terminal: boolean; worker: boolean };
   historyMetadataPath?: string;
   reaperIntervalMs?: number;
-  localPtyReconnectTimeoutMs?: number;
   onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
   isProcessAlive?: (pid: number) => boolean;
   isManagedSessionProcess?: (pid: number, identity: ManagedSessionProcessIdentity) => boolean;
@@ -193,13 +194,10 @@ function isProviderId(value: unknown): value is ProviderId {
 export class SessionManager {
   private sessions: Map<string, SessionInfo> = new Map();
   private pendingPtyReconnectMetadata: Map<string, PersistedPtySessionRecord> = new Map();
-  private pendingPtyReconnectDeadlines: Map<string, number> = new Map();
-  private pendingPtyReconnectTimer: NodeJS.Timeout | null = null;
   private reaperTimer: NodeJS.Timeout | null = null;
   private readonly persistPath: string;
   private readonly historyMetadataPath?: string;
   private readonly reaperIntervalMs: number;
-  private readonly localPtyReconnectTimeoutMs: number;
   private readonly onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
   private readonly allowSessionRuntimeHandover: { terminal: boolean; worker: boolean };
   private readonly processAlive: (pid: number) => boolean;
@@ -213,7 +211,6 @@ export class SessionManager {
     this.persistPath = options.persistPath;
     this.historyMetadataPath = options.historyMetadataPath;
     this.reaperIntervalMs = options.reaperIntervalMs ?? 60000;
-    this.localPtyReconnectTimeoutMs = options.localPtyReconnectTimeoutMs ?? 30_000;
     this.onSessionRemoved = options.onSessionRemoved;
     this.allowSessionRuntimeHandover = options.allowSessionRuntimeHandover;
     this.processAlive =
@@ -222,8 +219,9 @@ export class SessionManager {
         try {
           process.kill(pid, 0);
           return true;
-        } catch {
-          return false;
+        } catch (error) {
+          // Permission or inspection failures are not proof that the owner has exited.
+          return (error as NodeJS.ErrnoException).code !== "ESRCH";
         }
       });
     this.managedSessionProcess = options.isManagedSessionProcess ?? isManagedSessionProcess;
@@ -262,7 +260,7 @@ export class SessionManager {
     pid: number,
     name: string | undefined,
     id: string | undefined,
-    ptyOwner: "local-terminal",
+    ptyOwner: "proxy-hosted",
     nameLocked?: boolean,
   ): SessionInfo;
   createSession(
@@ -284,9 +282,9 @@ export class SessionManager {
     }
     if (
       kind === "terminal" &&
-      (mode !== "pty" || provider !== "claude" || ptyOwner !== "local-terminal")
+      (mode !== "pty" || provider !== "claude" || ptyOwner !== "proxy-hosted")
     ) {
-      throw new TypeError("Terminal sessions require a local Claude PTY");
+      throw new TypeError("Terminal sessions require a proxy-hosted Shell PTY");
     }
     if (!Number.isSafeInteger(pid) || pid <= 0) {
       throw new TypeError("Session PID must be a positive safe integer");
@@ -308,7 +306,7 @@ export class SessionManager {
     const resolvedName =
       pendingPtyMetadata?.nameLocked && pendingPtyMetadata.name !== undefined
         ? pendingPtyMetadata.name
-        : name;
+        : (name ?? pendingPtyMetadata?.name);
     const resolvedNameLocked = pendingPtyMetadata?.nameLocked ?? (nameLocked ? true : undefined);
     const common: SessionInfoCommon = {
       id: id ?? nanoid(),
@@ -333,7 +331,7 @@ export class SessionManager {
         kind: "terminal",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "local-terminal",
+        ptyOwner: "proxy-hosted",
       };
     } else if (mode === "json") {
       info = { ...common, kind: "agent", mode: "json", provider };
@@ -349,9 +347,7 @@ export class SessionManager {
     }
     this.sessions.set(info.id, info);
     this.pendingPtyReconnectMetadata.delete(info.id);
-    this.pendingPtyReconnectDeadlines.delete(info.id);
     this.save();
-    this.schedulePendingPtyReconnectCleanup();
     serviceLogger.info(
       { sessionId: info.id, kind: info.kind, mode, provider, ptyOwner, name },
       "Session created",
@@ -360,19 +356,23 @@ export class SessionManager {
   }
 
   /**
-   * Atomically creates or reclaims the local PTY identity presented by a terminal IPC client.
+   * Atomically creates or reclaims the PTY identity presented by an admitted IPC client.
    * A caller-supplied id is never a request to create arbitrary state: it must already be active
    * under the same process identity, or be an exact persisted handover waiting to reconnect.
    */
-  claimLocalPtySession(claim: LocalPtySessionClaim): LocalPtySessionClaimResult {
+  claimPtySession(claim: PtySessionClaim): PtySessionClaimResult {
     const sessionId = claim.sessionId;
     if (sessionId === undefined) {
-      return { session: this.createLocalPtySession(claim), source: "created" };
+      return { session: this.createClaimedPtySession(claim), source: "created" };
     }
 
     const active = this.sessions.get(sessionId);
     if (active !== undefined) {
-      this.assertLocalPtyClaimIdentity(active, claim);
+      this.assertPtyClaimIdentity(active, claim);
+      if (active.cwd !== claim.cwd) {
+        active.cwd = claim.cwd;
+        this.save();
+      }
       return { session: active, source: "active" };
     }
 
@@ -380,11 +380,27 @@ export class SessionManager {
     if (pending === undefined) {
       throw new TypeError("PTY reconnect session is not available for handover");
     }
-    this.assertLocalPtyClaimIdentity(pending, claim);
-    return { session: this.createLocalPtySession(claim), source: "pending" };
+    this.assertPtyClaimIdentity(pending, claim);
+    return { session: this.createClaimedPtySession(claim), source: "pending" };
   }
 
-  private createLocalPtySession(claim: LocalPtySessionClaim): SessionInfo {
+  /** Transport loss releases a binding, not the process or its persisted session identity. */
+  releasePtyBinding(sessionId: string, expectedPid: number): boolean {
+    const session = this.sessions.get(sessionId);
+    if (session === undefined) {
+      return this.pendingPtyReconnectMetadata.get(sessionId)?.pid === expectedPid;
+    }
+    if (session.mode !== "pty" || session.pid !== expectedPid) return false;
+    const record = this.toPersistedRecord(session);
+    if (record.mode !== "pty") return false;
+    this.pendingPtyReconnectMetadata.set(sessionId, record);
+    this.sessions.delete(sessionId);
+    this.save();
+    serviceLogger.info({ sessionId, pid: expectedPid }, "PTY binding released; awaiting reconnect");
+    return true;
+  }
+
+  private createClaimedPtySession(claim: PtySessionClaim): SessionInfo {
     if (claim.kind === "terminal") {
       return this.createSession(
         "terminal",
@@ -394,7 +410,7 @@ export class SessionManager {
         claim.pid,
         claim.name,
         claim.sessionId,
-        "local-terminal",
+        claim.ptyOwner,
       );
     }
     return this.createSession(
@@ -405,21 +421,20 @@ export class SessionManager {
       claim.pid,
       claim.name,
       claim.sessionId,
-      "local-terminal",
+      claim.ptyOwner,
     );
   }
 
-  private assertLocalPtyClaimIdentity(
+  private assertPtyClaimIdentity(
     session: SessionInfo | PersistedPtySessionRecord,
-    claim: LocalPtySessionClaim,
+    claim: PtySessionClaim,
   ): void {
     if (
       session.kind !== claim.kind ||
       session.mode !== "pty" ||
       session.provider !== claim.provider ||
-      session.ptyOwner !== "local-terminal" ||
-      session.pid !== claim.pid ||
-      session.cwd !== claim.cwd
+      session.ptyOwner !== claim.ptyOwner ||
+      session.pid !== claim.pid
     ) {
       throw new TypeError("PTY reconnect identity does not match the session owner");
     }
@@ -431,6 +446,10 @@ export class SessionManager {
 
   getSession(id: string): SessionInfo | undefined {
     return this.sessions.get(id);
+  }
+
+  getRuntimeSession(id: string): SessionInfo | PersistedPtySessionRecord | undefined {
+    return this.sessions.get(id) ?? this.pendingPtyReconnectMetadata.get(id);
   }
 
   updateState(id: string, newState: SessionState): boolean {
@@ -471,12 +490,13 @@ export class SessionManager {
   }
 
   terminateSession(id: string, context?: SessionRemoveContext): { success: boolean; pid?: number } {
-    const session = this.sessions.get(id);
+    const session = this.sessions.get(id) ?? this.pendingPtyReconnectMetadata.get(id);
     if (!session) {
       return { success: false };
     }
     const pid = session.pid;
     this.sessions.delete(id);
+    this.pendingPtyReconnectMetadata.delete(id);
     this.save();
     serviceLogger.info({ sessionId: id, mode: session.mode, pid }, "Session terminated");
     // 隔离 callback 异常: hook unregister / permission broker / 文件系统操作任意一步抛
@@ -595,7 +615,6 @@ export class SessionManager {
   startReaper(intervalMs: number = this.reaperIntervalMs): void {
     if (this.reaperTimer) clearInterval(this.reaperTimer);
     this.reaperTimer = setInterval(() => this.reap(), intervalMs);
-    this.schedulePendingPtyReconnectCleanup();
   }
 
   stopReaper(): void {
@@ -603,72 +622,17 @@ export class SessionManager {
       clearInterval(this.reaperTimer);
       this.reaperTimer = null;
     }
-    if (this.pendingPtyReconnectTimer) {
-      clearTimeout(this.pendingPtyReconnectTimer);
-      this.pendingPtyReconnectTimer = null;
-    }
-  }
-
-  private schedulePendingPtyReconnectCleanup(): void {
-    if (this.pendingPtyReconnectTimer) {
-      clearTimeout(this.pendingPtyReconnectTimer);
-      this.pendingPtyReconnectTimer = null;
-    }
-    let earliestDeadline: number | undefined;
-    for (const deadline of this.pendingPtyReconnectDeadlines.values()) {
-      earliestDeadline =
-        earliestDeadline === undefined ? deadline : Math.min(earliestDeadline, deadline);
-    }
-    if (earliestDeadline === undefined) return;
-    this.pendingPtyReconnectTimer = setTimeout(
-      () => this.expirePendingPtyReconnects(),
-      Math.max(0, earliestDeadline - Date.now()),
-    );
-    this.pendingPtyReconnectTimer.unref?.();
-  }
-
-  private expirePendingPtyReconnects(): void {
-    this.pendingPtyReconnectTimer = null;
-    const now = Date.now();
-    const expiredIds: string[] = [];
-    for (const [sessionId, deadline] of this.pendingPtyReconnectDeadlines) {
-      if (deadline > now) continue;
-      this.pendingPtyReconnectDeadlines.delete(sessionId);
-      if (this.pendingPtyReconnectMetadata.delete(sessionId)) expiredIds.push(sessionId);
-    }
-    if (expiredIds.length > 0) {
-      this.save();
-      for (const sessionId of expiredIds) {
-        try {
-          this.onSessionRemoved?.(sessionId);
-        } catch (err) {
-          serviceLogger.warn(
-            { sessionId, error: String(err) },
-            "Pending PTY cleanup callback failed",
-          );
-        }
-        serviceLogger.warn(
-          { sessionId, timeoutMs: this.localPtyReconnectTimeoutMs },
-          "Pending PTY handover expired and was removed",
-        );
-      }
-    }
-    this.schedulePendingPtyReconnectCleanup();
   }
 
   private reap(): void {
     const toRemove: Array<{ id: string; reason: string }> = [];
-    // 检查 JSON 会话的子进程是否存活
-    // PTY 会话的生命周期由 IPC socket close 事件管理，不需要 reaper 参与
-    for (const session of this.sessions.values()) {
-      if (
-        session.mode === "json" &&
-        session.pid !== undefined &&
-        session.state !== SessionState.TERMINATED
-      ) {
-        if (!this.isProcessAlive(session.pid)) {
-          toRemove.push({ id: session.id, reason: `JSON worker process ${session.pid} is dead` });
-        }
+    // An absent IPC binding is not an exit. Keep disconnected PTYs until their owner is dead.
+    for (const session of [
+      ...this.sessions.values(),
+      ...this.pendingPtyReconnectMetadata.values(),
+    ]) {
+      if (!this.isProcessAlive(session.pid)) {
+        toRemove.push({ id: session.id, reason: `Session process ${session.pid} is dead` });
       }
     }
     for (const { id, reason } of toRemove) {
@@ -711,7 +675,7 @@ export class SessionManager {
         kind: "terminal",
         mode: "pty",
         provider: "claude",
-        ptyOwner: "local-terminal",
+        ptyOwner: "proxy-hosted",
       });
     }
     if (s.mode === "pty") {
@@ -735,6 +699,7 @@ export class SessionManager {
     if (item === null || typeof item !== "object") return false;
     const candidate = item as {
       id?: unknown;
+      kind?: unknown;
       mode?: unknown;
       provider?: unknown;
       ptyOwner?: unknown;
@@ -742,7 +707,10 @@ export class SessionManager {
     };
     if (
       candidate.mode !== "json" &&
-      !(candidate.mode === "pty" && candidate.ptyOwner === "local-terminal")
+      !(
+        candidate.mode === "pty" &&
+        (candidate.ptyOwner === "local-terminal" || candidate.ptyOwner === "proxy-hosted")
+      )
     ) {
       return false;
     }
@@ -761,8 +729,13 @@ export class SessionManager {
       const identity: ManagedSessionProcessIdentity = {
         id: sessionId,
         mode: candidate.mode,
+        ...(candidate.kind === "agent" || candidate.kind === "terminal"
+          ? { kind: candidate.kind }
+          : {}),
         ...(isProviderId(candidate.provider) ? { provider: candidate.provider } : {}),
-        ...(candidate.ptyOwner === "local-terminal" ? { ptyOwner: candidate.ptyOwner } : {}),
+        ...(candidate.ptyOwner === "local-terminal" || candidate.ptyOwner === "proxy-hosted"
+          ? { ptyOwner: candidate.ptyOwner }
+          : {}),
         ...(candidate.mode === "json"
           ? { workerSocketPath: sessionPaths(sessionId).workerSock }
           : {}),
@@ -865,30 +838,12 @@ export class SessionManager {
       }
       const info = parsedRecord.data;
       if (info.mode === "pty") {
-        if (info.ptyOwner === "proxy-hosted") {
-          // A hosted PTY belongs to the daemon's in-memory node-pty registry and cannot be
-          // adopted by a replacement daemon.  Never expose it as pending handover.  We also do
-          // not signal the persisted PID here: after an ungraceful exit it may already have been
-          // reused, and a hosted Agent process has no session id in argv with which to prove
-          // ownership.  Graceful shutdown kills it through HostedPtyRegistry before removing this
-          // record.
-          this.onSessionRemoved?.(info.id);
-          serviceLogger.info(
-            { sessionId: info.id, pid: info.pid },
-            "Proxy-hosted PTY cleaned on load; runtime cannot be handed over",
-          );
-          continue;
-        }
         const processAlive = this.isProcessAlive(info.pid);
         if (processAlive) {
           // This only reserves metadata; it neither activates a session nor signals its PID.
           // The returning terminal must claim the exact persisted identity through IPC. An OS
           // command-line query is not needed here and its failure must not discard a live PTY.
           this.pendingPtyReconnectMetadata.set(info.id, info);
-          this.pendingPtyReconnectDeadlines.set(
-            info.id,
-            Date.now() + this.localPtyReconnectTimeoutMs,
-          );
           serviceLogger.info(
             { sessionId: info.id, pid: info.pid },
             "PTY session skipped on load, terminal alive",
@@ -926,7 +881,6 @@ export class SessionManager {
     }
     // 清理后回写磁盘，避免已清理的会话在下次启动时重复处理
     this.save();
-    this.schedulePendingPtyReconnectCleanup();
     if (this.sessions.size > 0) {
       serviceLogger.info({ count: this.sessions.size }, "Sessions restored from persistence");
     }

@@ -33,7 +33,6 @@ describe("createServeShutdown reentry guard", () => {
       devicePreviewStreamClose: ReturnType<typeof vi.fn>;
       relayConnectionClose: ReturnType<typeof vi.fn>;
       workerRegistryDestroyAll: ReturnType<typeof vi.fn>;
-      hostedPtyRegistryDestroyAll: ReturnType<typeof vi.fn>;
       terminalAdmissionDestroyAll: ReturnType<typeof vi.fn>;
       ipcServerClose: ReturnType<typeof vi.fn>;
       exit: ReturnType<typeof vi.fn>;
@@ -44,7 +43,6 @@ describe("createServeShutdown reentry guard", () => {
     const relayRouterDestroy = vi.fn();
     const relayConnectionClose = vi.fn();
     const workerRegistryDestroyAll = vi.fn();
-    const hostedPtyRegistryDestroyAll = vi.fn();
     const terminalAdmissionDestroyAll = vi.fn();
     const ipcServerClose = vi.fn();
     const exit = vi.fn();
@@ -74,7 +72,6 @@ describe("createServeShutdown reentry guard", () => {
       devicePreviewStreamClose,
       relayConnectionClose,
       workerRegistryDestroyAll,
-      hostedPtyRegistryDestroyAll,
       terminalAdmissionDestroyAll,
       ipcServerClose,
       sockPath,
@@ -92,7 +89,6 @@ describe("createServeShutdown reentry guard", () => {
         devicePreviewStreamClose,
         relayConnectionClose,
         workerRegistryDestroyAll,
-        hostedPtyRegistryDestroyAll,
         terminalAdmissionDestroyAll,
         ipcServerClose,
         exit,
@@ -124,7 +120,6 @@ describe("createServeShutdown reentry guard", () => {
     expect(spies.hookServerClose).toHaveBeenCalledTimes(1);
     expect(spies.relayConnectionClose).toHaveBeenCalledTimes(1);
     expect(spies.workerRegistryDestroyAll).toHaveBeenCalledTimes(1);
-    expect(spies.hostedPtyRegistryDestroyAll).toHaveBeenCalledTimes(1);
     expect(spies.terminalAdmissionDestroyAll).toHaveBeenCalledTimes(1);
     expect(spies.ipcServerClose).toHaveBeenCalledTimes(1);
     expect(spies.exit).toHaveBeenCalledTimes(1);

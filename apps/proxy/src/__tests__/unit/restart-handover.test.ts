@@ -2,10 +2,7 @@ import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  readLiveLocalPtySessionIds,
-  waitForSessionHandover,
-} from "#src/common/restart-handover.js";
+import { readLivePtySessionIds, waitForSessionHandover } from "#src/common/restart-handover.js";
 import {
   readSessionRuntimeIpcVersions,
   writeSessionRuntimeIpcVersions,
@@ -86,10 +83,10 @@ describe("restart session handover", () => {
     );
 
     expect(
-      readLiveLocalPtySessionIds(path, versionPath, runtimeVersions, (pid) =>
+      readLivePtySessionIds(path, versionPath, runtimeVersions, (pid) =>
         pid === 14 ? { status: "not-found", code: "ESRCH", message: "gone" } : { status: "alive" },
       ),
-    ).toEqual(["local-live"]);
+    ).toEqual(["local-live", "hosted-live"]);
   });
 
   it("does not wait for incomplete records even when the runtime marker matches", () => {
@@ -106,7 +103,7 @@ describe("restart session handover", () => {
     );
 
     expect(
-      readLiveLocalPtySessionIds(sessionsPath, versionPath, runtimeVersions, () => ({
+      readLivePtySessionIds(sessionsPath, versionPath, runtimeVersions, () => ({
         status: "alive",
       })),
     ).toEqual([]);
@@ -146,7 +143,7 @@ describe("restart session handover", () => {
     if (marker !== undefined) writeFileSync(versionPath, marker);
 
     expect(
-      readLiveLocalPtySessionIds(sessionsPath, versionPath, runtimeVersions, () => ({
+      readLivePtySessionIds(sessionsPath, versionPath, runtimeVersions, () => ({
         status: "alive",
       })),
     ).toEqual([]);

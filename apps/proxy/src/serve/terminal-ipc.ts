@@ -1,5 +1,10 @@
 import type { Socket } from "node:net";
-import { encodeBinaryFrame, serializeControl, type AgentStatusPayload } from "@dev-anywhere/shared";
+import {
+  ControlErrorCode,
+  encodeBinaryFrame,
+  serializeControl,
+  type AgentStatusPayload,
+} from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
   createIpcReader,
@@ -10,7 +15,8 @@ import {
 import type { TerminalAdmissionContext } from "../ipc/terminal-admission.js";
 import type { ProviderHookContext } from "../providers/index.js";
 import type { HookEventRouter } from "./hook-event-router.js";
-import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
+import { findCodexActiveWriter } from "../common/codex-active-writer.js";
+import { codexActiveWriterMessage } from "../common/codex-session-conflict.js";
 import type { PermissionBroker } from "./permission-broker.js";
 import { applyPtyStateToSession } from "./pty-session-bridge.js";
 import type { PtySessionBridgeDeps } from "./pty-session-bridge.js";
@@ -28,15 +34,16 @@ import type { TerminalSubscriptionBacklog } from "./terminal-subscription-backlo
 interface TerminalConnectionDeps {
   sessionManager: SessionManager;
   terminalSockets: Map<string, Socket>;
+  terminalClaims: Map<string, Socket>;
   terminalSubscriptionBacklog: TerminalSubscriptionBacklog;
-  hostedPtyRegistry: HostedPtyRegistry;
   relayConnection: RelayConnection;
   permissionBroker: PermissionBroker;
   hookEventRouter: HookEventRouter;
   createHookContext: (
     sessionId: string,
     provider: ProviderHookContext["provider"],
-  ) => ProviderHookContext;
+  ) => ProviderHookContext | undefined;
+  getProviderEnv: () => NodeJS.ProcessEnv;
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
   updateTerminalCwd: (sessionId: string, cwd: string) => boolean;
   resolveInterruptedApprovals: (sessionId: string) => void;
@@ -50,6 +57,7 @@ export function handleTerminalConnection(
   const {
     sessionManager,
     terminalSockets,
+    terminalClaims,
     terminalSubscriptionBacklog,
     relayConnection,
     permissionBroker,
@@ -75,21 +83,24 @@ export function handleTerminalConnection(
   let acceptedRegistration: {
     sessionId: string;
     pid: number;
-    source: "created" | "active" | "pending";
   } | null = null;
   let registeredSessionId: string | null = null;
   let admissionIntentChecked = false;
-  type LocalPtyClaimResult = ReturnType<SessionManager["claimLocalPtySession"]>;
+  type PtyClaimResult = ReturnType<SessionManager["claimPtySession"]>;
   const ownsRegisteredSession = (sessionId: string): boolean =>
     registeredSessionId === sessionId && terminalSockets.get(sessionId) === socket;
-  const discardClaimMutation = (claim: LocalPtyClaimResult | null): void => {
+  const discardClaimMutation = (claim: PtyClaimResult | null): void => {
     if (claim === null || claim.source === "active") return;
-    sessionManager.terminateSession(claim.session.id);
+    const sessionId = claim.session.id;
+    if (terminalSockets.has(sessionId) || terminalClaims.has(sessionId)) return;
+    sessionManager.releasePtyBinding(sessionId, claim.session.pid);
   };
   const discardUnregisteredClaim = (): void => {
     if (acceptedRegistration === null || registeredSessionId !== null) return;
-    if (acceptedRegistration.source !== "active") {
-      sessionManager.terminateSession(acceptedRegistration.sessionId);
+    const { sessionId, pid } = acceptedRegistration;
+    if (terminalClaims.get(sessionId) === socket) {
+      terminalClaims.delete(sessionId);
+      if (!terminalSockets.has(sessionId)) sessionManager.releasePtyBinding(sessionId, pid);
     }
     acceptedRegistration = null;
   };
@@ -106,11 +117,7 @@ export function handleTerminalConnection(
   const matchesAdmissionIntent = (msg: IpcMessage): boolean => {
     if (msg.type !== "session_create_request") return false;
     if (admission.clientKind === "terminal-worker") {
-      return (
-        msg.kind === "terminal" &&
-        admission.sessionId !== undefined &&
-        msg.sessionId === admission.sessionId
-      );
+      return admission.sessionId !== undefined && msg.sessionId === admission.sessionId;
     }
     return msg.kind === "agent" && msg.sessionId === admission.sessionId;
   };
@@ -154,22 +161,27 @@ export function handleTerminalConnection(
           }
           createHandshakeReceived = true;
           const provider = msg.provider;
-          let claim: LocalPtyClaimResult | null = null;
+          let claim: PtyClaimResult | null = null;
           try {
             const identity = {
               cwd: msg.cwd,
               pid: msg.pid,
+              ptyOwner:
+                admission.clientKind === "terminal-worker"
+                  ? ("proxy-hosted" as const)
+                  : ("local-terminal" as const),
               ...(msg.name !== undefined ? { name: msg.name } : {}),
               ...(msg.sessionId !== undefined ? { sessionId: msg.sessionId } : {}),
             };
             claim =
               msg.kind === "terminal"
-                ? sessionManager.claimLocalPtySession({
+                ? sessionManager.claimPtySession({
                     ...identity,
                     kind: "terminal",
                     provider: "claude",
+                    ptyOwner: "proxy-hosted",
                   })
-                : sessionManager.claimLocalPtySession({
+                : sessionManager.claimPtySession({
                     ...identity,
                     kind: "agent",
                     provider,
@@ -179,7 +191,8 @@ export function handleTerminalConnection(
               msg.kind === "terminal" || provider === "kimi"
                 ? undefined
                 : createHookContext(session.id, provider);
-            acceptedRegistration = { sessionId: session.id, pid: msg.pid, source: claim.source };
+            acceptedRegistration = { sessionId: session.id, pid: msg.pid };
+            terminalClaims.set(session.id, socket);
             socket.write(
               serializeIpc({
                 type: "session_create_response",
@@ -194,8 +207,8 @@ export function handleTerminalConnection(
               "PTY session create handshake accepted",
             );
           } catch (err) {
-            acceptedRegistration = null;
-            discardClaimMutation(claim);
+            if (acceptedRegistration !== null) discardUnregisteredClaim();
+            else discardClaimMutation(claim);
             const error = err instanceof Error ? err.message : "Terminal session claim failed";
             serviceLogger.warn(
               { requestedSessionId: msg.sessionId, pid: msg.pid, provider, error },
@@ -277,6 +290,7 @@ export function handleTerminalConnection(
         case "pty_register": {
           if (
             !acceptedRegistration ||
+            terminalClaims.get(msg.sessionId) !== socket ||
             acceptedRegistration.sessionId !== msg.sessionId ||
             acceptedRegistration.pid !== msg.pid
           ) {
@@ -294,8 +308,16 @@ export function handleTerminalConnection(
             break;
           }
           terminalSockets.set(msg.sessionId, socket);
+          terminalClaims.delete(msg.sessionId);
           registeredSessionId = msg.sessionId;
           acceptedRegistration = null;
+          socket.write(
+            serializeIpc({
+              type: "pty_approval_context",
+              sessionId: msg.sessionId,
+              waiting: permissionBroker.listSession(msg.sessionId).length > 0,
+            }),
+          );
           socket.write(
             serializeIpc({
               type: "bridge_status",
@@ -334,6 +356,30 @@ export function handleTerminalConnection(
             break;
           }
           terminalSubscriptionBacklog.delete(msg.sessionId);
+          if (msg.runtimeError?.errorCode === ControlErrorCode.SESSION_ALREADY_ACTIVE) {
+            const writer = findCodexActiveWriter(
+              msg.runtimeError.nativeSessionId,
+              deps.getProviderEnv(),
+            );
+            relayConnection.sendRaw(
+              serializeControl({
+                type: "session_runtime_error",
+                sessionId: msg.sessionId,
+                errorCode: msg.runtimeError.errorCode,
+                error: codexActiveWriterMessage(writer?.pid),
+                ...(writer ? { activeWriterPid: writer.pid } : {}),
+              }),
+            );
+          } else if (msg.runtimeError) {
+            relayConnection.sendRaw(
+              serializeControl({
+                type: "session_runtime_error",
+                sessionId: msg.sessionId,
+                errorCode: msg.runtimeError.errorCode,
+                error: msg.runtimeError.error,
+              }),
+            );
+          }
           sessionManager.terminateSession(msg.sessionId);
           terminalSockets.delete(msg.sessionId);
           registeredSessionId = null;
@@ -416,6 +462,9 @@ export function handleTerminalConnection(
           continue;
         }
         if (session.mode === "pty" && session.pid && isProcessAlive(session.pid)) {
+          if (!terminalClaims.has(sessionId)) {
+            sessionManager.releasePtyBinding(sessionId, session.pid);
+          }
           serviceLogger.info(
             { sessionId, pid: session.pid },
             "Terminal socket closed but process alive, skipping cleanup",

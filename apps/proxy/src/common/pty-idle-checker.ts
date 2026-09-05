@@ -1,8 +1,7 @@
 // PTY 闲置检测：每 IDLE_CHECK_INTERVAL_MS 抽一次，发现自上次输出已超过 IDLE_THRESHOLD_MS
 // 且当前局部状态仍是 working 时，把状态翻到 turn_complete 并触发 emit。
 //
-// 抽出来主要好处：terminal.ts / hosted-pty-registry.ts 都跑同样的 working→turn_complete
-// 退化逻辑，未来若把 hosted 也接入这个 checker，就只剩一份实现。
+// 本地终端与托管 PTY runtime 共用 working → turn_complete 的闲置判断。
 
 interface IdleCheckerOptions {
   // 检测周期

@@ -9,7 +9,6 @@ import { serviceLogger } from "../common/logger.js";
 import type { RemoteFileUploadManager } from "./remote-file-upload.js";
 import type { RemoteFileStreamManager } from "./remote-file-stream.js";
 import { serializeRawPtyInput } from "./pty-input.js";
-import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
 import type { JsonObserver } from "./json-observer.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionManager } from "./session-manager.js";
@@ -20,7 +19,6 @@ interface RelayInputHandlersDeps {
   workerRegistry: WorkerRegistry;
   relayConnection: RelayConnection;
   terminalSockets: Map<string, Socket>;
-  hostedPtyRegistry: HostedPtyRegistry;
   jsonObserver: JsonObserver;
   remoteFileStreamManager: RemoteFileStreamManager;
   remoteFileUploadManager: RemoteFileUploadManager;
@@ -92,18 +90,6 @@ export class RelayInputHandlers {
     if (!sessionId || data === undefined) return;
 
     const ts = this.deps.terminalSockets.get(sessionId);
-    const hostedInputForwarded =
-      !ts?.writable &&
-      (traceId
-        ? this.deps.hostedPtyRegistry.write(sessionId, data, traceId)
-        : this.deps.hostedPtyRegistry.write(sessionId, data));
-    if (hostedInputForwarded) {
-      serviceLogger.info(
-        { sessionId, traceId, bytes: data.length },
-        "Raw PTY input forwarded to hosted PTY",
-      );
-      return;
-    }
     if (!ts?.writable) {
       serviceLogger.warn(
         { sessionId, traceId },

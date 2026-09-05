@@ -15,7 +15,6 @@ export interface ServeShutdownDeps {
   hookServerClose: () => Promise<void>;
   relayConnectionClose: () => void;
   workerRegistryDestroyAll: () => void;
-  hostedPtyRegistryDestroyAll: () => void;
   terminalAdmissionDestroyAll?: () => void;
   ipcServerClose: () => void;
   sockPath: string;
@@ -48,7 +47,6 @@ export function createServeShutdown(deps: ServeShutdownDeps): () => Promise<void
     ]);
     deps.relayConnectionClose();
     deps.workerRegistryDestroyAll();
-    deps.hostedPtyRegistryDestroyAll();
     deps.terminalAdmissionDestroyAll?.();
     deps.ipcServerClose();
     if (deps.runtimeStateCleanup) deps.runtimeStateCleanup();

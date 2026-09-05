@@ -72,7 +72,7 @@ async function touchDrag(
 test.describe("L4 mobile / PTY input scroll", () => {
   test.setTimeout(60_000);
 
-  test("keeps a local-terminal Shell session at its snapshot width after mobile reconnect", async ({
+  test("keeps a hosted Shell session at its snapshot width after mobile reconnect", async ({
     emuPage,
   }) => {
     const sessionId = `${SESSION_ID}-session-owned`;
@@ -80,7 +80,7 @@ test.describe("L4 mobile / PTY input scroll", () => {
       sessionId,
       sessionKind: "terminal",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
       cols: 80,
       rows: 24,
       snapshotData: `${"QR".repeat(38)}\r\n$ `,

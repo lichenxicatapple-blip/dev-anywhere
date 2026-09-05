@@ -19,7 +19,7 @@ export const TERMINAL_IPC_PROTOCOL_VERSION = 2 as const;
 
 // IPC binary 帧外层 = [1B marker][4B payload_len uint32LE] + 内层 PTY 帧（来自 shared/binary-frame）。
 // 内层格式（[1B sid_len][sid][4B seq][data]）由 encodeBinaryFrame 统一管理，
-// 避免与 hosted-pty-registry / terminal-ipc / web 各自手写偏移量分叉。
+// 各个传输端共用同一帧布局。
 export function encodeBinaryIpcFrame(sessionId: string, data: Buffer, outputSeq: number): Buffer {
   const inner = encodeBinaryFrame(sessionId, outputSeq, data);
   const frame = Buffer.alloc(1 + 4 + inner.length);
@@ -107,6 +107,25 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     sessionId: z.string(),
     exitCode: z.number().int().optional(),
     errorTail: z.string().max(2048).optional(),
+    runtimeError: z
+      .discriminatedUnion("errorCode", [
+        z.object({
+          errorCode: z.literal(ControlErrorCode.SESSION_ALREADY_ACTIVE),
+          nativeSessionId: z.string(),
+        }),
+        z.object({
+          errorCode: z.literal(ControlErrorCode.PROCESS_START_FAILED),
+          error: z.string().max(2048),
+        }),
+      ])
+      .optional(),
+  }),
+
+  // serve → worker: hook approval state participates in PTY semantic inference.
+  z.object({
+    type: z.literal("pty_approval_context"),
+    sessionId: z.string(),
+    waiting: z.boolean(),
   }),
 
   // 输入，从服务端转发到客户端的 PTY stdin（手机远程输入注入）

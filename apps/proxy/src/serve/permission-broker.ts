@@ -48,6 +48,8 @@ function snapshot(pending: PendingPermission): PendingPermissionView {
 export class PermissionBroker {
   private readonly pending = new Map<string, PendingPermission>();
 
+  constructor(private readonly onChange?: (sessionId: string) => void) {}
+
   request(request: PermissionRequest): Promise<PermissionDecision> {
     if (this.pending.has(request.requestId)) {
       return Promise.resolve(DUPLICATE_DECISION);
@@ -59,6 +61,7 @@ export class PermissionBroker {
         resolve,
         createdAt: Date.now(),
       });
+      this.onChange?.(request.sessionId);
     });
   }
 
@@ -76,6 +79,7 @@ export class PermissionBroker {
       resolve: onDecision,
       createdAt: Date.now(),
     });
+    this.onChange?.(request.sessionId);
     return true;
   }
 
@@ -84,6 +88,7 @@ export class PermissionBroker {
     if (!pending) return false;
     this.pending.delete(requestId);
     pending.resolve(decision);
+    this.onChange?.(pending.sessionId);
     return true;
   }
 
@@ -105,6 +110,15 @@ export class PermissionBroker {
       this.pending.delete(requestId);
       pending.resolve({ behavior: "deny", message: reason });
       serviceLogger.info({ sessionId, requestId, reason }, "Pending hook permission dropped");
+    }
+    this.onChange?.(sessionId);
+  }
+
+  cancelHookRequests(reason: string): void {
+    for (const pending of [...this.pending.values()]) {
+      if (pending.source === "hook") {
+        this.resolve(pending.requestId, { behavior: "deny", message: reason });
+      }
     }
   }
 

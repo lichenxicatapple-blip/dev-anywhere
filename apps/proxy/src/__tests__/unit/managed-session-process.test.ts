@@ -141,51 +141,64 @@ describe("managed session process identity", () => {
     ).toBe(false);
   });
 
-  it("recognizes a Shell terminal worker by its exact positional session id", () => {
-    expect(
-      processArgvMatchesManagedSession(
-        [
-          "/usr/local/bin/node",
-          "/workspace/dev-anywhere/apps/proxy/dist/terminal-worker.js",
+  it.each([
+    ["terminal", "claude"],
+    ["agent", "claude"],
+    ["agent", "codex"],
+    ["agent", "kimi"],
+  ] as const)(
+    "recognizes a hosted %s/%s worker by session, kind and provider",
+    (kind, provider) => {
+      // Neither an updated package's removed entry path nor Windows path separators require
+      // filesystem probing: identity belongs to the still-running process's exact arguments.
+      for (const entry of [
+        "/removed-package/dist/terminal-worker.js",
+        String.raw`C:\removed-package\dist\terminal-worker.js`,
+      ]) {
+        const argv = [
+          "node",
+          entry,
           "--profile",
           "default",
-          "terminal-1",
-          "/tmp",
-          "Shell",
-          "80",
-          "24",
-        ],
-        {
-          id: "terminal-1",
-          mode: "pty",
-          provider: "claude",
-          ptyOwner: "local-terminal",
-        },
-      ),
-    ).toBe(true);
-  });
-
-  it("rejects a Shell terminal worker when the id only appears in another argument", () => {
-    expect(
-      processArgvMatchesManagedSession(
-        [
-          "/usr/local/bin/node",
-          "/workspace/dev-anywhere/apps/proxy/dist/terminal-worker.js",
-          "different-session",
-          "/tmp/session-1",
-          "Shell",
-          "80",
-          "24",
-        ],
-        {
+          "--session",
+          "session-1",
+          "--kind",
+          kind,
+          "--provider",
+          provider,
+        ];
+        const identity = {
           id: "session-1",
-          mode: "pty",
-          provider: "claude",
-          ptyOwner: "local-terminal",
-        },
-      ),
-    ).toBe(false);
-  });
+          kind,
+          mode: "pty" as const,
+          provider,
+          ptyOwner: "proxy-hosted" as const,
+        };
+        expect(processArgvMatchesManagedSession(argv, identity)).toBe(true);
+        expect(processArgvMatchesManagedSession(argv, { ...identity, id: "another-session" })).toBe(
+          false,
+        );
+        expect(
+          processArgvMatchesManagedSession(argv, {
+            ...identity,
+            kind: kind === "agent" ? "terminal" : "agent",
+          }),
+        ).toBe(false);
+        expect(
+          processArgvMatchesManagedSession(argv, {
+            ...identity,
+            provider: provider === "claude" ? "kimi" : "claude",
+          }),
+        ).toBe(false);
+        expect(
+          processArgvMatchesManagedSession(argv, { ...identity, ptyOwner: "local-terminal" }),
+        ).toBe(false);
+        expect(
+          processArgvMatchesManagedSession([...argv, "--session", "session-1"], identity),
+        ).toBe(false);
+      }
+    },
+  );
 
   it("recognizes a local Agent terminal only with a DEV Anywhere entry and provider", () => {
     expect(
@@ -257,10 +270,11 @@ describe("managed session process identity", () => {
     ).toBe(false);
   });
 
-  it("never treats a proxy-hosted PTY as a handover-owned process", () => {
+  it("does not accept a local CLI process as a hosted PTY worker", () => {
     expect(
       processArgvMatchesManagedSession(["/usr/local/bin/node", cliEntryPath, "kimi"], {
         id: "terminal-1",
+        kind: "agent",
         mode: "pty",
         provider: "kimi",
         ptyOwner: "proxy-hosted",

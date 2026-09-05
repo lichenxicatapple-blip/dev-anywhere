@@ -41,7 +41,7 @@ describe("SessionRow", () => {
           state: "idle",
           name: "Terminal",
           cwd: "/Users/dev/MyApps/dev-anywhere",
-          ptyOwner: "local-terminal",
+          ptyOwner: "proxy-hosted",
           lastActive: 1,
         }}
         selected={false}

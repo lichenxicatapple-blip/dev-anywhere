@@ -39,7 +39,6 @@ describe("RelayRouter agent_status_request", () => {
       relayConnection: createRelayConnectionFake().relayConnection,
       relaySend: options.relaySend,
       terminalSockets: new Map(),
-      hostedPtyRegistry: {} as never,
       terminalWorkerSpawner: {} as never,
       broadcastSessionList: () => {},
       broadcastSessionSync: () => {},

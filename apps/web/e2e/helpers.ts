@@ -981,7 +981,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 state: "idle",
                 mode: "pty",
                 provider: "claude",
-                ptyOwner: "local-terminal",
+                ptyOwner: "proxy-hosted",
                 lastActive,
               });
               persistSessions();
@@ -996,7 +996,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
                 lastActive,
                 mode: "pty",
                 provider: "claude",
-                ptyOwner: "local-terminal",
+                ptyOwner: "proxy-hosted",
               });
               this.emitJson(sessionListEnvelope());
               break;

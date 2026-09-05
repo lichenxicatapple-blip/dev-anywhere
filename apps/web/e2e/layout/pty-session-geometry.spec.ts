@@ -26,7 +26,7 @@ test.describe("iPad Safari PTY session geometry", () => {
       sessionId: SESSION_ID,
       sessionKind: "terminal",
       provider: "claude",
-      ptyOwner: "local-terminal",
+      ptyOwner: "proxy-hosted",
       cols: 100,
       rows: 30,
       snapshotData: `${"QR".repeat(48)}\r\n$ `,

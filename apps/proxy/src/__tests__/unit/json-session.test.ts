@@ -40,6 +40,7 @@ describe("JsonSession", () => {
   let JsonSession: typeof import("#src/worker/json-session.js").JsonSession;
 
   beforeEach(async () => {
+    vi.stubEnv("CLAUDE_BIN", undefined);
     mockChild = createChildProcessFake();
     const { spawn } = await import("node:child_process");
     vi.mocked(spawn).mockClear();
@@ -48,6 +49,7 @@ describe("JsonSession", () => {
   });
 
   afterEach(() => {
+    vi.unstubAllEnvs();
     vi.restoreAllMocks();
   });
 

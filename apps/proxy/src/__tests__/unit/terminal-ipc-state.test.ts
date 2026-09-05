@@ -1,4 +1,7 @@
-import { PassThrough } from "node:stream";
+import { Duplex, PassThrough } from "node:stream";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { Socket } from "node:net";
 import { describe, expect, it, vi } from "vitest";
 import { SessionState } from "@dev-anywhere/shared";
@@ -8,9 +11,131 @@ import {
   TERMINAL_IPC_PROTOCOL_VERSION,
 } from "#src/ipc/ipc-protocol.js";
 import { handleTerminalConnection } from "#src/serve/terminal-ipc.js";
-import type { SessionInfo } from "#src/serve/session-manager.js";
+import { SessionManager, type SessionInfo } from "#src/serve/session-manager.js";
 
 describe("local terminal IPC state ownership", () => {
+  it.each([
+    { oldRegistered: false, newRegistered: false },
+    { oldRegistered: false, newRegistered: true },
+    { oldRegistered: true, newRegistered: false },
+    { oldRegistered: true, newRegistered: true },
+  ])(
+    "does not release a replacement connection on old close (old registered=$oldRegistered, new registered=$newRegistered)",
+    async ({ oldRegistered, newRegistered }) => {
+      const dir = mkdtempSync(join(tmpdir(), "terminal-binding-test-"));
+      const onSessionRemoved = vi.fn();
+      const manager = new SessionManager({
+        persistPath: join(dir, "sessions.json"),
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
+        onSessionRemoved,
+      });
+      const session = manager.claimPtySession({
+        kind: "agent",
+        provider: "kimi",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp",
+        pid: process.pid,
+      }).session;
+      manager.releasePtyBinding(session.id, process.pid);
+      const terminalSockets = new Map<string, Socket>();
+      const terminalClaims = new Map<string, Socket>();
+      const sendBinary = vi.fn();
+      const deps = {
+        sessionManager: manager,
+        terminalSockets,
+        terminalClaims,
+        terminalSubscriptionBacklog: { take: () => [], delete: vi.fn() },
+        relayConnection: {
+          sendRaw: vi.fn(),
+          sendBinary,
+          sendEnvelope: vi.fn(),
+          getStatus: () => ({ connected: true }),
+        },
+        permissionBroker: { listSession: () => [] },
+        hookEventRouter: {},
+        createHookContext: () => undefined,
+        emitAgentStatus: vi.fn(),
+        updateTerminalCwd: () => false,
+        resolveInterruptedApprovals: vi.fn(),
+      };
+      const createSocket = (): Socket => {
+        const socket = new Duplex({
+          read() {},
+          write(_chunk, _encoding, done) {
+            done();
+          },
+        }) as unknown as Socket;
+        handleTerminalConnection(socket, deps as never, {
+          clientKind: "terminal-worker",
+          sessionId: session.id,
+        });
+        return socket;
+      };
+      const oldSocket = createSocket();
+      const newSocket = createSocket();
+      const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+      const createRequest = serializeIpc({
+        type: "session_create_request",
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+        kind: "agent",
+        mode: "pty",
+        provider: "kimi",
+        cwd: session.cwd,
+        pid: session.pid,
+        sessionId: session.id,
+      });
+      const register = serializeIpc({
+        type: "pty_register",
+        sessionId: session.id,
+        pid: session.pid,
+      });
+      try {
+        oldSocket.push(createRequest);
+        await tick();
+        if (oldRegistered) {
+          oldSocket.push(register);
+          await tick();
+        }
+        newSocket.push(createRequest);
+        await tick();
+        if (newRegistered) {
+          newSocket.push(register);
+          await tick();
+        }
+        // A stale claim (or duplicate registration from an old bound socket) cannot take
+        // ownership back from the newer connection, even before the newer one registers.
+        oldSocket.push(register);
+        await tick();
+        expect(terminalClaims.get(session.id)).toBe(newRegistered ? undefined : newSocket);
+        if (newRegistered) expect(terminalSockets.get(session.id)).toBe(newSocket);
+        oldSocket.destroy();
+        await tick();
+        expect(manager.getSession(session.id)).toBeDefined();
+        expect(onSessionRemoved).not.toHaveBeenCalled();
+        if (!newRegistered) {
+          newSocket.push(register);
+          await tick();
+        }
+        expect(terminalClaims.has(session.id)).toBe(false);
+        expect(terminalSockets.get(session.id)).toBe(newSocket);
+        newSocket.push(encodeBinaryIpcFrame(session.id, Buffer.from("still connected"), 1));
+        await tick();
+        expect(sendBinary).toHaveBeenCalledOnce();
+        newSocket.destroy();
+        await tick();
+        expect(manager.getSession(session.id)).toBeUndefined();
+        expect(manager.getRuntimeSession(session.id)).toBeDefined();
+        expect(terminalClaims.size).toBe(0);
+      } finally {
+        oldSocket.destroy();
+        newSocket.destroy();
+        await tick();
+        manager.stopReaper();
+        rmSync(dir, { recursive: true, force: true });
+      }
+    },
+  );
+
   it.each([
     [
       "local reconnect cannot change its session id",
@@ -18,22 +143,22 @@ describe("local terminal IPC state ownership", () => {
       "different-session",
     ],
     [
-      "terminal worker cannot register as an agent",
+      "terminal worker cannot register a different session",
       { clientKind: "terminal-worker", sessionId: "admitted-session" } as const,
-      "admitted-session",
+      "different-session",
     ],
   ])("rejects an admitted scope mismatch: %s", async (_label, admission, sessionId) => {
     const socket = new PassThrough() as unknown as Socket;
     const end = vi.spyOn(socket, "end");
-    const claimLocalPtySession = vi.fn();
+    const claimPtySession = vi.fn();
 
     handleTerminalConnection(
       socket,
       {
-        sessionManager: { claimLocalPtySession },
+        sessionManager: { claimPtySession },
+        terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: {},
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn() },
         permissionBroker: {},
         hookEventRouter: {},
@@ -63,14 +188,14 @@ describe("local terminal IPC state ownership", () => {
       type: "session_create_response",
       success: false,
     });
-    expect(claimLocalPtySession).not.toHaveBeenCalled();
+    expect(claimPtySession).not.toHaveBeenCalled();
     socket.destroy();
   });
 
   it("registers Kimi local PTY sessions without creating a provider hook", async () => {
     const socket = new PassThrough() as unknown as Socket;
     const createHookContext = vi.fn();
-    const claimLocalPtySession = vi.fn(() => ({
+    const claimPtySession = vi.fn(() => ({
       source: "created" as const,
       session: {
         id: "kimi-session",
@@ -90,13 +215,14 @@ describe("local terminal IPC state ownership", () => {
       socket,
       {
         sessionManager: {
+          releasePtyBinding: vi.fn(),
           getSession: vi.fn(),
-          claimLocalPtySession,
+          claimPtySession,
           terminateSession: vi.fn(),
         } as never,
+        terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: {},
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -120,7 +246,7 @@ describe("local terminal IPC state ownership", () => {
       }),
     );
 
-    await vi.waitFor(() => expect(claimLocalPtySession).toHaveBeenCalled());
+    await vi.waitFor(() => expect(claimPtySession).toHaveBeenCalled());
     expect(createHookContext).not.toHaveBeenCalled();
     socket.destroy();
   });
@@ -155,15 +281,16 @@ describe("local terminal IPC state ownership", () => {
       socket,
       {
         sessionManager: {
+          releasePtyBinding: vi.fn(),
           getSession: vi.fn(() => session),
-          claimLocalPtySession: vi.fn(() => ({ session, source: "active" })),
+          claimPtySession: vi.fn(() => ({ session, source: "active" })),
           listSessions: vi.fn(() => [session]),
           updateState,
           touchSession: vi.fn(() => false),
         },
+        terminalClaims: new Map(),
         terminalSockets,
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection,
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -244,13 +371,14 @@ describe("local terminal IPC state ownership", () => {
       socket,
       {
         sessionManager: {
+          releasePtyBinding: vi.fn(),
           getSession: vi.fn(() => session),
-          claimLocalPtySession: vi.fn(() => ({ session, source: "active" })),
+          claimPtySession: vi.fn(() => ({ session, source: "active" })),
           listSessions: vi.fn(() => [session]),
         },
+        terminalClaims: new Map(),
         terminalSockets,
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection,
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -305,18 +433,19 @@ describe("local terminal IPC state ownership", () => {
   ])("rejects PTY registration when the create protocol version is %s", async (_label, version) => {
     const socket = new PassThrough() as unknown as Socket;
     const terminalSockets = new Map<string, Socket>();
-    const claimLocalPtySession = vi.fn();
+    const claimPtySession = vi.fn();
 
     handleTerminalConnection(
       socket,
       {
         sessionManager: {
+          releasePtyBinding: vi.fn(),
           getSession: vi.fn(),
-          claimLocalPtySession,
+          claimPtySession,
         },
+        terminalClaims: new Map(),
         terminalSockets,
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -345,7 +474,7 @@ describe("local terminal IPC state ownership", () => {
     );
 
     await new Promise((resolve) => setImmediate(resolve));
-    expect(claimLocalPtySession).not.toHaveBeenCalled();
+    expect(claimPtySession).not.toHaveBeenCalled();
     expect(terminalSockets.size).toBe(0);
     socket.destroy();
   });
@@ -364,21 +493,21 @@ describe("local terminal IPC state ownership", () => {
       cwd: "/tmp",
       pid: 4242,
     };
-    const claimLocalPtySession = vi.fn(() => ({ session, source: "created" as const }));
-    const terminateSession = vi.fn(() => ({ success: true, pid: session.pid }));
+    const claimPtySession = vi.fn(() => ({ session, source: "created" as const }));
+    const releasePtyBinding = vi.fn(() => ({ success: true, pid: session.pid }));
     const end = vi.spyOn(socket, "end");
 
     handleTerminalConnection(
       socket,
       {
         sessionManager: {
-          claimLocalPtySession,
-          terminateSession,
+          claimPtySession,
+          releasePtyBinding,
           getSession: vi.fn(() => session),
         },
+        terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -403,9 +532,9 @@ describe("local terminal IPC state ownership", () => {
     socket.write(request);
 
     await vi.waitFor(() => expect(end).toHaveBeenCalledOnce());
-    expect(claimLocalPtySession).toHaveBeenCalledOnce();
-    expect(terminateSession).toHaveBeenCalledOnce();
-    expect(terminateSession).toHaveBeenCalledWith(session.id);
+    expect(claimPtySession).toHaveBeenCalledOnce();
+    expect(releasePtyBinding).toHaveBeenCalledOnce();
+    expect(releasePtyBinding).toHaveBeenCalledWith(session.id, session.pid);
     expect(JSON.parse(String(end.mock.calls[0]?.[0]).trim())).toMatchObject({
       type: "session_create_response",
       success: false,
@@ -417,17 +546,17 @@ describe("local terminal IPC state ownership", () => {
   it("returns a create failure and closes when the session claim is rejected", async () => {
     const socket = new PassThrough() as unknown as Socket;
     const end = vi.spyOn(socket, "end");
-    const claimLocalPtySession = vi.fn(() => {
+    const claimPtySession = vi.fn(() => {
       throw new TypeError("PTY reconnect session is not available for handover");
     });
 
     handleTerminalConnection(
       socket,
       {
-        sessionManager: { claimLocalPtySession, terminateSession: vi.fn() },
+        sessionManager: { claimPtySession, terminateSession: vi.fn() },
+        terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -475,19 +604,19 @@ describe("local terminal IPC state ownership", () => {
       cwd: "/tmp",
       pid: 4242,
     };
-    const terminateSession = vi.fn(() => ({ success: true, pid: session.pid }));
+    const releasePtyBinding = vi.fn(() => ({ success: true, pid: session.pid }));
     const end = vi.spyOn(socket, "end");
 
     handleTerminalConnection(
       socket,
       {
         sessionManager: {
-          claimLocalPtySession: vi.fn(() => ({ session, source: "created" as const })),
-          terminateSession,
+          claimPtySession: vi.fn(() => ({ session, source: "created" as const })),
+          releasePtyBinding,
         },
+        terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -514,7 +643,7 @@ describe("local terminal IPC state ownership", () => {
     );
 
     await vi.waitFor(() => expect(end).toHaveBeenCalledOnce());
-    expect(terminateSession).toHaveBeenCalledWith(session.id);
+    expect(releasePtyBinding).toHaveBeenCalledWith(session.id, session.pid);
     expect(JSON.parse(String(end.mock.calls[0]?.[0]).trim())).toMatchObject({
       type: "session_create_response",
       success: false,
@@ -523,7 +652,7 @@ describe("local terminal IPC state ownership", () => {
     socket.destroy();
   });
 
-  it("cleans a materialized pending claim if its socket closes before registration", async () => {
+  it("returns a half-registered claim to pending without terminating its runtime", async () => {
     const socket = new PassThrough() as unknown as Socket;
     const session: SessionInfo = {
       id: "pending-session",
@@ -537,18 +666,18 @@ describe("local terminal IPC state ownership", () => {
       cwd: "/tmp",
       pid: 4242,
     };
-    const terminateSession = vi.fn(() => ({ success: true, pid: session.pid }));
+    const releasePtyBinding = vi.fn(() => ({ success: true, pid: session.pid }));
 
     handleTerminalConnection(
       socket,
       {
         sessionManager: {
-          claimLocalPtySession: vi.fn(() => ({ session, source: "pending" as const })),
-          terminateSession,
+          claimPtySession: vi.fn(() => ({ session, source: "pending" as const })),
+          releasePtyBinding,
         },
+        terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -575,27 +704,27 @@ describe("local terminal IPC state ownership", () => {
     await new Promise((resolve) => setImmediate(resolve));
     socket.destroy();
 
-    await vi.waitFor(() => expect(terminateSession).toHaveBeenCalledWith(session.id));
+    await vi.waitFor(() => expect(releasePtyBinding).toHaveBeenCalledWith(session.id, session.pid));
   });
 
   it("does not accept reverse-direction mutation messages from a terminal socket", async () => {
     const socket = new PassThrough() as unknown as Socket;
     const terminateSession = vi.fn();
     const updateState = vi.fn();
-    const hostedWrite = vi.fn();
     const targetWrite = vi.fn();
 
     handleTerminalConnection(
       socket,
       {
         sessionManager: {
+          releasePtyBinding: vi.fn(),
           getSession: vi.fn(() => ({ id: "victim", mode: "pty" })),
           terminateSession,
           updateState,
         },
+        terminalClaims: new Map(),
         terminalSockets: new Map([["victim", { writable: true, write: targetWrite } as never]]),
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: { write: hostedWrite },
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
@@ -618,7 +747,6 @@ describe("local terminal IPC state ownership", () => {
     await new Promise((resolve) => setImmediate(resolve));
     expect(terminateSession).not.toHaveBeenCalled();
     expect(updateState).not.toHaveBeenCalled();
-    expect(hostedWrite).not.toHaveBeenCalled();
     expect(targetWrite).not.toHaveBeenCalled();
     socket.destroy();
   });
@@ -645,9 +773,9 @@ describe("local terminal IPC state ownership", () => {
       unrelatedSocket,
       {
         sessionManager: { getSession: vi.fn(() => session), terminateSession },
+        terminalClaims: new Map(),
         terminalSockets,
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        hostedPtyRegistry: {},
         relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},

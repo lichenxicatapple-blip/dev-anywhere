@@ -488,7 +488,7 @@ describe("attachPtySessionTransport", () => {
     ]);
   });
 
-  // proxy → relay 闪断时 sendBinary 直接丢帧，但 outputSeq 在 hosted-pty-registry
+  // proxy → relay 闪断时 sendBinary 直接丢帧，但 outputSeq 在 PTY runtime
   // 内仍递增。relay 重连后下一帧带跳过的 seq 到达 web。recovery.flushContiguousFrames
   // 严格按 appliedOutputSeq+1 推进，永远等不到丢失帧 → 屏幕卡住。transport 必须探测
   // 这个 gap 并主动重订 snapshot 让流恢复，否则用户必须 reload 才能继续。
