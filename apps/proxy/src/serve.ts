@@ -1,5 +1,6 @@
 import { createServer, type Socket } from "node:net";
-import { unlinkSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, writeFileSync, rmSync } from "node:fs";
 import { serializeControl } from "@dev-anywhere/shared";
 import { flushLogger } from "@dev-anywhere/shared/logger";
 import { serviceLogger } from "./common/logger.js";
@@ -8,6 +9,7 @@ import { RelayConnection } from "./serve/relay-connection.js";
 import {
   SOCK_PATH,
   PID_PATH,
+  SERVICE_CONTROL_PATH,
   STOPPED_PATH,
   SESSIONS_PATH,
   SESSION_RUNTIME_IPC_VERSION_PATH,
@@ -27,7 +29,7 @@ import {
 } from "./ipc/ipc-protocol.js";
 import {
   readSessionRuntimeIpcVersions,
-  sessionRuntimeIpcVersionsMatch,
+  sessionRuntimeIpcVersionMatches,
   writeSessionRuntimeIpcVersions,
 } from "./common/session-runtime-ipc-version.js";
 import { createControlMessageHandlers } from "./serve/handlers/control-messages.js";
@@ -42,8 +44,9 @@ import { TerminalWorkerSpawner } from "./serve/terminal-worker-spawner.js";
 import { applyPtyStateToSession, type PtySessionBridgeDeps } from "./serve/pty-session-bridge.js";
 import { broadcastSessionList, broadcastSessionSync } from "./serve/session-broadcast.js";
 import { createEventBridge } from "./serve/event-bridge.js";
-import { cleanupStaleResources, getProxyName } from "./serve/service-files.js";
+import { claimServiceRuntime, getProxyName } from "./serve/service-files.js";
 import { handleTerminalConnection } from "./serve/terminal-ipc.js";
+import { createTerminalIpcAdmissionController } from "./serve/terminal-ipc-admission.js";
 import { createProviderHookRuntime } from "./serve/provider-hook-runtime.js";
 import { createServeShutdown } from "./serve/shutdown.js";
 import { RemoteFileUploadManager } from "./serve/remote-file-upload.js";
@@ -59,6 +62,11 @@ import { cleanupStalePreviewRuntimes } from "./serve/preview/stale-preview-runti
 import { DefaultDevicePreviewBackend } from "./serve/device-preview/default-device-preview-backend.js";
 import { DevicePreviewManager } from "./serve/device-preview/device-preview-manager.js";
 import { DevicePreviewStreamConnection } from "./serve/device-preview/device-preview-stream-connection.js";
+import { startServiceControl } from "./common/service-control.js";
+import {
+  removeLocalIpcEndpoint,
+  setLocalIpcEndpointPermissions,
+} from "./common/local-ipc-endpoint.js";
 
 const AGENT_CLI_PATH_FIELDS: Record<ProviderId, "claudeBin" | "codexBin" | "kimiBin"> = {
   claude: "claudeBin",
@@ -105,7 +113,6 @@ function resolveInterruptedApprovals(
 export interface ServiceOptions {
   relayUrl?: string;
   relayName?: string;
-  preserveStoppedMarker?: boolean;
 }
 
 function parseServiceOptions(argv: readonly string[]): ServiceOptions {
@@ -127,24 +134,15 @@ function parseServiceOptions(argv: readonly string[]): ServiceOptions {
       options.relayName = relayName;
       continue;
     }
-    if (arg === "--preserve-stopped-marker") {
-      options.preserveStoppedMarker = true;
-    }
   }
   return options;
 }
 
 export async function startService(options?: ServiceOptions): Promise<void> {
   ensureProfileWorkspace();
-  await cleanupStaleResources();
+  await claimServiceRuntime();
+  const instanceId = randomUUID();
   await cleanupStalePreviewRuntimes(PREVIEW_RUN_DIR);
-  if (!options?.preserveStoppedMarker) {
-    try {
-      unlinkSync(STOPPED_PATH);
-    } catch {
-      // STOPPED 文件不存在时忽略
-    }
-  }
 
   const permissionBroker = new PermissionBroker();
   const agentStatusRegistry = new AgentStatusRegistry();
@@ -157,10 +155,21 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     terminal: TERMINAL_IPC_PROTOCOL_VERSION,
     worker: WORKER_IPC_PROTOCOL_VERSION,
   };
-  const allowSessionRuntimeHandover = sessionRuntimeIpcVersionsMatch(
-    readSessionRuntimeIpcVersions(SESSION_RUNTIME_IPC_VERSION_PATH),
-    currentSessionRuntimeIpcVersions,
+  const previousSessionRuntimeIpcVersions = readSessionRuntimeIpcVersions(
+    SESSION_RUNTIME_IPC_VERSION_PATH,
   );
+  const allowSessionRuntimeHandover = {
+    terminal: sessionRuntimeIpcVersionMatches(
+      previousSessionRuntimeIpcVersions,
+      currentSessionRuntimeIpcVersions,
+      "terminal",
+    ),
+    worker: sessionRuntimeIpcVersionMatches(
+      previousSessionRuntimeIpcVersions,
+      currentSessionRuntimeIpcVersions,
+      "worker",
+    ),
+  };
   const sessionManager = new SessionManager({
     persistPath: SESSIONS_PATH,
     historyMetadataPath: HISTORY_METADATA_PATH,
@@ -244,7 +253,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     profileName: PROFILE_NAME,
     relayName: proxyConfig.relayName,
     runningVersion: PROXY_VERSION,
-    daemonPid: process.pid,
     logger: serviceLogger,
   });
   let serviceReadyForAutoUpdate = false;
@@ -257,11 +265,17 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayUrl,
     token: relayToken,
     logger: serviceLogger,
-    onVersion: considerRelayVersion,
+    onAdmission: (event) => {
+      if (event.relayVersion) considerRelayVersion(event.relayVersion);
+      relayConnection.applyProtocolAdmission(event.direction);
+    },
   });
   relayConnection.on("relay_version", considerRelayVersion);
   relayConnection.on("connected", () => upgradeBootstrap.markControlProtocolConnected());
   relayConnection.on("disconnected", () => upgradeBootstrap.request());
+  relayConnection.on("protocol_blocked", (event: { source: string }) => {
+    if (event.source !== "http_bootstrap") upgradeBootstrap.request();
+  });
   upgradeBootstrap.request();
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
   const previewManager = new PreviewManager({
@@ -480,38 +494,60 @@ export async function startService(options?: ServiceOptions): Promise<void> {
 
   await workerRegistry.reconnectAll();
 
-  const server = createServer((socket) => {
-    handleTerminalConnection(socket, {
-      sessionManager,
-      workerRegistry,
-      terminalSockets,
-      terminalSubscriptionBacklog,
-      hostedPtyRegistry,
-      relayConnection,
-      permissionBroker,
-      hookEventRouter: hookRuntime.hookEventRouter,
-      createHookContext: hookRuntime.createHookContext,
-      emitAgentStatus: eventBridge.emitAgentStatus,
-      updateTerminalCwd: eventBridge.updateTerminalCwd,
-      config: statusConfig,
-      resolveInterruptedApprovals: (sessionId) =>
-        resolveInterruptedApprovals(
-          permissionBroker,
-          hookRuntime.hookEventRouter,
-          relayConnection,
-          sessionId,
-        ),
+  const terminalAdmission = createTerminalIpcAdmissionController({
+    terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+    logger: serviceLogger,
+  });
+  const terminalConnectionDeps = {
+    sessionManager,
+    terminalSockets,
+    terminalSubscriptionBacklog,
+    hostedPtyRegistry,
+    relayConnection,
+    permissionBroker,
+    hookEventRouter: hookRuntime.hookEventRouter,
+    createHookContext: hookRuntime.createHookContext,
+    emitAgentStatus: eventBridge.emitAgentStatus,
+    updateTerminalCwd: eventBridge.updateTerminalCwd,
+    resolveInterruptedApprovals: (sessionId: string) =>
+      resolveInterruptedApprovals(
+        permissionBroker,
+        hookRuntime.hookEventRouter,
+        relayConnection,
+        sessionId,
+      ),
+  };
+  const server = createServer({ pauseOnConnect: true }, (socket) => {
+    terminalAdmission.handle(socket, (admission) => {
+      handleTerminalConnection(socket, terminalConnectionDeps, admission);
+    });
+    socket.resume();
+  });
+
+  // Do not resolve startup until the IPC socket is actually listening. In particular, a listen
+  // failure must reach the entry-point catch (and bounded service log) instead of becoming an
+  // unhandled EventEmitter error while the parent CLI is polling an impossible readiness state.
+  await new Promise<void>((resolve, reject) => {
+    const onError = (error: Error) => {
+      server.off("error", onError);
+      reject(error);
+    };
+    server.once("error", onError);
+    server.listen(SOCK_PATH, () => {
+      server.off("error", onError);
+      try {
+        writeFileSync(PID_PATH, String(process.pid));
+        setLocalIpcEndpointPermissions(SOCK_PATH);
+        serviceLogger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
+        resolve();
+      } catch (error) {
+        reject(error);
+      }
     });
   });
 
-  server.listen(SOCK_PATH, () => {
-    writeFileSync(PID_PATH, String(process.pid));
-    chmodSync(SOCK_PATH, 0o600);
-    serviceLogger.info({ pid: process.pid, sock: SOCK_PATH }, "Service started");
-    serviceReadyForAutoUpdate = true;
-    if (pendingRelayVersion) autoUpdater.considerRelayVersion(pendingRelayVersion);
-  });
-
+  let control: Awaited<ReturnType<typeof startServiceControl>> | undefined = undefined;
+  let stopping = false;
   const shutdown = createServeShutdown({
     logger: serviceLogger,
     autoUpdaterDispose: () => {
@@ -527,17 +563,53 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     relayConnectionClose: () => relayConnection.close(),
     workerRegistryDestroyAll: () => workerRegistry.destroyAll(),
     hostedPtyRegistryDestroyAll: () => hostedPtyRegistry.destroyAll(),
+    terminalAdmissionDestroyAll: () => terminalAdmission.destroyAll(),
     ipcServerClose: () => server.close(),
     sockPath: SOCK_PATH,
     pidPath: PID_PATH,
+    runtimeStateCleanup: () => {
+      control?.close();
+      removeLocalIpcEndpoint(SERVICE_CONTROL_PATH);
+      removeLocalIpcEndpoint(SOCK_PATH);
+      rmSync(PID_PATH, { force: true });
+    },
   });
 
-  process.on("SIGTERM", () => {
+  const stop = () => {
+    stopping = true;
     void shutdown();
+  };
+  process.on("SIGTERM", stop);
+  process.on("SIGINT", stop);
+  if (existsSync(STOPPED_PATH)) {
+    await shutdown();
+    return;
+  }
+  control = await startServiceControl({
+    socketPath: SERVICE_CONTROL_PATH,
+    onStop: stop,
+    getStatus: () => ({
+      pid: process.pid,
+      instanceId,
+      profile: PROFILE_NAME,
+      version: PROXY_VERSION,
+      state: stopping ? "stopping" : "ready",
+      info: {
+        config: statusConfig,
+        relay: relayConnection.getStatus(),
+        sessions: sessionManager.listSessions().map((s) => ({
+          id: s.id,
+          mode: s.mode,
+          state: s.state,
+          createdAt: new Date(s.createdAt).toISOString(),
+          ...(s.name !== undefined ? { name: s.name } : {}),
+          hasWorker: workerRegistry.has(s.id),
+        })),
+      },
+    }),
   });
-  process.on("SIGINT", () => {
-    void shutdown();
-  });
+  serviceReadyForAutoUpdate = true;
+  if (pendingRelayVersion) autoUpdater.considerRelayVersion(pendingRelayVersion);
 }
 
 const isMainModule =

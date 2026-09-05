@@ -1,6 +1,8 @@
 import { WebSocket } from "ws";
 import {
+  compareProxyRelayProtocolVersions,
   isProxyToClientRelayControlType,
+  ProxyProtocolAdmissionDirection,
   RELAY_BINARY_FRAME_MAX_BYTES,
   RELAY_CONTROL_PROTOCOL_VERSION,
   RelayErrorCode,
@@ -8,6 +10,7 @@ import {
   RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
   type PreviewScope,
+  type ProxyProtocolRejectDirection,
   type RelayControlMessage,
 } from "@dev-anywhere/shared";
 import type { Logger } from "@dev-anywhere/shared/logger";
@@ -34,6 +37,7 @@ import {
 interface ProxySocket extends WebSocket {
   isAlive: boolean;
   proxyId?: string;
+  admissionPhase: "awaiting" | "ready" | "quarantined" | "rejected";
 }
 
 type BoundClientSocket = WebSocket & {
@@ -54,6 +58,10 @@ const PREVIEW_PUSH_TYPES = new Set([
   "device_preview_state_push",
   "device_preview_removed_push",
 ]);
+const DEFAULT_PROXY_ADMISSION_TIMEOUT_MS = 10_000;
+// A peer which did not finish registration may retry through its ordinary backoff. This is not
+// the permanent protocol-rejection signal.
+const RETRYABLE_PROXY_ADMISSION_TIMEOUT_CLOSE_CODE = 1013;
 
 type PreviewEventMessage = Extract<
   RelayControlMessage,
@@ -180,8 +188,34 @@ function rejectNotRegistered(ws: ProxySocket): void {
   );
 }
 
-function closeRejectedProxyProtocol(ws: ProxySocket): void {
-  ws.close(RelayCloseCode.PROXY_PROTOCOL_REJECTED, "proxy protocol rejected");
+function closeRejectedProxyProtocol(
+  ws: ProxySocket,
+  direction: ProxyProtocolRejectDirection = ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH,
+): void {
+  if (ws.admissionPhase === "rejected") return;
+  ws.admissionPhase = "rejected";
+  ws.close(RelayCloseCode.PROXY_PROTOCOL_REJECTED, direction);
+}
+
+function classifyInitialProxyProtocol(raw: string): ProxyProtocolRejectDirection | null {
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH;
+  }
+  if (
+    !value ||
+    typeof value !== "object" ||
+    (value as { type?: unknown }).type !== "proxy_register"
+  ) {
+    return ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH;
+  }
+  const direction = compareProxyRelayProtocolVersions(
+    (value as { protocolVersion?: unknown }).protocolVersion,
+    RELAY_CONTROL_PROTOCOL_VERSION,
+  );
+  return direction === ProxyProtocolAdmissionDirection.COMPATIBLE ? null : direction;
 }
 
 function isCurrentProxySocket(ws: ProxySocket, registry: RelayRegistry): boolean {
@@ -199,12 +233,30 @@ export function handleProxyConnection(
   devicePreviewBridge: DevicePreviewBridge,
   chaos?: RelayChaos,
   remoteFileBridge?: RemoteFileBridge,
+  proxyAdmissionTimeoutMs = DEFAULT_PROXY_ADMISSION_TIMEOUT_MS,
 ): void {
   const proxyWs = ws as ProxySocket;
   proxyWs.isAlive = true;
+  proxyWs.admissionPhase = "awaiting";
   let registrationCompleted = false;
-  let upgradeBootstrapStarted = false;
   let initialFrameReceived = false;
+  const effectiveAdmissionTimeoutMs =
+    Number.isSafeInteger(proxyAdmissionTimeoutMs) && proxyAdmissionTimeoutMs > 0
+      ? proxyAdmissionTimeoutMs
+      : DEFAULT_PROXY_ADMISSION_TIMEOUT_MS;
+  let admissionTimeout: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+    admissionTimeout = null;
+    if (proxyWs.admissionPhase !== "awaiting" || proxyWs.readyState !== WebSocket.OPEN) return;
+    proxyWs.admissionPhase = "rejected";
+    logger.warn({ timeoutMs: effectiveAdmissionTimeoutMs }, "Proxy registration timed out");
+    proxyWs.close(RETRYABLE_PROXY_ADMISSION_TIMEOUT_CLOSE_CODE, "proxy registration timeout");
+  }, effectiveAdmissionTimeoutMs);
+  admissionTimeout.unref?.();
+  const clearAdmissionTimeout = (): void => {
+    if (!admissionTimeout) return;
+    clearTimeout(admissionTimeout);
+    admissionTimeout = null;
+  };
 
   proxyWs.on("pong", () => {
     proxyWs.isAlive = true;
@@ -213,14 +265,14 @@ export function handleProxyConnection(
   proxyWs.on("message", (data: Buffer, isBinary: boolean) => {
     // Once the version-only bootstrap starts, this socket can never enter the application
     // protocol. In particular, queued traffic flushed by the source build is discarded.
-    if (upgradeBootstrapStarted) return;
+    if (proxyWs.admissionPhase === "quarantined" || proxyWs.admissionPhase === "rejected") return;
     const isInitialFrame = !initialFrameReceived;
     initialFrameReceived = true;
 
     // Binary frames are pass-through; relay only reads the sessionId prefix for routing.
     if (isBinary) {
       if (!proxyWs.proxyId) {
-        closeRejectedProxyProtocol(proxyWs);
+        closeRejectedProxyProtocol(proxyWs, ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH);
         return;
       }
       if (!isCurrentProxySocket(proxyWs, registry)) {
@@ -265,7 +317,9 @@ export function handleProxyConnection(
         { size: data.length, proxyId: proxyWs.proxyId },
         "JSON message rejected: exceeds max size",
       );
-      if (!proxyWs.proxyId) closeRejectedProxyProtocol(proxyWs);
+      if (!proxyWs.proxyId) {
+        closeRejectedProxyProtocol(proxyWs, ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH);
+      }
       return;
     }
 
@@ -274,7 +328,8 @@ export function handleProxyConnection(
       ? parseProxyUpgradeBootstrapRequest(raw, RELAY_VERSION)
       : null;
     if (upgradeBootstrap) {
-      upgradeBootstrapStarted = true;
+      proxyWs.admissionPhase = "quarantined";
+      clearAdmissionTimeout();
       logger.info(
         {
           proxyId: upgradeBootstrap.proxyId,
@@ -286,6 +341,15 @@ export function handleProxyConnection(
       sendProxyUpgradeBootstrapResponse(proxyWs, RELAY_VERSION);
       return;
     }
+
+    if (isInitialFrame) {
+      const rejection = classifyInitialProxyProtocol(raw);
+      if (rejection) {
+        logger.warn({ direction: rejection }, "Proxy control protocol rejected before admission");
+        closeRejectedProxyProtocol(proxyWs, rejection);
+        return;
+      }
+    }
     const result = parseMessage(raw);
 
     if (result.kind === "control" && result.message.type === "proxy_register") {
@@ -294,10 +358,12 @@ export function handleProxyConnection(
           { proxyId: proxyWs.proxyId, requestedProxyId: result.message.proxyId },
           "Repeated Proxy registration on the same socket rejected",
         );
-        closeRejectedProxyProtocol(proxyWs);
+        closeRejectedProxyProtocol(proxyWs, ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH);
         return;
       }
       const { proxyId, name, proxyVersion } = result.message;
+      proxyWs.admissionPhase = "ready";
+      clearAdmissionTimeout();
       const status = registry.registerProxy(proxyId, proxyWs, proxyVersion, name);
       proxyWs.proxyId = proxyId;
       registrationCompleted = true;
@@ -328,8 +394,9 @@ export function handleProxyConnection(
     }
 
     if (!proxyWs.proxyId) {
-      rejectNotRegistered(proxyWs);
-      closeRejectedProxyProtocol(proxyWs);
+      // Pre-admission failures have exactly one authority: the stable close code and reason.
+      // A versioned relay_error cannot be trusted by the peer that just failed admission.
+      closeRejectedProxyProtocol(proxyWs, ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH);
       return;
     }
 
@@ -649,6 +716,7 @@ export function handleProxyConnection(
   });
 
   proxyWs.on("close", (code: number, reason: Buffer) => {
+    clearAdmissionTimeout();
     if (!proxyWs.proxyId) return;
     const closeMeta = { code, reason: reason.toString() || undefined };
     // 同 proxyId 重连场景：registerProxy 会 terminate 旧 ws、把 registry 指向新 ws，

@@ -47,12 +47,13 @@ export function buildKimiTerminalArgs(args: string[], permissionMode?: string): 
   }
 }
 
-export function resolveKimiCommand(env: NodeJS.ProcessEnv): string {
+export function resolveKimiCommand(env: NodeJS.ProcessEnv, cwd?: string): string {
   return resolveExecutable(
     "kimi",
     env,
     "KIMI_BIN",
     "kimi not found in PATH. Set KIMI_BIN or install Kimi Code CLI.",
+    cwd,
   );
 }
 
@@ -65,16 +66,16 @@ export const KIMI_PROVIDER: ProviderAdapter = {
     supportsProjectScopedConfig: true,
     supportsGlobalSetup: true,
   },
-  buildJsonCommand(_options: ProviderJsonOptions, env: NodeJS.ProcessEnv): ProviderCommand {
+  buildJsonCommand(options: ProviderJsonOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     return {
-      command: resolveKimiCommand(env),
+      command: resolveKimiCommand(env, options.cwd),
       args: ["acp"],
       env,
     };
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     return {
-      command: resolveKimiCommand(env),
+      command: resolveKimiCommand(env, options.cwd),
       args: buildKimiTerminalArgs(options.args, options.permissionMode),
       env,
     };

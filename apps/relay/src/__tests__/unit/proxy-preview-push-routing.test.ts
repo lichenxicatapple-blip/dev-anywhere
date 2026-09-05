@@ -406,7 +406,7 @@ describe("Proxy preview push routing", () => {
 
     expect(proxy.close).toHaveBeenCalledWith(
       RelayCloseCode.PROXY_PROTOCOL_REJECTED,
-      "proxy protocol rejected",
+      "protocol_mismatch",
     );
     expect(registry.getProxy("proxy-a")).toBe(asWebSocket(proxy));
     expect(registry.hasProxy("proxy-b")).toBe(false);

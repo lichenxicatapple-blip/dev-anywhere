@@ -27,12 +27,15 @@ describe("restart session handover", () => {
     worker: WORKER_IPC_PROTOCOL_VERSION,
   };
 
-  it("tracks only live local-terminal PTYs from persisted state", () => {
+  it.each([0, 1])("tracks local PTYs independently of a worker-version offset of %s", (offset) => {
     const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-handover-"));
     dirs.push(dir);
     const path = join(dir, "sessions.json");
     const versionPath = join(dir, "session-runtime-ipc-version");
-    writeSessionRuntimeIpcVersions(versionPath, runtimeVersions);
+    writeSessionRuntimeIpcVersions(versionPath, {
+      ...runtimeVersions,
+      worker: WORKER_IPC_PROTOCOL_VERSION + offset,
+    });
     writeFileSync(
       path,
       JSON.stringify([
@@ -113,10 +116,10 @@ describe("restart session handover", () => {
     ["missing", undefined],
     ["malformed", "not-a-version"],
     [
-      "mismatched",
+      "incompatible terminal generation",
       JSON.stringify({
-        terminal: TERMINAL_IPC_PROTOCOL_VERSION,
-        worker: WORKER_IPC_PROTOCOL_VERSION + 1,
+        terminal: TERMINAL_IPC_PROTOCOL_VERSION - 1,
+        worker: WORKER_IPC_PROTOCOL_VERSION,
       }),
     ],
   ])("does not wait for local PTYs when the protocol marker is %s", (_label, marker) => {
@@ -126,7 +129,19 @@ describe("restart session handover", () => {
     const versionPath = join(dir, "session-runtime-ipc-version");
     writeFileSync(
       sessionsPath,
-      JSON.stringify([{ id: "local-live", mode: "pty", ptyOwner: "local-terminal", pid: 11 }]),
+      JSON.stringify([
+        {
+          id: "local-live",
+          kind: "agent",
+          mode: "pty",
+          provider: "kimi",
+          ptyOwner: "local-terminal",
+          cwd: "/tmp",
+          pid: 11,
+          createdAt: 1,
+          updatedAt: 1,
+        },
+      ]),
     );
     if (marker !== undefined) writeFileSync(versionPath, marker);
 

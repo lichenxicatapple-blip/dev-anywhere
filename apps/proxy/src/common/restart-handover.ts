@@ -3,7 +3,7 @@ import { probeProcess, type ProcessProbeResult } from "./process-probe.js";
 import { PersistedSessionRecordSchema } from "./persisted-session.js";
 import {
   readSessionRuntimeIpcVersions,
-  sessionRuntimeIpcVersionsMatch,
+  sessionRuntimeIpcVersionMatches,
   type SessionRuntimeIpcVersions,
 } from "./session-runtime-ipc-version.js";
 
@@ -14,9 +14,10 @@ export function readLiveLocalPtySessionIds(
   probe: (pid: number) => ProcessProbeResult = probeProcess,
 ): string[] {
   if (
-    !sessionRuntimeIpcVersionsMatch(
+    !sessionRuntimeIpcVersionMatches(
       readSessionRuntimeIpcVersions(sessionRuntimeIpcVersionPath),
       expectedProtocolVersions,
+      "terminal",
     )
   ) {
     return [];

@@ -43,6 +43,63 @@ describe("FilePathPicker", () => {
 
   afterEach(() => cleanup());
 
+  it("loads a Windows directory and uses the normalized response cache", async () => {
+    useFileStore.setState({ homePath: "C:\\Users\\dev" });
+    requestDirectoryList.mockResolvedValueOnce({
+      path: "C:/Users/dev/",
+      entries: [{ name: "index.html", isDir: false }],
+      includeHidden: false,
+    });
+    const onSelect = vi.fn();
+    const { baseElement } = render(
+      <FilePathPicker mode="select" filter="" onSelect={onSelect} onNavigate={vi.fn()} />,
+    );
+    await waitFor(() =>
+      expect(baseElement.querySelector('[data-entry-name="index.html"]')).toBeInTheDocument(),
+    );
+    expect(requestDirectoryList).toHaveBeenCalledWith("C:\\Users\\dev", { includeHidden: false });
+    fireEvent.click(baseElement.querySelector('[data-entry-name="index.html"]')!);
+    expect(onSelect).toHaveBeenCalledWith("C:\\Users\\dev\\index.html");
+  });
+
+  it.each(["C:\\Users\\dev", "\\\\server\\share\\dev"])(
+    "selects and navigates entries in %s",
+    (homePath) => {
+      useFileStore.setState({
+        homePath,
+        tree: new Map([
+          [
+            homePath,
+            [
+              { name: "app", isDir: true },
+              { name: "index.html", isDir: false },
+            ],
+          ],
+        ]),
+      });
+      const onSelect = vi.fn();
+      const onNavigate = vi.fn();
+      const { baseElement } = render(
+        <FilePathPicker mode="select" filter="" onSelect={onSelect} onNavigate={onNavigate} />,
+      );
+      fireEvent.click(baseElement.querySelector('[data-entry-name="index.html"]')!);
+      expect(onSelect).toHaveBeenCalledWith(`${homePath}\\index.html`);
+      fireEvent.click(baseElement.querySelector('[data-entry-name="app"]')!);
+      expect(onNavigate).toHaveBeenCalledWith(`${homePath}\\app\\`);
+    },
+  );
+
+  it.each(["C:\\", "\\\\server\\share\\"])(
+    "disables parent navigation at Windows root %s",
+    (homePath) => {
+      useFileStore.setState({ homePath, tree: new Map([[homePath, []]]) });
+      const { baseElement } = render(
+        <FilePathPicker mode="select" filter="" onSelect={vi.fn()} onNavigate={vi.fn()} />,
+      );
+      expect(baseElement.querySelector('[data-slot="file-path-picker-parent"]')).toBeDisabled();
+    },
+  );
+
   it("uses homePath, not the active session cwd, as the select-mode base directory", async () => {
     render(
       <FilePathPicker

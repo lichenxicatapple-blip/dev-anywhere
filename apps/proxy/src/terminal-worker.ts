@@ -1,7 +1,8 @@
 import * as pty from "node-pty";
+import { defaultShell, normalizeProcessEnvironment } from "./common/executable.js";
+import { prepareCommandLaunch } from "./common/command-launch.js";
 import type { IPty } from "node-pty";
 import type { Socket } from "node:net";
-import { setTimeout as sleep } from "node:timers/promises";
 import { existsSync } from "node:fs";
 import { extractOscSignals, extractOscWorkingDirectory } from "./common/osc-extractor.js";
 import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
@@ -24,9 +25,15 @@ import {
   waitForMessage,
 } from "./terminal/serve-bootstrap.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
+import { ReconnectSupervisor } from "./terminal/reconnect-supervisor.js";
+import {
+  requestTerminalAdmission,
+  TerminalAdmissionRetiredError,
+} from "./terminal/admission-client.js";
 
 const RECONNECT_INITIAL_DELAY_MS = 1_000;
 const RECONNECT_MAX_DELAY_MS = 5_000;
+const SPAWN_FAILURE_THRESHOLD = 3;
 
 class TerminalRegistrationRejectedError extends Error {
   constructor(message: string) {
@@ -37,7 +44,7 @@ class TerminalRegistrationRejectedError extends Error {
 
 function normalizeTerminalWorkerEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const normalized: Record<string, string> = {};
-  for (const [key, value] of Object.entries(env)) {
+  for (const [key, value] of Object.entries(normalizeProcessEnvironment(env))) {
     if (value !== undefined) normalized[key] = value;
   }
   delete normalized.NO_COLOR;
@@ -53,7 +60,10 @@ class ShellTerminalWorker {
   private child: IPty | null = null;
   private readonly renderSequencer: PtyRenderSequencer;
   private exiting = false;
-  private reconnecting = false;
+  private readonly reconnectSupervisor = new ReconnectSupervisor({
+    initialDelayMs: RECONNECT_INITIAL_DELAY_MS,
+    maxDelayMs: RECONNECT_MAX_DELAY_MS,
+  });
   private currentCwd: string;
   private outputTail = "";
   private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
@@ -79,7 +89,14 @@ class ShellTerminalWorker {
   }
 
   async run(): Promise<void> {
-    this.socket = await ensureService();
+    // A managed worker belongs to an already-running daemon. It must never clear an explicit
+    // STOPPED marker or resurrect the service during its own bootstrap.
+    this.socket = await ensureService("connect-only");
+    await requestTerminalAdmission(this.socket, {
+      clientKind: "terminal-worker",
+      terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+      sessionId: this.sessionId,
+    });
     this.setupSocketHandlers(this.socket);
     await this.registerWithServe();
     this.startPty();
@@ -127,13 +144,14 @@ class ShellTerminalWorker {
 
   private startPty(): void {
     if (this.child) return;
-    const shell = process.env.SHELL ?? "/bin/sh";
-    const child = pty.spawn(shell, [], {
+    const shell = defaultShell();
+    const launch = prepareCommandLaunch(shell, [], process.env, process.platform, this.cwd);
+    const child = pty.spawn(launch.command, launch.ptyArgs ?? launch.args, {
       name: "xterm-256color",
       cols: this.renderSequencer.cols,
       rows: this.renderSequencer.rows,
       cwd: this.cwd,
-      env: normalizeTerminalWorkerEnv(process.env),
+      env: normalizeTerminalWorkerEnv(launch.env),
     });
     this.child = child;
     child.onData((data) => this.handlePtyData(data));
@@ -251,41 +269,73 @@ class ShellTerminalWorker {
     log.info({ sessionId: this.sessionId, cols, rows }, "Terminal worker PTY resized");
   }
 
-  private async reconnectToServe(): Promise<void> {
-    if (this.reconnecting) return;
-    this.reconnecting = true;
-    try {
-      for (let i = 0; !this.exiting; i += 1) {
-        await sleep(Math.min(RECONNECT_INITIAL_DELAY_MS * (i + 1), RECONNECT_MAX_DELAY_MS));
+  private reconnectToServe(): void {
+    let consecutiveSpawnFailures = 0;
+    const run = this.reconnectSupervisor.request({
+      shouldStop: () => this.exiting,
+      attempt: async (attempt) => {
         const stopped = existsSync(STOPPED_PATH);
-        const newSocket = stopped ? await tryConnect(SOCK_PATH) : await ensureService();
-        if (!newSocket) continue;
-        this.socket = this.socket ? swapServeSocket(this.socket, newSocket) : newSocket;
-        this.setupSocketHandlers(this.socket);
-        await this.registerWithServe();
-        log.info({ sessionId: this.sessionId }, "Terminal worker reconnected to serve");
-        this.reconnecting = false;
-        return;
-      }
-    } catch (err) {
-      const failedSocket = this.socket;
-      this.socket = null;
-      failedSocket?.destroy();
-      log.warn(
+        const degraded = consecutiveSpawnFailures >= SPAWN_FAILURE_THRESHOLD;
+        const passive = stopped || degraded;
+        try {
+          const newSocket = passive
+            ? await tryConnect(SOCK_PATH)
+            : await ensureService("reconnect");
+          if (!newSocket) return "retry";
+          await requestTerminalAdmission(newSocket, {
+            clientKind: "terminal-worker",
+            terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+            sessionId: this.sessionId,
+          });
+          consecutiveSpawnFailures = 0;
+          this.socket = this.socket ? swapServeSocket(this.socket, newSocket) : newSocket;
+          this.setupSocketHandlers(this.socket);
+          await this.registerWithServe();
+          log.info({ sessionId: this.sessionId, attempt }, "Terminal worker reconnected to serve");
+          return "connected";
+        } catch (err) {
+          const failedSocket = this.socket;
+          this.socket = null;
+          failedSocket?.destroy();
+          log.warn(
+            {
+              sessionId: this.sessionId,
+              attempt,
+              err: err instanceof Error ? err.message : String(err),
+            },
+            "Terminal worker reconnect failed",
+          );
+          if (err instanceof TerminalRegistrationRejectedError) {
+            // The daemon understood this protocol generation and rejected the identity. Retrying
+            // the same registration cannot succeed; stop the owned PTY instead of looping forever.
+            this.shutdown(1);
+            return "stop";
+          }
+          if (err instanceof TerminalAdmissionRetiredError) {
+            this.shutdown(1);
+            return "stop";
+          }
+          if (!passive) {
+            consecutiveSpawnFailures += 1;
+            if (consecutiveSpawnFailures === SPAWN_FAILURE_THRESHOLD) {
+              log.warn(
+                { sessionId: this.sessionId, failures: consecutiveSpawnFailures },
+                "Terminal worker daemon auto-start disabled after repeated failures",
+              );
+            }
+          }
+          return "retry";
+        }
+      },
+    });
+    if (!run.started) return;
+    void run.completion.catch((err: unknown) => {
+      log.error(
         { sessionId: this.sessionId, err: err instanceof Error ? err.message : String(err) },
-        "Terminal worker reconnect failed",
+        "Terminal worker reconnect loop failed",
       );
-      if (err instanceof TerminalRegistrationRejectedError) {
-        // The daemon understood this protocol generation and rejected the identity. Retrying the
-        // same registration cannot succeed; stop the owned PTY instead of looping forever.
-        this.shutdown(1);
-        return;
-      }
-      this.reconnecting = false;
-      void this.reconnectToServe();
-      return;
-    }
-    this.reconnecting = false;
+      this.shutdown(1);
+    });
   }
 
   private shutdown(code: number): void {

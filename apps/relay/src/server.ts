@@ -30,6 +30,12 @@ import { DevicePreviewBridge } from "./device-preview-bridge.js";
 export interface RelayServerOptions {
   port?: number;
   heartbeatInterval?: number;
+  // Maximum time a raw /proxy WebSocket may occupy resources before completing registration.
+  // Primarily configurable for embedding and deterministic integration tests.
+  proxyAdmissionTimeoutMs?: number;
+  // Maximum time a raw /client WebSocket may occupy resources before completing registration.
+  // Primarily configurable for embedding and deterministic integration tests.
+  clientAdmissionTimeoutMs?: number;
   logger: Logger;
   dataDir?: string;
   // proxy 注册预共享 token; 不传 / 空串则关闭鉴权 (开发默认)
@@ -304,6 +310,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
       devicePreviewBridge,
       relayChaos,
       remoteFileBridge,
+      options.proxyAdmissionTimeoutMs,
     );
   });
 
@@ -328,6 +335,7 @@ export function createRelayServer(options: RelayServerOptions): RelayServer {
         userAgent: firstHeaderValue(request.headers["user-agent"]),
         remoteAddress: requestRemoteAddress(request),
       },
+      options.clientAdmissionTimeoutMs,
     );
   });
 

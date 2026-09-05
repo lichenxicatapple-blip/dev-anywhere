@@ -1,356 +1,130 @@
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { connect } from "node:net";
-import { setTimeout as sleep } from "node:timers/promises";
 import { Command } from "commander";
 import {
-  PID_PATH,
-  SOCK_PATH,
-  STOPPED_PATH,
   SESSIONS_PATH,
   SESSION_RUNTIME_IPC_VERSION_PATH,
   SERVICE_LOG_PATH,
   CONFIG_PATH,
   PROFILE_NAME,
-  ensureProfileWorkspace,
   isInitialized,
   initWorkspace,
 } from "./common/paths.js";
-import { spawnScript } from "./common/env.js";
 import { prepareDaemonSpawnEnvironment } from "./common/daemon-spawn-env.js";
-import { daemonRelayArgs, setDesiredDaemonRelay } from "./common/daemon-env.js";
-import { getErrnoCode, getErrorMessage, probeProcess } from "./common/process-probe.js";
-import { unlinkIfPresent } from "./common/safe-unlink.js";
-import {
-  createIpcReader,
-  serializeIpc,
-  TERMINAL_IPC_PROTOCOL_VERSION,
-  WORKER_IPC_PROTOCOL_VERSION,
-} from "./ipc/ipc-protocol.js";
-import type { IpcMessage } from "./ipc/ipc-protocol.js";
+import { setDesiredDaemonRelay } from "./common/daemon-env.js";
+import { getErrorMessage } from "./common/process-probe.js";
+import { TERMINAL_IPC_PROTOCOL_VERSION, WORKER_IPC_PROTOCOL_VERSION } from "./ipc/ipc-protocol.js";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "./cli-args.js";
-import { waitForProcessExit } from "./common/daemon-stop.js";
 import { readLiveLocalPtySessionIds, waitForSessionHandover } from "./common/restart-handover.js";
 import { PROXY_VERSION } from "./version.js";
+import { createProfileServiceLifecycle } from "./common/profile-service.js";
+import { ServiceLifecycleError } from "./common/service-lifecycle.js";
+import type { ServiceCommandResult } from "./common/service-command-result.js";
 
-const DAEMON_STOP_TIMEOUT_MS = 10_000;
-const SESSION_HANDOVER_TIMEOUT_MS = 10_000;
-type StopServiceResult = "stopped" | "not-running" | "failed";
-
-async function stopService(): Promise<StopServiceResult> {
-  if (!existsSync(PID_PATH)) {
-    console.error("Service is not running (no PID file)");
-    return "not-running";
-  }
-  const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
-  if (!Number.isSafeInteger(pid) || pid <= 0) {
-    console.error("Service PID file is invalid, cleaning up stale files");
-    unlinkIfPresent(PID_PATH);
-    unlinkIfPresent(SOCK_PATH);
-    writeFileSync(STOPPED_PATH, String(Date.now()));
-    return "not-running";
-  }
-
-  // 先声明“主动停机”，避免本地 PTY 在旧 socket 刚断开时通过 ensureService 抢先拉起
-  // 另一个 daemon。restart 会在 startDaemon 中移除此标记。
-  writeFileSync(STOPPED_PATH, String(Date.now()));
-  let alreadyExited = false;
+async function showStatus(): Promise<number> {
+  const lines: string[] = [`Profile: ${PROFILE_NAME}`];
   try {
-    process.kill(pid, "SIGTERM");
-  } catch (err) {
-    const code = getErrnoCode(err);
-    if (code === "ESRCH") {
-      console.error(`Process ${pid} not found, cleaning up stale files`);
-      alreadyExited = true;
-    } else if (code === "EPERM") {
-      console.error(`Cannot stop service PID ${pid}: permission denied`);
-      return "failed";
+    const service = await createProfileServiceLifecycle().status();
+    if (!service) {
+      lines.push("Service: not running");
     } else {
-      console.error(
-        `Cannot stop service PID ${pid}: ${code ? `${code}: ` : ""}${getErrorMessage(err)}`,
+      lines.push(`Service: ${service.state} (PID ${service.pid})`);
+      lines.push(
+        `Version: ${service.version === PROXY_VERSION ? service.version : `daemon ${service.version} (CLI ${PROXY_VERSION})`}`,
       );
-      return "failed";
-    }
-  }
-
-  if (!alreadyExited) {
-    const exitResult = await waitForProcessExit(pid, {
-      timeoutMs: DAEMON_STOP_TIMEOUT_MS,
-      pollMs: 100,
-    });
-    if (exitResult !== "exited") {
-      const detail =
-        exitResult === "timed-out"
-          ? `${DAEMON_STOP_TIMEOUT_MS / 1000}s 后仍在运行`
-          : "无法确认进程是否已退出";
-      console.error(`Service PID ${pid} ${detail}；为避免双 daemon，本次不会启动新服务。`);
-      return "failed";
-    }
-  }
-
-  unlinkIfPresent(PID_PATH);
-  unlinkIfPresent(SOCK_PATH);
-  console.log(`Service stopped (PID ${pid})`);
-  return "stopped";
-}
-
-type ServiceStatusResponse = Extract<IpcMessage, { type: "service_status_response" }>;
-
-function requestActiveSessionIds(timeoutMs = 1_000): Promise<string[] | null> {
-  return new Promise((resolve) => {
-    let settled = false;
-    const finish = (value: string[] | null, socket?: ReturnType<typeof connect>) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      socket?.destroy();
-      resolve(value);
-    };
-    const socket = connect(SOCK_PATH);
-    const timer = setTimeout(() => finish(null, socket), timeoutMs);
-    timer.unref?.();
-    socket.once("error", () => finish(null, socket));
-    socket.once("connect", () => {
-      createIpcReader(
-        socket,
-        (msg) => {
-          if (msg.type !== "service_status_response") return;
-          finish(
-            (msg as ServiceStatusResponse).sessions.map((session) => session.id),
-            socket,
+      lines.push(`Log:     ${SERVICE_LOG_PATH}`);
+      if (service.info) {
+        const { config, relay, sessions } = service.info;
+        lines.push(`Updates: ${config.autoUpdate ? "automatic (follows Relay)" : "disabled"}`);
+        lines.push(`Relay:   ${config.relayName} (${config.relayNameSource})`);
+        lines.push(`Config:  relay ${config.relayUrl ?? "(unset)"} (${config.relayUrlSource})`);
+        lines.push(
+          relay
+            ? `Relay:   ${relay.connected ? "connected" : "disconnected"} (proxy: ${relay.proxyId}, queued: ${relay.queueDepth}, reconnect attempts: ${relay.reconnectAttempt})`
+            : "Relay:   not configured",
+        );
+        lines.push("", sessions.length ? "Sessions:" : "Sessions: none");
+        for (const session of sessions) {
+          lines.push(
+            `  ${session.id}  ${session.mode}  ${session.state}  worker: ${session.hasWorker ? "yes" : "no"}`,
           );
-        },
-        undefined,
-        () => finish(null, socket),
-      );
-      socket.write(
-        serializeIpc({
-          type: "service_status_request",
-          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        }),
-      );
-    });
-  });
+        }
+      }
+    }
+  } catch (error) {
+    lines.push(`Service: unavailable (${getErrorMessage(error)})`);
+    process.exitCode = 1;
+  }
+  console.log(lines.join("\n"));
+  return lines.length;
 }
 
-function showStatus(): Promise<number> {
-  return new Promise((resolve) => {
-    let lines = 0;
-    const log = (s: string) => {
-      console.log(s);
-      lines++;
-    };
-
-    if (!existsSync(PID_PATH)) {
-      log(`Profile: ${PROFILE_NAME}`);
-      log("Service: not running");
-      resolve(lines);
-      return;
-    }
-    const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
-    const probe = probeProcess(pid);
-
-    if (probe.status === "not-found") {
-      log("Service: dead (stale PID file)");
-      resolve(lines);
-      return;
-    }
-
-    log(`Profile: ${PROFILE_NAME}`);
-    if (probe.status === "permission-denied") {
-      log(`Service: running (PID ${pid}, permission denied while probing)`);
-    } else if (probe.status === "unknown") {
-      log(`Service: unknown (PID ${pid}, ${probe.code ?? "unknown"}: ${probe.message})`);
+async function runServiceCommand(
+  action: "start" | "stop" | "restart",
+  options: { relay?: string; json?: boolean; recoverFrom?: string; ifRunning?: boolean },
+): Promise<void> {
+  let result: ServiceCommandResult;
+  try {
+    if (action !== "stop") setDesiredDaemonRelay(options.relay);
+    const environment = action === "stop" ? undefined : await prepareDaemonSpawnEnvironment();
+    const lifecycle = createProfileServiceLifecycle({
+      relayName: options.relay,
+      env: environment?.env,
+    });
+    if (action === "stop") {
+      await lifecycle.stop();
+      result = { status: "stopped" };
     } else {
-      log(`Service: running (PID ${pid})`);
-    }
-    log(`Socket:  ${SOCK_PATH}`);
-    log(`Log:     ${SERVICE_LOG_PATH}`);
-
-    const sock = connect(SOCK_PATH);
-    sock.on("error", (err) => {
-      const code = getErrnoCode(err);
-      log(`Sessions: unable to connect${code ? ` (${code})` : ""}`);
-      sock.destroy();
-      resolve(lines);
-    });
-    sock.on("connect", () => {
-      createIpcReader(
-        sock,
-        (msg) => {
-          if (msg.type === "service_status_response") {
-            const config = msg.config;
-            log(`Daemon:  profile ${config.profile ?? PROFILE_NAME}`);
-            log(
-              `Version: ${
-                config.version === PROXY_VERSION
-                  ? config.version
-                  : `daemon ${config.version} (CLI ${PROXY_VERSION})`
-              }`,
-            );
-            log(`Updates: ${config.autoUpdate ? "automatic (follows Relay)" : "disabled"}`);
-            log(`Relay:   ${config.relayName} (${config.relayNameSource})`);
-            log(`Config:  relay ${config.relayUrl ?? "(unset)"} (${config.relayUrlSource})`);
-            const relay = msg.relay;
-            if (!relay) {
-              log("Relay:   not configured");
-            } else if (relay.connected) {
-              log(`Relay:   connected (proxy: ${relay.proxyId})`);
-              log(
-                `         queue depth: ${relay.queueDepth}, reconnect attempts: ${relay.reconnectAttempt}`,
-              );
-            } else {
-              log(
-                `Relay:   disconnected (proxy: ${relay.proxyId}, reconnecting: attempt ${relay.reconnectAttempt}, queued: ${relay.queueDepth})`,
-              );
-            }
-            log("");
-
-            // 显示会话列表
-            const sessions = msg.sessions;
-            if (sessions.length === 0) {
-              log("Sessions: none");
-            } else {
-              log(`Sessions: ${sessions.length}`);
-              for (const s of sessions) {
-                log(`  ${s.id}  ${s.mode}  ${s.state}  worker: ${s.hasWorker ? "yes" : "no"}`);
-              }
-            }
-            sock.destroy();
-            resolve(lines);
-          }
-        },
-        undefined,
-        (err) => {
-          log(`Sessions: invalid service response (${err.message})`);
-          sock.destroy();
-          resolve(lines);
-        },
-      );
-      sock.write(
-        serializeIpc({
-          type: "service_status_request",
-          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        }),
-      );
-    });
-  });
-}
-
-const DAEMON_STARTUP_TIMEOUT_MS = 30_000;
-const DAEMON_STARTUP_POLL_MS = 200;
-
-// 轮询 SOCK_PATH 直到可连接，作为 serve 的 readiness 信号。
-// serve.ts 里 server.listen(SOCK_PATH) 是启动序列的最后一步，连上即代表 ready。
-async function waitForServeReady(timeoutMs: number): Promise<boolean> {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    const connected = await new Promise<boolean>((resolve) => {
-      const sock = connect(SOCK_PATH);
-      sock.once("connect", () => {
-        sock.destroy();
-        resolve(true);
+      const expectedSessionIds =
+        action === "restart"
+          ? readLiveLocalPtySessionIds(SESSIONS_PATH, SESSION_RUNTIME_IPC_VERSION_PATH, {
+              terminal: TERMINAL_IPC_PROTOCOL_VERSION,
+              worker: WORKER_IPC_PROTOCOL_VERSION,
+            })
+          : [];
+      const { service } =
+        action === "restart"
+          ? await lifecycle.restart(options.ifRunning ? "recover" : "explicit")
+          : await lifecycle.start("explicit", options.recoverFrom);
+      const missingSessionIds = await waitForSessionHandover({
+        expectedSessionIds,
+        loadActiveSessionIds: async () =>
+          (await lifecycle.status())?.info?.sessions.map((s) => s.id) ?? null,
+        timeoutMs: 10_000,
       });
-      sock.once("error", () => resolve(false));
-    });
-    if (connected) return true;
-    await sleep(DAEMON_STARTUP_POLL_MS);
-  }
-  return false;
-}
-
-async function startDaemon(options?: {
-  relayName?: string;
-  env?: NodeJS.ProcessEnv;
-}): Promise<void> {
-  ensureProfileWorkspace();
-  if (existsSync(PID_PATH)) {
-    const pid = parseInt(readFileSync(PID_PATH, "utf-8").trim(), 10);
-    const probe = probeProcess(pid);
-    if (probe.status === "alive") {
-      console.error(`Service is already running (PID ${pid})`);
-      return;
+      result = {
+        status: "ready",
+        pid: service.pid,
+        instanceId: service.instanceId,
+        version: service.version,
+        missingSessionIds,
+      };
     }
-    if (probe.status === "permission-denied" || probe.status === "unknown") {
-      const reason =
-        probe.status === "permission-denied"
-          ? "permission denied while probing"
-          : `${probe.code ?? "unknown"}: ${probe.message}`;
-      console.error(`Service may already be running (PID ${pid}); cannot verify it: ${reason}`);
-      return;
-    }
+  } catch (error) {
+    result = {
+      status: "failed",
+      code: error instanceof ServiceLifecycleError ? error.code : "COMMAND_FAILED",
+      message: getErrorMessage(error),
+      ...(error instanceof ServiceLifecycleError && error.recoveryToken
+        ? { recoveryToken: error.recoveryToken }
+        : {}),
+    };
   }
-  // stderr 走 pipe 由父 CLI 订阅：子进程 ready 前（pino logger 未接管）的启动错误
-  // 会被捕获；ready 后父 detach，pino 接管所有输出到 service.log。
-  // start 命令必须等 daemon socket 可连接后再退出；否则用户会看到“启动成功”，实际服务还没就绪。
-  const serveArgs = [
-    "--profile",
-    PROFILE_NAME,
-    "--preserve-stopped-marker",
-    ...daemonRelayArgs(options?.relayName),
-  ];
-  const child = spawnScript("serve", serveArgs, {
-    env: { ...(options?.env ?? process.env) },
-    stdio: ["ignore", "ignore", "pipe"],
-    unref: false,
-  });
-
-  const stderrChunks: Buffer[] = [];
-  child.stderr!.on("data", (chunk: Buffer) => {
-    stderrChunks.push(chunk);
-  });
-
-  // race: readiness handshake vs. 子进程先挂。子进程 ready 前就 exit 说明启动硬失败，
-  // 不必再等到 30s 超时才报错。
-  type Outcome =
-    | { kind: "ready" }
-    | { kind: "timeout" }
-    | { kind: "exited"; code: number | null; signal: NodeJS.Signals | null };
-
-  const readyOutcome: Promise<Outcome> = waitForServeReady(DAEMON_STARTUP_TIMEOUT_MS).then((ok) =>
-    ok ? { kind: "ready" as const } : { kind: "timeout" as const },
-  );
-  const exitOutcome: Promise<Outcome> = new Promise((resolve) => {
-    // 设 listener 前已经 exit 的边界：Node 记在 exitCode 上
-    if (child.exitCode !== null) {
-      resolve({ kind: "exited", code: child.exitCode, signal: child.signalCode });
-      return;
-    }
-    child.once("exit", (code, signal) => resolve({ kind: "exited", code, signal }));
-  });
-
-  const result = await Promise.race([readyOutcome, exitOutcome]);
-
-  if (result.kind === "ready") {
-    // 上一个 daemon 完全退出、新 socket 已 ready 后再允许 terminal 主动连接/拉起服务，
-    // 避免重启窗口里 terminal worker 与 CLI 各 spawn 一份 daemon。
-    unlinkIfPresent(STOPPED_PATH);
-    console.log(`Service started in background (PID ${child.pid})`);
-    // ready 后 detach：摘 stderr 订阅 + destroy pipe + unref 子进程。
-    // 单独 child.unref() 不够，父侧的 stderr pipe fd 还在事件循环里会让父 CLI 永不退出；
-    // 必须 destroy 掉 pipe 才能真正释放 refcount。pino 已接管子进程的输出到 service.log。
-    child.stderr!.removeAllListeners("data");
-    child.stderr!.destroy();
-    child.unref();
-    return;
-  }
-
-  // 失败路径：timeout 或 exited
-  const stderrOutput = Buffer.concat(stderrChunks).toString("utf-8").trim();
-  if (result.kind === "exited") {
-    console.error(`Service exited during startup (code=${result.code}, signal=${result.signal}).`);
-  } else {
-    console.error(`Service failed to become ready within ${DAEMON_STARTUP_TIMEOUT_MS / 1000}s.`);
-    try {
-      process.kill(child.pid!, "SIGTERM");
-    } catch {
-      // 子进程可能已自己退出，kill 失败不影响后续退出码
+  if (options.json) console.log(JSON.stringify(result));
+  else if (result.status === "failed") console.error(result.message);
+  else if (result.status === "stopped") console.log("Service stopped");
+  else {
+    console.log(`Service ready (PID ${result.pid})`);
+    if (result.missingSessionIds.length) {
+      console.error(
+        `Service restarted, but ${result.missingSessionIds.length} 个本地终端会话尚未重新连接：${result.missingSessionIds.join(", ")}`,
+      );
     }
   }
-  if (stderrOutput) {
-    console.error("--- child stderr ---");
-    console.error(stderrOutput);
+  if (
+    result.status === "failed" ||
+    (result.status === "ready" && result.missingSessionIds.length)
+  ) {
+    process.exitCode = 1;
   }
-  process.exit(1);
 }
 
 const program = new Command("dev-anywhere")
@@ -392,11 +166,17 @@ const serve = new Command("serve")
     }
     if (opts.daemon) {
       setDesiredDaemonRelay(undefined);
-      await startDaemon();
+      await runServiceCommand("start", {});
     } else {
-      // 延迟导入 serve: daemon 模式只需要 startDaemon（纯 spawn），不需要加载 70KB 的 serve bundle
-      const { startService } = await import("./serve.js");
-      await startService();
+      try {
+        await createProfileServiceLifecycle().startForeground(async () => {
+          const { startService } = await import("./serve.js");
+          await startService();
+        });
+      } catch (error) {
+        console.error(getErrorMessage(error));
+        process.exit(1);
+      }
     }
   });
 
@@ -404,14 +184,15 @@ serve
   .command("start")
   .description("Start the background service")
   .option("--relay <name>", "Use a named relay from config")
+  .option("--json", "Print a machine-readable result")
+  .option("--recover-from <token>", "Resume only the specified failed restart")
   .action(async (opts) => {
     if (!isInitialized()) {
-      console.error(`Dev Anywhere is not initialized. Run "dev-anywhere init" first.`);
-      process.exit(1);
+      console.error('Dev Anywhere is not initialized. Run "dev-anywhere init" first.');
+      process.exitCode = 1;
+      return;
     }
-    setDesiredDaemonRelay(opts.relay);
-    const daemonEnvironment = await prepareDaemonSpawnEnvironment();
-    await startDaemon({ relayName: opts.relay, env: daemonEnvironment.env });
+    await runServiceCommand("start", opts);
   });
 
 serve
@@ -437,54 +218,40 @@ serve
 serve
   .command("stop")
   .description("Stop the background service")
-  .action(async () => {
-    const result = await stopService();
-    if (result === "failed") process.exitCode = 1;
-  });
+  .option("--json", "Print a machine-readable result")
+  .action(async (opts) => runServiceCommand("stop", opts));
 
 serve
   .command("restart")
   .description("Restart the background service")
   .option("--relay <name>", "Use a named relay from config")
-  .action(async (opts) => {
-    setDesiredDaemonRelay(opts.relay);
-    // Relay updater 的锁归属于当前 CLI 的父进程时，先从 login shell 刷新 PATH，再停旧
-    // daemon。这样 shell 配置较慢或失败时不会无谓延长服务中断窗口；手动 restart 则原样
-    // 继承调用它的终端环境。
-    const daemonEnvironment = await prepareDaemonSpawnEnvironment();
-    const expectedSessionIds = readLiveLocalPtySessionIds(
-      SESSIONS_PATH,
-      SESSION_RUNTIME_IPC_VERSION_PATH,
-      {
-        terminal: TERMINAL_IPC_PROTOCOL_VERSION,
-        worker: WORKER_IPC_PROTOCOL_VERSION,
-      },
-    );
-    const stopResult = await stopService();
-    if (stopResult === "failed") {
-      process.exitCode = 1;
-      return;
-    }
-    await startDaemon({ relayName: opts.relay, env: daemonEnvironment.env });
-    const missingSessionIds = await waitForSessionHandover({
-      expectedSessionIds,
-      loadActiveSessionIds: requestActiveSessionIds,
-      timeoutMs: SESSION_HANDOVER_TIMEOUT_MS,
-    });
-    if (missingSessionIds.length > 0) {
-      console.error(
-        `Service restarted, but ${missingSessionIds.length} 个本地终端会话未重新登记：${missingSessionIds.join(
-          ", ",
-        )}`,
-      );
-      console.error(`请查看 ${SERVICE_LOG_PATH}；重启不会静默宣告会话交接成功。`);
-      process.exitCode = 1;
-    } else if (expectedSessionIds.length > 0) {
-      console.log(`Session handover complete (${expectedSessionIds.length})`);
-    }
-  });
+  .option("--json", "Print a machine-readable result")
+  .option("--if-running", "Do not restart a service that was explicitly stopped")
+  .action(async (opts) => runServiceCommand("restart", opts));
 
 program.addCommand(serve);
+
+const autostart = serve.command("autostart").description("Start Proxy automatically at user login");
+for (const [action, description] of [
+  ["enable", "Enable automatic startup at login"],
+  ["disable", "Disable automatic startup without stopping Proxy"],
+  ["status", "Show automatic startup status"],
+] as const) {
+  autostart
+    .command(action)
+    .description(description)
+    .action(async () => {
+      const { runAutostartCommand } = await import("./autostart.js");
+      await runAutostartCommand(action);
+    });
+}
+autostart
+  .command("run", { hidden: true })
+  .option("--daemon", "Detach after service readiness (systemd login trigger)")
+  .action(async (_options, command: Command) => {
+    const { startAutostartService } = await import("./autostart.js");
+    await startAutostartService(Boolean(command.optsWithGlobals().daemon));
+  });
 
 const relay = new Command("relay").description("Inspect and manage relay configuration");
 
@@ -541,4 +308,7 @@ program
 const cliArgs = normalizeCliArgs(process.argv.slice(2));
 const cliArgsWithoutProfile = stripProxyProfileArgs(cliArgs);
 
-program.parse(cliArgsWithoutProfile, { from: "user" });
+// Commander actions are asynchronous (daemon readiness, lifecycle lock acquisition, graceful
+// teardown). Await them so the public CLI exit code is decided only after the complete operation,
+// rather than relying on incidental open handles to keep Node alive.
+await program.parseAsync(cliArgsWithoutProfile, { from: "user" });

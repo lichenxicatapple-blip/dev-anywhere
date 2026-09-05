@@ -63,6 +63,22 @@ function reconnectTimers(): Timers {
   return timers;
 }
 
+function openRelayTransport(timers: Timers, relay: RelayClient): void {
+  handleWsStatusChange(false, timers, relay, {
+    willReconnect: false,
+    transportOpen: true,
+    protocolReady: false,
+  });
+}
+
+function admitRelayProtocol(timers: Timers, relay: RelayClient): void {
+  handleWsStatusChange(true, timers, relay, {
+    willReconnect: false,
+    transportOpen: true,
+    protocolReady: true,
+  });
+}
+
 function emptyPreviewSnapshotMethods() {
   return {
     requestWebPreviewList: vi.fn().mockResolvedValue({
@@ -129,9 +145,32 @@ describe("phase-machine reconnect timers", () => {
     } as unknown as RelayClient;
     const timers = reconnectTimers();
 
-    handleWsStatusChange(false, timers, relay, false);
+    handleWsStatusChange(false, timers, relay, { willReconnect: false });
 
     expect(useAppStore.getState().relayConnectionIssue).toBe("disconnected");
+    expect(timers.reconnect).toBeNull();
+  });
+
+  it("surfaces a protocol mismatch permanently and cancels reconnect recovery", () => {
+    const relay = {
+      register: vi.fn(),
+      listProxies: vi.fn(),
+    } as unknown as RelayClient;
+    const timers = reconnectTimers();
+
+    handleWsStatusChange(false, timers, relay);
+    expect(timers.reconnect).not.toBeNull();
+
+    handleWsStatusChange(false, timers, relay, {
+      willReconnect: false,
+      closeCode: 4402,
+      disconnectReason: "protocol_mismatch",
+    });
+
+    expect(useAppStore.getState().relayConnectionIssue).toBe("protocol_mismatch");
+    expect(timers.reconnect).toBeNull();
+    vi.advanceTimersByTime(30_000);
+    expect(router.navigate).not.toHaveBeenCalled();
   });
 
   it("keeps one reconnect fallback timer across repeated disconnect notifications", () => {
@@ -150,7 +189,8 @@ describe("phase-machine reconnect timers", () => {
     expect(useAppStore.getState().phase).toBe("reconnecting");
     expect(useAppStore.getState().phaseBeforeDisconnect).toBe("chatting");
 
-    handleWsStatusChange(true, timers, relay);
+    openRelayTransport(timers, relay);
+    admitRelayProtocol(timers, relay);
     expect(timers.reconnect).toBe(firstTimer);
 
     vi.advanceTimersByTime(10_000);
@@ -185,11 +225,14 @@ describe("phase-machine reconnect timers", () => {
     const timers = reconnectTimers();
 
     handleWsStatusChange(false, timers, relay);
-    handleWsStatusChange(true, timers, relay);
+    openRelayTransport(timers, relay);
 
     expect(useAppStore.getState().phase).toBe("reconnecting");
+    expect(useAppStore.getState().connected).toBe(false);
     expect(useAppStore.getState().proxyOnline).toBe(false);
-    expect(useAppStore.getState().relayConnectionIssue).toBeNull();
+    expect(useAppStore.getState().relayConnectionIssue).toBe("unreachable");
+    expect(relay.register).toHaveBeenCalledTimes(1);
+    expect(relay.listProxies).not.toHaveBeenCalled();
 
     vi.advanceTimersByTime(30_000);
     expect(useAppStore.getState().phase).toBe("connecting");
@@ -243,7 +286,8 @@ describe("phase-machine reconnect timers", () => {
     const timers = reconnectTimers();
 
     handleWsStatusChange(false, timers, relay);
-    handleWsStatusChange(true, timers, relay);
+    openRelayTransport(timers, relay);
+    admitRelayProtocol(timers, relay);
     const handling = handleRelayMessage(
       {
         type: "proxy_list_response",
@@ -288,7 +332,8 @@ describe("phase-machine reconnect timers", () => {
     const timers = reconnectTimers();
 
     handleWsStatusChange(false, timers, relay);
-    handleWsStatusChange(true, timers, relay);
+    openRelayTransport(timers, relay);
+    admitRelayProtocol(timers, relay);
     await handleRelayMessage(
       {
         type: "proxy_list_response",
@@ -323,7 +368,8 @@ describe("phase-machine reconnect timers", () => {
     const timers = reconnectTimers();
 
     handleWsStatusChange(false, timers, relay);
-    handleWsStatusChange(true, timers, relay);
+    openRelayTransport(timers, relay);
+    admitRelayProtocol(timers, relay);
     await handleRelayMessage(
       {
         type: "proxy_list_response",
@@ -366,7 +412,8 @@ describe("phase-machine reconnect timers", () => {
     const timers = reconnectTimers();
 
     handleWsStatusChange(false, timers, relay);
-    handleWsStatusChange(true, timers, relay);
+    openRelayTransport(timers, relay);
+    admitRelayProtocol(timers, relay);
     const handling = handleRelayMessage(
       {
         type: "proxy_list_response",
@@ -397,7 +444,8 @@ describe("phase-machine reconnect timers", () => {
     const timers = reconnectTimers();
 
     handleWsStatusChange(false, timers, relay);
-    handleWsStatusChange(true, timers, relay);
+    openRelayTransport(timers, relay);
+    admitRelayProtocol(timers, relay);
     await handleRelayMessage(
       {
         type: "proxy_list_response",

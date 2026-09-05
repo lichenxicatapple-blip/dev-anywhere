@@ -53,4 +53,53 @@ describe("resolvePickerTarget", () => {
       query: "we",
     });
   });
+
+  it("browses a Windows Home, another drive, and UNC shares", () => {
+    const baseCwd = "C:\\Users\\dev";
+    expect(resolvePickerTarget("", "select", { baseCwd })).toEqual({
+      currentPath: `${baseCwd}\\`,
+      query: "",
+    });
+    expect(resolvePickerTarget("D:\\", "select", { baseCwd })).toEqual({
+      currentPath: "D:\\",
+      query: "",
+    });
+    expect(resolvePickerTarget("C:/Users/dev/app", "select", { baseCwd })).toEqual({
+      currentPath: `${baseCwd}\\`,
+      query: "app",
+    });
+    expect(resolvePickerTarget("\\\\server\\share\\", "select", { baseCwd })).toEqual({
+      currentPath: "\\\\server\\share\\",
+      query: "",
+    });
+    expect(resolvePickerTarget("C:app", "select", { baseCwd })).toEqual({
+      currentPath: "",
+      query: "",
+    });
+  });
+
+  it("keeps ambiguous rooted input on the remote platform and root", () => {
+    expect(resolvePickerTarget("//home/dev/site", "select", { baseCwd: "/home/dev" })).toEqual({
+      currentPath: "/home/dev/",
+      query: "site",
+    });
+    expect(resolvePickerTarget("/site", "select", { baseCwd: "D:\\Projects" })).toEqual({
+      currentPath: "D:\\",
+      query: "site",
+    });
+    expect(
+      resolvePickerTarget("/site", "select", { baseCwd: "\\\\server\\share\\project" }),
+    ).toEqual({ currentPath: "\\\\server\\share\\", query: "site" });
+  });
+
+  it("parses Windows insert-mode separators without changing POSIX backslash names", () => {
+    expect(resolvePickerTarget("@app\\so", "insert", { baseCwd: "C:\\project" })).toEqual({
+      currentPath: "app\\",
+      query: "so",
+    });
+    expect(resolvePickerTarget("@app\\so", "insert", { baseCwd: "/project" })).toEqual({
+      currentPath: "./",
+      query: "app\\so",
+    });
+  });
 });

@@ -10,6 +10,11 @@ import {
 
 const spawnScriptMock = vi.hoisted(() => vi.fn());
 
+vi.mock("node:fs", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:fs")>()),
+  mkdirSync: vi.fn(),
+}));
+
 vi.mock("#src/common/env.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#src/common/env.js")>();
   return {

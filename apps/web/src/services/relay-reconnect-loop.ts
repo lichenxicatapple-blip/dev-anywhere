@@ -17,7 +17,7 @@ export class RelayReconnectAttemptTimeoutError extends Error {
 }
 
 // Relay 还没启动时 Web 也可能先被打开。预检失败后在原页重试，
-// 成功或得到明确的鉴权结果后 attempt 会 resolve，循环自然停止。
+// 成功或得到明确的准入结果（鉴权/协议版本）后 attempt 会 resolve，循环自然停止。
 export function createRelayReconnectLoop(
   attempt: (signal: AbortSignal) => Promise<void>,
   options: RelayReconnectLoopOptions = {},

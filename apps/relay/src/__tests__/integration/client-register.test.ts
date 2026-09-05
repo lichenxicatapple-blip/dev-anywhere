@@ -5,6 +5,7 @@ import {
   MESSAGE_ENVELOPE_VERSION,
   RELAY_CONTROL_PROTOCOL_VERSION,
   RelayCloseCode,
+  RelayProtocolRejectReason,
 } from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import {
@@ -53,6 +54,22 @@ describe("client_register protocol", () => {
     return ws;
   }
 
+  async function startRelayWithClientAdmissionTimeout(timeoutMs: number): Promise<{
+    relay: RelayServer;
+    port: number;
+  }> {
+    const timeoutRelay = createRelayServer({
+      port: 0,
+      heartbeatInterval: 60_000,
+      clientAdmissionTimeoutMs: timeoutMs,
+      logger,
+    });
+    await new Promise<void>((resolve) => {
+      timeoutRelay.httpServer.listen(0, "127.0.0.1", resolve);
+    });
+    return { relay: timeoutRelay, port: getPort(timeoutRelay) };
+  }
+
   function clientRegister(clientId: string): Record<string, unknown> {
     return {
       type: "client_register",
@@ -88,6 +105,30 @@ describe("client_register protocol", () => {
     expect(response.bindingId).toBeUndefined();
   });
 
+  it("does not broadcast proxy state to a raw client before its registration response", async () => {
+    const client = connectClient();
+    await waitForOpen(client);
+    const earlyMessages: string[] = [];
+    const collectEarly = (data: { toString(): string }) => earlyMessages.push(data.toString());
+    client.on("message", collectEarly);
+
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    const proxyRegistered = waitForMessageType(proxy, "proxy_register_response");
+    proxy.send(JSON.stringify(proxyRegister("proxy-during-client-admission")));
+    await proxyRegistered;
+    await settle(25);
+    expect(earlyMessages).toEqual([]);
+
+    client.off("message", collectEarly);
+    const clientRegistered = waitForMessage(client);
+    client.send(JSON.stringify(clientRegister("client-after-proxy-broadcast")));
+    expect(JSON.parse(await clientRegistered)).toMatchObject({
+      type: "client_register_response",
+      status: "new",
+    });
+  });
+
   it("rejects incomplete client_register without device descriptor", async () => {
     const client = connectClient();
     await waitForOpen(client);
@@ -112,28 +153,105 @@ describe("client_register protocol", () => {
     expect(await closePromise).toBe(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
   });
 
-  it.each([
-    ["missing", undefined],
-    ["mismatched", 0],
-  ])("rejects a client with a %s control protocol", async (_label, protocolVersion) => {
+  it("terminates an unversioned client with the permanent signal it already understands", async () => {
     const client = connectClient();
     await waitForOpen(client);
-    const message = clientRegister(`rejected-client-${String(protocolVersion)}`);
-    if (protocolVersion === undefined) delete message.protocolVersion;
-    else message.protocolVersion = protocolVersion;
-    const errorPromise = waitForMessageType(client, "relay_error");
+    const message = clientRegister("unversioned-client");
+    delete message.protocolVersion;
+    const messages: Array<Record<string, unknown>> = [];
+    client.on("message", (data) => messages.push(JSON.parse(data.toString())));
     const closePromise = new Promise<number>((resolve) => {
       client.once("close", (code) => resolve(code));
     });
 
-    client.send(JSON.stringify(message));
+    const obsoleteRegistration = JSON.stringify(message);
+    client.send(obsoleteRegistration);
+    client.send(obsoleteRegistration);
 
-    expect(JSON.parse(await errorPromise)).toMatchObject({ code: "INVALID_MESSAGE" });
-    expect(await closePromise).toBe(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
+    // Unversioned Web clients only classify 4401 as terminal. 4402 would reopen immediately and
+    // reset their retry budget on every successful HTTP upgrade.
+    expect(await closePromise).toBe(RelayCloseCode.CLIENT_KICKED);
+    expect(messages).toEqual([
+      {
+        type: "relay_client_kicked",
+        reason: "页面版本已更新，请刷新",
+      },
+    ]);
     expect(relay.registry.getClientDetails()).not.toEqual(
       expect.arrayContaining([expect.objectContaining({ clientId: message.clientId })]),
     );
   });
+
+  it("closes an unregistered raw client after a retryable admission timeout", async () => {
+    const timeoutServer = await startRelayWithClientAdmissionTimeout(100);
+    const client = new WebSocket(`ws://127.0.0.1:${timeoutServer.port}/client`);
+    try {
+      await waitForOpen(client);
+      const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+        client.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+      });
+
+      await expect(closed).resolves.toEqual({
+        code: 1013,
+        reason: "client registration timeout",
+      });
+    } finally {
+      if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+        client.terminate();
+      }
+      await timeoutServer.relay.close();
+    }
+  });
+
+  it("cancels the admission timeout after a valid registration", async () => {
+    const timeoutServer = await startRelayWithClientAdmissionTimeout(100);
+    const client = new WebSocket(`ws://127.0.0.1:${timeoutServer.port}/client`);
+    try {
+      await waitForOpen(client);
+      const registered = waitForMessageType(client, "client_register_response");
+      client.send(JSON.stringify(clientRegister("admitted-before-timeout")));
+      await registered;
+      await new Promise((resolve) => setTimeout(resolve, 250));
+
+      expect(client.readyState).toBe(WebSocket.OPEN);
+    } finally {
+      if (client.readyState === WebSocket.OPEN || client.readyState === WebSocket.CONNECTING) {
+        client.terminate();
+      }
+      await timeoutServer.relay.close();
+    }
+  });
+
+  it.each([
+    [0, RelayProtocolRejectReason.PROTOCOL_MISMATCH],
+    [2, RelayProtocolRejectReason.SERVICE_OUTDATED],
+  ])(
+    "rejects control protocol %s with the machine-readable reason %s",
+    async (protocolVersion, expectedReason) => {
+      const client = connectClient();
+      await waitForOpen(client);
+      const message = clientRegister(`rejected-client-${String(protocolVersion)}`);
+      message.protocolVersion = protocolVersion;
+      const messages: string[] = [];
+      client.on("message", (data) => messages.push(data.toString()));
+      const closePromise = new Promise<{ code: number; reason: string }>((resolve) => {
+        client.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+      });
+
+      client.send(JSON.stringify(message));
+
+      expect(await closePromise).toEqual({
+        code: RelayCloseCode.CLIENT_PROTOCOL_REJECTED,
+        reason: expectedReason,
+      });
+      // Admission rejection stays in the stable WebSocket close layer. Sending a new JSON message
+      // first would make an older page close locally before it can observe the permanent 4402.
+      expect(messages).toEqual([]);
+      expect(relay.registry.getClientDetails()).not.toEqual(
+        expect.arrayContaining([expect.objectContaining({ clientId: message.clientId })]),
+      );
+    },
+  );
 
   it("rejects an envelope before the current client handshake", async () => {
     const client = connectClient();
@@ -167,15 +285,19 @@ describe("client_register protocol", () => {
     const message = proxyRegister(`rejected-proxy-${String(protocolVersion)}`);
     if (protocolVersion === undefined) delete message.protocolVersion;
     else message.protocolVersion = protocolVersion;
-    const errorPromise = waitForMessageType(proxy, "relay_error");
-    const closePromise = new Promise<number>((resolve) => {
-      proxy.once("close", (code) => resolve(code));
+    const messages: string[] = [];
+    proxy.on("message", (data) => messages.push(data.toString()));
+    const closePromise = new Promise<{ code: number; reason: string }>((resolve) => {
+      proxy.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
     });
 
     proxy.send(JSON.stringify(message));
 
-    expect(JSON.parse(await errorPromise)).toMatchObject({ code: "NOT_REGISTERED" });
-    expect(await closePromise).toBe(RelayCloseCode.PROXY_PROTOCOL_REJECTED);
+    expect(await closePromise).toEqual({
+      code: RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      reason: "protocol_mismatch",
+    });
+    expect(messages).toEqual([]);
     expect(relay.registry.hasProxy(String(message.proxyId))).toBe(false);
   });
 

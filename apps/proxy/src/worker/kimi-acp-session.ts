@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { spawnCommand } from "../common/command-launch.js";
+import { terminateOwnedProcessTree } from "../common/process-termination.js";
 import { LineBuffer } from "../ipc/line-buffer.js";
 import { KIMI_PROVIDER, resolveKimiAcpMode, type KimiAcpMode } from "../providers/kimi.js";
 import { PROXY_VERSION } from "../version.js";
@@ -281,8 +283,8 @@ export class KimiAcpSession {
 
   start(): number {
     if (this.child) throw new Error("Kimi ACP session has already been started");
-    const command = KIMI_PROVIDER.buildJsonCommand({}, process.env);
-    this.child = spawn(command.command, command.args, {
+    const command = KIMI_PROVIDER.buildJsonCommand({ cwd: this.workDir }, process.env);
+    this.child = spawnCommand(command.command, command.args, {
       cwd: this.workDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: command.env,
@@ -353,13 +355,13 @@ export class KimiAcpSession {
       }
     }
 
-    child.kill("SIGTERM");
+    terminateOwnedProcessTree(child, "SIGTERM");
     const startedAt = Date.now();
     while (Date.now() - startedAt < gracePeriodMs) {
       if (!this.isChildAlive(child)) return;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
-    if (this.isChildAlive(child)) child.kill("SIGKILL");
+    if (this.isChildAlive(child)) terminateOwnedProcessTree(child, "SIGKILL");
   }
 
   isAlive(): boolean {
@@ -585,7 +587,7 @@ export class KimiAcpSession {
     // The old ACP process may still believe the cancelled prompt is live. Never let a queued
     // prompt or late permission request share that transport; a fresh session can safely resume
     // from Kimi's durable native history after the worker exits.
-    this.child?.kill("SIGKILL");
+    if (this.child) terminateOwnedProcessTree(this.child, "SIGKILL");
   }
 
   private handleNotification(method: string, rawParams: unknown): void {

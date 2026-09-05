@@ -52,12 +52,13 @@ function withCodexTerminalPermissionArgs(args: string[], permissionMode?: string
   return [...args];
 }
 
-export function resolveCodexCommand(env: NodeJS.ProcessEnv): string {
+export function resolveCodexCommand(env: NodeJS.ProcessEnv, cwd?: string): string {
   return resolveExecutable(
     "codex",
     env,
     "CODEX_BIN",
     "codex not found in PATH. Set CODEX_BIN or install Codex CLI.",
+    cwd,
   );
 }
 
@@ -70,9 +71,9 @@ export const CODEX_PROVIDER: ProviderAdapter = {
     supportsProjectScopedConfig: true,
     supportsGlobalSetup: true,
   },
-  buildJsonCommand(_options: ProviderJsonOptions, env: NodeJS.ProcessEnv): ProviderCommand {
+  buildJsonCommand(options: ProviderJsonOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     return {
-      command: resolveCodexCommand(env),
+      command: resolveCodexCommand(env, options.cwd),
       args: ["app-server", "--listen", "stdio://"],
       env,
     };
@@ -80,7 +81,7 @@ export const CODEX_PROVIDER: ProviderAdapter = {
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     const args = withCodexTerminalPermissionArgs(options.args, options.permissionMode);
     return {
-      command: resolveCodexCommand(env),
+      command: resolveCodexCommand(env, options.cwd),
       args,
       env,
     };

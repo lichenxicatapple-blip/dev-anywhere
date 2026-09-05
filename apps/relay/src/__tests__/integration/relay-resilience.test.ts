@@ -19,7 +19,7 @@ import { mkdtempSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve as pathResolve } from "node:path";
 import { WebSocket } from "ws";
-import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
+import { RELAY_CONTROL_PROTOCOL_VERSION, RelayCloseCode } from "@dev-anywhere/shared";
 import {
   waitForOpen,
   waitForMessage,
@@ -389,17 +389,22 @@ describe("proxy lifecycle", () => {
   );
 
   it(
-    "Proxy 未注册就发 envelope → NOT_REGISTERED",
+    "rejects a Proxy business frame before registration without sending business responses",
     async () => {
       const proxy = ws.proxy(port);
       await waitForOpen(proxy);
 
-      const msgP = waitForMessage(proxy);
+      const messages: string[] = [];
+      proxy.on("message", (data) => messages.push(data.toString()));
+      const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+        proxy.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+      });
       proxy.send(JSON.stringify(makeEnvelope(1)));
-      const resp = JSON.parse(await msgP);
-
-      expect(resp.type).toBe("relay_error");
-      expect(resp.code).toBe("NOT_REGISTERED");
+      expect(await closed).toEqual({
+        code: RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+        reason: "protocol_mismatch",
+      });
+      expect(messages).toEqual([]);
     },
     E2E_TIMEOUT,
   );

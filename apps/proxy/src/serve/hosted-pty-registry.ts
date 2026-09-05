@@ -1,4 +1,6 @@
 import * as pty from "node-pty";
+import { defaultShell } from "../common/executable.js";
+import { prepareCommandLaunch } from "../common/command-launch.js";
 import type { IPty } from "node-pty";
 import {
   ControlErrorCode,
@@ -150,20 +152,28 @@ export class HostedPtyRegistry {
     const command =
       options.kind === "terminal"
         ? {
-            command: options.shell ?? this.deps.getProviderEnv().SHELL ?? "/bin/sh",
+            command: options.shell ?? defaultShell(this.deps.getProviderEnv()),
             args: [],
             env: this.deps.getProviderEnv(),
           }
         : PROVIDERS[options.provider].buildTerminalCommand(
             {
               args: options.args,
+              cwd: options.cwd,
               permissionMode: options.permissionMode,
               hook: options.hook,
             },
             this.deps.getProviderEnv(),
           );
-    const env = normalizeHostedPtyEnv(command.env);
-    const child = pty.spawn(command.command, command.args, {
+    const launch = prepareCommandLaunch(
+      command.command,
+      command.args,
+      command.env,
+      process.platform,
+      options.cwd,
+    );
+    const env = normalizeHostedPtyEnv(launch.env);
+    const child = pty.spawn(launch.command, launch.ptyArgs ?? launch.args, {
       name: HOSTED_PTY_TERM,
       cols,
       rows,

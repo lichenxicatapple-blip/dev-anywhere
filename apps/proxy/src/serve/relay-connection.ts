@@ -5,13 +5,18 @@ import { join } from "node:path";
 import { nanoid } from "nanoid";
 import { EventEmitter } from "node:events";
 import {
+  compareProxyRelayProtocolVersions,
   createFSM,
+  isProxyProtocolRejectDirection,
+  ProxyProtocolAdmissionDirection,
   RELAY_JSON_MESSAGE_MAX_BYTES,
   RELAY_CONTROL_PROTOCOL_VERSION,
   RelayCloseCode,
   RelayControlSchema,
   serializeControl,
   type MessageEnvelope,
+  type ProxyProtocolAdmissionDirectionType,
+  type ProxyProtocolRejectDirection,
 } from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
@@ -30,6 +35,9 @@ const MAX_QUEUE_SIZE = 10000;
 // proxy 侧主动心跳：网络切换时本机 TCP/WebSocket 可能保持半开，不能只等 close 事件。
 const DEFAULT_HEARTBEAT_INTERVAL_MS = 15000;
 const DEFAULT_HEARTBEAT_TIMEOUT_MS = 10000;
+// Covers both the HTTP/WebSocket handshake and Relay registration. A transport which opens but
+// never admits this Proxy is no more usable than one which never opens.
+const DEFAULT_READY_TIMEOUT_MS = 10_000;
 export const RELAY_CONNECTION_WEBSOCKET_OPTIONS = {
   maxPayload: 10 * 1024 * 1024,
   perMessageDeflate: {
@@ -49,6 +57,7 @@ export const RelayConnectionState = {
   REGISTERING: "registering",
   SYNCED: "synced",
   WAITING_RECONNECT: "waiting_reconnect",
+  BLOCKED_REMOTE: "blocked_remote",
   CLOSED: "closed",
 } as const;
 export type RelayConnectionState = (typeof RelayConnectionState)[keyof typeof RelayConnectionState];
@@ -60,23 +69,32 @@ export type RelayConnectionState = (typeof RelayConnectionState)[keyof typeof Re
 const RELAY_TRANSITIONS: Record<RelayConnectionState, readonly RelayConnectionState[]> = {
   [RelayConnectionState.DISCONNECTED]: [
     RelayConnectionState.CONNECTING,
+    RelayConnectionState.BLOCKED_REMOTE,
     RelayConnectionState.CLOSED,
   ],
   [RelayConnectionState.CONNECTING]: [
     RelayConnectionState.REGISTERING,
     RelayConnectionState.WAITING_RECONNECT,
+    RelayConnectionState.BLOCKED_REMOTE,
     RelayConnectionState.CLOSED,
   ],
   [RelayConnectionState.REGISTERING]: [
     RelayConnectionState.SYNCED,
     RelayConnectionState.WAITING_RECONNECT,
+    RelayConnectionState.BLOCKED_REMOTE,
     RelayConnectionState.CLOSED,
   ],
   [RelayConnectionState.SYNCED]: [
     RelayConnectionState.WAITING_RECONNECT,
+    RelayConnectionState.BLOCKED_REMOTE,
     RelayConnectionState.CLOSED,
   ],
   [RelayConnectionState.WAITING_RECONNECT]: [
+    RelayConnectionState.CONNECTING,
+    RelayConnectionState.BLOCKED_REMOTE,
+    RelayConnectionState.CLOSED,
+  ],
+  [RelayConnectionState.BLOCKED_REMOTE]: [
     RelayConnectionState.CONNECTING,
     RelayConnectionState.CLOSED,
   ],
@@ -95,6 +113,7 @@ interface RelayConnectionOptions {
   // 测试/特殊部署覆盖；生产默认值见 DEFAULT_HEARTBEAT_*。
   heartbeatIntervalMs?: number;
   heartbeatTimeoutMs?: number;
+  readyTimeoutMs?: number;
 }
 
 // 管理代理到中转服务器的出站 WebSocket 连接，支持自动重连和消息队列
@@ -105,6 +124,12 @@ export class RelayConnection extends EventEmitter {
   private queue: MemoryMessageQueue = new MemoryMessageQueue();
   private reconnectAttempt: number = 0;
   private reconnectTimer: NodeJS.Timeout | null = null;
+  private readyTimeout:
+    | {
+        socket: WebSocket;
+        timer: NodeJS.Timeout;
+      }
+    | undefined;
   private heartbeatTimer: NodeJS.Timeout | null = null;
   private heartbeatTimeoutTimer: NodeJS.Timeout | null = null;
   private fsm = createFSM({
@@ -125,6 +150,10 @@ export class RelayConnection extends EventEmitter {
   private version: string;
   private heartbeatIntervalMs: number;
   private heartbeatTimeoutMs: number;
+  private readyTimeoutMs: number;
+  private protocolAdmissionDirection: ProxyProtocolAdmissionDirectionType =
+    ProxyProtocolAdmissionDirection.COMPATIBLE;
+  private disconnectedNotified = false;
 
   constructor(relayUrl: string, options?: RelayConnectionOptions) {
     super();
@@ -135,6 +164,13 @@ export class RelayConnection extends EventEmitter {
     this.version = options?.version ?? PROXY_VERSION;
     this.heartbeatIntervalMs = options?.heartbeatIntervalMs ?? DEFAULT_HEARTBEAT_INTERVAL_MS;
     this.heartbeatTimeoutMs = options?.heartbeatTimeoutMs ?? DEFAULT_HEARTBEAT_TIMEOUT_MS;
+    const configuredReadyTimeoutMs = options?.readyTimeoutMs;
+    this.readyTimeoutMs =
+      typeof configuredReadyTimeoutMs === "number" &&
+      Number.isSafeInteger(configuredReadyTimeoutMs) &&
+      configuredReadyTimeoutMs > 0
+        ? configuredReadyTimeoutMs
+        : DEFAULT_READY_TIMEOUT_MS;
   }
 
   // 从文件读取或生成新的 proxyId，生成后持久化到文件
@@ -164,15 +200,17 @@ export class RelayConnection extends EventEmitter {
       const url = this.token ? `${base}?token=${encodeURIComponent(this.token)}` : base;
       this.ws = new WebSocket(url, RELAY_CONNECTION_WEBSOCKET_OPTIONS);
       const socket = this.ws;
+      this.startReadyTimeout(socket);
 
-      this.ws.on("open", () => {
+      socket.on("open", () => {
+        if (this.ws !== socket) return;
         // open 属异步回调，若同步 close() 已先切 CLOSED，REGISTERING 会被拒，需跳过后续 register
         if (!this.fsm.tryTransitionTo(RelayConnectionState.REGISTERING)) return;
         serviceLogger.info(
           { proxyId: this.proxyId, url: base, tokenSet: !!this.token },
           "Connected to relay server",
         );
-        this.ws!.send(
+        socket.send(
           serializeControl({
             type: "proxy_register",
             protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
@@ -183,7 +221,9 @@ export class RelayConnection extends EventEmitter {
         );
       });
 
-      this.ws.on("message", (data, isBinary) => {
+      socket.on("message", (data, isBinary) => {
+        // A superseded socket must not admit a newer attempt or clear its timers.
+        if (this.ws !== socket) return;
         const buf = data as Buffer;
         if (isBinary) {
           if (this.fsm.current() !== RelayConnectionState.SYNCED) {
@@ -225,21 +265,34 @@ export class RelayConnection extends EventEmitter {
           }
           const response = RelayControlSchema.safeParse(msg);
           if (!response.success || response.data.type !== "proxy_register_response") {
+            const direction = compareProxyRelayProtocolVersions(
+              RELAY_CONTROL_PROTOCOL_VERSION,
+              msg.protocolVersion,
+            );
             serviceLogger.warn(
-              { issues: response.success ? undefined : response.error.issues },
+              { direction, issues: response.success ? undefined : response.error.issues },
               "Invalid Proxy registration response; terminating relay connection",
             );
-            this.rejectRelayProtocol(socket, "invalid registration response");
+            this.rejectRelayProtocol(
+              socket,
+              "invalid registration response",
+              direction === ProxyProtocolAdmissionDirection.COMPATIBLE
+                ? ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH
+                : direction,
+            );
             return;
           }
           const { status, relayVersion, connectionId } = response.data;
           serviceLogger.info({ status, relayVersion }, "Received register response");
           if (!this.fsm.tryTransitionTo(RelayConnectionState.SYNCED)) return;
+          this.clearReadyTimeout(socket);
           this.reconnectAttempt = 0;
+          this.protocolAdmissionDirection = ProxyProtocolAdmissionDirection.COMPATIBLE;
           this.startHeartbeat();
           this.flushQueue();
           this.emit("relay_version", relayVersion);
           this.emit("stream_connection", connectionId);
+          this.disconnectedNotified = false;
           this.emit("connected");
           return;
         }
@@ -250,29 +303,37 @@ export class RelayConnection extends EventEmitter {
         this.emit("message", msg);
       });
 
-      this.ws.on("close", (code: number, reason: Buffer) => {
+      socket.on("close", (code: number, reason: Buffer) => {
+        if (this.ws !== socket) {
+          serviceLogger.debug({ code }, "Close from inactive Relay socket ignored");
+          return;
+        }
+        this.clearReadyTimeout(socket);
         this.stopHeartbeat();
         this.ws = null;
         const closeMeta = { code, reason: reason.toString() || undefined };
         if (code === RelayCloseCode.PROXY_PROTOCOL_REJECTED) {
-          this.fsm.tryTransitionTo(RelayConnectionState.CLOSED);
-          serviceLogger.warn(closeMeta, "Relay rejected Proxy control protocol");
-          this.emit("disconnected");
+          const direction = isProxyProtocolRejectDirection(closeMeta.reason)
+            ? closeMeta.reason
+            : ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH;
+          this.applyProtocolRejection(direction, "websocket", closeMeta);
         } else if (this.fsm.current() !== RelayConnectionState.CLOSED) {
           this.fsm.tryTransitionTo(RelayConnectionState.WAITING_RECONNECT);
           serviceLogger.info(closeMeta, "Relay connection closed unexpectedly");
-          this.emit("disconnected");
+          this.emitDisconnectedOnce();
           this.scheduleReconnect();
         } else {
           serviceLogger.info(closeMeta, "Relay connection closed");
         }
       });
 
-      this.ws.on("error", (err) => {
+      socket.on("error", (err) => {
+        if (this.ws !== socket) return;
         serviceLogger.error({ error: String(err) }, "Relay connection error");
       });
 
-      this.ws.on("pong", () => {
+      socket.on("pong", () => {
+        if (this.ws !== socket) return;
         this.clearHeartbeatTimeout();
       });
     } catch (err) {
@@ -282,6 +343,46 @@ export class RelayConnection extends EventEmitter {
         this.scheduleReconnect();
       }
     }
+  }
+
+  private startReadyTimeout(socket: WebSocket): void {
+    this.clearReadyTimeout();
+    const timer = setTimeout(() => {
+      if (this.readyTimeout?.socket !== socket) return;
+      this.readyTimeout = undefined;
+      if (
+        this.ws !== socket ||
+        (this.fsm.current() !== RelayConnectionState.CONNECTING &&
+          this.fsm.current() !== RelayConnectionState.REGISTERING)
+      ) {
+        return;
+      }
+
+      serviceLogger.warn(
+        { timeoutMs: this.readyTimeoutMs, state: this.fsm.current() },
+        "Relay connection did not become ready in time",
+      );
+      // Retire the attempt before terminating its transport. This makes a response racing with
+      // the timeout stale and ensures the later close event cannot schedule a second reconnect.
+      this.stopHeartbeat();
+      this.ws = null;
+      if (!this.fsm.tryTransitionTo(RelayConnectionState.WAITING_RECONNECT)) return;
+      this.emitDisconnectedOnce();
+      this.scheduleReconnect();
+      try {
+        socket.terminate();
+      } catch (error) {
+        serviceLogger.debug({ error: String(error) }, "Timed-out Relay socket was already closed");
+      }
+    }, this.readyTimeoutMs);
+    timer.unref?.();
+    this.readyTimeout = { socket, timer };
+  }
+
+  private clearReadyTimeout(socket?: WebSocket): void {
+    if (!this.readyTimeout || (socket && this.readyTimeout.socket !== socket)) return;
+    clearTimeout(this.readyTimeout.timer);
+    this.readyTimeout = undefined;
   }
 
   private startHeartbeat(): void {
@@ -347,12 +448,95 @@ export class RelayConnection extends EventEmitter {
     ws.terminate();
   }
 
-  private rejectRelayProtocol(ws: WebSocket, reason: string): void {
+  private rejectRelayProtocol(
+    ws: WebSocket,
+    detail: string,
+    direction: ProxyProtocolRejectDirection = ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH,
+  ): void {
     if (this.ws !== ws || this.fsm.current() === RelayConnectionState.CLOSED) return;
+    this.clearReadyTimeout(ws);
     this.stopHeartbeat();
-    this.fsm.tryTransitionTo(RelayConnectionState.CLOSED);
-    serviceLogger.warn({ reason }, "Relay control protocol rejected");
-    ws.close(RelayCloseCode.PROXY_PROTOCOL_REJECTED, reason.slice(0, 123));
+    serviceLogger.warn({ detail, direction }, "Relay control protocol rejected");
+    // Retire ownership before initiating the close handshake. A real ws peer normally echoes our
+    // 4405 close code asynchronously; leaving this socket current would make the close handler
+    // emit a second `disconnected` notification for the same rejection.
+    this.ws = null;
+    ws.close(RelayCloseCode.PROXY_PROTOCOL_REJECTED, direction);
+    this.applyProtocolRejection(direction, "local_validation");
+  }
+
+  /** Apply a result from the stable HTTP bootstrap channel. */
+  applyProtocolAdmission(direction: ProxyProtocolAdmissionDirectionType): void {
+    if (direction === ProxyProtocolAdmissionDirection.COMPATIBLE) {
+      if (!this.fsm.is(RelayConnectionState.BLOCKED_REMOTE)) return;
+      this.protocolAdmissionDirection = direction;
+      if (!this.fsm.tryTransitionTo(RelayConnectionState.CONNECTING)) return;
+      serviceLogger.info("Relay control protocol is compatible; reconnecting");
+      this.doConnect();
+      return;
+    }
+    this.applyProtocolRejection(direction, "http_bootstrap");
+  }
+
+  private applyProtocolRejection(
+    direction: ProxyProtocolRejectDirection,
+    source: "websocket" | "http_bootstrap" | "local_validation",
+    closeMeta?: { code: number; reason?: string },
+  ): void {
+    const previousState = this.fsm.current();
+    if (previousState === RelayConnectionState.CLOSED) return;
+    if (
+      direction === ProxyProtocolAdmissionDirection.RELAY_OUTDATED &&
+      previousState === RelayConnectionState.BLOCKED_REMOTE
+    ) {
+      return;
+    }
+
+    if (this.reconnectTimer) {
+      clearTimeout(this.reconnectTimer);
+      this.reconnectTimer = null;
+    }
+    this.clearReadyTimeout();
+    this.stopHeartbeat();
+    const socket = this.ws;
+    this.ws = null;
+    this.protocolAdmissionDirection = direction;
+
+    const targetState =
+      direction === ProxyProtocolAdmissionDirection.RELAY_OUTDATED
+        ? RelayConnectionState.BLOCKED_REMOTE
+        : RelayConnectionState.CLOSED;
+    if (!this.fsm.tryTransitionTo(targetState)) return;
+
+    serviceLogger.warn(
+      { direction, source, previousState, ...closeMeta },
+      direction === ProxyProtocolAdmissionDirection.RELAY_OUTDATED
+        ? "Relay control protocol is older; WebSocket retries paused"
+        : direction === ProxyProtocolAdmissionDirection.PROXY_OUTDATED
+          ? "Proxy control protocol is older; waiting for Proxy update"
+          : "Proxy/Relay control protocol mismatch; retries stopped",
+    );
+    this.emit("protocol_blocked", { direction, source });
+
+    // When HTTP wins the race, own and retire the in-flight WebSocket first. Its eventual close is
+    // stale and therefore cannot emit another disconnect or start another reconnect chain.
+    if (socket) {
+      try {
+        socket.terminate();
+      } catch (error) {
+        serviceLogger.debug(
+          { error: String(error), direction },
+          "Protocol-blocked Relay socket was already closed",
+        );
+      }
+    }
+    if (previousState !== RelayConnectionState.DISCONNECTED) this.emitDisconnectedOnce();
+  }
+
+  private emitDisconnectedOnce(): void {
+    if (this.disconnectedNotified) return;
+    this.disconnectedNotified = true;
+    this.emit("disconnected");
   }
 
   // 将队列中缓存的消息依次发送到 relay
@@ -364,6 +548,9 @@ export class RelayConnection extends EventEmitter {
 
   // 计算全抖动指数退避延迟并调度重连
   private scheduleReconnect(): void {
+    if (this.reconnectTimer || this.fsm.current() !== RelayConnectionState.WAITING_RECONNECT) {
+      return;
+    }
     const backoff =
       Math.random() *
       Math.min(MAX_BACKOFF_MS, BASE_BACKOFF_MS * Math.pow(2, this.reconnectAttempt));
@@ -372,6 +559,7 @@ export class RelayConnection extends EventEmitter {
       "Scheduling reconnect",
     );
     this.reconnectTimer = setTimeout(() => {
+      this.reconnectTimer = null;
       this.reconnectAttempt++;
       // 必须先回 CONNECTING 才能让 open handler 合法转到 REGISTERING；
       // 若 close() 抢先切 CLOSED（clearTimeout 理论上拦得住，保险再守一层），跳过重连
@@ -427,18 +615,26 @@ export class RelayConnection extends EventEmitter {
   close(): void {
     // 幂等：已 CLOSED 直接跳过，避免 FSM 抛 closed -> closed
     if (this.fsm.is(RelayConnectionState.CLOSED)) return;
+    const wasSynced = this.fsm.is(RelayConnectionState.SYNCED);
     this.fsm.tryTransitionTo(RelayConnectionState.CLOSED);
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    this.clearReadyTimeout();
     this.stopHeartbeat();
-    if (this.ws) {
-      if (this.ws.readyState === WebSocket.OPEN) {
-        this.ws.send(serializeControl({ type: "proxy_disconnect", proxyId: this.proxyId }));
+    const socket = this.ws;
+    this.ws = null;
+    if (socket) {
+      if (socket.readyState === WebSocket.OPEN) {
+        // proxy_disconnect is application traffic and must never be emitted before admission.
+        if (wasSynced) {
+          socket.send(serializeControl({ type: "proxy_disconnect", proxyId: this.proxyId }));
+        }
+        socket.close();
+      } else {
+        socket.terminate();
       }
-      this.ws.close();
-      this.ws = null;
     }
   }
 
@@ -454,6 +650,7 @@ export class RelayConnection extends EventEmitter {
     proxyId: string;
     reconnectAttempt: number;
     queueDepth: number;
+    protocolAdmissionDirection: ProxyProtocolAdmissionDirectionType;
   } {
     return {
       connected: this.fsm.current() === RelayConnectionState.SYNCED,
@@ -461,6 +658,7 @@ export class RelayConnection extends EventEmitter {
       proxyId: this.proxyId,
       reconnectAttempt: this.reconnectAttempt,
       queueDepth: this.queue.size(),
+      protocolAdmissionDirection: this.protocolAdmissionDirection,
     };
   }
 }

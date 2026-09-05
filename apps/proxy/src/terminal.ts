@@ -1,5 +1,4 @@
 import type { Socket } from "node:net";
-import { setTimeout as sleep } from "node:timers/promises";
 import { readTtySize, notifyUser } from "./terminal/tty.js";
 import { PtyManager } from "./terminal/pty-manager.js";
 import { resolveTerminalCwd } from "./terminal/cwd.js";
@@ -10,6 +9,11 @@ import {
   waitForMessage,
 } from "./terminal/serve-bootstrap.js";
 import { createIdleChecker, type IdleChecker } from "./terminal/idle-checker.js";
+import { ReconnectSupervisor } from "./terminal/reconnect-supervisor.js";
+import {
+  requestTerminalAdmission,
+  TerminalAdmissionRetiredError,
+} from "./terminal/admission-client.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
 import {
   appendPtySemanticTextTail,
@@ -88,9 +92,12 @@ class TerminalSession {
   private xtermHistoryCompat: CodexXtermHistoryCompat | null = null;
   private xtermHistoryCompatReported = false;
   private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
+  private readonly reconnectSupervisor = new ReconnectSupervisor({
+    initialDelayMs: RECONNECT_INITIAL_DELAY_MS,
+    maxDelayMs: RECONNECT_MAX_DELAY_MS,
+  });
   private ptyStateSeq = 0;
   private remoteDetached = false;
-  private reconnecting = false;
   // 记录上次 bridge 连接状态，避免重连抖动重复打印 banner；
   // 初值 null 确保首次状态变更（无论 true/false）都触发一次输出
   private lastBridgeConnected: boolean | null = null;
@@ -117,6 +124,10 @@ class TerminalSession {
     log.info("Terminal starting");
     this.fsm.transitionTo(TerminalState.CONNECTING_SERVICE);
     this.socket = await ensureService();
+    await requestTerminalAdmission(this.socket, {
+      clientKind: "local-terminal",
+      terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+    });
 
     await this.createSession();
     const initialSize = this.initRenderSequencer();
@@ -471,36 +482,37 @@ class TerminalSession {
     this.idleChecker.start();
   }
 
-  private async reconnectToServe(): Promise<void> {
-    if (this.reconnecting) return;
-    this.reconnecting = true;
-    log.info("Serve connection lost, starting reconnection");
-
+  private reconnectToServe(): void {
     // 两条路径都不该再继续 spawn daemon：
     //   - STOPPED=true：用户主动 dev-anywhere stop，不要对抗用户意图。
     //   - consecutiveSpawnFailures 跨过阈值：说明环境有持续性问题，spawn 再多也白搭。
     // 进入 passive 后仅做 tryConnect 等待，daemon 起来或用户 dev-anywhere start 后自动恢复。
     let consecutiveSpawnFailures = 0;
-
-    try {
-      for (let i = 0; ; i++) {
-        if (this.remoteDetached) return;
-        await sleep(Math.min(RECONNECT_INITIAL_DELAY_MS * (i + 1), RECONNECT_MAX_DELAY_MS));
-
+    const run = this.reconnectSupervisor.request({
+      shouldStop: () => this.remoteDetached,
+      attempt: async (attempt) => {
         const stopped = existsSync(STOPPED_PATH);
         const degraded = consecutiveSpawnFailures >= SPAWN_FAILURE_THRESHOLD;
         const passive = stopped || degraded;
 
         try {
-          log.debug({ attempt: i + 1, stopped, degraded }, "Reconnect attempt");
-          const newSocket = passive ? await tryConnect(SOCK_PATH) : await ensureService();
-          if (!newSocket) continue;
+          log.debug({ attempt, stopped, degraded }, "Reconnect attempt");
+          const newSocket = passive
+            ? await tryConnect(SOCK_PATH)
+            : await ensureService("reconnect");
+          if (!newSocket) return "retry";
+
+          await requestTerminalAdmission(newSocket, {
+            clientKind: "local-terminal",
+            terminalProtocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+            ...(this.sessionId ? { sessionId: this.sessionId } : {}),
+          });
 
           if (degraded) notifyUser("serve daemon reachable, reconnected");
           consecutiveSpawnFailures = 0;
 
           this.socket = swapServeSocket(this.socket, newSocket);
-          log.info({ attempt: i + 1, sessionId: this.sessionId }, "Reconnected to serve");
+          log.info({ attempt, sessionId: this.sessionId }, "Reconnected to serve");
 
           this.setupSocketHandlers();
 
@@ -540,16 +552,21 @@ class TerminalSession {
               );
               this.socket.destroy();
               this.ptyManager?.cleanup(1);
+              return "stop";
             }
           } else {
             this.fsm.transitionTo(TerminalState.RUNNING);
           }
 
-          return;
+          return "connected";
         } catch (err) {
           // This.socket is either the failed attempt or the already-closed socket from the
           // preceding round. Destroy is idempotent and guarantees no half-open attempt survives.
           this.socket.destroy();
+          if (err instanceof TerminalAdmissionRetiredError) {
+            this.retireRemoteView(err.message);
+            return "stop";
+          }
           if (err instanceof IpcProtocolError) {
             const rejectedSessionId = this.sessionId;
             this.sessionId = null;
@@ -558,7 +575,7 @@ class TerminalSession {
               "Terminal session registration failed the IPC protocol gate",
             );
             this.ptyManager?.cleanup(1);
-            return;
+            return "stop";
           }
           // passive 模式走 tryConnect，失败返回 null；主动连接还可能在拉起 daemon 或创建
           // 会话握手时失败。所有失败都留在当前单一重连循环中处理。
@@ -571,14 +588,22 @@ class TerminalSession {
             }
           }
           log.debug(
-            { err: err instanceof Error ? err.message : err, attempt: i + 1, degraded },
+            { err: err instanceof Error ? err.message : err, attempt, degraded },
             "Reconnect attempt failed",
           );
+          return "retry";
         }
-      }
-    } finally {
-      this.reconnecting = false;
-    }
+      },
+    });
+    if (!run.started) return;
+    log.info("Serve connection lost, starting reconnection");
+    void run.completion.catch((err: unknown) => {
+      log.error(
+        { err: err instanceof Error ? err.message : String(err) },
+        "Terminal reconnect loop failed",
+      );
+      this.ptyManager?.cleanup(1);
+    });
   }
 
   private detachRemoteView(): void {
@@ -592,6 +617,17 @@ class TerminalSession {
     notifyUser("remote viewing detached");
     if (this.socket.writable) this.socket.end();
   }
+
+  private retireRemoteView(reason: string): void {
+    const sessionId = this.sessionId;
+    this.remoteDetached = true;
+    this.sessionId = null;
+    this.hookContext = null;
+    this.currentPtyState = "turn_complete";
+    log.error({ sessionId, reason }, "Remote view retired by terminal admission");
+    notifyUser(`remote viewing stopped — ${reason}`);
+    if (this.socket.writable) this.socket.end();
+  }
 }
 
 function providerFromEnv(): ProviderId {
@@ -603,5 +639,14 @@ export async function startTerminal(
   providerArgs: string[],
   providerId: ProviderId = providerFromEnv(),
 ): Promise<void> {
-  await new TerminalSession(PROVIDERS[providerId], providerArgs).run();
+  try {
+    await new TerminalSession(PROVIDERS[providerId], providerArgs).run();
+  } catch (error) {
+    if (error instanceof TerminalAdmissionRetiredError) {
+      console.error(`DEV Anywhere could not connect this terminal: ${error.message}`);
+      process.exitCode = 1;
+      return;
+    }
+    throw error;
+  }
 }

@@ -1,5 +1,6 @@
 import type { Logger } from "pino";
 import { describe, expect, it, vi } from "vitest";
+import { ProxyProtocolAdmissionDirection } from "@dev-anywhere/shared";
 import {
   createRelayUpgradeBootstrapMonitor,
   fetchRelayUpgradeBootstrap,
@@ -22,6 +23,7 @@ function jsonResponse(body: unknown, status = 200): Response {
 function testLogger(): Logger {
   return {
     debug: vi.fn(),
+    error: vi.fn(),
     info: vi.fn(),
     warn: vi.fn(),
   } as unknown as Logger;
@@ -55,6 +57,20 @@ describe("Relay upgrade bootstrap", () => {
         cache: "no-store",
       }),
     );
+  });
+
+  it("keeps the stable bootstrap readable when a future Relay adds negotiation hints", async () => {
+    const fetchImpl = vi.fn<typeof fetch>().mockResolvedValue(
+      jsonResponse({
+        ...bootstrapBody,
+        minimumProxyVersion: "0.10.0",
+        recommendedAction: "upgrade",
+      }),
+    );
+
+    await expect(
+      fetchRelayUpgradeBootstrap({ relayUrl: "wss://relay.example.test", fetchImpl }),
+    ).resolves.toEqual(bootstrapBody);
   });
 
   it("treats a missing endpoint as an older same-protocol Relay", async () => {
@@ -93,11 +109,11 @@ describe("Relay upgrade bootstrap", () => {
           resolveFetch = resolve;
         }),
     );
-    const onVersion = vi.fn();
+    const onAdmission = vi.fn();
     const monitor = createRelayUpgradeBootstrapMonitor({
       relayUrl: "ws://127.0.0.1:3100",
       logger: testLogger(),
-      onVersion,
+      onAdmission,
       fetchImpl,
     });
 
@@ -105,8 +121,14 @@ describe("Relay upgrade bootstrap", () => {
     monitor.request();
     expect(fetchImpl).toHaveBeenCalledTimes(1);
     resolveFetch(jsonResponse(bootstrapBody));
-    await vi.waitFor(() => expect(onVersion).toHaveBeenCalledWith("0.9.1"));
-    expect(onVersion).toHaveBeenCalledTimes(1);
+    await vi.waitFor(() =>
+      expect(onAdmission).toHaveBeenCalledWith({
+        direction: ProxyProtocolAdmissionDirection.COMPATIBLE,
+        relayVersion: "0.9.1",
+        relayControlProtocolVersion: 1,
+      }),
+    );
+    expect(onAdmission).toHaveBeenCalledTimes(1);
     monitor.dispose();
   });
 
@@ -115,19 +137,136 @@ describe("Relay upgrade bootstrap", () => {
       .fn<typeof fetch>()
       .mockRejectedValueOnce(new Error("temporary failure"))
       .mockResolvedValueOnce(jsonResponse(bootstrapBody));
-    const onVersion = vi.fn();
+    const onAdmission = vi.fn();
     const monitor = createRelayUpgradeBootstrapMonitor({
       relayUrl: "ws://127.0.0.1:3100",
       logger: testLogger(),
-      onVersion,
+      onAdmission,
       fetchImpl,
       retryInitialMs: 1,
       retryMaxMs: 1,
     });
 
     monitor.request();
-    await vi.waitFor(() => expect(onVersion).toHaveBeenCalledWith("0.9.1"));
+    await vi.waitFor(() => expect(onAdmission).toHaveBeenCalledTimes(1));
     expect(fetchImpl).toHaveBeenCalledTimes(2);
+    monitor.dispose();
+  });
+
+  it("backs off while Relay is older and reports compatibility when Relay catches up", async () => {
+    vi.useFakeTimers();
+    try {
+      const olderRelay = { ...bootstrapBody, controlProtocolVersion: 1 } as const;
+      const compatibleRelay = {
+        ...bootstrapBody,
+        relayVersion: "0.9.2",
+        controlProtocolVersion: 2,
+      } as const;
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValueOnce(jsonResponse(olderRelay))
+        .mockResolvedValueOnce(jsonResponse(olderRelay))
+        .mockResolvedValueOnce(jsonResponse(compatibleRelay));
+      const onAdmission = vi.fn();
+      const monitor = createRelayUpgradeBootstrapMonitor({
+        relayUrl: "ws://127.0.0.1:3100",
+        logger: testLogger(),
+        onAdmission,
+        fetchImpl,
+        controlProtocolVersion: 2,
+        retryInitialMs: 5,
+        retryMaxMs: 20,
+      });
+
+      monitor.request();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      expect(onAdmission).toHaveBeenLastCalledWith({
+        direction: ProxyProtocolAdmissionDirection.RELAY_OUTDATED,
+        relayVersion: "0.9.1",
+        relayControlProtocolVersion: 1,
+      });
+
+      await vi.advanceTimersByTimeAsync(5);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      // Identical observations are coalesced, but polling continues with the next backoff step.
+      expect(onAdmission).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(9);
+      expect(fetchImpl).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      expect(onAdmission).toHaveBeenLastCalledWith({
+        direction: ProxyProtocolAdmissionDirection.COMPATIBLE,
+        relayVersion: "0.9.2",
+        relayControlProtocolVersion: 2,
+      });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(3);
+      monitor.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("fails closed on an invalid successful bootstrap response without retrying", async () => {
+    vi.useFakeTimers();
+    try {
+      const onAdmission = vi.fn();
+      const fetchImpl = vi
+        .fn<typeof fetch>()
+        .mockResolvedValue(jsonResponse({ bootstrapVersion: 1, relayVersion: "broken" }));
+      const monitor = createRelayUpgradeBootstrapMonitor({
+        relayUrl: "ws://127.0.0.1:3100",
+        logger: testLogger(),
+        onAdmission,
+        fetchImpl,
+        retryInitialMs: 1,
+        retryMaxMs: 1,
+      });
+
+      monitor.request();
+      await vi.advanceTimersByTimeAsync(0);
+      expect(onAdmission).toHaveBeenCalledOnce();
+      expect(onAdmission).toHaveBeenCalledWith({
+        direction: ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH,
+      });
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(fetchImpl).toHaveBeenCalledTimes(1);
+      monitor.dispose();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("ignores a stale HTTP response after a newer probe has taken ownership", async () => {
+    const resolvers: Array<(response: Response) => void> = [];
+    const fetchImpl = vi.fn<typeof fetch>().mockImplementation(
+      () =>
+        new Promise<Response>((resolve) => {
+          resolvers.push(resolve);
+        }),
+    );
+    const onAdmission = vi.fn();
+    const monitor = createRelayUpgradeBootstrapMonitor({
+      relayUrl: "ws://127.0.0.1:3100",
+      logger: testLogger(),
+      onAdmission,
+      fetchImpl,
+    });
+
+    monitor.request();
+    monitor.markControlProtocolConnected();
+    monitor.request();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    resolvers[0]?.(jsonResponse({ ...bootstrapBody, relayVersion: "0.9.0" }));
+    resolvers[1]?.(jsonResponse(bootstrapBody));
+    await vi.waitFor(() => expect(onAdmission).toHaveBeenCalledTimes(1));
+    expect(onAdmission).toHaveBeenCalledWith({
+      direction: ProxyProtocolAdmissionDirection.COMPATIBLE,
+      relayVersion: "0.9.1",
+      relayControlProtocolVersion: 1,
+    });
     monitor.dispose();
   });
 
@@ -144,7 +283,7 @@ describe("Relay upgrade bootstrap", () => {
       const monitor = createRelayUpgradeBootstrapMonitor({
         relayUrl: "ws://127.0.0.1:3100",
         logger: testLogger(),
-        onVersion: vi.fn(),
+        onAdmission: vi.fn(),
         fetchImpl,
         retryInitialMs: 5,
         retryMaxMs: 5,

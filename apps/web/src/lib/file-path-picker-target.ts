@@ -5,43 +5,6 @@ interface PickerTarget {
   query: string;
 }
 
-export function withTrailingSlash(path: string): string {
-  if (!path || path.endsWith("/")) return path;
-  return `${path}/`;
-}
-
-function extractInsertQuery(filter: string): string {
-  const afterAt = filter.split("@").pop() ?? "";
-  const lastSlash = afterAt.lastIndexOf("/");
-  return lastSlash >= 0 ? afterAt.slice(lastSlash + 1).toLowerCase() : afterAt.toLowerCase();
-}
-
-function extractInsertPath(filter: string): string {
-  const afterAt = filter.split("@").pop() ?? "";
-  const lastSlash = afterAt.lastIndexOf("/");
-  return lastSlash >= 0 ? afterAt.slice(0, lastSlash + 1) : "";
-}
-
-function normalizeAbsolutePath(path: string): string {
-  if (!path.startsWith("/")) return "";
-  const parts: string[] = [];
-  for (const part of path.split("/")) {
-    if (!part || part === ".") continue;
-    if (part === "..") {
-      parts.pop();
-      continue;
-    }
-    parts.push(part);
-  }
-  return `/${parts.join("/")}`;
-}
-
-function resolveSelectPath(filter: string, baseCwd: string): string {
-  if (filter.startsWith("/")) return normalizeAbsolutePath(filter);
-  if (!baseCwd) return "";
-  return normalizeAbsolutePath(`${baseCwd}/${filter}`);
-}
-
 export function resolvePickerTarget(
   filter: string,
   mode: PickerMode,
@@ -51,28 +14,43 @@ export function resolvePickerTarget(
   },
 ): PickerTarget {
   if (mode === "insert") {
+    const afterAt = filter.split("@").pop() ?? "";
+    const windows = remotePathSeparator(options?.baseCwd ?? afterAt) === "\\";
+    const lastSlash = Math.max(afterAt.lastIndexOf("/"), windows ? afterAt.lastIndexOf("\\") : -1);
     return {
-      currentPath: extractInsertPath(filter) || "./",
-      query: extractInsertQuery(filter),
+      currentPath: lastSlash >= 0 ? afterAt.slice(0, lastSlash + 1) : windows ? ".\\" : "./",
+      query: afterAt.slice(lastSlash + 1).toLowerCase(),
     };
   }
 
-  const baseCwd = normalizeAbsolutePath(options?.baseCwd ?? "");
+  const baseCwd = normalizeRemoteAbsolutePath(options?.baseCwd ?? "");
   if (!filter) {
-    return { currentPath: baseCwd ? withTrailingSlash(baseCwd) : "", query: "" };
+    return { currentPath: withTrailingSeparator(baseCwd), query: "" };
   }
 
-  const normalized = resolveSelectPath(filter.replace(/\/+$/, "") || "/", baseCwd);
+  const normalized = resolveRemotePath(baseCwd, filter);
   if (!normalized) return { currentPath: "", query: "" };
+  const parent = remoteParentDirectory(normalized);
+  const separator = remotePathSeparator(normalized);
   const isKnownDir =
-    filter.endsWith("/") || normalized === baseCwd || options?.knownDirs?.has(normalized);
+    filter.endsWith("/") ||
+    (separator === "\\" && filter.endsWith("\\")) ||
+    normalized === parent ||
+    normalized === baseCwd ||
+    options?.knownDirs?.has(normalized);
   if (isKnownDir) {
-    return { currentPath: withTrailingSlash(normalized), query: "" };
+    return { currentPath: withTrailingSeparator(normalized), query: "" };
   }
 
-  const lastSlash = normalized.lastIndexOf("/");
   return {
-    currentPath: normalized.slice(0, lastSlash + 1) || "/",
-    query: normalized.slice(lastSlash + 1).toLowerCase(),
+    currentPath: withTrailingSeparator(parent),
+    query: normalized.slice(normalized.lastIndexOf(separator) + 1).toLowerCase(),
   };
 }
+import {
+  normalizeRemoteAbsolutePath,
+  remoteParentDirectory,
+  remotePathSeparator,
+  resolveRemotePath,
+  withTrailingSeparator,
+} from "./remote-path";

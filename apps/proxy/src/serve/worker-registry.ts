@@ -1,5 +1,6 @@
 import { connect, type Socket } from "node:net";
-import { unlinkSync, existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync } from "node:fs";
+import { localIpcEndpointMayExist, removeLocalIpcEndpoint } from "../common/local-ipc-endpoint.js";
 import type { ChildProcess } from "node:child_process";
 import {
   buildMessage,
@@ -210,6 +211,8 @@ export class WorkerRegistry {
 
   spawn(sessionId: string, options: SpawnOptions): number {
     const paths = sessionPaths(sessionId);
+    // Recovery enumerates session directories even when IPC itself is a Windows named pipe.
+    mkdirSync(paths.dir, { recursive: true });
     const args: string[] = [sessionId, paths.workerSock];
     args.push("--provider", options.provider);
     if (options.cwd) args.push("--cwd", options.cwd);
@@ -473,7 +476,7 @@ export class WorkerRegistry {
     for (const dir of dirs) {
       const sessionId = dir.name;
       const paths = sessionPaths(sessionId);
-      if (!existsSync(paths.workerSock)) continue;
+      if (!localIpcEndpointMayExist(paths.workerSock)) continue;
 
       const persistedSession = this.deps.sessionManager.getSession(sessionId);
       if (!persistedSession || persistedSession.mode !== "json") {
@@ -494,7 +497,7 @@ export class WorkerRegistry {
         serviceLogger.info({ sessionId }, "Reconnected to existing worker");
       } else {
         try {
-          unlinkSync(paths.workerSock);
+          removeLocalIpcEndpoint(paths.workerSock);
         } catch {
           // socket 文件可能已被删除
         }
@@ -706,7 +709,7 @@ export class WorkerRegistry {
         clearTimeout(timeout);
         socket.destroy();
         try {
-          unlinkSync(workerSocketPath);
+          removeLocalIpcEndpoint(workerSocketPath);
         } catch {
           // The worker may already have removed its socket while handling SIGTERM.
         }
@@ -754,6 +757,14 @@ export class WorkerRegistry {
             finish({ pid: msg.pid, provider: msg.provider, terminated });
           },
           () => finish({ terminated: false }),
+        );
+        socket.write(
+          serializeWorkerMsg({
+            type: "serve_protocol_hello",
+            protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+            sessionId,
+            pid: process.pid,
+          }),
         );
       });
     });

@@ -16,7 +16,14 @@ import { useFileStore } from "@/stores/file-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import type { RelayClient } from "@/services/relay-client";
 import { cn } from "@/lib/utils";
-import { resolvePickerTarget, withTrailingSlash } from "@/lib/file-path-picker-target";
+import { resolvePickerTarget } from "@/lib/file-path-picker-target";
+import {
+  joinRemoteChildDirectory,
+  remoteParentDirectory,
+  remotePathSeparator,
+  resolveRemotePath,
+  withTrailingSeparator,
+} from "@/lib/remote-path";
 import type { PickerHandle } from "./picker-handle";
 
 interface FilePathPickerBaseProps {
@@ -48,24 +55,7 @@ type FilePathPickerProps = FilePathPickerBaseProps &
 // 绝对路径 (/home/dev/...) 直接用, 避免 select 模式被错误拼到 cwd 下
 // 空 / "./" → cwd; 末尾清斜杠避免 // 双斜杠; 前缀 "./" 清掉
 function toAbsolutePath(cwd: string, relPath: string): string {
-  if (relPath.startsWith("/")) {
-    return relPath.replace(/\/+$/, "") || "/";
-  }
-  if (!cwd) return "";
-  const cleaned = relPath.replace(/^\.\//, "").replace(/\/+$/, "");
-  return cleaned ? `${cwd}/${cleaned}` : cwd;
-}
-
-function joinPickerPath(currentPath: string, entry: { name: string; isDir: boolean }): string {
-  return `${withTrailingSlash(currentPath)}${entry.name}${entry.isDir ? "/" : ""}`;
-}
-
-function joinChildDirectory(parent: string, child: string): string | null {
-  const base = parent.trim().replace(/\/+$/, "") || "/";
-  const name = child.trim().replace(/^\/+|\/+$/g, "");
-  if (!base.startsWith("/") || !name || child.trim().startsWith("/")) return null;
-  if (name.split("/").some((part) => part === "" || part === "." || part === "..")) return null;
-  return base === "/" ? `/${name}` : `${base}/${name}`;
+  return resolveRemotePath(cwd, relPath);
 }
 
 export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(function FilePathPicker(
@@ -208,10 +198,11 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   // select 模式始终向业务层返回绝对路径。
   const emitPath = useCallback(
     (entry: { name: string; isDir: boolean }): string => {
-      const raw = joinPickerPath(currentPath, entry);
-      if (mode === "insert") return raw.replace(/^\.\//, "");
+      const separator = remotePathSeparator(baseCwd);
+      const raw = `${withTrailingSeparator(currentPath, baseCwd)}${entry.name}${entry.isDir ? separator : ""}`;
+      if (mode === "insert") return raw.replace(separator === "\\" ? /^\.[\\/]/ : /^\.\//, "");
       const absolute = toAbsolutePath(baseCwd, raw);
-      return entry.isDir ? withTrailingSlash(absolute) : absolute;
+      return entry.isDir ? withTrailingSeparator(absolute) : absolute;
     },
     [baseCwd, currentPath, mode],
   );
@@ -220,7 +211,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     (path: string): void => {
       const absolute = toAbsolutePath(baseCwd, path);
       if (!absolute) return;
-      const directory = withTrailingSlash(absolute);
+      const directory = withTrailingSeparator(absolute);
       if (mode === "select") {
         onNavigate!(directory);
         return;
@@ -243,7 +234,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   );
 
   async function handleCreateDirectory() {
-    const targetPath = joinChildDirectory(absolutePath, newDirName);
+    const targetPath = joinRemoteChildDirectory(absolutePath, newDirName);
     if (!targetPath || !onCreateDirectory) return;
     setCreatingDir(true);
     try {
@@ -252,7 +243,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
       setNewDirName("");
       setCreateOpen(false);
       if (onSelectCurrentDirectory) {
-        onSelectCurrentDirectory(withTrailingSlash(createdPath));
+        onSelectCurrentDirectory(withTrailingSeparator(createdPath));
         return;
       }
       navigate(createdPath);
@@ -286,11 +277,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     [filteredEntries, index, selectEntry],
   );
 
-  const parentPath = useMemo(() => {
-    if (!absolutePath || absolutePath === "/") return "/";
-    const lastSlash = absolutePath.lastIndexOf("/");
-    return lastSlash <= 0 ? "/" : absolutePath.slice(0, lastSlash);
-  }, [absolutePath]);
+  const parentPath = useMemo(() => remoteParentDirectory(absolutePath), [absolutePath]);
 
   const containerClass =
     placement === "inline"
@@ -341,7 +328,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
               type="button"
               data-slot="file-path-picker-parent"
               className="inline-flex min-h-11 min-w-11 items-center justify-start px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
-              disabled={!absolutePath || absolutePath === "/"}
+              disabled={!absolutePath || absolutePath === parentPath}
               onClick={() => navigate(parentPath)}
             >
               上一级
@@ -365,7 +352,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
                     data-slot="select-current-directory"
                     className="inline-flex min-h-11 min-w-11 items-center justify-center px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
                     disabled={!absolutePath}
-                    onClick={() => onSelectCurrentDirectory(withTrailingSlash(absolutePath))}
+                    onClick={() => onSelectCurrentDirectory(withTrailingSeparator(absolutePath))}
                   >
                     选定
                   </button>
@@ -400,7 +387,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
                 type="button"
                 data-slot="file-path-picker-create-directory-submit"
                 className="min-h-11 rounded-md bg-primary px-3 text-sm text-primary-foreground disabled:cursor-not-allowed disabled:opacity-50 md:h-8 md:min-h-0"
-                disabled={!joinChildDirectory(absolutePath, newDirName) || creatingDir}
+                disabled={!joinRemoteChildDirectory(absolutePath, newDirName) || creatingDir}
                 onClick={() => void handleCreateDirectory()}
               >
                 {creatingDir ? "创建中..." : "创建目录"}

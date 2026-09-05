@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { spawnCommand } from "../common/command-launch.js";
+import { terminateOwnedProcessTree } from "../common/process-termination.js";
 import { LineBuffer } from "../ipc/line-buffer.js";
 import { CODEX_PROVIDER } from "../providers/index.js";
 import { resolveCodexPermissionPolicy } from "../providers/codex.js";
@@ -101,8 +103,8 @@ export class CodexAppServerSession {
   }
 
   start(): number {
-    const command = CODEX_PROVIDER.buildJsonCommand({}, process.env);
-    this.child = spawn(command.command, command.args, {
+    const command = CODEX_PROVIDER.buildJsonCommand({ cwd: this.workDir }, process.env);
+    this.child = spawnCommand(command.command, command.args, {
       cwd: this.workDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: command.env,
@@ -141,13 +143,13 @@ export class CodexAppServerSession {
 
   async stop(gracePeriodMs = 5000): Promise<void> {
     if (!this.child || !this.isAlive()) return;
-    this.child.kill("SIGTERM");
+    terminateOwnedProcessTree(this.child, "SIGTERM");
     const start = Date.now();
     while (Date.now() - start < gracePeriodMs) {
       if (!this.isAlive()) return;
       await new Promise((resolve) => setTimeout(resolve, 200));
     }
-    if (this.isAlive()) this.child.kill("SIGKILL");
+    if (this.isAlive()) terminateOwnedProcessTree(this.child, "SIGKILL");
   }
 
   async interruptCurrentTurn(): Promise<boolean> {

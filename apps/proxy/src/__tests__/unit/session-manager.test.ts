@@ -3,6 +3,11 @@ import { join } from "node:path";
 import { mkdtempSync, readFileSync, writeFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { SessionManager } from "#src/serve/session-manager.js";
+import { sessionRuntimeIpcVersionMatches } from "#src/common/session-runtime-ipc-version.js";
+import {
+  TERMINAL_IPC_PROTOCOL_VERSION,
+  WORKER_IPC_PROTOCOL_VERSION,
+} from "#src/ipc/ipc-protocol.js";
 import { SessionState } from "@dev-anywhere/shared";
 
 function makeTmpDir(): string {
@@ -23,7 +28,7 @@ describe("SessionManager", () => {
     persistPath = join(dir, "sessions.json");
     historyMetadataPath = join(dir, "history-metadata.json");
     manager = new SessionManager({
-      allowSessionRuntimeHandover: true,
+      allowSessionRuntimeHandover: { terminal: true, worker: true },
       persistPath,
       historyMetadataPath,
     });
@@ -96,7 +101,7 @@ describe("SessionManager", () => {
         nameLocked: true,
       });
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
       });
@@ -503,7 +508,7 @@ describe("SessionManager", () => {
     it("passes remove context to lifecycle cleanup", () => {
       const contexts: unknown[] = [];
       const scoped = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         onSessionRemoved: (_id, context) => contexts.push(context),
       });
@@ -530,7 +535,7 @@ describe("SessionManager", () => {
     // web 看到 session 残留。
     it("does not propagate exceptions from onSessionRemoved callback", () => {
       const scoped = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         onSessionRemoved: () => {
           throw new Error("hook unregister boom");
@@ -741,7 +746,7 @@ describe("SessionManager", () => {
       });
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
       });
@@ -784,7 +789,7 @@ describe("SessionManager", () => {
         "persisted",
       );
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
       });
@@ -798,7 +803,7 @@ describe("SessionManager", () => {
       const s2 = manager.createSession("agent", "json", "claude", "/tmp/test", ALIVE_PID, "kept");
       manager.terminateSession(s1.id);
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
       });
@@ -827,7 +832,7 @@ describe("SessionManager", () => {
         "alive",
       );
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
       });
@@ -839,7 +844,7 @@ describe("SessionManager", () => {
     it("starts with empty map when file does not exist", () => {
       const freshPath = join(makeTmpDir(), "fresh.json");
       const fresh = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath: freshPath,
       });
       expect(fresh.listSessions()).toEqual([]);
@@ -850,7 +855,10 @@ describe("SessionManager", () => {
       // 抛错路径会让 proxy daemon 起不来, 用户必须手删文件才能恢复——不友好。
       // fail-soft: 警告 + 退化为空 session 列表；没有权威记录的 worker 随后会被拒绝。
       writeFileSync(persistPath, "not-valid-json{{{", "utf-8");
-      const mgr = new SessionManager({ allowSessionRuntimeHandover: true, persistPath });
+      const mgr = new SessionManager({
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
+        persistPath,
+      });
       expect(mgr.listSessions()).toEqual([]);
       mgr.stopReaper();
     });
@@ -877,7 +885,7 @@ describe("SessionManager", () => {
       manager.updateState(s.id, SessionState.WAITING_APPROVAL);
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
       });
@@ -920,7 +928,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
         terminateManagedSession: vi.fn(),
@@ -951,7 +959,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         onSessionRemoved: (id) => removedIds.push(id),
       });
@@ -979,7 +987,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         onSessionRemoved: (id) => removedIds.push(id),
       });
@@ -1007,7 +1015,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         onSessionRemoved: (id) => removedIds.push(id),
       });
@@ -1018,6 +1026,54 @@ describe("SessionManager", () => {
   });
 
   describe("PTY session cleanup on load()", () => {
+    it("cleans an incompatible terminal generation without discarding compatible JSON workers", () => {
+      manager.createSession(
+        "agent",
+        "pty",
+        "kimi",
+        "/tmp/test",
+        4242,
+        undefined,
+        "incompatible-terminal",
+        "local-terminal",
+      );
+      manager.createSession(
+        "agent",
+        "json",
+        "claude",
+        "/tmp/test",
+        5252,
+        undefined,
+        "compatible-json",
+      );
+      const expected = {
+        terminal: TERMINAL_IPC_PROTOCOL_VERSION,
+        worker: WORKER_IPC_PROTOCOL_VERSION,
+      };
+      const saved = { ...expected, terminal: TERMINAL_IPC_PROTOCOL_VERSION - 1 };
+      const terminateManagedSession = vi.fn();
+      const onSessionRemoved = vi.fn();
+      const manager2 = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: {
+          terminal: sessionRuntimeIpcVersionMatches(saved, expected, "terminal"),
+          worker: sessionRuntimeIpcVersionMatches(saved, expected, "worker"),
+        },
+        isProcessAlive: () => true,
+        isManagedSessionProcess: () => true,
+        terminateManagedSession,
+        onSessionRemoved,
+      });
+
+      expect(terminateManagedSession).toHaveBeenCalledExactlyOnceWith(4242);
+      expect(onSessionRemoved).toHaveBeenCalledExactlyOnceWith("incompatible-terminal");
+      expect(manager2.listSessions().map((session) => session.id)).toEqual(["compatible-json"]);
+      expect(JSON.parse(readFileSync(persistPath, "utf-8"))).toEqual([
+        expect.objectContaining({ id: "compatible-json", mode: "json", pid: 5252 }),
+      ]);
+      manager2.stopReaper();
+    });
+
     it("stops and removes a foreign-generation local PTY before validating required fields", () => {
       const terminateManagedSession = vi.fn();
       const removedIds: string[] = [];
@@ -1040,7 +1096,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: false,
+        allowSessionRuntimeHandover: { terminal: false, worker: false },
         isProcessAlive: () => true,
         isManagedSessionProcess: () => true,
         terminateManagedSession,
@@ -1075,7 +1131,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: false,
+        allowSessionRuntimeHandover: { terminal: false, worker: false },
         isProcessAlive: () => true,
         isManagedSessionProcess: inspectManagedProcess,
         terminateManagedSession,
@@ -1119,7 +1175,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: false,
+        allowSessionRuntimeHandover: { terminal: false, worker: false },
         isProcessAlive: () => true,
         isManagedSessionProcess: inspectManagedProcess,
         terminateManagedSession,
@@ -1154,7 +1210,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: false,
+        allowSessionRuntimeHandover: { terminal: false, worker: false },
         isProcessAlive: () => true,
         isManagedSessionProcess: () => false,
         terminateManagedSession,
@@ -1181,7 +1237,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         isProcessAlive: () => true,
         isManagedSessionProcess: inspectManagedProcess,
         terminateManagedSession,
@@ -1223,7 +1279,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         isProcessAlive: () => true,
         isManagedSessionProcess: () => false,
         terminateManagedSession,
@@ -1254,7 +1310,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         isProcessAlive: () => true,
         isManagedSessionProcess: () => true,
         terminateManagedSession,
@@ -1338,7 +1394,7 @@ describe("SessionManager", () => {
 
       const manager2 = new SessionManager({
         persistPath,
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         isProcessAlive: () => true,
         terminateManagedSession: vi.fn(),
         onSessionRemoved: (id) => removedIds.push(id),
@@ -1369,7 +1425,7 @@ describe("SessionManager", () => {
 
         const manager2 = new SessionManager({
           persistPath,
-          allowSessionRuntimeHandover: true,
+          allowSessionRuntimeHandover: { terminal: true, worker: true },
           isProcessAlive: () => true,
           isManagedSessionProcess: () => true,
         });
@@ -1402,7 +1458,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
         onSessionRemoved: (id) => removedIds.push(id),
@@ -1426,7 +1482,7 @@ describe("SessionManager", () => {
       manager.renameSession(pty.id, "Release checklist");
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
       });
@@ -1467,7 +1523,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: () => true,
         onSessionRemoved: (id) => removedIds.push(id),
@@ -1481,7 +1537,7 @@ describe("SessionManager", () => {
       manager.createSession("agent", "json", "claude", "/tmp/test", DEAD_PID, "dead-pid");
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         onSessionRemoved: (id) => removedIds.push(id),
       });
@@ -1502,7 +1558,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isManagedSessionProcess: inspectManagedProcess,
         onSessionRemoved: (id) => removedIds.push(id),
@@ -1536,7 +1592,7 @@ describe("SessionManager", () => {
       );
 
       const manager2 = new SessionManager({
-        allowSessionRuntimeHandover: true,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
         persistPath,
         isProcessAlive: () => true,
         isManagedSessionProcess: () => false,

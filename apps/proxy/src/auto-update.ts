@@ -13,7 +13,6 @@ export interface RelayAutoUpdaterOptions {
   profileName: string;
   relayName: string;
   runningVersion: string;
-  daemonPid: number;
   logger: Logger;
   packagedRuntime?: boolean;
   spawnRunner?: (args: readonly string[]) => ChildProcess;
@@ -77,8 +76,6 @@ export function createRelayAutoUpdater(options: RelayAutoUpdaterOptions): RelayA
       runnerTargetVersion,
       "--running-version",
       options.runningVersion,
-      "--daemon-pid",
-      String(options.daemonPid),
       "--relay",
       options.relayName,
     ];

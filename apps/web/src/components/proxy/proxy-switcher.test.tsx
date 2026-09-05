@@ -117,6 +117,34 @@ function pointerDown(element: HTMLElement): void {
   );
 }
 
+function dispatchTouchPointer(
+  element: HTMLElement,
+  type: "pointerdown" | "pointermove" | "pointerup",
+  point: [number, number],
+): void {
+  const event = new MouseEvent(type, {
+    bubbles: true,
+    cancelable: true,
+    clientX: point[0],
+    clientY: point[1],
+  });
+  Object.defineProperties(event, {
+    pointerId: { value: 1 },
+    pointerType: { value: "touch" },
+  });
+  fireEvent(element, event);
+}
+
+function revealOfflineMobileRow(): void {
+  const foreground = document.querySelector<HTMLElement>(
+    '[data-slot="proxy-item"][data-proxy-id="proxy-offline"] [data-slot="proxy-swipe-foreground"]',
+  );
+  if (!foreground) throw new Error("offline proxy swipe foreground not found");
+  dispatchTouchPointer(foreground, "pointerdown", [120, 20]);
+  dispatchTouchPointer(foreground, "pointermove", [40, 22]);
+  dispatchTouchPointer(foreground, "pointerup", [40, 22]);
+}
+
 describe("ProxySwitcher offline removal", () => {
   beforeEach(() => {
     removeOfflineProxy.mockReset();
@@ -174,22 +202,24 @@ describe("ProxySwitcher offline removal", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
-  it("offers removal only on offline rows in the mobile list", () => {
+  it("keeps removal hidden until an offline mobile row is swiped", () => {
     renderSwitcher("page");
 
-    expect(screen.getByRole("button", { name: "显示移除 旧 Mac 操作" })).toBeEnabled();
-    expect(screen.queryByRole("button", { name: "显示移除 工作站 操作" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "显示移除 旧 Mac 操作" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "移除 旧 Mac" })).toBeNull();
     expect(
       document.querySelector('[data-slot="proxy-item"][data-proxy-id="proxy-online"]'),
     ).toHaveAttribute("data-online", "true");
-    expect(
-      document.querySelector('[data-slot="proxy-item"][data-proxy-id="proxy-offline"]'),
-    ).toHaveAttribute("data-online", "false");
+    const offlineRow = document.querySelector(
+      '[data-slot="proxy-item"][data-proxy-id="proxy-offline"]',
+    );
+    expect(offlineRow).toHaveAttribute("data-online", "false");
+    expect(offlineRow).not.toHaveAttribute("data-revealed");
   });
 
   it("confirms the reconnect semantics before removing an offline mobile row", async () => {
     renderSwitcher("page");
-    fireEvent.click(screen.getByRole("button", { name: "显示移除 旧 Mac 操作" }));
+    revealOfflineMobileRow();
     fireEvent.click(screen.getByRole("button", { name: "移除 旧 Mac" }));
 
     expect(screen.getByRole("heading", { name: "移除离线开发机？" })).toBeVisible();
@@ -217,7 +247,7 @@ describe("ProxySwitcher offline removal", () => {
 
   it("refuses a stale confirmation when the device has already come back online", async () => {
     renderSwitcher("page");
-    fireEvent.click(screen.getByRole("button", { name: "显示移除 旧 Mac 操作" }));
+    revealOfflineMobileRow();
     fireEvent.click(screen.getByRole("button", { name: "移除 旧 Mac" }));
     useAppStore.setState({
       proxies: proxies.map((proxy) =>

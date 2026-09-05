@@ -1,63 +1,49 @@
 import { execSync } from "node:child_process";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { hostname } from "node:os";
-import { connect, type Socket } from "node:net";
-import { flushLogger } from "@dev-anywhere/shared/logger";
-import { serviceLogger } from "../common/logger.js";
-import { DEFAULT_PROXY_PROFILE, PID_PATH, PROFILE_NAME, SOCK_PATH } from "../common/paths.js";
-import { probeProcess, processExistsOrIsInaccessible } from "../common/process-probe.js";
+import {
+  DEFAULT_PROXY_PROFILE,
+  PID_PATH,
+  PROFILE_NAME,
+  SOCK_PATH,
+  SERVICE_CONTROL_PATH,
+  SERVICE_RUNTIME_LOCK_PATH,
+  STOPPED_PATH,
+} from "../common/paths.js";
+import { processExistsOrIsInaccessible } from "../common/process-probe.js";
 import { unlinkIfPresent } from "../common/safe-unlink.js";
-
-function tryConnectSocket(sockPath: string): Promise<Socket | null> {
-  return new Promise((resolve) => {
-    const s = connect(sockPath);
-    s.on("connect", () => resolve(s));
-    s.on("error", () => resolve(null));
-  });
-}
+import { removeLocalIpcEndpoint } from "../common/local-ipc-endpoint.js";
+import { tryConnectSocket } from "../common/socket-connect.js";
+import { tryAcquireFileLock } from "../common/file-lock.js";
 
 export function isProcessAlive(pid: number): boolean {
   return processExistsOrIsInaccessible(pid);
 }
 
-export async function cleanupStaleResources(): Promise<void> {
-  if (existsSync(SOCK_PATH)) {
-    const existing = await tryConnectSocket(SOCK_PATH);
-    if (existing) {
-      existing.destroy();
-      const msg = `Another service is already running on ${SOCK_PATH}`;
-      serviceLogger.error(msg);
-      console.error(msg);
-      await flushLogger(serviceLogger);
-      process.exit(1);
+// The daemon holds this fd for its entire lifetime. No parent owns or transfers it,
+// and no cleanup path removes the lock inode.
+export async function claimServiceRuntime(): Promise<void> {
+  const lock = tryAcquireFileLock(SERVICE_RUNTIME_LOCK_PATH);
+  if (!lock) throw new Error("Another service is starting or running for this profile");
+  const release = () => lock.release();
+  try {
+    if (existsSync(STOPPED_PATH)) throw new Error("Service was explicitly stopped");
+    for (const path of [SOCK_PATH, SERVICE_CONTROL_PATH]) {
+      const existing = await tryConnectSocket(path);
+      if (existing) {
+        existing.destroy();
+        throw new Error(
+          "A service is already using this profile. Stop it before starting another service.",
+        );
+      }
     }
-    unlinkIfPresent(SOCK_PATH);
-    serviceLogger.info("Removed stale socket file");
-  }
-
-  if (existsSync(PID_PATH)) {
-    const pidStr = readFileSync(PID_PATH, "utf-8").trim();
-    const pid = parseInt(pidStr, 10);
-    const probe = !isNaN(pid) ? probeProcess(pid) : null;
-    if (probe?.status === "alive") {
-      const msg = `Another service is already running with PID ${pid}`;
-      serviceLogger.error(msg);
-      console.error(msg);
-      await flushLogger(serviceLogger);
-      process.exit(1);
-    }
-    if (probe?.status === "permission-denied" || probe?.status === "unknown") {
-      const msg =
-        probe.status === "permission-denied"
-          ? `Another service may be running with PID ${pid}, but this process cannot probe it (permission denied)`
-          : `Another service may be running with PID ${pid}, but this process cannot verify it (${probe.code ?? "unknown"}: ${probe.message})`;
-      serviceLogger.error(msg);
-      console.error(msg);
-      await flushLogger(serviceLogger);
-      process.exit(1);
-    }
+    removeLocalIpcEndpoint(SOCK_PATH);
+    removeLocalIpcEndpoint(SERVICE_CONTROL_PATH);
     unlinkIfPresent(PID_PATH);
-    serviceLogger.info("Removed stale PID file");
+    process.once("exit", release);
+  } catch (error) {
+    release();
+    throw error;
   }
 }
 
@@ -73,6 +59,7 @@ export function getProxyName(): string {
 }
 
 function getComputerName(): string | null {
+  if (process.platform !== "darwin") return null;
   try {
     return (
       execSync("scutil --get ComputerName", { stdio: ["pipe", "pipe", "ignore"] })

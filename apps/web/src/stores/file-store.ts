@@ -4,6 +4,7 @@
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
 import type { AgentCliStatus, DirEntry } from "@dev-anywhere/shared";
+import { normalizeRemoteAbsolutePath } from "@/lib/remote-path";
 
 interface FileStoreState {
   tree: Map<string, DirEntry[]>;
@@ -31,14 +32,15 @@ export const useFileStore = create<FileStoreState>()(
       agentCli: null,
 
       setDirEntries: (path, entries, includeHidden = false) => {
+        const key = normalizeRemoteAbsolutePath(path) || path;
         if (includeHidden) {
           const next = new Map(get().treeWithHidden);
-          next.set(path, entries);
+          next.set(key, entries);
           set({ treeWithHidden: next });
           return;
         }
         const next = new Map(get().tree);
-        next.set(path, entries);
+        next.set(key, entries);
         set({ tree: next });
       },
       setCwd: (cwd) => set({ cwd }),

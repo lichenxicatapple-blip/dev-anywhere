@@ -6,6 +6,7 @@ import {
   selectFakeProxy,
   sentFakeRelayMessages,
 } from "../helpers";
+import { RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
 import webPackage from "../../package.json" with { type: "json" };
 
 const WEB_VERSION = webPackage.version;
@@ -212,7 +213,12 @@ test.describe("CreateSessionDialog — 字段校验", () => {
   test("设置菜单进入版本页后展示 Web 和 Relay 版本", async ({ page }) => {
     await page.route("**/health", async (route) => {
       await route.fulfill({
-        json: { status: "ok", version: "9.8.7", uptime: 125 },
+        json: {
+          status: "ok",
+          version: "9.8.7",
+          controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+          uptime: 125,
+        },
       });
     });
 

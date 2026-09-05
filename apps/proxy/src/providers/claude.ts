@@ -6,6 +6,8 @@ import type {
   ProviderTerminalOptions,
 } from "./types.js";
 import { resolveExecutable } from "./path-resolver.js";
+import { environmentValue } from "../common/executable.js";
+import { sessionPaths } from "../common/paths.js";
 
 export type ClaudePermissionMode =
   | "default"
@@ -47,17 +49,18 @@ export function buildClaudeArgs(options: {
   return args;
 }
 
-export function resolveClaudePtyCommand(env: NodeJS.ProcessEnv): string {
+export function resolveClaudePtyCommand(env: NodeJS.ProcessEnv, cwd?: string): string {
   return resolveExecutable(
     "claude",
     env,
     "CLAUDE_BIN",
     "claude not found in PATH. Set CLAUDE_BIN or install Claude Code: https://claude.ai/download",
+    cwd,
   );
 }
 
 export function resolveClaudeJsonCommand(env: NodeJS.ProcessEnv): string {
-  return env.CLAUDE_BIN || "claude";
+  return environmentValue(env, "CLAUDE_BIN") || "claude";
 }
 
 const CLAUDE_HOOK_EVENTS = [
@@ -106,12 +109,14 @@ process.stdin.on("end", async () => {
 });
 `.trim();
 
-function shellQuote(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-function buildHookForwardCommand(event: string): string {
-  return `DEV_ANYWHERE_HOOK_EVENT=${shellQuote(event)} node -e ${shellQuote(HOOK_FORWARDER_SCRIPT)}`;
+function buildHookForwardCommand(event: string): { command: string; args: string[] } {
+  return {
+    command: process.execPath,
+    args: [
+      "-e",
+      `process.env.DEV_ANYWHERE_HOOK_EVENT = ${JSON.stringify(event)};\n${HOOK_FORWARDER_SCRIPT}`,
+    ],
+  };
 }
 
 export function buildClaudeHookSettings(options?: {
@@ -129,7 +134,7 @@ export function buildClaudeHookSettings(options?: {
         hooks: [
           {
             type: "command",
-            command: buildHookForwardCommand(event),
+            ...buildHookForwardCommand(event),
             timeout: event === "PermissionRequest" ? PERMISSION_HOOK_TIMEOUT_SECONDS : 5,
           },
         ],
@@ -139,25 +144,21 @@ export function buildClaudeHookSettings(options?: {
   return { ...settings, hooks };
 }
 
-function withClaudeHookArgs(args: string[], context: ProviderHookContext | undefined): string[] {
-  if (!context) return args;
-  return [...args, "--settings", JSON.stringify(buildClaudeHookSettings())];
-}
-
-function withClaudeTerminalHookArgs(
+function withClaudeHookArgs(
   args: string[],
   context: ProviderHookContext | undefined,
+  mode: "json" | "pty",
 ): string[] {
   if (!context) return args;
-  return [
-    ...args,
-    "--settings",
-    JSON.stringify(
-      buildClaudeHookSettings({
-        includePermissionRequest: false,
-      }),
-    ),
-  ];
+  const directory = sessionPaths(context.sessionId).dir;
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  const settingsPath = join(directory, `claude-${mode}-settings.json`);
+  const settings = buildClaudeHookSettings({ includePermissionRequest: mode === "json" });
+  // Keep the complete hook configuration outside CMD's command-line length limit. These
+  // files belong to the existing session runtime directory, not the user's project config.
+  writeFileSync(settingsPath, JSON.stringify(settings), { mode: 0o600 });
+  if (process.platform !== "win32") chmodSync(settingsPath, 0o600);
+  return [...args, "--settings", settingsPath];
 }
 
 function withClaudeTerminalPermissionArgs(args: string[], permissionMode?: string): string[] {
@@ -203,16 +204,18 @@ export const CLAUDE_PROVIDER: ProviderAdapter = {
 
     return {
       command: resolveClaudeJsonCommand(env),
-      args: [...withClaudeHookArgs(baseArgs, options.hook), ...(options.extraArgs ?? [])],
+      args: [...withClaudeHookArgs(baseArgs, options.hook, "json"), ...(options.extraArgs ?? [])],
       env: withClaudeHookEnv(filterClaudeEnvVars(env), options.hook),
     };
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     const args = withClaudeTerminalPermissionArgs(options.args, options.permissionMode);
     return {
-      command: resolveClaudePtyCommand(env),
-      args: withClaudeTerminalHookArgs(args, options.hook),
+      command: resolveClaudePtyCommand(env, options.cwd),
+      args: withClaudeHookArgs(args, options.hook, "pty"),
       env: withClaudeHookEnv(env, options.hook),
     };
   },
 };
+import { chmodSync, mkdirSync, writeFileSync } from "node:fs";
+import { join } from "node:path";

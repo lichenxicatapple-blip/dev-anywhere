@@ -21,6 +21,7 @@ import {
   type ThemePreference,
 } from "@/lib/theme-preference";
 import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
+import type { RelayProtocolIssue } from "@/lib/relay-protocol-admission";
 
 type AppPhase =
   | "connecting"
@@ -41,7 +42,7 @@ interface ProxySwitchTarget {
 }
 
 export type InputModePreference = "auto" | "touch" | "hardware";
-export type RelayConnectionIssue = "unreachable" | "disconnected";
+export type RelayConnectionIssue = "unreachable" | "disconnected" | RelayProtocolIssue;
 type AdaptiveInputModality = "unknown" | "touch" | "hardware";
 
 interface AppStoreState {

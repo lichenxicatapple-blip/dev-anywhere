@@ -1,5 +1,6 @@
 import { execFile as nodeExecFile, type ExecFileOptions } from "node:child_process";
-import { delimiter, join } from "node:path";
+import { posix, win32 } from "node:path";
+import { environmentValue, normalizeProcessEnvironment } from "../../common/executable.js";
 
 const ADB_TIMEOUT_MS = 5_000;
 const ADB_OUTPUT_LIMIT_BYTES = 1024 * 1024;
@@ -45,6 +46,7 @@ interface AndroidEmulatorAdapterOptions {
   command?: string;
   env?: NodeJS.ProcessEnv;
   execFile?: AndroidExecFile;
+  platform?: NodeJS.Platform;
 }
 
 interface DisplayMetrics {
@@ -118,28 +120,41 @@ function validEmulatorSerial(serial: string): boolean {
   return Number.isSafeInteger(port) && port <= 65_535;
 }
 
-function adbCandidates(command: string | undefined, env: NodeJS.ProcessEnv): string[] {
+function adbCandidates(
+  command: string | undefined,
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): string[] {
   const explicit = command?.trim();
   if (explicit) {
     if (!validCommand(explicit)) return [];
     return [explicit];
   }
 
-  const executable = process.platform === "win32" ? "adb.exe" : "adb";
+  const executable = platform === "win32" ? "adb.exe" : "adb";
+  const { join, delimiter } = platform === "win32" ? win32 : posix;
+  const readEnv = (key: string) => environmentValue(env, key, platform);
   const candidates: string[] = [];
-  const sdkRoots = [env.ANDROID_SDK_ROOT, env.ANDROID_HOME];
-  if (env.HOME) {
+  const sdkRoots = [readEnv("ANDROID_SDK_ROOT"), readEnv("ANDROID_HOME")];
+  const home = readEnv("HOME");
+  const localAppData = readEnv("LOCALAPPDATA");
+  if (platform === "win32") {
+    if (localAppData) sdkRoots.push(join(localAppData, "Android", "Sdk"));
+  } else if (home) {
     sdkRoots.push(
-      process.platform === "darwin"
-        ? join(env.HOME, "Library", "Android", "sdk")
-        : join(env.HOME, "Android", "Sdk"),
+      platform === "darwin"
+        ? join(home, "Library", "Android", "sdk")
+        : join(home, "Android", "Sdk"),
     );
   }
   for (const root of sdkRoots) {
     if (root) candidates.push(join(root, "platform-tools", executable));
   }
-  for (const entry of (env.PATH ?? "").split(delimiter)) {
-    if (entry) candidates.push(join(entry, executable));
+  for (const entry of (readEnv("PATH") ?? "").split(delimiter)) {
+    if (entry)
+      candidates.push(
+        join(platform === "win32" ? entry.replace(/^"(.*)"$/, "$1") : entry, executable),
+      );
   }
   candidates.push(executable);
   return [...new Set(candidates.filter(validCommand))];
@@ -215,13 +230,15 @@ function orientSize(
 export class AndroidEmulatorAdapter {
   private readonly env: NodeJS.ProcessEnv;
   private readonly requestedCommand?: string;
+  private readonly platform: NodeJS.Platform;
   private readonly execFile: AndroidExecFile;
   private readonly allowedDevices = new Map<string, AndroidEmulatorDevice>();
   private readonly inputQueues = new Map<string, Promise<void>>();
   private locatedCommand: string | null = null;
 
   constructor(options: AndroidEmulatorAdapterOptions) {
-    this.env = { ...(options.env ?? process.env) };
+    this.platform = options.platform ?? process.platform;
+    this.env = normalizeProcessEnvironment({ ...(options.env ?? process.env) }, this.platform);
     this.requestedCommand = options.command;
     this.execFile = options.execFile ?? defaultExecFile;
   }
@@ -231,7 +248,7 @@ export class AndroidEmulatorAdapter {
       return { available: true, command: this.locatedCommand };
     }
 
-    for (const candidate of adbCandidates(this.requestedCommand, this.env)) {
+    for (const candidate of adbCandidates(this.requestedCommand, this.env, this.platform)) {
       try {
         const result = await this.execFile(candidate, ["version"], {
           env: this.env,

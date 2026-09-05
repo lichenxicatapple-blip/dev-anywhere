@@ -1,6 +1,7 @@
 import { cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { homedir } from "node:os";
-import { dirname, resolve } from "node:path";
+import { dirname, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
 
 // 所有 dev-anywhere 文件路径的集中定义
@@ -22,6 +23,9 @@ interface ProxyProfilePaths {
   runDir: string;
   sockPath: string;
   pidPath: string;
+  serviceControlPath: string;
+  serviceRuntimeLockPath: string;
+  serviceOperationLockPath: string;
   stoppedPath: string;
   desiredRelayPath: string;
   stateDir: string;
@@ -91,7 +95,23 @@ function readDefaultProfileFromConfig(home: string): string | undefined {
   }
 }
 
-export function buildProxyProfilePaths(home: string, profileName: string): ProxyProfilePaths {
+/** Windows pipes have no filesystem entry. The full resource path scopes their names by user,
+ * profile and session; hashing only keeps names bounded, and is not an access-control mechanism. */
+export function localIpcEndpointPath(
+  filePath: string,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  if (platform !== "win32") return filePath;
+  const identity = win32.normalize(filePath).toLowerCase();
+  const digest = createHash("sha256").update(identity).digest("hex");
+  return `\\\\.\\pipe\\dev-anywhere-${digest}`;
+}
+
+export function buildProxyProfilePaths(
+  home: string,
+  profileName: string,
+  platform: NodeJS.Platform = process.platform,
+): ProxyProfilePaths {
   const normalizedProfile = normalizeProxyProfileName(profileName);
   const appDir = `${home}/.dev-anywhere`;
   const isDefaultProfile = normalizedProfile === DEFAULT_PROXY_PROFILE;
@@ -109,8 +129,11 @@ export function buildProxyProfilePaths(home: string, profileName: string): Proxy
     profileDir,
     configPath: `${appDir}/config.json`,
     runDir,
-    sockPath: `${runDir}/dev-anywhere.sock`,
+    sockPath: localIpcEndpointPath(`${runDir}/dev-anywhere.sock`, platform),
     pidPath: `${runDir}/dev-anywhere.pid`,
+    serviceControlPath: localIpcEndpointPath(`${runDir}/service-control.sock`, platform),
+    serviceRuntimeLockPath: `${runDir}/service-runtime.lock`,
+    serviceOperationLockPath: `${runDir}/service-operation.lock`,
     stoppedPath: `${runDir}/stopped`,
     desiredRelayPath: `${runDir}/desired-relay`,
     stateDir,
@@ -154,6 +177,9 @@ export const CONFIG_PATH = PROFILE_PATHS.configPath;
 export const RUN_DIR = PROFILE_PATHS.runDir;
 export const SOCK_PATH = PROFILE_PATHS.sockPath;
 export const PID_PATH = PROFILE_PATHS.pidPath;
+export const SERVICE_CONTROL_PATH = PROFILE_PATHS.serviceControlPath;
+export const SERVICE_RUNTIME_LOCK_PATH = PROFILE_PATHS.serviceRuntimeLockPath;
+export const SERVICE_OPERATION_LOCK_PATH = PROFILE_PATHS.serviceOperationLockPath;
 // 停机标记文件。用户执行 `dev-anywhere stop` 时创建，其它时候不存在。文件内容无意义。
 // 作用：terminal 重连逻辑检查此标记，存在则仅 tryConnect 不主动 spawn daemon，
 // 防止 stop 结束 daemon 后 terminal 立即将其重新拉起。
@@ -182,16 +208,20 @@ const FONT_DIR = PROFILE_PATHS.fontDir;
 export const LOG_DIR = PROFILE_PATHS.logDir;
 export const SERVICE_LOG_PATH = PROFILE_PATHS.serviceLogPath;
 
-function sessionDir(sessionId: string): string {
-  return `${DATA_DIR}/${sessionId}`;
+export function buildSessionPaths(
+  dataDir: string,
+  sessionId: string,
+  platform: NodeJS.Platform = process.platform,
+) {
+  const dir = `${dataDir}/${sessionId}`;
+  return {
+    dir,
+    workerSock: localIpcEndpointPath(`${dir}/worker.sock`, platform),
+  };
 }
 
 export function sessionPaths(sessionId: string) {
-  const dir = sessionDir(sessionId);
-  return {
-    dir,
-    workerSock: `${dir}/worker.sock`,
-  };
+  return buildSessionPaths(DATA_DIR, sessionId);
 }
 
 export function isInitialized(): boolean {

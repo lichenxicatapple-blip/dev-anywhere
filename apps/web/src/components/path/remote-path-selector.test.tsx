@@ -312,13 +312,42 @@ describe("RemotePathSelector", () => {
     expect(onValueChange).not.toHaveBeenCalled();
     expect(browser(container)).toBeInTheDocument();
 
-    fireEvent.click(getByRole("button", { name: "select Windows file" }));
-    fireEvent.click(getByRole("button", { name: "navigate UNC directory" }));
-    expect(onValueChange).not.toHaveBeenCalled();
-    expect(browser(container)).toHaveAttribute("data-filter", initialFilter);
-
     fireEvent.click(getByRole("button", { name: "select relative current directory" }));
     expect(onValueChange).not.toHaveBeenCalled();
     expect(browser(container)).toBeInTheDocument();
   });
+
+  it.each([false, true])("accepts drive and UNC paths on coarse pointer %s", (coarse) => {
+    media.coarse = coarse;
+    useFileStore.setState({ homePath: "C:\\Users\\dev" });
+    const { container, getByRole, onValueChange } = renderSelector({
+      value: "C:\\Tools\\codex.exe",
+      selectionKind: "file",
+    });
+    const control = getByRole(coarse ? "button" : "textbox", { name: "远程路径" });
+    if (coarse) fireEvent.click(control);
+    else fireEvent.focus(control);
+    expect(browser(container)).toHaveAttribute("data-filter", "C:\\Tools\\");
+    fireEvent.click(getByRole("button", { name: "navigate UNC directory" }));
+    expect(browser(container)).toHaveAttribute("data-filter", "\\\\server\\tools\\");
+    fireEvent.click(getByRole("button", { name: "select Windows file" }));
+    expect(onValueChange).toHaveBeenCalledWith("C:\\Tools\\claude.exe");
+  });
+
+  it.each([
+    ["/home/dev", "//home/dev/site", "/home/dev/site"],
+    ["D:\\Projects", "/site", "D:\\site"],
+    ["\\\\server\\share\\project", "/site", "\\\\server\\share\\site"],
+  ])(
+    "qualifies pasted root paths using remote Home %s before submission",
+    (homePath, pasted, expected) => {
+      useFileStore.setState({ homePath });
+      const { container, getByRole, onValueChange } = renderSelector();
+      const input = getByRole("textbox", { name: "远程路径" });
+      fireEvent.focus(input);
+      fireEvent.change(input, { target: { value: pasted } });
+      expect(onValueChange).toHaveBeenLastCalledWith(expected);
+      expect(browser(container)).toHaveAttribute("data-filter", expected);
+    },
+  );
 });

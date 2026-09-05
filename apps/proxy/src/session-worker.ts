@@ -1,5 +1,9 @@
 import { createServer, type Socket } from "node:net";
-import { mkdirSync, unlinkSync, existsSync, chmodSync } from "node:fs";
+import {
+  prepareLocalIpcEndpoint,
+  removeLocalIpcEndpoint,
+  setLocalIpcEndpointPermissions,
+} from "./common/local-ipc-endpoint.js";
 import {
   JsonSession,
   ToolWhitelist,
@@ -16,12 +20,12 @@ import { createApprovalRequestIdFactory } from "./common/approval-request-id.js"
 import { SeqCounter } from "./common/seq-counter.js";
 import {
   WORKER_IPC_PROTOCOL_VERSION,
-  createWorkerReader,
   serializeWorkerMsg,
   type WorkerMessage,
 } from "./ipc/ipc-protocol.js";
 import {
   acceptCurrentServeSocketMessage,
+  readServeConnection,
   releaseServeSocket,
   takeoverServeSocket,
 } from "./worker/serve-socket-takeover.js";
@@ -84,7 +88,6 @@ const workerHook: ProviderHookContext | undefined =
     : undefined;
 
 let serveSocket: Socket | null = null;
-let negotiatedServeSocket: Socket | null = null;
 const queuedServeMessages: WorkerMessage[] = [];
 let latestKimiCommandEvent: Extract<WorkerMessage, { type: "worker_event" }> | null = null;
 let readyMessage: Extract<WorkerMessage, { type: "worker_ready" }> | null = null;
@@ -140,7 +143,7 @@ function sendToServe(msg: WorkerMessage): void {
     }
     return;
   }
-  if (serveSocket?.writable && negotiatedServeSocket === serveSocket) {
+  if (serveSocket?.writable) {
     serveSocket.write(serializeWorkerMsg(msg));
     return;
   }
@@ -151,7 +154,7 @@ function sendToServe(msg: WorkerMessage): void {
 }
 
 function flushQueuedServeMessages(): void {
-  if (!serveSocket?.writable || negotiatedServeSocket !== serveSocket) return;
+  if (!serveSocket?.writable) return;
   while (queuedServeMessages.length > 0) {
     const msg = queuedServeMessages.shift();
     if (msg) serveSocket.write(serializeWorkerMsg(msg));
@@ -165,7 +168,7 @@ function reportReady(message: Extract<WorkerMessage, { type: "worker_ready" }>):
 }
 
 function replayServeState(socket: Socket | null): void {
-  if (!socket?.writable || serveSocket !== socket || negotiatedServeSocket !== socket) return;
+  if (!socket?.writable || serveSocket !== socket) return;
   if (!providerReady || !readyMessage) return;
 
   socket.write(serializeWorkerMsg(readyMessage));
@@ -355,42 +358,24 @@ const session =
         });
 
 function handleServeConnection(socket: Socket): void {
-  const previousServeSocket = serveSocket;
-  serveSocket = socket;
-  negotiatedServeSocket = null;
-  takeoverServeSocket(previousServeSocket, socket);
-  // Every daemon connection begins with an independent protocol handshake. Provider readiness
-  // follows separately, so bootstrap failures can still be delivered on a negotiated connection.
-  serveSocket.write(
-    serializeWorkerMsg({
-      type: "worker_protocol_hello",
-      protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
-      sessionId,
-      provider,
-      pid: process.pid,
-    }),
-  );
-  let protocolAccepted = false;
-  createWorkerReader(
-    socket,
-    (msg: WorkerMessage) => {
+  readServeConnection(socket, sessionId, {
+    onAccepted: () => {
+      const previousServeSocket = serveSocket;
+      serveSocket = socket;
+      takeoverServeSocket(previousServeSocket, socket);
+      socket.write(
+        serializeWorkerMsg({
+          type: "worker_protocol_hello",
+          protocolVersion: WORKER_IPC_PROTOCOL_VERSION,
+          sessionId,
+          provider,
+          pid: process.pid,
+        }),
+      );
+      replayServeState(socket);
+    },
+    onMessage: (msg: WorkerMessage) => {
       if (!acceptCurrentServeSocketMessage(serveSocket, socket)) return;
-      if (!protocolAccepted) {
-        if (msg.type !== "serve_protocol_hello" || msg.sessionId !== sessionId) {
-          console.error("[worker] serve IPC protocol handshake rejected");
-          socket.destroy();
-          return;
-        }
-        protocolAccepted = true;
-        negotiatedServeSocket = socket;
-        replayServeState(socket);
-        return;
-      }
-      if (msg.type === "serve_protocol_hello") {
-        console.error("[worker] duplicate serve IPC protocol hello");
-        socket.destroy();
-        return;
-      }
       if (!providerReady && msg.type !== "worker_stop") {
         console.error(`[worker] serve message ${msg.type} arrived before provider readiness`);
         socket.destroy();
@@ -443,27 +428,20 @@ function handleServeConnection(socket: Socket): void {
           socket.destroy();
       }
     },
-    (err) => {
-      if (!protocolAccepted) {
-        console.error(`[worker] serve IPC protocol handshake rejected: ${err.message}`);
-        socket.destroy();
-        return;
-      }
+    onError: (err) => {
       // worker 进程没有 pino logger，console.error 经 ipc-protocol 捕获到 stderr。
       // 同样不让单条 schema 错误升级成 socket close。
       console.error(`[worker] serve IPC message dropped: ${err.message}`);
     },
-  );
+  });
 
   socket.on("close", () => {
     serveSocket = releaseServeSocket(serveSocket, socket, () => {
-      negotiatedServeSocket = null;
       rejectAllPendingApprovals("Serve connection closed");
     });
   });
   socket.on("error", () => {
     serveSocket = releaseServeSocket(serveSocket, socket, () => {
-      negotiatedServeSocket = null;
       rejectAllPendingApprovals("Serve connection error");
     });
   });
@@ -484,12 +462,8 @@ function rejectAllPendingApprovals(reason: string, cancelled = false): void {
   pendingApprovals.clear();
 }
 
-const sockDir = sockPath.substring(0, sockPath.lastIndexOf("/"));
-mkdirSync(sockDir, { recursive: true });
-
-if (existsSync(sockPath)) {
-  unlinkSync(sockPath);
-}
+prepareLocalIpcEndpoint(sockPath);
+removeLocalIpcEndpoint(sockPath);
 
 const server = createServer((socket) => {
   handleServeConnection(socket);
@@ -498,7 +472,7 @@ const server = createServer((socket) => {
 function cleanup(): void {
   server.close();
   try {
-    unlinkSync(sockPath);
+    removeLocalIpcEndpoint(sockPath);
   } catch {
     // socket 文件可能已被删除
   }
@@ -509,7 +483,7 @@ process.on("SIGTERM", () => {
 });
 
 server.listen(sockPath, () => {
-  chmodSync(sockPath, 0o600);
+  setLocalIpcEndpointPermissions(sockPath);
   const pid = session.start();
   if (!Number.isFinite(pid) || pid <= 0) {
     console.error("[worker] provider process failed to start: missing child pid");

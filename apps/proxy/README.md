@@ -10,6 +10,8 @@ npm install -g @dev-anywhere/proxy
 
 This installs the `dev-anywhere` command globally.
 
+Supported development machines: macOS, Linux, and native Windows 11. WSL is not required on Windows.
+
 Requires Node.js >= 20 and at least one supported local AI coding CLI installed locally: Claude Code, Codex, or Kimi Code.
 
 ## Quick start
@@ -43,6 +45,9 @@ dev-anywhere serve stop       # stop daemon
 dev-anywhere serve restart    # restart daemon using the selected profile's relay
 dev-anywhere serve restart --relay cloud
 dev-anywhere serve status     # show daemon status
+dev-anywhere serve autostart enable  # start automatically at user login
+dev-anywhere serve autostart disable # cancel automatic startup
+dev-anywhere serve autostart status  # show automatic startup setting
 dev-anywhere init             # create default config at ~/.dev-anywhere/config.json
 dev-anywhere tunnel           # temporary account-free Cloudflare Quick Tunnel
 dev-anywhere claude [...args] # start/attach a Claude Code terminal session
@@ -52,6 +57,8 @@ dev-anywhere --help
 ```
 
 The daemon connects to the relay server over WebSocket and manages local AI CLI sessions. A mobile/web client connected to the same relay can then see and drive those sessions.
+
+Autostart is optional and applies to the selected profile. Enabling or disabling it does not start, restart, or stop the current Proxy. It is available on macOS, Linux with systemd user services, and Windows for the current user.
 
 Arguments after `claude`, `codex`, or `kimi` are passed through to the real CLI:
 
@@ -87,7 +94,7 @@ The Relay package includes the Web client. For a turnkey VPS setup with TLS and 
 
 ## Configuration
 
-Config file: `~/.dev-anywhere/config.json`
+Config file: `~/.dev-anywhere/config.json` (`%USERPROFILE%\.dev-anywhere\config.json` on Windows).
 
 ```json
 {
@@ -120,7 +127,22 @@ that value in Settings -> Relay Token so the browser client can authenticate.
 
 `dev-anywhere serve start --relay cloud` and `dev-anywhere serve restart --relay cloud` use a named relay without editing the file each time.
 
-`autoUpdate` defaults to `true` and runs after this machine connects to the Relay. DEV Anywhere 0.9.0 must be installed manually on every development machine after the Relay is upgraded; restart the service after installing it. Set `autoUpdate` to `false` and restart the service to keep the installed version.
+`autoUpdate` defaults to `true` and runs after this machine connects to the Relay. Set `autoUpdate` to `false` and restart the service to keep the installed version.
+
+The first upgrade from an earlier release to 0.9.2 requires a one-time manual update. Stop the Proxy with the existing CLI before upgrading the Relay or installing the new release:
+
+```bash
+dev-anywhere serve stop
+```
+
+After upgrading the Relay:
+
+```bash
+npm install -g @dev-anywhere/proxy@0.9.2
+dev-anywhere serve start --relay cloud
+```
+
+See the [upgrade guide](https://github.com/lichenxicatapple-blip/dev-anywhere/blob/main/README.en.md#upgrading) for the full steps and session impact.
 
 If DEV Anywhere cannot detect an agent CLI automatically, set its persistent
 path under the top-level `agentCli` object:
@@ -146,7 +168,7 @@ Environment variables are reserved for temporary overrides:
 ## How it works
 
 - Local daemon wraps Claude Code, Codex, and Kimi Code CLI sessions with `node-pty` for transparent terminal control. Claude Code and Codex also support structured chat-message mode; Kimi Code supports ACP chat with streaming output, tool calls and interactive approvals, turn cancellation, and history resume.
-- IPC socket at `~/.dev-anywhere/run/dev-anywhere.sock` for terminal attachment.
+- Local terminal attachment uses a Unix-domain socket on macOS/Linux or a named pipe on Windows.
 - Terminal bytes + structured control messages are forwarded to relay over WebSocket.
 - Relay serves the Web client and routes live traffic; session state remains on the proxy side.
 

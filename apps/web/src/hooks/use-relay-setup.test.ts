@@ -3,6 +3,8 @@ import { beforeEach, afterEach, describe, expect, it, vi } from "vitest";
 const relaySetupMocks = vi.hoisted(() => {
   const wsManager = {
     connect: vi.fn<(url: string) => void>(),
+    failPermanently:
+      vi.fn<(reason: "page_outdated" | "service_outdated" | "protocol_mismatch") => void>(),
   };
   const runtime = {
     wsManagerRef: wsManager,
@@ -15,20 +17,27 @@ const relaySetupMocks = vi.hoisted(() => {
   ).__devAnywhereRelayRuntime = runtime;
 
   return {
-    checkRelayClientAuth:
+    checkRelayClientPreflight:
       vi.fn<
         (
           relayUrl: string,
           token: string | null,
           signal?: AbortSignal,
-        ) => Promise<"missing_client_token" | "invalid_client_token" | null>
+        ) => Promise<
+          | "missing_client_token"
+          | "invalid_client_token"
+          | "page_outdated"
+          | "service_outdated"
+          | "protocol_mismatch"
+          | null
+        >
       >(),
     wsManager,
   };
 });
 
 vi.mock("@/lib/relay-client-auth", () => ({
-  checkRelayClientAuth: relaySetupMocks.checkRelayClientAuth,
+  checkRelayClientPreflight: relaySetupMocks.checkRelayClientPreflight,
 }));
 
 import { reconnectRelayClient } from "./use-relay-setup";
@@ -56,8 +65,9 @@ function deferred<T>(): {
 
 describe("reconnectRelayClient", () => {
   beforeEach(() => {
-    relaySetupMocks.checkRelayClientAuth.mockReset();
+    relaySetupMocks.checkRelayClientPreflight.mockReset();
     relaySetupMocks.wsManager.connect.mockReset();
+    relaySetupMocks.wsManager.failPermanently.mockReset();
     clearRelayClientToken();
     useAppStore.setState({
       phase: "connecting",
@@ -81,13 +91,13 @@ describe("reconnectRelayClient", () => {
   it("ignores an old invalid-token result after a newer token has connected", async () => {
     const oldAuth = deferred<"invalid_client_token" | null>();
     const newAuth = deferred<"invalid_client_token" | null>();
-    relaySetupMocks.checkRelayClientAuth
+    relaySetupMocks.checkRelayClientPreflight
       .mockReturnValueOnce(oldAuth.promise)
       .mockReturnValueOnce(newAuth.promise);
 
     persistRelayClientToken("old-token");
     const oldReconnect = reconnectRelayClient();
-    expect(relaySetupMocks.checkRelayClientAuth).toHaveBeenNthCalledWith(
+    expect(relaySetupMocks.checkRelayClientPreflight).toHaveBeenNthCalledWith(
       1,
       "https://relay.example.com",
       "old-token",
@@ -96,7 +106,7 @@ describe("reconnectRelayClient", () => {
 
     persistRelayClientToken("new-token");
     const newReconnect = reconnectRelayClient();
-    const oldSignal = relaySetupMocks.checkRelayClientAuth.mock.calls[0]?.[2];
+    const oldSignal = relaySetupMocks.checkRelayClientPreflight.mock.calls[0]?.[2];
     expect(oldSignal?.aborted).toBe(true);
     newAuth.resolve(null);
     await newReconnect;
@@ -118,12 +128,14 @@ describe("reconnectRelayClient", () => {
   it("marks a standalone authentication preflight unavailable at its timeout boundary", async () => {
     vi.useFakeTimers();
     let attemptSignal: AbortSignal | undefined;
-    relaySetupMocks.checkRelayClientAuth.mockImplementationOnce((_relayUrl, _token, signal) => {
-      attemptSignal = signal;
-      return new Promise((_resolve, reject) => {
-        signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
-      });
-    });
+    relaySetupMocks.checkRelayClientPreflight.mockImplementationOnce(
+      (_relayUrl, _token, signal) => {
+        attemptSignal = signal;
+        return new Promise((_resolve, reject) => {
+          signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
+        });
+      },
+    );
 
     const reconnect = reconnectRelayClient();
     const rejected = expect(reconnect).rejects.toBeInstanceOf(RelayReconnectAttemptTimeoutError);
@@ -138,5 +150,20 @@ describe("reconnectRelayClient", () => {
     expect(attemptSignal?.reason).toBeInstanceOf(RelayReconnectAttemptTimeoutError);
     expect(useAppStore.getState().relayConnectionIssue).toBe("unreachable");
     expect(relaySetupMocks.wsManager.connect).not.toHaveBeenCalled();
+  });
+
+  it("stops before opening a WebSocket when the health preflight reports an outdated service", async () => {
+    relaySetupMocks.checkRelayClientPreflight.mockResolvedValueOnce("service_outdated");
+
+    await reconnectRelayClient();
+
+    expect(relaySetupMocks.wsManager.connect).not.toHaveBeenCalled();
+    expect(relaySetupMocks.wsManager.failPermanently).toHaveBeenCalledWith("service_outdated");
+    expect(useAppStore.getState()).toMatchObject({
+      connected: false,
+      proxyOnline: false,
+      relayClientAuthIssue: null,
+      relayConnectionIssue: "service_outdated",
+    });
   });
 });

@@ -1,11 +1,18 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RELAY_CONTROL_PROTOCOL_VERSION, type PreviewScope } from "@dev-anywhere/shared";
+import {
+  RELAY_CONTROL_PROTOCOL_VERSION,
+  type PreviewScope,
+  type RelayProtocolRejectReasonType,
+} from "@dev-anywhere/shared";
 import { RelayClient } from "./relay-client";
 
 class FakeWebSocketManager {
   sent: string[] = [];
+  admissionSent: string[] = [];
   connected = true;
   closed = false;
+  permanentFailure: RelayProtocolRejectReasonType | null = null;
+  protocolReadyCount = 0;
   private messageHandlers = new Set<(data: string) => void>();
   private statusHandlers = new Set<(connected: boolean) => void>();
 
@@ -14,9 +21,24 @@ class FakeWebSocketManager {
     return this.connected;
   }
 
+  sendAdmission(data: string): boolean {
+    this.sent.push(data);
+    this.admissionSent.push(data);
+    return this.connected;
+  }
+
   close(): void {
     this.closed = true;
     this.connected = false;
+  }
+
+  failPermanently(reason: RelayProtocolRejectReasonType): void {
+    this.permanentFailure = reason;
+    this.close();
+  }
+
+  markProtocolReady(): void {
+    this.protocolReadyCount += 1;
   }
 
   onMessage(handler: (data: string) => void): () => void {
@@ -105,21 +127,42 @@ describe("RelayClient request handling", () => {
       osName: "iPad",
       deviceKind: "tablet",
     });
+    expect(ws.admissionSent).toEqual(ws.sent);
   });
 
   it.each([
     ["missing", { type: "client_register_response", status: "new" }],
     ["mismatched", { type: "client_register_response", protocolVersion: 0, status: "new" }],
-  ])("closes when the Relay registration response protocol is %s", (_label, response) => {
+  ])(
+    "fails permanently when the Relay registration response protocol is %s",
+    (_label, response) => {
+      const { relay, ws } = createClient(false);
+      const handler = vi.fn();
+      relay.onMessage(handler);
+      relay.register();
+
+      ws.emit(response);
+
+      expect(ws.closed).toBe(true);
+      expect(ws.permanentFailure).toBe("protocol_mismatch");
+      expect(ws.protocolReadyCount).toBe(0);
+      expect(handler).not.toHaveBeenCalled();
+    },
+  );
+
+  it("marks the transport ready only after a valid registration response", () => {
     const { relay, ws } = createClient(false);
-    const handler = vi.fn();
-    relay.onMessage(handler);
     relay.register();
 
-    ws.emit(response);
+    expect(ws.protocolReadyCount).toBe(0);
+    ws.emit({
+      type: "client_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      status: "new",
+    });
 
-    expect(ws.closed).toBe(true);
-    expect(handler).not.toHaveBeenCalled();
+    expect(ws.protocolReadyCount).toBe(1);
+    expect(ws.permanentFailure).toBeNull();
   });
 
   it("does not enter the normal message flow before registration succeeds", () => {
@@ -131,6 +174,7 @@ describe("RelayClient request handling", () => {
     ws.emit({ type: "proxy_list_response", proxies: [] });
 
     expect(ws.closed).toBe(true);
+    expect(ws.permanentFailure).toBe("protocol_mismatch");
     expect(handler).not.toHaveBeenCalled();
   });
 

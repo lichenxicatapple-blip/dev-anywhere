@@ -1,13 +1,25 @@
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { decodeBinaryFrame, SessionState } from "@dev-anywhere/shared";
 import {
   buildHostedPtyArgs,
   HostedPtyRegistry,
   normalizeHostedPtyEnv,
 } from "#src/serve/hosted-pty-registry.js";
+
+const fixture = vi.hoisted(() => ({ root: "" }));
+vi.mock("#src/common/paths.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("#src/common/paths.js")>();
+  return { ...actual, sessionPaths: (id: string) => actual.buildSessionPaths(fixture.root, id) };
+});
+beforeEach(() => {
+  fixture.root = mkdtempSync(join(tmpdir(), "dev-anywhere-hosted-settings-"));
+});
+afterEach(() => {
+  rmSync(fixture.root, { recursive: true, force: true });
+});
 
 const ptySpawnMock = vi.hoisted(() =>
   vi.fn(() => ({

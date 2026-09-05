@@ -9,7 +9,7 @@ import type { RelayConnection } from "#src/serve/relay-connection.js";
 function makeSessionManager(): SessionManager {
   return new SessionManager({
     persistPath: join(mkdtempSync(join(tmpdir(), "event-bridge-test-")), "sessions.json"),
-    allowSessionRuntimeHandover: true,
+    allowSessionRuntimeHandover: { terminal: true, worker: true },
   });
 }
 

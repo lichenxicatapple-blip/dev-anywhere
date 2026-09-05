@@ -1,4 +1,5 @@
 import { spawnSync } from "node:child_process";
+import { readWindowsProcess } from "./windows-process.js";
 
 const PROCESS_QUERY_TIMEOUT_MS = 1_000;
 const MAX_ANCESTRY_DEPTH = 64;
@@ -9,18 +10,8 @@ export function readParentProcessId(pid: number): number | null {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
 
   if (process.platform === "win32") {
-    const script = `(Get-CimInstance Win32_Process -Filter "ProcessId = ${pid}").ParentProcessId`;
-    const result = spawnSync(
-      "powershell.exe",
-      ["-NoProfile", "-NonInteractive", "-Command", script],
-      {
-        encoding: "utf8",
-        timeout: PROCESS_QUERY_TIMEOUT_MS,
-        maxBuffer: 64 * 1024,
-        stdio: ["ignore", "pipe", "ignore"],
-      },
-    );
-    return result.error ? null : parseParentPid(result.stdout);
+    const parentPid = readWindowsProcess(pid)?.parentPid;
+    return parentPid !== undefined && parentPid > 0 ? parentPid : null;
   }
 
   const commands = ["/bin/ps", "/usr/bin/ps", "ps"];
@@ -35,7 +26,7 @@ export function readParentProcessId(pid: number): number | null {
       stdio: ["ignore", "pipe", "ignore"],
     });
     if (result.error && (result.error as NodeJS.ErrnoException).code === "ENOENT") continue;
-    return result.error ? null : parseParentPid(result.stdout);
+    return result.error || result.status !== 0 ? null : parseParentPid(result.stdout);
   }
   return null;
 }

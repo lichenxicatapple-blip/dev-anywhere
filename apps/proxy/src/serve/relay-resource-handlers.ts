@@ -1,5 +1,6 @@
 import { homedir } from "node:os";
 import { accessSync, constants, statSync } from "node:fs";
+import { isAbsolute } from "node:path";
 import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelaySend } from "./relay-router-types.js";
@@ -24,7 +25,7 @@ function errorMessage(err: unknown): string {
 
 function validateExecutablePath(path: string): string {
   const normalized = path.trim();
-  if (!normalized.startsWith("/")) throw new Error("CLI 路径必须是绝对路径");
+  if (!isAbsolute(normalized)) throw new Error("CLI 路径必须是绝对路径");
   const stat = statSync(normalized);
   if (!stat.isFile()) throw new Error("CLI 路径不是可执行文件");
   accessSync(normalized, constants.X_OK);

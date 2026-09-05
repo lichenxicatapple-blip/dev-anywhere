@@ -5,6 +5,8 @@ const setupMocks = vi.hoisted(() => {
   const ws = {
     connect: vi.fn<(url: string) => void>(),
     close: vi.fn<() => void>(),
+    failPermanently:
+      vi.fn<(reason: "page_outdated" | "service_outdated" | "protocol_mismatch") => void>(),
     onStatusChange: vi.fn(() => vi.fn()),
   };
   const relay = {
@@ -19,13 +21,20 @@ const setupMocks = vi.hoisted(() => {
   return {
     ws,
     relay,
-    checkRelayClientAuth:
+    checkRelayClientPreflight:
       vi.fn<
         (
           relayUrl: string,
           token: string | null,
           signal?: AbortSignal,
-        ) => Promise<"missing_client_token" | "invalid_client_token" | null>
+        ) => Promise<
+          | "missing_client_token"
+          | "invalid_client_token"
+          | "page_outdated"
+          | "service_outdated"
+          | "protocol_mismatch"
+          | null
+        >
       >(),
     disposePreview: vi.fn(),
   };
@@ -61,7 +70,7 @@ vi.mock("@/services/preview-controller", () => ({
 }));
 vi.mock("@/lib/font-assets", () => ({ loadFontCSS: vi.fn() }));
 vi.mock("@/lib/relay-client-auth", () => ({
-  checkRelayClientAuth: setupMocks.checkRelayClientAuth,
+  checkRelayClientPreflight: setupMocks.checkRelayClientPreflight,
 }));
 
 import { reconnectRelayClient, useRelaySetup } from "./use-relay-setup";
@@ -85,9 +94,10 @@ function deferred<T>(): {
 describe("useRelaySetup reconnect ownership", () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    setupMocks.checkRelayClientAuth.mockReset();
+    setupMocks.checkRelayClientPreflight.mockReset();
     setupMocks.ws.connect.mockReset();
     setupMocks.ws.close.mockReset();
+    setupMocks.ws.failPermanently.mockReset();
     setupMocks.ws.onStatusChange.mockClear();
     setupMocks.relay.onMessage.mockClear();
     setupMocks.disposePreview.mockReset();
@@ -113,12 +123,12 @@ describe("useRelaySetup reconnect ownership", () => {
   });
 
   it("cancels a cold-start retry timer after a later manual reconnect succeeds", async () => {
-    setupMocks.checkRelayClientAuth
+    setupMocks.checkRelayClientPreflight
       .mockRejectedValueOnce(new Error("relay down"))
       .mockResolvedValue(null);
 
     const hook = renderHook(() => useRelaySetup());
-    expect(setupMocks.checkRelayClientAuth).toHaveBeenCalledTimes(1);
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(1);
     await act(async () => {
       await Promise.resolve();
       await Promise.resolve();
@@ -127,12 +137,12 @@ describe("useRelaySetup reconnect ownership", () => {
 
     await act(async () => reconnectRelayClient());
 
-    expect(setupMocks.checkRelayClientAuth).toHaveBeenCalledTimes(2);
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(2);
     expect(setupMocks.ws.connect).toHaveBeenCalledTimes(1);
     expect(vi.getTimerCount()).toBe(0);
 
     await act(async () => vi.advanceTimersByTimeAsync(10_000));
-    expect(setupMocks.checkRelayClientAuth).toHaveBeenCalledTimes(2);
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(2);
     expect(setupMocks.ws.connect).toHaveBeenCalledTimes(1);
 
     hook.unmount();
@@ -141,7 +151,7 @@ describe("useRelaySetup reconnect ownership", () => {
   it("keeps retry supervision after a manual reconnect supersedes an active startup attempt and fails", async () => {
     const manualAuth = deferred<null>();
     let startupSignal: AbortSignal | undefined;
-    setupMocks.checkRelayClientAuth
+    setupMocks.checkRelayClientPreflight
       .mockImplementationOnce((_relayUrl, _token, signal) => {
         startupSignal = signal;
         return new Promise<null>((_resolve, reject) => {
@@ -152,11 +162,11 @@ describe("useRelaySetup reconnect ownership", () => {
       .mockResolvedValue(null);
 
     const hook = renderHook(() => useRelaySetup());
-    expect(setupMocks.checkRelayClientAuth).toHaveBeenCalledTimes(1);
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(1);
 
     const manualReconnect = reconnectRelayClient();
     expect(startupSignal?.aborted).toBe(true);
-    expect(setupMocks.checkRelayClientAuth).toHaveBeenCalledTimes(2);
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(2);
 
     await act(async () => {
       manualAuth.reject(new Error("relay still down"));
@@ -166,7 +176,7 @@ describe("useRelaySetup reconnect ownership", () => {
     });
     await act(async () => vi.advanceTimersByTimeAsync(10_000));
 
-    expect(setupMocks.checkRelayClientAuth).toHaveBeenCalledTimes(3);
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(3);
     expect(setupMocks.ws.connect).toHaveBeenCalledTimes(1);
 
     hook.unmount();
@@ -174,7 +184,7 @@ describe("useRelaySetup reconnect ownership", () => {
 
   it("does not reconnect a disposed runtime when a manual preflight succeeds late", async () => {
     const lateManualAuth = deferred<null>();
-    setupMocks.checkRelayClientAuth
+    setupMocks.checkRelayClientPreflight
       .mockResolvedValueOnce(null)
       .mockReturnValueOnce(lateManualAuth.promise);
 
@@ -183,11 +193,11 @@ describe("useRelaySetup reconnect ownership", () => {
       await Promise.resolve();
       await Promise.resolve();
     });
-    expect(setupMocks.checkRelayClientAuth).toHaveBeenCalledTimes(1);
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(1);
     expect(setupMocks.ws.connect).toHaveBeenCalledTimes(1);
 
     const manualReconnect = reconnectRelayClient();
-    const manualSignal = setupMocks.checkRelayClientAuth.mock.calls[1]?.[2];
+    const manualSignal = setupMocks.checkRelayClientPreflight.mock.calls[1]?.[2];
     expect(manualSignal?.aborted).toBe(false);
 
     hook.unmount();
@@ -200,5 +210,25 @@ describe("useRelaySetup reconnect ownership", () => {
     });
 
     expect(setupMocks.ws.connect).toHaveBeenCalledTimes(1);
+  });
+
+  it("treats an outdated page as terminal without scheduling startup retries", async () => {
+    setupMocks.checkRelayClientPreflight.mockResolvedValue("page_outdated");
+
+    const hook = renderHook(() => useRelaySetup());
+    await act(async () => {
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(1);
+    expect(setupMocks.ws.connect).not.toHaveBeenCalled();
+    expect(setupMocks.ws.failPermanently).toHaveBeenCalledWith("page_outdated");
+    expect(useAppStore.getState().relayConnectionIssue).toBe("page_outdated");
+    expect(vi.getTimerCount()).toBe(0);
+
+    await act(async () => vi.advanceTimersByTimeAsync(10_000));
+    expect(setupMocks.checkRelayClientPreflight).toHaveBeenCalledTimes(1);
+    hook.unmount();
   });
 });

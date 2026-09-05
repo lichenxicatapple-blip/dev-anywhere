@@ -4,6 +4,7 @@ import { resolveCodexCommand } from "./codex.js";
 import { resolveKimiCommand } from "./kimi.js";
 import { findExecutableCandidates } from "./path-resolver.js";
 import type { ProviderId } from "./types.js";
+import { environmentValue } from "../common/executable.js";
 
 interface AgentCliStatusOptions {
   suggestions?: Partial<Record<ProviderId, string[]>>;
@@ -39,7 +40,7 @@ function uniqueSuggestions(paths: Array<string | undefined>): string[] {
 }
 
 function discoverProviderCandidates(provider: ProviderId, env: NodeJS.ProcessEnv): string[] {
-  const envPath = env[PROVIDER_ENV_NAME[provider]];
+  const envPath = environmentValue(env, PROVIDER_ENV_NAME[provider]);
   return uniqueSuggestions([
     envPath,
     ...findExecutableCandidates(PROVIDER_BIN_NAME[provider], env),

@@ -9,7 +9,7 @@
 - 一台有公网 IPv4 的 Linux VPS；
 - 可以通过 SSH 密钥登录，并能执行 `sudo` 的账户；
 - 对公网开放的 `80` 和 `443` 端口；
-- 本地安装 Git。
+- 本地安装 Git，并能运行 Bash 脚本。
 
 公网入口可以直接使用 VPS 的 IPv4 地址，也可以使用一个已经将 `A` 记录指向该 VPS 的域名。两种方式都只提供 HTTPS/WSS，不会把应用直接暴露在 HTTP 上。
 
@@ -101,14 +101,14 @@ sudo bash scripts/deploy/install-relay.sh dev-anywhere.example.com
 
 ## 连接开发机
 
-在运行 Claude Code、Codex、Kimi Code 或 Shell 的开发机上安装 Proxy：
+开发机支持 macOS、Linux 和原生 Windows 11，Windows 无需安装 WSL。在运行 Claude Code、Codex、Kimi Code 或 Shell 的开发机上安装 Proxy：
 
 ```bash
 npm install -g @dev-anywhere/proxy
 dev-anywhere init
 ```
 
-编辑 `~/.dev-anywhere/config.json`：
+编辑 `~/.dev-anywhere/config.json`（Windows 为 `%USERPROFILE%\.dev-anywhere\config.json`）：
 
 ```json
 {
@@ -153,6 +153,23 @@ dev-anywhere serve status
 也可以分别使用 `CLAUDE_BIN`、`CODEX_BIN` 和 `KIMI_BIN` 临时覆盖这些路径。
 
 Kimi Code 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere kimi ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
+
+### 可选：登录后自动启动
+
+配置好 Relay 后，可以设置登录系统时自动启动 Proxy：
+
+```bash
+dev-anywhere serve autostart enable
+dev-anywhere serve autostart status
+```
+
+取消自动启动：
+
+```bash
+dev-anywhere serve autostart disable
+```
+
+这些设置只影响之后的登录，不会启动、重启或停止当前 Proxy。macOS 使用当前用户的 LaunchAgent，Linux 需要 systemd 用户服务，Windows 使用当前用户的登录任务。使用其他 profile 时，将 `--profile 名称` 放在 `serve` 前。
 
 ## 连接浏览器
 
@@ -199,6 +216,12 @@ ssh root@your-vps \
 
 ## 升级
 
+从此前版本首次升级到 0.9.2，需要进行一次手动更新。先在每台开发机上使用升级前的 CLI 停止 Proxy，确保这一步在升级 Relay 或安装新版之前完成：
+
+```bash
+dev-anywhere serve stop
+```
+
 进入 DEV Anywhere 项目目录，运行以下命令升级 Relay：
 
 ```bash
@@ -210,11 +233,11 @@ bash scripts/deploy/install-relay.sh \
 
 部署脚本会复用 `/opt/dev-anywhere/.env` 中已有的 Token。
 
-DEV Anywhere 0.9.0 不兼容此前版本。Relay 更新后，请在每台开发机上手动更新并重启 DEV Anywhere：
+Relay 更新后，在每台开发机上安装并启动 0.9.2：
 
 ```bash
-npm install -g @dev-anywhere/proxy@0.9.0
-dev-anywhere serve restart --relay cloud
+npm install -g @dev-anywhere/proxy@0.9.2
+dev-anywhere serve start --relay cloud
 ```
 
 全部开发机更新完成后，刷新浏览器，并重新启动升级前仍在运行的会话。
@@ -224,12 +247,13 @@ dev-anywhere serve restart --relay cloud
 需要固定版本时，在同一个终端执行：
 
 ```bash
+dev-anywhere serve stop
 VERSION=x.y.z
 IMAGE_TAG="$VERSION" bash scripts/deploy/install-relay.sh \
   --ssh root@your-vps \
   203.0.113.10
 npm install -g "@dev-anywhere/proxy@$VERSION"
-dev-anywhere serve restart --relay cloud
+dev-anywhere serve start --relay cloud
 ```
 
 同时在开发机的 `~/.dev-anywhere/config.json` 顶层设置 `"autoUpdate": false`，否则 Proxy 连接 Relay 后会重新跟随其版本。
@@ -254,6 +278,12 @@ ssh root@your-vps \
 
 ```bash
 tail -f ~/.dev-anywhere/logs/service.log
+```
+
+Windows PowerShell 使用：
+
+```powershell
+Get-Content "$env:USERPROFILE\.dev-anywhere\logs\service.log" -Tail 50 -Wait
 ```
 
 自动升级异常记录在 `~/.dev-anywhere/logs/auto-update.log`。

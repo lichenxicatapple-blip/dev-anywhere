@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { RelayCloseCode } from "@dev-anywhere/shared";
+import { encodeBinaryFrame, RelayCloseCode, RelayProtocolRejectReason } from "@dev-anywhere/shared";
 import { WebSocketManager } from "./websocket";
 
 class FakeWebSocket extends EventTarget {
@@ -26,10 +26,11 @@ class FakeWebSocket extends EventTarget {
     this.dispatchEvent(new Event("close"));
   }
 
-  closeWithCode(code: number): void {
+  closeWithCode(code: number, reason = ""): void {
     this.readyState = FakeWebSocket.CLOSED;
-    const event = new Event("close") as Event & { code: number };
+    const event = new Event("close") as Event & { code: number; reason: string };
     Object.defineProperty(event, "code", { value: code });
+    Object.defineProperty(event, "reason", { value: reason });
     this.dispatchEvent(event);
   }
 
@@ -50,27 +51,154 @@ class FakeWebSocket extends EventTarget {
 const sockets: FakeWebSocket[] = [];
 const originalWebSocket = globalThis.WebSocket;
 
+function openAndAdmit(manager: WebSocketManager, socket: FakeWebSocket): void {
+  socket.open();
+  manager.markProtocolReady();
+}
+
 describe("WebSocketManager", () => {
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
     sockets.length = 0;
     globalThis.WebSocket = originalWebSocket;
   });
 
-  it("sends reconnect registration before flushing explicitly queued messages", () => {
+  it("keeps ordinary traffic behind admission and flushes it after registration", () => {
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     const manager = new WebSocketManager();
     manager.connect("ws://relay/client");
 
     expect(manager.send("request-that-must-not-queue")).toBe(false);
     expect(manager.send("queued-user-input", { queueWhenDisconnected: true })).toBe(false);
-    manager.onStatusChange((connected) => {
-      if (connected) manager.send("client-register");
+    manager.onStatusChange((_connected, status) => {
+      if (status?.transportOpen && !status.protocolReady) {
+        manager.sendAdmission("client-register");
+      }
     });
 
     sockets[0]?.open();
+    expect(manager.isConnected()).toBe(false);
+    expect(sockets[0]?.sent).toEqual(["client-register"]);
+    expect(manager.sendAdmission("duplicate-client-register")).toBe(false);
+    expect(sockets[0]?.sent).toEqual(["client-register"]);
 
+    manager.markProtocolReady();
+    expect(manager.isConnected()).toBe(true);
     expect(sockets[0]?.sent).toEqual(["client-register", "queued-user-input"]);
+    manager.close();
+  });
+
+  it("times out a desktop connection which never becomes protocol-ready and uses backoff", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: false });
+    const statuses: Array<{ connected: boolean; willReconnect?: boolean }> = [];
+    manager.onStatusChange((connected, details) => statuses.push({ connected, ...details }));
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+    ws1.open();
+    expect(manager.sendAdmission("client-register")).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(9_999);
+    expect(sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
+    expect(manager.isConnected()).toBe(false);
+    expect(statuses.at(-1)).toMatchObject({ connected: false, willReconnect: true });
+    await vi.advanceTimersByTimeAsync(499);
+    expect(sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(2);
+    manager.close();
+  });
+
+  it("bounds a desktop socket which remains CONNECTING before admission", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager({ probeConnectionAfterBackground: false });
+    manager.connect("ws://relay/client");
+    const ws1 = sockets[0]!;
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
+    await vi.advanceTimersByTimeAsync(500);
+    expect(sockets).toHaveLength(2);
+    manager.close();
+  });
+
+  it("keeps retry-period input queued while no physical socket exists", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    openAndAdmit(manager, sockets[0]!);
+
+    sockets[0]!.closeWithCode(1006);
+    expect(manager.send("input-during-backoff", { queueWhenDisconnected: true })).toBe(false);
+    await vi.advanceTimersByTimeAsync(500);
+    const ws2 = sockets[1]!;
+    ws2.open();
+    expect(manager.sendAdmission("client-register-2")).toBe(true);
+    expect(ws2.sent).toEqual(["client-register-2"]);
+
+    manager.markProtocolReady();
+    expect(ws2.sent).toEqual(["client-register-2", "input-during-backoff"]);
+    manager.close();
+  });
+
+  it("does not queue new traffic or retain the ready timer after an explicit close", async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    manager.close();
+
+    expect(manager.send("must-not-survive", { queueWhenDisconnected: true })).toBe(false);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(sockets).toHaveLength(1);
+    manager.connect("ws://relay/client");
+    openAndAdmit(manager, sockets[1]!);
+    expect(sockets[1]!.sent).toEqual([]);
+    manager.close();
+  });
+
+  it("clears queued traffic when admission fails permanently", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+    expect(manager.send("queued-before-rejection", { queueWhenDisconnected: true })).toBe(false);
+    manager.failPermanently("protocol_mismatch");
+    expect(manager.send("queued-after-rejection", { queueWhenDisconnected: true })).toBe(false);
+
+    manager.connect("ws://relay/client");
+    openAndAdmit(manager, sockets[1]!);
+    expect(sockets[1]!.sent).toEqual([]);
+    manager.close();
+  });
+
+  it("drops binary business frames until protocol admission succeeds", () => {
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    const received: Array<{ data: number[]; outputSeq: number }> = [];
+    manager.subscribeBinary("session-1", (data, outputSeq) => {
+      received.push({ data: [...data], outputSeq });
+    });
+    manager.connect("ws://relay/client");
+    const ws = sockets[0]!;
+    ws.open();
+    const frame = encodeBinaryFrame("session-1", 7, new Uint8Array([1, 2, 3]));
+    const frameBuffer = frame.slice().buffer as ArrayBuffer;
+
+    ws.receiveBinary(frameBuffer);
+    expect(received).toEqual([]);
+    manager.markProtocolReady();
+    ws.receiveBinary(frameBuffer);
+    expect(received).toEqual([{ data: [1, 2, 3], outputSeq: 7 }]);
     manager.close();
   });
 
@@ -94,10 +222,10 @@ describe("WebSocketManager", () => {
     const ws2 = sockets[1]!;
     expect(ws2).not.toBe(ws1);
 
-    let statusObserved: boolean | null = null;
-    manager.onStatusChange((connected) => {
-      statusObserved = connected;
-      if (connected) manager.send("register");
+    let statusObserved: { connected: boolean; protocolReady?: boolean } | null = null;
+    manager.onStatusChange((connected, status) => {
+      statusObserved = { connected, protocolReady: status?.protocolReady };
+      if (status?.transportOpen && !status.protocolReady) manager.sendAdmission("register");
     });
 
     // 触发 ws1 的 stale close: 老的 close listener 闭包持有 ws1, 但 this.ws 现在是
@@ -108,7 +236,7 @@ describe("WebSocketManager", () => {
     expect(sockets.length).toBe(2);
 
     ws2.open();
-    expect(statusObserved).toBe(true);
+    expect(statusObserved).toEqual({ connected: false, protocolReady: false });
     expect(ws2.sent).toEqual(["register"]);
 
     manager.close();
@@ -144,7 +272,7 @@ describe("WebSocketManager", () => {
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     // The browser may keep a dead TCP path as readyState=OPEN throughout a signal outage.
     // `online` is the strongest available hint that the route changed, so keeping ws1 here
@@ -153,9 +281,9 @@ describe("WebSocketManager", () => {
 
     expect(sockets).toHaveLength(2);
     expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
-    expect(statuses).toEqual([true, false]);
+    expect(statuses).toEqual([false, true, false]);
     sockets[1]!.open();
-    expect(statuses).toEqual([true, false, true]);
+    expect(statuses).toEqual([false, true, false, false]);
 
     manager.close();
   });
@@ -190,7 +318,7 @@ describe("WebSocketManager", () => {
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     await vi.advanceTimersByTimeAsync(15_000);
     expect(ws1.sent).toHaveLength(1);
@@ -199,7 +327,7 @@ describe("WebSocketManager", () => {
     await vi.advanceTimersByTimeAsync(2_001);
     expect(sockets).toHaveLength(2);
     expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
-    expect(statuses).toEqual([true, false]);
+    expect(statuses).toEqual([false, true, false]);
 
     manager.close();
   });
@@ -238,7 +366,7 @@ describe("WebSocketManager", () => {
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     await vi.advanceTimersByTimeAsync(15_000);
     for (let probeIndex = 0; probeIndex < 2; probeIndex += 1) {
@@ -251,7 +379,7 @@ describe("WebSocketManager", () => {
     }
 
     expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
-    expect(statuses).toEqual([true]);
+    expect(statuses).toEqual([false, true]);
     manager.close();
   });
 
@@ -269,7 +397,7 @@ describe("WebSocketManager", () => {
     manager.onMessage((message) => messages.push(message));
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     await vi.advanceTimersByTimeAsync(14_000);
     ws1.receive('{"type":"pty_state"}');
@@ -295,7 +423,7 @@ describe("WebSocketManager", () => {
     const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     await vi.advanceTimersByTimeAsync(15_000);
     expect(ws1.sent).toHaveLength(1);
@@ -320,7 +448,7 @@ describe("WebSocketManager", () => {
     const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     await vi.advanceTimersByTimeAsync(14_000);
     ws1.receiveBinary();
@@ -343,7 +471,7 @@ describe("WebSocketManager", () => {
     const manager = new WebSocketManager({ probeConnectionAfterBackground: false });
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
     await vi.advanceTimersByTimeAsync(60_000);
 
     expect(sockets).toHaveLength(1);
@@ -360,7 +488,7 @@ describe("WebSocketManager", () => {
     const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     document.dispatchEvent(new Event("visibilitychange"));
     window.dispatchEvent(new Event("focus"));
@@ -386,7 +514,7 @@ describe("WebSocketManager", () => {
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     visibilityState = "hidden";
     document.dispatchEvent(new Event("visibilitychange"));
@@ -397,7 +525,7 @@ describe("WebSocketManager", () => {
     expect(sockets).toHaveLength(1);
     expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
     expect(ws1.sent).toEqual([]);
-    expect(statuses).toEqual([true]);
+    expect(statuses).toEqual([false, true]);
 
     manager.close();
   });
@@ -417,7 +545,7 @@ describe("WebSocketManager", () => {
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     visibilityState = "hidden";
     document.dispatchEvent(new Event("visibilitychange"));
@@ -427,7 +555,7 @@ describe("WebSocketManager", () => {
 
     expect(sockets).toHaveLength(1);
     expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
-    expect(statuses).toEqual([true]);
+    expect(statuses).toEqual([false, true]);
     expect(ws1.sent).toHaveLength(1);
     const probe = JSON.parse(ws1.sent[0]!) as { type: string; requestId: string };
     expect(probe.type).toBe("latency_web_relay_ping");
@@ -437,7 +565,7 @@ describe("WebSocketManager", () => {
 
     expect(sockets).toHaveLength(1);
     expect(ws1.readyState).toBe(FakeWebSocket.OPEN);
-    expect(statuses).toEqual([true]);
+    expect(statuses).toEqual([false, true]);
 
     manager.close();
   });
@@ -454,7 +582,7 @@ describe("WebSocketManager", () => {
     const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     window.dispatchEvent(new Event("blur"));
     await vi.advanceTimersByTimeAsync(5_001);
@@ -488,7 +616,7 @@ describe("WebSocketManager", () => {
     manager.onStatusChange((connected) => statuses.push(connected));
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     visibilityState = "hidden";
     document.dispatchEvent(new Event("visibilitychange"));
@@ -502,9 +630,9 @@ describe("WebSocketManager", () => {
 
     expect(sockets).toHaveLength(2);
     expect(ws1.readyState).toBe(FakeWebSocket.CLOSED);
-    expect(statuses).toEqual([true, false]);
+    expect(statuses).toEqual([false, true, false]);
     sockets[1]!.open();
-    expect(statuses).toEqual([true, false, true]);
+    expect(statuses).toEqual([false, true, false, false]);
 
     manager.close();
   });
@@ -522,7 +650,7 @@ describe("WebSocketManager", () => {
     const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     visibilityState = "hidden";
     document.dispatchEvent(new Event("visibilitychange"));
@@ -550,7 +678,7 @@ describe("WebSocketManager", () => {
     const manager = new WebSocketManager({ probeConnectionAfterBackground: true });
     manager.connect("ws://relay/client");
     const ws1 = sockets[0]!;
-    ws1.open();
+    openAndAdmit(manager, ws1);
 
     visibilityState = "hidden";
     document.dispatchEvent(new Event("visibilitychange"));
@@ -580,7 +708,7 @@ describe("WebSocketManager", () => {
     });
     manager.connect("ws://relay/client");
     const ws = sockets[0]!;
-    ws.open();
+    openAndAdmit(manager, ws);
 
     ws.closeWithCode(RelayCloseCode.CLIENT_KICKED);
     await vi.advanceTimersByTimeAsync(30_000);
@@ -590,23 +718,90 @@ describe("WebSocketManager", () => {
     expect(statuses.at(-1)).toEqual({
       connected: false,
       willReconnect: false,
+      transportOpen: false,
+      protocolReady: false,
       closeCode: RelayCloseCode.CLIENT_KICKED,
     });
   });
 
-  it("does not reconnect after the relay rejects the client protocol", async () => {
+  it("does not reconnect and preserves why the Relay rejected the client protocol", async () => {
     vi.useFakeTimers();
     globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
     const manager = new WebSocketManager();
+    const statuses: Array<{
+      connected: boolean;
+      willReconnect?: boolean;
+      disconnectReason?: string;
+    }> = [];
+    manager.onStatusChange((connected, details) => statuses.push({ connected, ...details }));
     manager.connect("ws://relay/client");
     const ws = sockets[0]!;
     ws.open();
 
-    ws.closeWithCode(RelayCloseCode.CLIENT_PROTOCOL_REJECTED);
+    ws.closeWithCode(
+      RelayCloseCode.CLIENT_PROTOCOL_REJECTED,
+      RelayProtocolRejectReason.PAGE_OUTDATED,
+    );
     await vi.advanceTimersByTimeAsync(30_000);
 
     expect(sockets).toHaveLength(1);
     expect(manager.isConnected()).toBe(false);
+    expect(statuses.at(-1)).toMatchObject({
+      connected: false,
+      willReconnect: false,
+      disconnectReason: "page_outdated",
+    });
+  });
+
+  it("keeps reconnect backoff across raw opens and resets it only after protocol readiness", async () => {
+    vi.useFakeTimers();
+    vi.spyOn(Math, "random").mockReturnValue(0.5);
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    manager.connect("ws://relay/client");
+
+    sockets[0]!.open();
+    sockets[0]!.closeWithCode(1006);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(sockets).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(2);
+
+    // A second transport open without a successful registration must stay in the next bucket.
+    sockets[1]!.open();
+    sockets[1]!.closeWithCode(1006);
+    await vi.advanceTimersByTimeAsync(999);
+    expect(sockets).toHaveLength(2);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(3);
+
+    sockets[2]!.open();
+    manager.markProtocolReady();
+    sockets[2]!.closeWithCode(1006);
+    await vi.advanceTimersByTimeAsync(499);
+    expect(sockets).toHaveLength(3);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(sockets).toHaveLength(4);
+    manager.close();
+  });
+
+  it("reports a local protocol failure once and never reconnects", async () => {
+    vi.useFakeTimers();
+    globalThis.WebSocket = FakeWebSocket as unknown as typeof WebSocket;
+    const manager = new WebSocketManager();
+    const statuses: Array<{ connected: boolean; disconnectReason?: string }> = [];
+    manager.onStatusChange((connected, details) => statuses.push({ connected, ...details }));
+    manager.connect("ws://relay/client");
+    sockets[0]!.open();
+
+    manager.failPermanently("protocol_mismatch");
+    await vi.advanceTimersByTimeAsync(30_000);
+
+    expect(sockets).toHaveLength(1);
+    expect(manager.isConnected()).toBe(false);
+    expect(statuses.filter((status) => status.disconnectReason === "protocol_mismatch")).toEqual([
+      expect.objectContaining({ disconnectReason: "protocol_mismatch" }),
+    ]);
   });
 
   it("removes wake listeners on close so document/window do not retain the manager", () => {

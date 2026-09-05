@@ -1,4 +1,3 @@
-import { spawn } from "node:child_process";
 import {
   closeSync,
   existsSync,
@@ -11,19 +10,15 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { connect } from "node:net";
 import { dirname, join, resolve } from "node:path";
 import { flushLogger } from "@dev-anywhere/shared/logger";
 import { autoUpdateLogger as logger } from "./common/logger.js";
-import {
-  AUTO_UPDATE_LOCK_PATH,
-  PID_PATH,
-  PROFILE_NAME,
-  SOCK_PATH,
-  STOPPED_PATH,
-} from "./common/paths.js";
+import { AUTO_UPDATE_LOCK_PATH, PROFILE_NAME, STOPPED_PATH } from "./common/paths.js";
 import { sanitizeProviderErrorTail } from "./common/codex-session-conflict.js";
+import { parseServiceCommandResult } from "./common/service-command-result.js";
 import { compareStableVersions, parseStableVersion } from "./common/stable-version.js";
+import { spawnCommand } from "./common/command-launch.js";
+import { terminateOwnedProcessTree } from "./common/process-termination.js";
 import { PROXY_PACKAGE_NAME, PROXY_PACKAGE_ROOT } from "./version.js";
 
 const LOCK_STALE_AFTER_MS = 30 * 60_000;
@@ -33,7 +28,6 @@ const NPM_ROOT_TIMEOUT_MS = 30_000;
 const NPM_INSTALL_TIMEOUT_MS = 5 * 60_000;
 const CLI_VALIDATE_TIMEOUT_MS = 30_000;
 const CLI_RESTART_TIMEOUT_MS = 90_000;
-const SOCKET_PROBE_TIMEOUT_MS = 2_000;
 const LOCK_BUSY_EXIT_CODE = 75;
 const UNSUPPORTED_EXIT_CODE = 64;
 
@@ -42,7 +36,6 @@ class UnsupportedAutoUpdateError extends Error {}
 export interface RunnerOptions {
   targetVersion: string;
   runningVersion: string;
-  daemonPid: number;
   relayName: string;
 }
 
@@ -56,9 +49,11 @@ export interface CommandResult {
 
 export interface RestartRecoveryDeps {
   stopped(): boolean;
-  runService(action: "start" | "restart", options: RunnerOptions): Promise<CommandResult>;
-  socketIsReachable(): Promise<boolean>;
-  readDaemonPid(): number | null;
+  runService(
+    action: "start" | "restart",
+    options: RunnerOptions,
+    recoveryToken?: string,
+  ): Promise<CommandResult>;
   installVersion(npm: string, version: string): Promise<void>;
   validateInstalledCli(version: string): Promise<void>;
 }
@@ -114,9 +109,10 @@ async function runCommand(
   command: string,
   args: readonly string[],
   timeoutMs: number,
+  killTreeOnTimeout = false,
 ): Promise<CommandResult> {
   return new Promise((resolveCommand, reject) => {
-    const child = spawn(command, args, {
+    const child = spawnCommand(command, [...args], {
       env: {
         ...process.env,
         NO_UPDATE_NOTIFIER: "1",
@@ -125,16 +121,17 @@ async function runCommand(
         npm_config_update_notifier: "false",
       },
       stdio: ["ignore", "pipe", "pipe"],
+      windowsHide: true,
     });
     let stdout = "";
     let stderr = "";
     let timedOut = false;
     let settled = false;
     let forceTimer: NodeJS.Timeout | null = null;
-    child.stdout.on("data", (chunk: Buffer) => {
+    child.stdout?.on("data", (chunk: Buffer) => {
       stdout = appendTail(stdout, chunk);
     });
-    child.stderr.on("data", (chunk: Buffer) => {
+    child.stderr?.on("data", (chunk: Buffer) => {
       stderr = appendTail(stderr, chunk);
     });
     child.once("error", (error) => {
@@ -153,8 +150,12 @@ async function runCommand(
     });
     const timer = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      forceTimer = setTimeout(() => child.kill("SIGKILL"), 5_000);
+      // Only npm owns all its descendants. A service command may have started a
+      // daemon whose retained sessions must outlive this short-lived CLI process.
+      const terminate = (signal: NodeJS.Signals) =>
+        killTreeOnTimeout ? terminateOwnedProcessTree(child, signal) : child.kill(signal);
+      terminate("SIGTERM");
+      forceTimer = setTimeout(() => terminate("SIGKILL"), 5_000);
       forceTimer.unref?.();
     }, timeoutMs);
     timer.unref?.();
@@ -186,6 +187,7 @@ async function verifyNpmManagedGlobalInstall(npm: string): Promise<void> {
     npm,
     ["root", "--global", "--loglevel=error"],
     NPM_ROOT_TIMEOUT_MS,
+    true,
   );
   if (result.code !== 0 || result.timedOut) throw commandFailure("npm root --global", result);
   const npmRoot = result.stdout.trim().split(/\r?\n/).at(-1)?.trim();
@@ -294,17 +296,13 @@ function parseRunnerOptions(argv: readonly string[]): RunnerOptions {
   const targetVersion = readValue("--target-version");
   const runningVersion = readValue("--running-version");
   const relayName = readValue("--relay");
-  const daemonPid = Number(readValue("--daemon-pid"));
   if (!parseStableVersion(targetVersion) || !parseStableVersion(runningVersion)) {
     throw new Error("Auto-update versions must use stable x.y.z syntax");
   }
-  if (!Number.isSafeInteger(daemonPid) || daemonPid <= 0) {
-    throw new Error("Auto-update daemon PID is invalid");
-  }
-  return { targetVersion, runningVersion, daemonPid, relayName };
+  return { targetVersion, runningVersion, relayName };
 }
 
-async function installVersion(npm: string, version: string): Promise<void> {
+export async function installVersion(npm: string, version: string): Promise<void> {
   const result = await runCommand(
     npm,
     [
@@ -316,6 +314,7 @@ async function installVersion(npm: string, version: string): Promise<void> {
       "--loglevel=error",
     ],
     NPM_INSTALL_TIMEOUT_MS,
+    true,
   );
   if (result.code !== 0 || result.timedOut) {
     throw commandFailure(`npm install ${PROXY_PACKAGE_NAME}@${version}`, result);
@@ -347,39 +346,26 @@ function relayArgs(relayName: string): string[] {
   return relayName ? ["--relay", relayName] : [];
 }
 
-async function runProxyServiceCommand(
+export async function runProxyServiceCommand(
   action: "start" | "restart",
   options: RunnerOptions,
+  recoveryToken?: string,
 ): Promise<CommandResult> {
   return runCommand(
     process.execPath,
-    [proxyCliPath(), "--profile", PROFILE_NAME, "serve", action, ...relayArgs(options.relayName)],
+    [
+      proxyCliPath(),
+      "--profile",
+      PROFILE_NAME,
+      "serve",
+      action,
+      "--json",
+      ...(action === "restart" ? ["--if-running"] : []),
+      ...relayArgs(options.relayName),
+      ...(recoveryToken !== undefined ? ["--recover-from", recoveryToken] : []),
+    ],
     CLI_RESTART_TIMEOUT_MS,
   );
-}
-
-function readDaemonPid(): number | null {
-  try {
-    const pid = Number(readFileSync(PID_PATH, "utf-8").trim());
-    return Number.isSafeInteger(pid) && pid > 0 ? pid : null;
-  } catch {
-    return null;
-  }
-}
-
-async function socketIsReachable(): Promise<boolean> {
-  return new Promise((resolveSocket) => {
-    const socket = connect(SOCK_PATH);
-    const finish = (value: boolean) => {
-      clearTimeout(timer);
-      socket.destroy();
-      resolveSocket(value);
-    };
-    const timer = setTimeout(() => finish(false), SOCKET_PROBE_TIMEOUT_MS);
-    timer.unref?.();
-    socket.once("connect", () => finish(true));
-    socket.once("error", () => finish(false));
-  });
 }
 
 export async function restartWithRecovery(
@@ -392,8 +378,6 @@ export async function restartWithRecovery(
   const runtime: RestartRecoveryDeps = deps ?? {
     stopped: () => existsSync(STOPPED_PATH),
     runService: runProxyServiceCommand,
-    socketIsReachable,
-    readDaemonPid,
     installVersion,
     validateInstalledCli,
   };
@@ -406,22 +390,29 @@ export async function restartWithRecovery(
   }
 
   const result = await runtime.runService("restart", options);
-  if (result.code === 0 && !result.timedOut) return;
-
-  const reachable = await runtime.socketIsReachable();
-  const daemonPid = runtime.readDaemonPid();
-  if (reachable && daemonPid !== options.daemonPid) {
-    logger.warn(
-      { daemonPid, targetVersion: options.targetVersion },
-      "Proxy updated and restarted, but session handover reported an error",
-    );
+  const restart =
+    !result.timedOut && result.signal === null ? parseServiceCommandResult(result.stdout) : null;
+  if (restart?.status === "ready") {
+    if (restart.missingSessionIds.length > 0) {
+      logger.warn(
+        { targetVersion: options.targetVersion, missingSessionIds: restart.missingSessionIds },
+        "Proxy updated and restarted, but some sessions did not reconnect",
+      );
+    }
     return;
   }
-  if (reachable) {
-    throw commandFailure("Proxy auto-update restart (old daemon is still running)", result);
+  if (restart?.status === "failed" && restart.code === "STOPPED") {
+    logger.info("Proxy stop state changed during auto-update; restart was cancelled");
+    return;
   }
-
-  if (!installedByThisRun) {
+  if (
+    !installedByThisRun ||
+    restart?.status !== "failed" ||
+    restart.code !== "START_FAILED" ||
+    restart.recoveryToken === undefined
+  ) {
+    // Only the lifecycle owner can confirm that startup failed safely and authorize recovery.
+    // Missing/invalid output, a failed stop, or an unmanageable service is not that confirmation.
     throw commandFailure("Proxy auto-update restart", result);
   }
 
@@ -431,10 +422,19 @@ export async function restartWithRecovery(
   );
   await runtime.installVersion(npm, previousInstalledVersion);
   await runtime.validateInstalledCli(previousInstalledVersion);
-  // failed restart 自己会留下 STOPPED_PATH；这里必须重新 start 才能完成回滚。
-  // 用户主动 stop 若发生在安装阶段，已经由上面的首次 stopped() 检查拦住。
-  const recovery = await runtime.runService("start", options);
-  if (recovery.code !== 0 || recovery.timedOut || !(await runtime.socketIsReachable())) {
+  // The lifecycle owner checks this token while holding its operation lock. A later user stop
+  // replaces the token, so package rollback cannot override that stop by starting the service.
+  const recovery = await runtime.runService("start", options, restart.recoveryToken);
+  const recovered =
+    !recovery.timedOut && recovery.signal === null
+      ? parseServiceCommandResult(recovery.stdout)
+      : null;
+  if (recovered?.status === "failed" && recovered.code === "STOPPED") {
+    throw new Error(
+      `Proxy ${options.targetVersion} failed to start; restored ${previousInstalledVersion}; service recovery was cancelled because the stop state changed`,
+    );
+  }
+  if (recovered?.status !== "ready") {
     throw commandFailure("Proxy rollback start", recovery);
   }
   throw new Error(

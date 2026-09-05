@@ -38,6 +38,8 @@ DEV Anywhere is designed around remote coding agent workflows. In addition to re
 
 ### Prerequisites
 
+Development machines can run macOS, Linux, or native Windows 11. WSL is not required on Windows.
+
 Install [Node.js 20 or later](https://nodejs.org/en/download) on the development machine. npm is included with Node.js. Verify the environment with:
 
 ```bash
@@ -98,7 +100,7 @@ After deploying the Relay, initialize DEV Anywhere on the development machine:
 dev-anywhere init
 ```
 
-Edit `~/.dev-anywhere/config.json` with the Relay URL and the `RELAY_PROXY_TOKEN` printed by the deployment script:
+Edit `~/.dev-anywhere/config.json` (`%USERPROFILE%\.dev-anywhere\config.json` on Windows) with the Relay URL and the `RELAY_PROXY_TOKEN` printed by the deployment script:
 
 ```json
 {
@@ -131,6 +133,17 @@ dev-anywhere serve status
 Open the Web URL printed by the deployment script. On first access, enter `RELAY_CLIENT_TOKEN` under Settings → Relay Token.
 
 See the [VPS deployment guide](./docs/DEPLOYMENT.md) for deployment, upgrades, and troubleshooting. The guide is currently maintained in Chinese only.
+
+#### Optional: start automatically at login
+
+After configuring the Relay, enable automatic connection when you log in:
+
+```bash
+dev-anywhere serve autostart enable
+dev-anywhere serve autostart status
+```
+
+Use `dev-anywhere serve autostart disable` to turn it off. Enabling or disabling autostart only affects future logins; it does not start, restart, or stop the current Proxy. This is available on macOS, Linux with systemd user services, and Windows for the current user.
 
 ### 3. Start or take over a session
 
@@ -177,6 +190,12 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
+The first upgrade from an earlier release to 0.9.2 requires a one-time manual update. On every development machine, stop the Proxy with the existing CLI before proceeding:
+
+```bash
+dev-anywhere serve stop
+```
+
 From the DEV Anywhere project directory, run the following commands to upgrade the Relay:
 
 ```bash
@@ -188,11 +207,11 @@ bash scripts/deploy/install-relay.sh \
 
 Keep the last argument consistent with the initial deployment: pass the domain again for a domain deployment, or the public IP for an IP deployment. The installer reuses the existing tokens on the VPS.
 
-DEV Anywhere 0.9.0 is incompatible with earlier releases. After upgrading the Relay, manually update and restart DEV Anywhere on every development machine:
+After upgrading the Relay, install and start 0.9.2 on every development machine:
 
 ```bash
-npm install -g @dev-anywhere/proxy@0.9.0
-dev-anywhere serve restart --relay cloud
+npm install -g @dev-anywhere/proxy@0.9.2
+dev-anywhere serve start --relay cloud
 ```
 
 After all development machines are updated, refresh the browser and restart any sessions that were still running before the upgrade.

@@ -59,7 +59,9 @@ function requireFile(path) {
 requireFile("dist/index.js");
 requireFile("dist/serve.js");
 requireFile("dist/session-worker.js");
+requireFile("dist/terminal-worker.js");
 requireFile("dist/update-runner.js");
+requireFile("scripts/postinstall.cjs");
 requireFile("assets/fonts/sarasa-fixed-sc/result.css");
 requireFile("assets/scrcpy/scrcpy-server-v4.1");
 requireFile("README.md");
@@ -68,6 +70,14 @@ requireFile("THIRD_PARTY_NOTICES.md");
 requireFile("licenses/Apache-2.0.txt");
 requireFile("licenses/BSD-3-Clause.txt");
 requireFile("licenses/Boost-1.0.txt");
+
+const testFiles = [...files].filter((path) =>
+  /(^|\/)__tests__\/|\.(test|spec)\.[cm]?[jt]sx?(\.map)?$/.test(path),
+);
+if (testFiles.length) {
+  console.error(`Proxy package contains test artifacts: ${testFiles.join(", ")}`);
+  process.exit(1);
+}
 
 const scrcpyServer = readFileSync("apps/proxy/assets/scrcpy/scrcpy-server-v4.1");
 const scrcpyServerHash = createHash("sha256").update(scrcpyServer).digest("hex");
@@ -135,7 +145,8 @@ NODE
 
 echo ""
 echo "=== Check installed command behavior with isolated HOME ==="
-TMP_HOME="$(mktemp -d "${TMPDIR:-/tmp}/dev-anywhere-release-check.XXXXXX")"
+# macOS TMPDIR can make the derived Unix socket path exceed the platform limit.
+TMP_HOME="$(mktemp -d /tmp/dev-anywhere-release-check.XXXXXX)"
 cleanup() {
   rm -rf "$TMP_HOME"
 }
@@ -143,7 +154,12 @@ trap cleanup EXIT
 
 HOME="$TMP_HOME" node apps/proxy/dist/index.js --version >/dev/null
 HOME="$TMP_HOME" node apps/proxy/dist/index.js init
-HOME="$TMP_HOME" node apps/proxy/dist/index.js serve status >/dev/null
+STATUS_EXIT=0
+STATUS_OUTPUT="$(HOME="$TMP_HOME" node apps/proxy/dist/index.js serve status)" || STATUS_EXIT=$?
+if [ "$STATUS_EXIT" -ne 0 ] || ! grep -Fxq "Service: not running" <<< "$STATUS_OUTPUT"; then
+  echo "Expected an unstarted service with exit 0; got exit $STATUS_EXIT: $STATUS_OUTPUT" >&2
+  exit 1
+fi
 
 test -f "$TMP_HOME/.dev-anywhere/config.json"
 grep -q '"defaultProfile": "default"' "$TMP_HOME/.dev-anywhere/config.json"

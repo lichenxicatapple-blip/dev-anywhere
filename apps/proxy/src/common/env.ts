@@ -65,6 +65,7 @@ export function spawnScript(
   const runtimeArgs = IS_DEV ? ["--import", "tsx", scriptPath, ...args] : [scriptPath, ...args];
   const child = spawn(process.execPath, runtimeArgs, {
     detached: true,
+    ...(process.platform === "win32" ? { windowsHide: true } : {}),
     ...rest,
     stdio,
   });

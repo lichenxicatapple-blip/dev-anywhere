@@ -19,7 +19,7 @@
     "dist"
   ],
   "scripts": {
-    "build": "tsup && rm -f dist/.tsbuildinfo && tsc -p tsconfig.build.json --outDir dist",
+    "build": "tsup && node -e \"require('node:fs').rmSync('dist/.tsbuildinfo', { force: true })\" && tsc -p tsconfig.build.json --outDir dist",
     "dev": "tsup --watch",
     "test": "bash ../../scripts/test/vitest.sh",
     "typecheck": "tsc --noEmit"

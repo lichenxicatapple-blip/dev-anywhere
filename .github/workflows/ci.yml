@@ -74,3 +74,48 @@ jobs:
             apps/web/test-results
             artifacts/test-layout
             artifacts/test-pc
+
+  windows-proxy:
+    name: Native Windows Proxy
+    runs-on: windows-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Test native processes, IPC, terminal handover and startup registration
+        shell: pwsh
+        run: |
+          $tests = @(
+            'src/__tests__/unit/executable.test.ts',
+            'src/__tests__/unit/command-launch.test.ts',
+            'src/__tests__/unit/provider-claude.test.ts',
+            'src/__tests__/unit/provider-working-directory.test.ts',
+            'src/__tests__/unit/relay-resource-path.test.ts',
+            'src/__tests__/unit/postinstall.test.ts',
+            'src/__tests__/unit/windows-process.test.ts',
+            'src/__tests__/unit/managed-session-process.test.ts',
+            'src/__tests__/unit/android-emulator-adapter.test.ts',
+            'src/__tests__/unit/process-termination.test.ts',
+            'src/__tests__/unit/service-autostart.test.ts',
+            'src/__tests__/unit/profile-paths.test.ts',
+            'src/__tests__/unit/local-ipc-endpoint.test.ts',
+            'src/__tests__/unit/service-control.test.ts',
+            'src/__tests__/unit/service-lifecycle.test.ts',
+            'src/__tests__/unit/worker-registry-reconnect.test.ts',
+            'src/__tests__/unit/worker-registry-spawn.test.ts',
+            'src/__tests__/unit/serve-socket-takeover.test.ts',
+            'src/__tests__/integration/local-ipc-endpoint.test.ts',
+            'src/__tests__/integration/pty-process.test.ts',
+            'src/__tests__/integration/file-lock-process.test.ts',
+            'src/__tests__/integration/daemon-cli-lifecycle-process.test.ts',
+            'src/__tests__/integration/windows-process.test.ts'
+          )
+          pnpm --filter @dev-anywhere/proxy exec vitest run @tests --testTimeout=60000 --hookTimeout=30000

@@ -1,8 +1,9 @@
 import { execFileSync } from "node:child_process";
-import { basename } from "node:path";
-import { readFileSync } from "node:fs";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
+import { closeSync, openSync, readFileSync, readSync, realpathSync } from "node:fs";
 import { extractAgentInvocation, normalizeCliArgs, stripProxyProfileArgs } from "../cli-args.js";
 import type { ProviderId } from "../providers/types.js";
+import { parseWindowsCommandLine, readWindowsProcess } from "./windows-process.js";
 
 export interface ManagedSessionProcessIdentity {
   id: string;
@@ -14,19 +15,55 @@ export interface ManagedSessionProcessIdentity {
 
 function findEntryIndex(argv: readonly string[], name: string): number {
   return argv.findIndex((arg) => {
-    const file = basename(arg);
+    const file = basename(arg.replaceAll("\\", "/"));
     return file === name || file === `${name}.js` || file === `${name}.ts`;
   });
 }
 
-function findDevAnywhereEntryIndex(argv: readonly string[]): number {
-  return argv.findIndex((arg) => {
-    const file = basename(arg);
-    if (file === "dev-anywhere") return true;
-    if (file !== "index.js" && file !== "index.ts") return false;
-    const pathSegments = arg.replaceAll("\\", "/").split("/");
-    return pathSegments.includes("dev-anywhere") || pathSegments.includes("@dev-anywhere");
-  });
+function canonicalEntryPath(path: string): string | null {
+  try {
+    const resolved = realpathSync(path);
+    return process.platform === "win32" ? resolved.toLowerCase() : resolved;
+  } catch {
+    return null;
+  }
+}
+
+function isDevAnywhereCliEntry(path: string): boolean {
+  if (!isAbsolute(path)) return false;
+  const entry = canonicalEntryPath(path);
+  if (entry === null) return false;
+  // Identify the entry's own package, not this daemon's installation path. A live terminal can
+  // belong to another checkout or a package-manager store retained across an update.
+  let directory = dirname(entry);
+  for (let depth = 0; depth < 8; depth += 1) {
+    let fd: number | undefined;
+    try {
+      fd = openSync(join(directory, "package.json"), "r");
+      const buffer = Buffer.alloc(65_537);
+      const bytes = readSync(fd, buffer, 0, buffer.length, 0);
+      if (bytes > 65_536) return false;
+      const manifest = JSON.parse(buffer.subarray(0, bytes).toString("utf8")) as {
+        name?: unknown;
+        bin?: { "dev-anywhere"?: unknown };
+      } | null;
+      if (manifest?.name !== "@dev-anywhere/proxy") return false;
+      const bin = manifest.bin?.["dev-anywhere"];
+      if (typeof bin !== "string") return false;
+      return (
+        entry === canonicalEntryPath(resolve(directory, bin)) ||
+        entry === canonicalEntryPath(join(directory, "src", "index.ts"))
+      );
+    } catch (error) {
+      if (fd !== undefined || (error as NodeJS.ErrnoException).code !== "ENOENT") return false;
+    } finally {
+      if (fd !== undefined) closeSync(fd);
+    }
+    const parent = dirname(directory);
+    if (parent === directory) break;
+    directory = parent;
+  }
+  return false;
 }
 
 function readOption(args: readonly string[], name: string): string | null {
@@ -92,7 +129,7 @@ export function processArgvMatchesManagedSession(
   // A terminal started from the local CLI learns its session id only after it is running, so the
   // id cannot be present in argv. Parse the actual DEV Anywhere invocation and require its command
   // to be the recorded provider; a provider name elsewhere in argv is not process identity.
-  const entryIndex = findDevAnywhereEntryIndex(argv);
+  const entryIndex = argv.findIndex(isDevAnywhereCliEntry);
   if (entryIndex < 0 || identity.provider === undefined) return false;
   try {
     const invocation = extractAgentInvocation(
@@ -146,6 +183,11 @@ function parsePosixCommandLine(command: string): string[] | null {
 
 export function readProcessArgv(pid: number): string[] | null {
   if (!Number.isSafeInteger(pid) || pid <= 0) return null;
+
+  if (process.platform === "win32") {
+    const record = readWindowsProcess(pid);
+    return record?.commandLine ? parseWindowsCommandLine(record.commandLine) : null;
+  }
 
   if (process.platform === "linux") {
     try {

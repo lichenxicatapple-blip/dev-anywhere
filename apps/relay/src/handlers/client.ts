@@ -5,6 +5,8 @@ import {
   RELAY_CONTROL_PROTOCOL_VERSION,
   RelayCloseCode,
   RelayErrorCode,
+  RelayProtocolRejectReason,
+  type RelayProtocolRejectReasonType,
   RELAY_JSON_MESSAGE_MAX_BYTES,
   serializeControl,
   type ControlErrorCodeType,
@@ -30,10 +32,15 @@ import {
 } from "../web-preview-route-registry.js";
 import type { DevicePreviewBridge } from "../device-preview-bridge.js";
 import { isDevicePreviewRequestMessage } from "../device-preview-route-registry.js";
+import {
+  classifyClientRegistrationProtocol,
+  inspectClientRegistrationAdmission,
+} from "../client-registration-admission.js";
 
 // 扩展 WebSocket 实例存储客户端元数据
 interface ClientSocket extends WebSocket {
   isAlive: boolean;
+  admissionPhase: "awaiting" | "ready" | "rejected";
   clientId?: string;
   boundProxyId?: string;
   bindingId?: string;
@@ -55,14 +62,10 @@ interface ClientRegisterInfo {
   deviceKind: "desktop" | "tablet" | "phone" | "unknown";
 }
 
-function isMalformedClientRegister(raw: string): boolean {
-  try {
-    const parsed = JSON.parse(raw) as { type?: unknown } | null;
-    return parsed !== null && typeof parsed === "object" && parsed.type === "client_register";
-  } catch {
-    return false;
-  }
-}
+const DEFAULT_CLIENT_ADMISSION_TIMEOUT_MS = 10_000;
+// 1013 (Try Again Later) deliberately remains outside the permanent protocol-rejection codes.
+// A client which merely failed to finish registration in time should use its ordinary backoff.
+const RETRYABLE_CLIENT_ADMISSION_TIMEOUT_CLOSE_CODE = 1013;
 
 // 处理 client_register 消息：三种状态 restored / proxy_offline / new。
 // relay 不缓存输出；恢复由 proxy 重新推送 session_list/agent_status/snapshot 等状态。
@@ -508,8 +511,51 @@ function validatePreviewScope(
   return false;
 }
 
-function closeRejectedClientProtocol(ws: ClientSocket): void {
-  ws.close(RelayCloseCode.CLIENT_PROTOCOL_REJECTED, "client protocol rejected");
+function closeRejectedClientProtocol(
+  ws: ClientSocket,
+  reason: RelayProtocolRejectReasonType = RelayProtocolRejectReason.PROTOCOL_MISMATCH,
+): void {
+  if (!beginClientRejection(ws)) return;
+  ws.close(RelayCloseCode.CLIENT_PROTOCOL_REJECTED, reason);
+}
+
+function beginClientRejection(ws: ClientSocket): boolean {
+  if (ws.admissionPhase === "rejected") return false;
+  ws.admissionPhase = "rejected";
+  return ws.readyState !== WebSocket.CLOSING && ws.readyState !== WebSocket.CLOSED;
+}
+
+function closeUnversionedClientProtocol(ws: ClientSocket): void {
+  // 4401 is the permanent-disconnect signal understood by clients from before the versioned
+  // registration handshake. Sending it here is an admission-level tombstone only: the Relay does
+  // not accept or translate the obsolete business protocol.
+  if (!beginClientRejection(ws)) return;
+  ws.send(
+    JSON.stringify({
+      type: "relay_client_kicked",
+      reason: "页面版本已更新，请刷新",
+    }),
+  );
+  ws.close(RelayCloseCode.CLIENT_KICKED, "client refresh required");
+}
+
+function rejectVersionedClientProtocol(
+  ws: ClientSocket,
+  clientProtocolVersion: unknown,
+  reason: RelayProtocolRejectReasonType,
+  clientId: string | undefined,
+  logger: Logger,
+): void {
+  logger.warn(
+    {
+      ...(clientId !== undefined ? { clientId } : {}),
+      clientProtocolVersion,
+      relayProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      reason,
+    },
+    "Client control protocol rejected at admission",
+  );
+  closeRejectedClientProtocol(ws, reason);
 }
 
 function rejectProxySelect(ws: ClientSocket, requestId: string | undefined, proxyId: string): void {
@@ -598,16 +644,40 @@ export function handleClientConnection(
   voiceProviders?: VoiceProviderRegistry,
   remoteFileBridge?: RemoteFileBridge,
   connectionInfo: ClientConnectionInfo = {},
+  clientAdmissionTimeoutMs = DEFAULT_CLIENT_ADMISSION_TIMEOUT_MS,
 ): void {
   const clientWs = ws as ClientSocket;
   clientWs.isAlive = true;
+  clientWs.admissionPhase = "awaiting";
   registry.addClientWs(clientWs, connectionInfo);
+
+  const effectiveAdmissionTimeoutMs =
+    Number.isSafeInteger(clientAdmissionTimeoutMs) && clientAdmissionTimeoutMs > 0
+      ? clientAdmissionTimeoutMs
+      : DEFAULT_CLIENT_ADMISSION_TIMEOUT_MS;
+  let admissionTimeout: ReturnType<typeof setTimeout> | null = setTimeout(() => {
+    admissionTimeout = null;
+    if (clientWs.admissionPhase !== "awaiting" || clientWs.readyState !== WebSocket.OPEN) return;
+    if (!beginClientRejection(clientWs)) return;
+    logger.warn(
+      { timeoutMs: effectiveAdmissionTimeoutMs, remoteAddress: connectionInfo.remoteAddress },
+      "Client registration timed out",
+    );
+    clientWs.close(RETRYABLE_CLIENT_ADMISSION_TIMEOUT_CLOSE_CODE, "client registration timeout");
+  }, effectiveAdmissionTimeoutMs);
+  admissionTimeout.unref?.();
+  const clearAdmissionTimeout = (): void => {
+    if (!admissionTimeout) return;
+    clearTimeout(admissionTimeout);
+    admissionTimeout = null;
+  };
 
   clientWs.on("pong", () => {
     clientWs.isAlive = true;
   });
 
   clientWs.on("message", (data: Buffer, isBinary: boolean) => {
+    if (clientWs.admissionPhase === "rejected") return;
     // Clients only send JSON control/envelope messages; binary frames from clients are ignored.
     if (isBinary) {
       if (!clientWs.clientId) closeRejectedClientProtocol(clientWs);
@@ -624,6 +694,35 @@ export function handleClientConnection(
     }
 
     const raw = data.toString();
+    const registrationAdmission = inspectClientRegistrationAdmission(raw);
+    if (registrationAdmission.kind === "unversioned_client_registration") {
+      logger.warn(
+        {
+          ...(registrationAdmission.clientId !== undefined
+            ? { clientId: registrationAdmission.clientId }
+            : {}),
+        },
+        "Unversioned client registration rejected",
+      );
+      closeUnversionedClientProtocol(clientWs);
+      return;
+    }
+    if (registrationAdmission.kind === "versioned_client_registration") {
+      const registrationProtocolIssue = classifyClientRegistrationProtocol(
+        registrationAdmission.protocolVersion,
+      );
+      if (registrationProtocolIssue) {
+        rejectVersionedClientProtocol(
+          clientWs,
+          registrationAdmission.protocolVersion,
+          registrationProtocolIssue,
+          registrationAdmission.clientId,
+          logger,
+        );
+        return;
+      }
+    }
+
     const result = parseMessage(raw);
 
     if (result.kind === "control") {
@@ -642,6 +741,8 @@ export function handleClientConnection(
           webPreviewRoutes,
           devicePreviewBridge,
         );
+        clientWs.admissionPhase = "ready";
+        clearAdmissionTimeout();
         return;
       }
 
@@ -1217,7 +1318,16 @@ export function handleClientConnection(
       return;
     }
 
-    logger.error({ error: result.error, raw: raw.slice(0, 200) }, "Invalid message from client");
+    const isRegistrationAttempt = registrationAdmission.kind !== "not_client_registration";
+    const logContext = {
+      error: result.error,
+      raw: raw.slice(0, 200),
+      ...(registrationAdmission.kind !== "not_client_registration" &&
+      registrationAdmission.clientId !== undefined
+        ? { clientId: registrationAdmission.clientId }
+        : {}),
+    };
+    logger.error(logContext, "Invalid message from client");
     clientWs.send(
       JSON.stringify({
         type: "relay_error",
@@ -1225,12 +1335,14 @@ export function handleClientConnection(
         message: `${result.error} | raw: ${raw.slice(0, 200)}`,
       }),
     );
-    if (isMalformedClientRegister(raw) || !clientWs.clientId) {
+    if (isRegistrationAttempt || !clientWs.clientId) {
       closeRejectedClientProtocol(clientWs);
     }
   });
 
   clientWs.on("close", (code: number, reason: Buffer) => {
+    clearAdmissionTimeout();
+    clientWs.admissionPhase = "rejected";
     ptySnapshotRoutes.abandonSocket(clientWs);
     sessionHistoryRoutes.abandonSocket(clientWs);
     webPreviewRoutes.abandonSocket(clientWs);

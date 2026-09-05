@@ -26,11 +26,12 @@ export function readSessionRuntimeIpcVersions(path: string): SessionRuntimeIpcVe
   }
 }
 
-export function sessionRuntimeIpcVersionsMatch(
+export function sessionRuntimeIpcVersionMatches(
   actual: SessionRuntimeIpcVersions | null,
   expected: SessionRuntimeIpcVersions,
+  kind: keyof SessionRuntimeIpcVersions,
 ): boolean {
-  return actual?.terminal === expected.terminal && actual.worker === expected.worker;
+  return actual?.[kind] === expected[kind];
 }
 
 export function writeSessionRuntimeIpcVersions(

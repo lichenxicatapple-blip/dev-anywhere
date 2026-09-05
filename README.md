@@ -38,6 +38,8 @@ DEV Anywhere 直接围绕远程 coding agent 工作流设计。除了查看 codi
 
 ### 前置条件
 
+开发机支持 macOS、Linux 和原生 Windows 11；Windows 无需安装 WSL。
+
 在开发机上安装 [Node.js 20 或更高版本](https://nodejs.org/zh-cn/download)，npm 会随 Node.js 一起安装。可以用以下命令确认环境：
 
 ```bash
@@ -98,7 +100,7 @@ VPS 是 Virtual Private Server 的缩写，通常就是一台可以通过公网�
 dev-anywhere init
 ```
 
-编辑 `~/.dev-anywhere/config.json`，填入 Relay 地址和部署脚本输出的 `RELAY_PROXY_TOKEN`：
+编辑 `~/.dev-anywhere/config.json`（Windows 为 `%USERPROFILE%\.dev-anywhere\config.json`），填入 Relay 地址和部署脚本输出的 `RELAY_PROXY_TOKEN`：
 
 ```json
 {
@@ -131,6 +133,17 @@ dev-anywhere serve status
 打开部署脚本输出的 Web 地址，首次访问时在“设置 → Relay Token”中填写 `RELAY_CLIENT_TOKEN`。
 
 部署、升级和排障步骤见 [VPS 部署指南](./docs/DEPLOYMENT.md)。
+
+#### 可选：登录后自动启动
+
+配置好 Relay 后，可以让开发机在登录系统后自动连接：
+
+```bash
+dev-anywhere serve autostart enable
+dev-anywhere serve autostart status
+```
+
+使用 `dev-anywhere serve autostart disable` 取消。开启或取消只影响之后的登录，不会启动、重启或停止当前 Proxy。支持 macOS、提供 systemd 用户服务的 Linux，以及 Windows 当前用户。
 
 ### 3. 启动或接管会话
 
@@ -177,6 +190,12 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
+从此前版本首次升级到 0.9.2，需要进行一次手动更新。先在每台开发机上使用升级前的 CLI 停止 Proxy，再继续以下升级步骤：
+
+```bash
+dev-anywhere serve stop
+```
+
 进入 DEV Anywhere 项目目录，运行以下命令升级 Relay：
 
 ```bash
@@ -188,11 +207,11 @@ bash scripts/deploy/install-relay.sh \
 
 最后一个参数应与首次部署时保持一致：使用域名部署就继续传域名，使用公网 IP 部署就传公网 IP。部署脚本会复用 VPS 上已有的 Token。
 
-DEV Anywhere 0.9.0 不兼容此前版本。Relay 更新后，请在每台开发机上手动更新并重启 DEV Anywhere：
+Relay 更新后，在每台开发机上安装并启动 0.9.2：
 
 ```bash
-npm install -g @dev-anywhere/proxy@0.9.0
-dev-anywhere serve restart --relay cloud
+npm install -g @dev-anywhere/proxy@0.9.2
+dev-anywhere serve start --relay cloud
 ```
 
 全部开发机更新完成后，刷新浏览器，并重新启动升级前仍在运行的会话。

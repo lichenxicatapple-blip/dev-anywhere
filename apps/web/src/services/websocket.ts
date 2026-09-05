@@ -1,7 +1,13 @@
 // WebSocket 连接管理器，使用原生 WebSocket，支持文本和二进制消息分发，指数退避重连
 
-import { decodeBinaryFrame, RelayCloseCode } from "@dev-anywhere/shared";
+import {
+  decodeBinaryFrame,
+  RelayCloseCode,
+  RelayProtocolRejectReason,
+  type RelayProtocolRejectReasonType,
+} from "@dev-anywhere/shared";
 import { describeCurrentClientDevice } from "@/lib/client-device";
+import { isRelayProtocolIssue } from "@/lib/relay-protocol-admission";
 
 type SendOptions = {
   queueWhenDisconnected?: boolean;
@@ -20,6 +26,10 @@ const FOREGROUND_CONNECTION_IDLE_MS = 15_000;
 // 浏览器 WebSocket API 不暴露协议层 ping。复用 Relay 的应用层 ping/pong，在这个窗口内
 // 能收到任意入站帧就保留原连接；只有完全静默才承担完整换链与状态重建的成本。
 const CONNECTION_PROBE_TIMEOUT_MS = 2_000;
+// A TCP/WebSocket upgrade is not enough to use the connection. Bound the whole physical
+// connection attempt, including a socket stuck in CONNECTING and an OPEN socket whose Relay never
+// answers client_register. Expiry is a transient failure and therefore enters the normal backoff.
+const CONNECTION_READY_TIMEOUT_MS = 10_000;
 
 interface WebSocketManagerOptions {
   probeConnectionAfterBackground?: boolean;
@@ -27,7 +37,10 @@ interface WebSocketManagerOptions {
 
 export interface WebSocketStatusDetails {
   willReconnect: boolean;
+  transportOpen?: boolean;
+  protocolReady?: boolean;
   closeCode?: number;
+  disconnectReason?: RelayProtocolRejectReasonType;
 }
 
 interface ConnectionProbe {
@@ -39,10 +52,13 @@ interface ConnectionProbe {
 export class WebSocketManager {
   private ws: WebSocket | null = null;
   private url = "";
-  private connected = false;
+  private transportOpen = false;
+  private protocolReady = false;
   private closed = false;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
+  private readyTimeoutTimer: ReturnType<typeof setTimeout> | null = null;
   private reconnectAttempt = 0;
+  private admissionSent = false;
   private messageHandlers = new Set<(data: string) => void>();
   private binarySubscribers = new Map<string, Set<(data: Uint8Array, outputSeq: number) => void>>();
   private statusHandlers = new Set<
@@ -144,7 +160,12 @@ export class WebSocketManager {
   private runForegroundWatchdog(): void {
     if (!this.canRunForegroundWatchdog()) return;
     const socket = this.ws;
-    if (!socket || !this.connected || socket.readyState !== WebSocket.OPEN) {
+    if (
+      !socket ||
+      !this.transportOpen ||
+      !this.protocolReady ||
+      socket.readyState !== WebSocket.OPEN
+    ) {
       // Includes a CONNECTING attempt that never completes after a mobile route transition.
       this.wakeReconnect(true);
       return;
@@ -161,7 +182,12 @@ export class WebSocketManager {
   private probeConnection(): void {
     if (this.closed) return;
     const socket = this.ws;
-    if (!this.connected || !socket || socket.readyState !== WebSocket.OPEN) {
+    if (
+      !this.transportOpen ||
+      !this.protocolReady ||
+      !socket ||
+      socket.readyState !== WebSocket.OPEN
+    ) {
       // 没有可验证的 OPEN 连接。长后台可能冻结了 CONNECTING 尝试，直接换链恢复。
       this.wakeReconnect(true);
       return;
@@ -222,18 +248,58 @@ export class WebSocketManager {
     }
   }
 
+  private cancelReadyTimeout(): void {
+    if (!this.readyTimeoutTimer) return;
+    clearTimeout(this.readyTimeoutTimer);
+    this.readyTimeoutTimer = null;
+  }
+
+  private armReadyTimeout(socket: WebSocket): void {
+    this.cancelReadyTimeout();
+    this.readyTimeoutTimer = setTimeout(() => {
+      this.readyTimeoutTimer = null;
+      if (this.closed || this.ws !== socket || this.protocolReady) return;
+
+      this.cancelConnectionProbe(socket);
+      this.cancelForegroundWatchdog();
+      // Retire the timed-out socket before close so its eventual close event is stale and cannot
+      // create a second reconnect timer.
+      this.ws = null;
+      this.transportOpen = false;
+      this.protocolReady = false;
+      this.admissionSent = false;
+      try {
+        socket.close();
+      } catch {
+        // Local state is already detached; the retry below does not depend on a close event.
+      }
+      this.statusHandlers.forEach((handler) =>
+        handler(false, {
+          willReconnect: true,
+          transportOpen: false,
+          protocolReady: false,
+        }),
+      );
+      // CONNECTING attempts have no earlier status event. OPEN attempts did, but both states must
+      // consume exactly one backoff step after failing to become protocol-ready.
+      this.scheduleReconnect();
+    }, CONNECTION_READY_TIMEOUT_MS);
+  }
+
   connect(url: string): void {
     this.cancelConnectionProbe();
     this.cancelForegroundWatchdog();
+    this.cancelReadyTimeout();
     if (this.ws) {
       this.ws.close();
       this.ws = null;
     }
     this.cancelReconnectTimer();
-    this.connected = false;
+    this.transportOpen = false;
+    this.protocolReady = false;
+    this.admissionSent = false;
     this.url = url;
     this.closed = false;
-    this.reconnectAttempt = 0;
     this.attachWakeListeners();
     this.doConnect();
   }
@@ -262,24 +328,31 @@ export class WebSocketManager {
   }
 
   private wakeReconnect(force = false): void {
-    if (this.closed || (!force && this.connected)) return;
+    if (this.closed || (!force && this.transportOpen)) return;
     // 老 ws 还在 CONNECTING: 不打断它, 浏览器会输出 "WebSocket is closed before
     // the connection is established" 警告且新建一份会跟它 race, stale 事件互相
     // 覆盖 this.ws 直到出 InvalidStateError CONNECTING。等它自己 OPEN 或 close。
     if (!force && this.ws && this.ws.readyState === WebSocket.CONNECTING) return;
     this.cancelConnectionProbe();
     this.cancelForegroundWatchdog();
-    // 锁屏期间的失败次数不应该惩罚恢复后的第一次重连
-    this.reconnectAttempt = 0;
+    this.cancelReadyTimeout();
     this.cancelReconnectTimer();
     // 老 ws 可能处于 half-open（TCP 半死），显式 close 再立即重连
     const previousWs = this.ws;
-    const wasConnected = this.connected;
+    const wasTransportOpen = this.transportOpen;
     // 先摘掉 active 引用，previousWs.close() 同步/异步触发的 close 都会被 stale guard 忽略。
     this.ws = null;
-    this.connected = false;
-    if (wasConnected) {
-      this.statusHandlers.forEach((handler) => handler(false, { willReconnect: true }));
+    this.transportOpen = false;
+    this.protocolReady = false;
+    this.admissionSent = false;
+    if (wasTransportOpen) {
+      this.statusHandlers.forEach((handler) =>
+        handler(false, {
+          willReconnect: true,
+          transportOpen: false,
+          protocolReady: false,
+        }),
+      );
     }
     if (previousWs) {
       try {
@@ -292,12 +365,8 @@ export class WebSocketManager {
   }
 
   send(data: string, options: SendOptions = {}): boolean {
-    if (!this.ws) {
-      console.warn("WebSocket send dropped: no socket");
-      return false;
-    }
-    if (!this.connected) {
-      if (options.queueWhenDisconnected) {
+    if (!this.protocolReady) {
+      if (options.queueWhenDisconnected && !this.closed) {
         if (this.pendingQueue.length >= MAX_PENDING_QUEUE_SIZE) {
           const dropped = this.pendingQueue.shift();
           console.warn(
@@ -307,8 +376,33 @@ export class WebSocketManager {
         }
         this.pendingQueue.push(data);
       }
+      if (!this.ws && !options.queueWhenDisconnected) {
+        console.warn("WebSocket send dropped: no socket");
+      }
       return false;
     }
+    if (!this.ws) {
+      console.warn("WebSocket send dropped: no socket");
+      return false;
+    }
+    this.doSend(data);
+    return true;
+  }
+
+  // The registration frame is the only application message allowed between the raw WebSocket
+  // open and Relay admission. All ordinary traffic remains queued or rejected until the matching
+  // client_register_response marks this transport ready.
+  sendAdmission(data: string): boolean {
+    if (
+      !this.ws ||
+      !this.transportOpen ||
+      this.protocolReady ||
+      this.admissionSent ||
+      this.ws.readyState !== WebSocket.OPEN
+    ) {
+      return false;
+    }
+    this.admissionSent = true;
     this.doSend(data);
     return true;
   }
@@ -317,10 +411,14 @@ export class WebSocketManager {
     this.closed = true;
     this.cancelConnectionProbe();
     this.cancelForegroundWatchdog();
+    this.cancelReadyTimeout();
     this.cancelReconnectTimer();
     this.ws?.close();
     this.ws = null;
-    this.connected = false;
+    this.transportOpen = false;
+    this.protocolReady = false;
+    this.admissionSent = false;
+    this.pendingQueue.length = 0;
     this.backgroundedAt = null;
     this.detachWakeListeners();
   }
@@ -338,7 +436,67 @@ export class WebSocketManager {
   }
 
   isConnected(): boolean {
-    return this.connected;
+    return this.protocolReady;
+  }
+
+  // A raw WebSocket open only proves that the HTTP upgrade succeeded. Keep the reconnect attempt
+  // budget until the versioned Relay registration handshake has completed, otherwise a server
+  // which rejects after `open` traps the client in the first (sub-second) retry bucket forever.
+  markProtocolReady(): void {
+    if (
+      !this.transportOpen ||
+      this.protocolReady ||
+      !this.ws ||
+      this.ws.readyState !== WebSocket.OPEN
+    ) {
+      return;
+    }
+    this.protocolReady = true;
+    this.reconnectAttempt = 0;
+    this.cancelReadyTimeout();
+    this.statusHandlers.forEach((handler) =>
+      handler(true, {
+        willReconnect: false,
+        transportOpen: true,
+        protocolReady: true,
+      }),
+    );
+    this.flushPendingQueue();
+  }
+
+  failPermanently(reason: RelayProtocolRejectReasonType): void {
+    if (this.closed && !this.ws && !this.transportOpen) return;
+    this.closed = true;
+    this.cancelConnectionProbe();
+    this.cancelForegroundWatchdog();
+    this.cancelReadyTimeout();
+    this.cancelReconnectTimer();
+    this.backgroundedAt = null;
+    this.detachWakeListeners();
+    this.pendingQueue.length = 0;
+
+    const socket = this.ws;
+    const shouldNotify = socket !== null || this.transportOpen;
+    this.ws = null;
+    this.transportOpen = false;
+    this.protocolReady = false;
+    this.admissionSent = false;
+    try {
+      socket?.close(RelayCloseCode.CLIENT_PROTOCOL_REJECTED, reason);
+    } catch {
+      // The local state is already terminal even if the browser cannot finish the close handshake.
+    }
+    if (shouldNotify) {
+      this.statusHandlers.forEach((handler) =>
+        handler(false, {
+          willReconnect: false,
+          transportOpen: false,
+          protocolReady: false,
+          closeCode: RelayCloseCode.CLIENT_PROTOCOL_REJECTED,
+          disconnectReason: reason,
+        }),
+      );
+    }
   }
 
   subscribeBinary(
@@ -363,27 +521,37 @@ export class WebSocketManager {
     const ws = new WebSocket(this.url);
     ws.binaryType = "arraybuffer";
     this.ws = ws;
+    this.transportOpen = false;
+    this.protocolReady = false;
+    this.admissionSent = false;
+    this.armReadyTimeout(ws);
     // Also bounds a CONNECTING socket which never produces open/close after a route change.
     this.armForegroundWatchdog();
 
     // wakeReconnect / connect() 重新建链时, 老 ws 的 close / open 事件可能在新 ws
     // 已替换 this.ws 之后才异步 fire (尤其老 ws 是 CONNECTING 被 close 时)。所有
-    // listener 都用 ws !== this.ws 早返, 避免 stale 事件污染 this.connected /
+    // listener 都用 ws !== this.ws 早返, 避免 stale 事件污染 transport/admission 状态 /
     // this.ws / 触发额外 reconnect 导致多 ws 互相覆盖, 最终 status handler 拿到
     // 错位的 connected 状态调 send 撞上 CONNECTING ws → InvalidStateError。
     ws.addEventListener("open", () => {
       if (this.ws !== ws) return;
-      this.connected = true;
-      this.reconnectAttempt = 0;
+      this.transportOpen = true;
+      this.protocolReady = false;
       this.lastInboundAt = Date.now();
       this.armForegroundWatchdog();
-      this.statusHandlers.forEach((h) => h(true, { willReconnect: false }));
-      this.flushPendingQueue();
+      this.statusHandlers.forEach((handler) =>
+        handler(false, {
+          willReconnect: false,
+          transportOpen: true,
+          protocolReady: false,
+        }),
+      );
     });
 
     ws.addEventListener("message", (event) => {
       if (this.ws !== ws) return;
       if (event.data instanceof ArrayBuffer) {
+        if (!this.protocolReady) return;
         this.noteInbound(ws);
         this.dispatchBinary(new Uint8Array(event.data));
       } else {
@@ -399,18 +567,35 @@ export class WebSocketManager {
       if (this.ws !== ws) return;
       this.cancelConnectionProbe(ws);
       this.cancelForegroundWatchdog();
+      this.cancelReadyTimeout();
       if (
         event.code === RelayCloseCode.CLIENT_KICKED ||
         event.code === RelayCloseCode.CLIENT_PROTOCOL_REJECTED
       ) {
         this.closed = true;
         this.cancelReconnectTimer();
+        this.detachWakeListeners();
+        this.pendingQueue.length = 0;
       }
-      this.connected = false;
+      this.transportOpen = false;
+      this.protocolReady = false;
+      this.admissionSent = false;
       this.ws = null;
       const willReconnect = !this.closed;
+      const protocolRejectReason =
+        event.code === RelayCloseCode.CLIENT_PROTOCOL_REJECTED
+          ? isRelayProtocolIssue(event.reason)
+            ? event.reason
+            : RelayProtocolRejectReason.PROTOCOL_MISMATCH
+          : undefined;
       this.statusHandlers.forEach((h) =>
-        h(false, { willReconnect, ...(event.code ? { closeCode: event.code } : {}) }),
+        h(false, {
+          willReconnect,
+          transportOpen: false,
+          protocolReady: false,
+          ...(event.code ? { closeCode: event.code } : {}),
+          ...(protocolRejectReason ? { disconnectReason: protocolRejectReason } : {}),
+        }),
       );
       if (willReconnect) this.scheduleReconnect();
     });
@@ -421,12 +606,14 @@ export class WebSocketManager {
   }
 
   private scheduleReconnect(): void {
+    if (this.closed || this.reconnectTimer) return;
     // Full Jitter 指数退避，和 proxy 侧一致：避免多 client 同步重连打崩 relay
     const cap = Math.min(1000 * Math.pow(2, this.reconnectAttempt), 30000);
     const delay = Math.random() * cap;
     this.reconnectAttempt++;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
+      if (this.closed) return;
       this.doConnect();
     }, delay);
   }

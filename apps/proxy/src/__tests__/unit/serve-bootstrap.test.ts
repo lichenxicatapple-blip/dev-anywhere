@@ -52,4 +52,13 @@ describe("terminal IPC response waiter", () => {
     await expect(response).rejects.toThrow("Timeout waiting for session_create_response");
     expect(socket.destroyed).toBe(true);
   });
+
+  it("rejects immediately when the socket closes during a response handshake", async () => {
+    const socket = new PassThrough() as unknown as Socket;
+    const response = waitForMessage(socket, "session_create_response", 10_000);
+
+    socket.destroy();
+
+    await expect(response).rejects.toThrow("Socket closed waiting for session_create_response");
+  });
 });

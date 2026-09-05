@@ -1,5 +1,6 @@
 import { flushLogger, type Logger } from "@dev-anywhere/shared/logger";
 import { unlinkIfPresent } from "../common/safe-unlink.js";
+import { removeLocalIpcEndpoint } from "../common/local-ipc-endpoint.js";
 
 // 收尾步骤里依赖的所有外部资源都通过 deps 注入；shutdown 函数本身只负责正确顺序与
 // 单次执行守卫，便于以纯单元测试的方式覆盖双信号场景而不必拉起整个 service。
@@ -15,9 +16,11 @@ export interface ServeShutdownDeps {
   relayConnectionClose: () => void;
   workerRegistryDestroyAll: () => void;
   hostedPtyRegistryDestroyAll: () => void;
+  terminalAdmissionDestroyAll?: () => void;
   ipcServerClose: () => void;
   sockPath: string;
   pidPath: string;
+  runtimeStateCleanup?: () => void;
   exit?: (code: number) => void;
 }
 
@@ -46,9 +49,13 @@ export function createServeShutdown(deps: ServeShutdownDeps): () => Promise<void
     deps.relayConnectionClose();
     deps.workerRegistryDestroyAll();
     deps.hostedPtyRegistryDestroyAll();
+    deps.terminalAdmissionDestroyAll?.();
     deps.ipcServerClose();
-    unlinkIfPresent(deps.sockPath);
-    unlinkIfPresent(deps.pidPath);
+    if (deps.runtimeStateCleanup) deps.runtimeStateCleanup();
+    else {
+      removeLocalIpcEndpoint(deps.sockPath);
+      unlinkIfPresent(deps.pidPath);
+    }
     await flushLogger(deps.logger);
     exit(0);
   };

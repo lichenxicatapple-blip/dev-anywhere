@@ -23,6 +23,7 @@ export interface ProviderHookContext {
 }
 
 export interface ProviderJsonOptions {
+  readonly cwd?: string;
   readonly extraArgs?: string[];
   readonly permissionMode?: string;
   readonly resumeSessionId?: string;
@@ -31,6 +32,7 @@ export interface ProviderJsonOptions {
 }
 
 export interface ProviderTerminalOptions {
+  readonly cwd?: string;
   readonly args: string[];
   readonly permissionMode?: string;
   readonly hook?: ProviderHookContext;

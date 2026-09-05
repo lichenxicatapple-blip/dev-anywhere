@@ -387,8 +387,11 @@ export class RelayRegistry {
 
   getAllClientWs(): WebSocket[] {
     const clients: WebSocket[] = [];
-    for (const ws of this.connectedClients.keys()) {
-      if (ws.readyState === WebSocket.OPEN) {
+    for (const [ws, metadata] of this.connectedClients) {
+      // Raw /client sockets are tracked immediately so they can be inspected and cleaned up, but
+      // they must not receive business broadcasts before client_register has completed. The
+      // registration response is the admission boundary observed by Web clients.
+      if (metadata.clientId && ws.readyState === WebSocket.OPEN) {
         clients.push(ws);
       }
     }

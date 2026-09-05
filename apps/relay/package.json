@@ -43,7 +43,7 @@
     "#src/*": "./src/*"
   },
   "scripts": {
-    "build": "tsup && node scripts/copy-web-assets.mjs && rm -f tsconfig.build.tsbuildinfo && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
+    "build": "tsup && node scripts/copy-web-assets.mjs && node -e \"require('node:fs').rmSync('tsconfig.build.tsbuildinfo', { force: true })\" && tsc -p tsconfig.build.json --emitDeclarationOnly --outDir dist",
     "dev": "tsx src/index.ts",
     "test": "bash ../../scripts/test/vitest.sh",
     "typecheck": "tsc --noEmit",

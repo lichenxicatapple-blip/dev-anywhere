@@ -37,6 +37,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
       contentType: "application/json",
       body: JSON.stringify({
         status: "ok",
+        controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         auth: { clientTokenRequired: false },
       }),
     });

@@ -895,10 +895,17 @@ describe("Relay Server Integration", () => {
   it("GET /health returns 200 with status ok", async () => {
     const res = await fetch(`http://127.0.0.1:${port}/health`);
     expect(res.status).toBe(200);
-    const body = (await res.json()) as { status: string; version: string; uptime: number };
+    const body = (await res.json()) as {
+      status: string;
+      version: string;
+      controlProtocolVersion: number;
+      uptime: number;
+    };
     expect(body.status).toBe("ok");
     expect(body.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(body.controlProtocolVersion).toBe(RELAY_CONTROL_PROTOCOL_VERSION);
     expect(typeof body.uptime).toBe("number");
+    expect(res.headers.get("cache-control")).toBe("no-store");
   });
 
   it("serves bundled font assets when the persistent font volume is empty", async () => {

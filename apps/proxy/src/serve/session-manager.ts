@@ -79,7 +79,7 @@ type PersistedPtySessionRecord = Extract<PersistedSessionRecord, { mode: "pty" }
 
 interface SessionManagerOptions {
   persistPath: string;
-  allowSessionRuntimeHandover: boolean;
+  allowSessionRuntimeHandover: { terminal: boolean; worker: boolean };
   historyMetadataPath?: string;
   reaperIntervalMs?: number;
   localPtyReconnectTimeoutMs?: number;
@@ -201,7 +201,7 @@ export class SessionManager {
   private readonly reaperIntervalMs: number;
   private readonly localPtyReconnectTimeoutMs: number;
   private readonly onSessionRemoved?: (id: string, context?: SessionRemoveContext) => void;
-  private readonly allowSessionRuntimeHandover: boolean;
+  private readonly allowSessionRuntimeHandover: { terminal: boolean; worker: boolean };
   private readonly processAlive: (pid: number) => boolean;
   private readonly managedSessionProcess: (
     pid: number,
@@ -815,7 +815,17 @@ export class SessionManager {
       // this against the raw record before strict field validation: a record from any other
       // generation may be incomplete yet still refer to a live process that would otherwise be
       // orphaned or keep retrying forever.
-      if (!this.allowSessionRuntimeHandover) {
+      const mode =
+        item !== null && typeof item === "object" && !Array.isArray(item)
+          ? (item as { mode?: unknown }).mode
+          : undefined;
+      const allowHandover =
+        mode === "json"
+          ? this.allowSessionRuntimeHandover.worker
+          : mode === "pty"
+            ? this.allowSessionRuntimeHandover.terminal
+            : false;
+      if (!allowHandover) {
         const sessionId =
           item !== null &&
           typeof item === "object" &&

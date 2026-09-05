@@ -1,5 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { PassThrough } from "node:stream";
+import { TERMINAL_IPC_PROTOCOL_VERSION } from "#src/ipc/ipc-protocol.js";
 
 function throwProtocolError(error: Error): never {
   throw error;
@@ -34,7 +35,7 @@ describe("IPC Protocol", () => {
         cwd: "/tmp/test",
         pid: 12345,
         kind: "agent" as const,
-        protocolVersion: 1 as const,
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
       };
       const serialized = serializeIpc(msg);
       const parsed = JSON.parse(serialized.trim());
@@ -84,7 +85,7 @@ describe("IPC Protocol", () => {
         "request",
         {
           type: "session_create_request",
-          protocolVersion: 0,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION - 1,
           kind: "agent",
           mode: "pty",
           provider: "claude",
@@ -94,7 +95,12 @@ describe("IPC Protocol", () => {
       ],
       [
         "response",
-        { type: "session_create_response", success: true, protocolVersion: 0, sessionId: "s1" },
+        {
+          type: "session_create_response",
+          success: true,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION - 1,
+          sessionId: "s1",
+        },
       ],
     ])(
       "rejects a terminal session create %s from another protocol generation",
@@ -113,7 +119,7 @@ describe("IPC Protocol", () => {
         cwd: "/tmp/test",
         pid: 12345,
         kind: "agent",
-        protocolVersion: 1,
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
       });
 
       expect(result.success).toBe(true);
@@ -128,7 +134,7 @@ describe("IPC Protocol", () => {
         cwd: "/tmp/test",
         pid: 12345,
         kind: "agent",
-        protocolVersion: 1,
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
       });
 
       expect(result.success).toBe(true);
@@ -142,7 +148,7 @@ describe("IPC Protocol", () => {
         cwd: "/tmp/test",
         pid: 12345,
         kind: "agent",
-        protocolVersion: 1,
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
       },
       {
         type: "session_create_request",
@@ -151,7 +157,7 @@ describe("IPC Protocol", () => {
         cwd: "/tmp/test",
         pid: 12345,
         kind: "terminal",
-        protocolVersion: 1,
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
       },
     ])("rejects impossible terminal create request combinations", async (message) => {
       const { IpcMessageSchema } = await importIpc();
@@ -301,91 +307,6 @@ describe("IPC Protocol", () => {
       ).toBe(false);
     });
 
-    it("accepts service status responses with relay naming", async () => {
-      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
-      const result = IpcMessageSchema.safeParse({
-        type: "service_status_response",
-        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        config: {
-          profile: "local",
-          version: "0.9.0",
-          autoUpdate: true,
-          relayName: "local",
-          relayNameSource: "profile",
-          relayUrl: "ws://localhost:3100",
-          relayUrlSource: "file",
-          relayTokenSource: "none",
-          hookPort: 17978,
-          hookPortSource: "default",
-        },
-        relay: null,
-        sessions: [],
-      });
-
-      expect(result.success).toBe(true);
-    });
-
-    it("accepts service status responses for env-only profiles", async () => {
-      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
-      const result = IpcMessageSchema.safeParse({
-        type: "service_status_response",
-        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        config: {
-          profile: "quick-tunnel",
-          version: "0.9.0",
-          autoUpdate: true,
-          relayName: "environment",
-          relayNameSource: "env",
-          relayUrl: "ws://127.0.0.1:43100",
-          relayUrlSource: "env",
-          relayTokenSource: "env",
-          hookPort: 17978,
-          hookPortSource: "default",
-        },
-        relay: null,
-        sessions: [],
-      });
-
-      expect(result.success).toBe(true);
-    });
-
-    it("requires the current protocol generation for service status requests and responses", async () => {
-      const { IpcMessageSchema, TERMINAL_IPC_PROTOCOL_VERSION } = await importIpc();
-      const response = {
-        type: "service_status_response",
-        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        config: {
-          version: "0.9.0",
-          autoUpdate: true,
-          relayName: "local",
-          relayNameSource: "profile",
-          relayUrlSource: "none",
-          relayTokenSource: "none",
-          hookPort: 17978,
-          hookPortSource: "default",
-        },
-        relay: null,
-        sessions: [],
-      } as const;
-
-      expect(
-        IpcMessageSchema.safeParse({
-          type: "service_status_request",
-          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        }).success,
-      ).toBe(true);
-      expect(IpcMessageSchema.safeParse(response).success).toBe(true);
-      expect(IpcMessageSchema.safeParse({ type: "service_status_request" }).success).toBe(false);
-      expect(
-        IpcMessageSchema.safeParse({ type: "service_status_request", protocolVersion: 0 }).success,
-      ).toBe(false);
-      const unversionedResponse = Object.fromEntries(
-        Object.entries(response).filter(([key]) => key !== "protocolVersion"),
-      );
-      expect(IpcMessageSchema.safeParse(unversionedResponse).success).toBe(false);
-      expect(IpcMessageSchema.safeParse({ ...response, protocolVersion: 0 }).success).toBe(false);
-    });
-
     it("accepts a structured provider startup error", async () => {
       const { WorkerMessageSchema } = await importIpc();
       expect(
@@ -439,7 +360,7 @@ describe("IPC Protocol", () => {
           cwd: "/tmp/test",
           pid: 12345,
           kind: "agent",
-          protocolVersion: 1,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
         }),
       );
       stream.end();
@@ -459,7 +380,7 @@ describe("IPC Protocol", () => {
         cwd: "/tmp/test",
         pid: 12345,
         kind: "agent",
-        protocolVersion: 1,
+        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
       });
     });
 
@@ -506,7 +427,7 @@ describe("IPC Protocol", () => {
           cwd: "/tmp/test",
           pid: 12345,
           kind: "agent",
-          protocolVersion: 1,
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
         }) + "\n",
       );
       stream.end();

@@ -7,6 +7,7 @@ import {
   TERMINAL_IPC_PROTOCOL_VERSION,
   type IpcMessage,
 } from "../ipc/ipc-protocol.js";
+import type { TerminalAdmissionContext } from "../ipc/terminal-admission.js";
 import type { ProviderHookContext } from "../providers/index.js";
 import type { HookEventRouter } from "./hook-event-router.js";
 import type { HostedPtyRegistry } from "./hosted-pty-registry.js";
@@ -21,13 +22,11 @@ import {
   touchSessionActivity,
 } from "./session-broadcast.js";
 import type { SessionManager } from "./session-manager.js";
-import type { WorkerRegistry } from "./worker-registry.js";
 import { isProcessAlive } from "./service-files.js";
 import type { TerminalSubscriptionBacklog } from "./terminal-subscription-backlog.js";
 
 interface TerminalConnectionDeps {
   sessionManager: SessionManager;
-  workerRegistry: WorkerRegistry;
   terminalSockets: Map<string, Socket>;
   terminalSubscriptionBacklog: TerminalSubscriptionBacklog;
   hostedPtyRegistry: HostedPtyRegistry;
@@ -41,13 +40,15 @@ interface TerminalConnectionDeps {
   emitAgentStatus: (sessionId: string, phase: AgentStatusPayload["phase"]) => void;
   updateTerminalCwd: (sessionId: string, cwd: string) => boolean;
   resolveInterruptedApprovals: (sessionId: string) => void;
-  config: Extract<IpcMessage, { type: "service_status_response" }>["config"];
 }
 
-export function handleTerminalConnection(socket: Socket, deps: TerminalConnectionDeps): void {
+export function handleTerminalConnection(
+  socket: Socket,
+  deps: TerminalConnectionDeps,
+  admission: TerminalAdmissionContext,
+): void {
   const {
     sessionManager,
-    workerRegistry,
     terminalSockets,
     terminalSubscriptionBacklog,
     relayConnection,
@@ -56,7 +57,6 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     emitAgentStatus,
     updateTerminalCwd,
     resolveInterruptedApprovals,
-    config,
   } = deps;
 
   const bridgeDeps: PtySessionBridgeDeps = {
@@ -78,6 +78,7 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
     source: "created" | "active" | "pending";
   } | null = null;
   let registeredSessionId: string | null = null;
+  let admissionIntentChecked = false;
   type LocalPtyClaimResult = ReturnType<SessionManager["claimLocalPtySession"]>;
   const ownsRegisteredSession = (sessionId: string): boolean =>
     registeredSessionId === sessionId && terminalSockets.get(sessionId) === socket;
@@ -102,11 +103,44 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
       }),
     );
   };
+  const matchesAdmissionIntent = (msg: IpcMessage): boolean => {
+    if (msg.type !== "session_create_request") return false;
+    if (admission.clientKind === "terminal-worker") {
+      return (
+        msg.kind === "terminal" &&
+        admission.sessionId !== undefined &&
+        msg.sessionId === admission.sessionId
+      );
+    }
+    return msg.kind === "agent" && msg.sessionId === admission.sessionId;
+  };
+  const rejectAdmissionIntent = (msg: IpcMessage): void => {
+    protocolRejected = true;
+    const error = "Terminal request does not match its admitted connection scope";
+    if (msg.type === "session_create_request") {
+      rejectCreateHandshake(error);
+      return;
+    }
+    socket.end(
+      serializeIpc({
+        type: "error",
+        code: "TERMINAL_ADMISSION_SCOPE_MISMATCH",
+        message: error,
+      }),
+    );
+  };
 
   createIpcReader(
     socket,
     (msg: IpcMessage) => {
       if (protocolRejected) return;
+      if (!admissionIntentChecked) {
+        admissionIntentChecked = true;
+        if (!matchesAdmissionIntent(msg)) {
+          rejectAdmissionIntent(msg);
+          return;
+        }
+      }
       switch (msg.type) {
         case "session_create_request": {
           if (createHandshakeReceived) {
@@ -169,29 +203,6 @@ export function handleTerminalConnection(socket: Socket, deps: TerminalConnectio
             );
             rejectCreateHandshake(error);
           }
-          break;
-        }
-
-        case "service_status_request": {
-          const relayStatus = relayConnection.getStatus();
-          const sessions = sessionManager.listSessions();
-          socket.end(
-            serializeIpc({
-              type: "service_status_response",
-              protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-              config,
-              relay: relayStatus,
-              sessions: sessions.map((s) => ({
-                id: s.id,
-                mode: s.mode,
-                provider: s.provider,
-                state: s.state,
-                createdAt: new Date(s.createdAt).toISOString(),
-                ...(s.name !== undefined ? { name: s.name } : {}),
-                hasWorker: workerRegistry.has(s.id),
-              })),
-            }),
-          );
           break;
         }
 

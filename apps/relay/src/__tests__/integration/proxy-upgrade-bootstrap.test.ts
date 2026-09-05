@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket } from "ws";
-import { RelayCloseCode } from "@dev-anywhere/shared";
+import { RELAY_CONTROL_PROTOCOL_VERSION, RelayCloseCode } from "@dev-anywhere/shared";
 import { createLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer, type RelayServer } from "#src/server.js";
 import { RELAY_VERSION } from "#src/version.js";
@@ -14,7 +14,12 @@ describe("Proxy upgrade bootstrap", () => {
   const connections: WebSocket[] = [];
 
   beforeEach(async () => {
-    relay = createRelayServer({ port: 0, heartbeatInterval: 60_000, logger });
+    relay = createRelayServer({
+      port: 0,
+      heartbeatInterval: 60_000,
+      proxyAdmissionTimeoutMs: 100,
+      logger,
+    });
     await new Promise<void>((resolve) => relay.httpServer.listen(0, "127.0.0.1", resolve));
     port = getPort(relay);
   });
@@ -32,7 +37,7 @@ describe("Proxy upgrade bootstrap", () => {
     return ws;
   }
 
-  it("returns only the Relay version and quarantines an exact 0.8.1 registration", async () => {
+  it("returns only the Relay version and keeps an exact 0.8.1 registration quarantined", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
     const responsePromise = waitForMessage(proxy);
@@ -51,9 +56,45 @@ describe("Proxy upgrade bootstrap", () => {
       status: "new",
       relayVersion: RELAY_VERSION,
     });
-    await new Promise((resolve) => setTimeout(resolve, 25));
+    await new Promise((resolve) => setTimeout(resolve, 250));
     expect(proxy.readyState).toBe(WebSocket.OPEN);
     expect(relay.registry.hasProxy("upgrade-source")).toBe(false);
+  });
+
+  it("closes an unregistered /proxy socket after a retryable admission timeout", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    const closed = new Promise<{ code: number; reason: string }>((resolve) => {
+      proxy.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+    });
+
+    await expect(closed).resolves.toEqual({
+      code: 1013,
+      reason: "proxy registration timeout",
+    });
+    expect(relay.registry.listProxies()).toEqual([]);
+  });
+
+  it("cancels the admission timeout after a current Proxy registers", async () => {
+    const proxy = connectProxy();
+    await waitForOpen(proxy);
+    const responsePromise = waitForMessage(proxy);
+    proxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        proxyId: "admitted-proxy",
+        proxyVersion: RELAY_VERSION,
+      }),
+    );
+
+    expect(JSON.parse(await responsePromise)).toMatchObject({
+      type: "proxy_register_response",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 250));
+    expect(proxy.readyState).toBe(WebSocket.OPEN);
+    expect(relay.registry.getProxy("admitted-proxy")).toBeDefined();
   });
 
   it("drops follow-up traffic without registering or routing the old Proxy", async () => {
@@ -105,21 +146,51 @@ describe("Proxy upgrade bootstrap", () => {
       "current version",
       { type: "proxy_register", proxyId: "current-version", proxyVersion: RELAY_VERSION },
     ],
-  ])("keeps the current protocol rejection for a %s registration", async (_label, registration) => {
+  ])(
+    "rejects a %s registration once without a versioned relay_error",
+    async (_label, registration) => {
+      const proxy = connectProxy();
+      await waitForOpen(proxy);
+      const messages: string[] = [];
+      proxy.on("message", (data) => messages.push(data.toString()));
+      const closePromise = new Promise<{ code: number; reason: string }>((resolve) => {
+        proxy.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
+      });
+
+      proxy.send(JSON.stringify(registration));
+
+      await expect(closePromise).resolves.toEqual({
+        code: RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+        reason: "protocol_mismatch",
+      });
+      expect(messages).toEqual([]);
+      expect(relay.registry.hasProxy(String(registration.proxyId))).toBe(false);
+    },
+  );
+
+  it("tells a newer Proxy that the Relay is outdated without sending business traffic", async () => {
     const proxy = connectProxy();
     await waitForOpen(proxy);
-    const responsePromise = waitForMessage(proxy);
-    const closePromise = new Promise<number>((resolve) => {
-      proxy.once("close", (code) => resolve(code));
+    const messages: string[] = [];
+    proxy.on("message", (data) => messages.push(data.toString()));
+    const closePromise = new Promise<{ code: number; reason: string }>((resolve) => {
+      proxy.once("close", (code, reason) => resolve({ code, reason: reason.toString() }));
     });
 
-    proxy.send(JSON.stringify(registration));
+    proxy.send(
+      JSON.stringify({
+        type: "proxy_register",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION + 1,
+        proxyId: "newer-proxy",
+        proxyVersion: "0.10.0",
+      }),
+    );
 
-    expect(JSON.parse(await responsePromise)).toMatchObject({
-      type: "relay_error",
-      code: "NOT_REGISTERED",
+    await expect(closePromise).resolves.toEqual({
+      code: RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      reason: "relay_outdated",
     });
-    expect(await closePromise).toBe(RelayCloseCode.PROXY_PROTOCOL_REJECTED);
-    expect(relay.registry.hasProxy(String(registration.proxyId))).toBe(false);
+    expect(messages).toEqual([]);
+    expect(relay.registry.hasProxy("newer-proxy")).toBe(false);
   });
 });

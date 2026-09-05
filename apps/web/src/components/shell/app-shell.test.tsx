@@ -196,6 +196,26 @@ describe("AppShell PTY Always yes controller", () => {
     expect(document.querySelector('[data-slot="relay-connection-state"] svg')).toBeNull();
   });
 
+  it("asks the user to refresh when the page is behind the Relay", () => {
+    useAppStore.setState({ connected: false, relayConnectionIssue: "page_outdated" });
+    renderAppShell("/sessions");
+
+    expect(screen.getByText("当前页面版本较旧，请刷新后重试")).toBeVisible();
+    expect(screen.getByRole("button", { name: "刷新页面" })).toBeVisible();
+    expect(document.querySelector('[data-slot="relay-connection-state"] svg')).toBeNull();
+    expect(screen.queryByText(/正在继续尝试|网络恢复后|自动.*(?:返回|恢复)/)).toBeNull();
+  });
+
+  it("explains that the service must update without promising an automatic retry", () => {
+    useAppStore.setState({ connected: false, relayConnectionIssue: "service_outdated" });
+    renderAppShell("/sessions");
+
+    expect(screen.getByText("服务端版本较旧，请更新服务后重试")).toBeVisible();
+    expect(screen.getByRole("button", { name: "重新检测" })).toBeVisible();
+    expect(document.querySelector('[data-slot="relay-connection-state"] svg')).toBeNull();
+    expect(screen.queryByText(/正在继续尝试|网络恢复后|自动.*(?:返回|恢复)/)).toBeNull();
+  });
+
   it.each([
     ["chat", "/chat/s1?mode=pty", "chat-route"],
     ["device preview", "/preview/device/device-1", "device-preview-route"],

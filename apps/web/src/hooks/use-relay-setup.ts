@@ -16,8 +16,9 @@ import { registerResourceDispatcher } from "@/services/resource-dispatcher";
 import { registerPreviewDispatcher } from "@/services/preview-dispatcher";
 import { previewController } from "@/services/preview-controller";
 import { loadFontCSS } from "@/lib/font-assets";
-import { checkRelayClientAuth } from "@/lib/relay-client-auth";
-import type { RelayClientAuthIssue } from "@/lib/relay-client-auth";
+import { checkRelayClientPreflight } from "@/lib/relay-client-auth";
+import type { RelayClientAuthIssue, RelayClientPreflightIssue } from "@/lib/relay-client-auth";
+import { isRelayProtocolIssue, type RelayProtocolIssue } from "@/lib/relay-protocol-admission";
 import {
   createRelayReconnectLoop,
   RelayReconnectAttemptTimeoutError,
@@ -71,6 +72,16 @@ function applyRelayClientAuthIssue(authIssue: RelayClientAuthIssue): void {
   previewController.dispose();
 }
 
+function applyRelayProtocolIssue(issue: RelayProtocolIssue): void {
+  const store = useAppStore.getState();
+  store.setRelayClientAuthIssue(null);
+  store.setRelayConnectionIssue(issue);
+  store.setConnected(false);
+  store.setProxyOnline(false);
+  store.invalidateProxyList();
+  previewController.dispose();
+}
+
 function prepareRelayReconnect(): void {
   const store = useAppStore.getState();
   const hasSelectedProxy = store.selectedProxyId !== null;
@@ -111,9 +122,9 @@ export async function reconnectRelayClient(signal?: AbortSignal): Promise<void> 
   const isCurrent = (): boolean => generation === relayReconnectGeneration;
   const relayUrl = useAppStore.getState().relayUrl || window.location.origin;
   const token = getRelayClientToken();
-  let authIssue: RelayClientAuthIssue | null;
+  let preflightIssue: RelayClientPreflightIssue | null;
   try {
-    authIssue = await checkRelayClientAuth(relayUrl, token, attemptSignal);
+    preflightIssue = await checkRelayClientPreflight(relayUrl, token, attemptSignal);
   } catch (err) {
     if (
       !isCurrent() ||
@@ -145,8 +156,14 @@ export async function reconnectRelayClient(signal?: AbortSignal): Promise<void> 
     return;
   }
   useAppStore.getState().setRelayConnectionIssue(null);
-  if (authIssue) {
-    applyRelayClientAuthIssue(authIssue);
+  if (isRelayProtocolIssue(preflightIssue)) {
+    ws.failPermanently(preflightIssue);
+    applyRelayProtocolIssue(preflightIssue);
+    activeRelayReconnectLoop?.stop();
+    return;
+  }
+  if (preflightIssue) {
+    applyRelayClientAuthIssue(preflightIssue);
     if (!signal) activeRelayReconnectLoop?.stop();
     return;
   }
@@ -182,12 +199,7 @@ export function useRelaySetup(): void {
     timersRef.current = timers;
 
     const unsubStatus = ws.onStatusChange((connected, status) => {
-      handleWsStatusChange(
-        connected,
-        timersRef.current!,
-        relayRef.current!,
-        status?.willReconnect ?? true,
-      );
+      handleWsStatusChange(connected, timersRef.current!, relayRef.current!, status);
     });
 
     const unsubRelay = relay.onMessage((msg) => {

@@ -27,9 +27,11 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
   const clientTokenRequired = options.clientTokenRequired ?? false;
 
   router.get("/health", (_req, res) => {
+    res.setHeader("Cache-Control", "no-store");
     res.json({
       status: "ok",
       version: RELAY_VERSION,
+      controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
       uptime: process.uptime(),
       auth: {
         proxyTokenRequired,

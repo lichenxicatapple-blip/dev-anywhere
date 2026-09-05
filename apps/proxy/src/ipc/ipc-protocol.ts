@@ -1,6 +1,5 @@
 import { z } from "zod";
 import {
-  SessionState,
   ControlErrorCode,
   ApprovalOptionSchema,
   encodeBinaryFrame,
@@ -16,7 +15,7 @@ export const IPC_BINARY_MARKER = 0x00;
 // JSON session worker 与 daemon 的独立协议版本。只在 WorkerMessage 协议不兼容时递增，
 // 不与 npm 包的 patch/minor 版本绑定。
 export const WORKER_IPC_PROTOCOL_VERSION = 1 as const;
-export const TERMINAL_IPC_PROTOCOL_VERSION = 1 as const;
+export const TERMINAL_IPC_PROTOCOL_VERSION = 2 as const;
 
 // IPC binary 帧外层 = [1B marker][4B payload_len uint32LE] + 内层 PTY 帧（来自 shared/binary-frame）。
 // 内层格式（[1B sid_len][sid][4B seq][data]）由 encodeBinaryFrame 统一管理，
@@ -29,8 +28,6 @@ export function encodeBinaryIpcFrame(sessionId: string, data: Buffer, outputSeq:
   frame.set(inner, 5);
   return frame;
 }
-
-const sessionStateValues = Object.values(SessionState) as [SessionState, ...SessionState[]];
 
 const ProviderHookContextSchema = z
   .object({
@@ -138,52 +135,6 @@ export const IpcMessageSchema = z.discriminatedUnion("type", [
     message: z.string(),
     code: z.string().optional(),
   }),
-
-  // 客户端请求服务状态（含 relay 连接信息和 worker 状态）
-  z
-    .object({
-      type: z.literal("service_status_request"),
-      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
-    })
-    .strict(),
-
-  // 服务端响应增强版服务状态
-  z
-    .object({
-      type: z.literal("service_status_response"),
-      protocolVersion: z.literal(TERMINAL_IPC_PROTOCOL_VERSION),
-      config: z.object({
-        profile: z.string().optional(),
-        version: z.string(),
-        autoUpdate: z.boolean(),
-        relayName: z.string(),
-        relayNameSource: z.enum(["cli", "profile", "env"]),
-        relayUrl: z.string().optional(),
-        relayUrlSource: z.enum(["env", "file", "none"]),
-        relayTokenSource: z.enum(["env", "file", "none"]),
-        hookPort: z.number(),
-        hookPortSource: z.enum(["env", "file", "default"]),
-      }),
-      relay: z
-        .object({
-          connected: z.boolean(),
-          proxyId: z.string(),
-          reconnectAttempt: z.number(),
-          queueDepth: z.number(),
-        })
-        .nullable(),
-      sessions: z.array(
-        z.object({
-          id: z.string(),
-          mode: z.enum(["pty", "json"]),
-          state: z.enum(sessionStateValues),
-          createdAt: z.string(),
-          name: z.string().optional(),
-          hasWorker: z.boolean(),
-        }),
-      ),
-    })
-    .strict(),
 
   // terminal → serve：终端标题变化，由 xterm onTitleChange 触发
   z.object({

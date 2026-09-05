@@ -235,7 +235,16 @@ export {
   PTY_INITIAL_MAX_COLS,
   PTY_INITIAL_MAX_ROWS,
 } from "./constants/pty.js";
-export { RelayCloseCode } from "./constants/relay-close-codes.js";
+export {
+  compareProxyRelayProtocolVersions,
+  isProxyProtocolRejectDirection,
+  ProxyProtocolAdmissionDirection,
+  RelayCloseCode,
+  RelayProtocolRejectReason,
+  type ProxyProtocolAdmissionDirectionType,
+  type ProxyProtocolRejectDirection,
+  type RelayProtocolRejectReasonType,
+} from "./constants/relay-close-codes.js";
 export {
   RELAY_BINARY_FRAME_MAX_BYTES,
   RELAY_JSON_MESSAGE_MAX_BYTES,

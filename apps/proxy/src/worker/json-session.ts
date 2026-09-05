@@ -1,4 +1,6 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import type { ChildProcess } from "node:child_process";
+import { spawnCommand } from "../common/command-launch.js";
+import { terminateOwnedProcessTree } from "../common/process-termination.js";
 import type { z } from "zod";
 import { LineBuffer } from "../ipc/line-buffer.js";
 import { ControlRequestEventSchema } from "../common/stream-json-schema.js";
@@ -123,6 +125,7 @@ export class JsonSession {
     const command = CLAUDE_PROVIDER.buildJsonCommand(
       {
         extraArgs: this.claudeArgs,
+        cwd: this.workDir,
         permissionMode: this.permissionMode,
         resumeSessionId,
         includePartialMessages: this.includePartialMessages,
@@ -131,7 +134,7 @@ export class JsonSession {
       process.env,
     );
 
-    this.child = spawn(command.command, command.args, {
+    this.child = spawnCommand(command.command, command.args, {
       cwd: this.workDir,
       stdio: ["pipe", "pipe", "pipe"],
       env: command.env,
@@ -155,7 +158,7 @@ export class JsonSession {
   async stop(gracePeriodMs = 5000): Promise<void> {
     if (!this.child || !this.isAlive()) return;
 
-    this.child.kill("SIGTERM");
+    terminateOwnedProcessTree(this.child, "SIGTERM");
 
     const start = Date.now();
     while (Date.now() - start < gracePeriodMs) {
@@ -164,7 +167,7 @@ export class JsonSession {
     }
 
     if (this.isAlive()) {
-      this.child.kill("SIGKILL");
+      terminateOwnedProcessTree(this.child, "SIGKILL");
     }
   }
 
@@ -180,7 +183,7 @@ export class JsonSession {
         this.interruptedExitResolvers.set(child, resolve);
       });
 
-      const signaled = child.kill("SIGINT");
+      const signaled = terminateOwnedProcessTree(child, "SIGINT");
       if (!signaled) {
         this.interruptedChildren.delete(child);
         this.interruptedExitResolvers.delete(child);
@@ -193,7 +196,7 @@ export class JsonSession {
         await new Promise((r) => setTimeout(r, 100));
       }
       if (this.isChildAlive(child)) {
-        child.kill("SIGKILL");
+        terminateOwnedProcessTree(child, "SIGKILL");
       }
 
       await Promise.race([drained, new Promise((resolve) => setTimeout(resolve, 1500))]);

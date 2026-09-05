@@ -5,6 +5,7 @@ import { toast } from "@/components/toast";
 import { router } from "@/lib/router";
 import { ensureBinding, isBindingError } from "@/services/ensure-binding";
 import type { RelayClient } from "@/services/relay-client";
+import type { WebSocketStatusDetails } from "@/services/websocket";
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
 import { previewController } from "@/services/preview-controller";
@@ -286,34 +287,54 @@ export function handleWsStatusChange(
   connected: boolean,
   timers: Timers,
   relay: RelayClient,
-  willReconnect = true,
+  status?: WebSocketStatusDetails,
 ): void {
   if (timers.disposed) return;
-  useAppStore.getState().setConnected(connected);
-  const s = useAppStore.getState();
-  if (connected) {
-    useAppStore.getState().setRelayConnectionIssue(null);
-    // A new raw socket invalidates any proxy_select still pending on the previous transport.
-    // Input stays disabled until the selected proxy binding is acknowledged below.
+
+  // WebSocket open and Relay admission are separate phases. The raw transport may send exactly
+  // one registration frame, but it must not make the application look connected or start proxy
+  // restoration before a versioned client_register_response has been accepted.
+  if (status?.transportOpen === true && status.protocolReady === false) {
+    useAppStore.getState().setConnected(false);
+    useAppStore.getState().setProxyOnline(false);
     invalidateBindingRecovery(timers);
     previewController.dispose();
     relay.register();
-
-    if (s.phase === "connecting") {
+    if (useAppStore.getState().phase === "connecting") {
       useAppStore.getState().setPhase("registering");
     }
+    return;
+  }
 
+  const protocolReady = connected && status?.protocolReady === true;
+  useAppStore.getState().setConnected(protocolReady);
+  const s = useAppStore.getState();
+  if (protocolReady) {
+    useAppStore.getState().setRelayConnectionIssue(null);
     if (s.phase === "reconnecting") {
       useAppStore.getState().setProxyOnline(false);
       ensureReconnectFallback(timers);
       relay.listProxies();
     }
   } else {
-    useAppStore.getState().setRelayConnectionIssue(willReconnect ? "unreachable" : "disconnected");
+    const willReconnect = status?.willReconnect ?? true;
+    useAppStore
+      .getState()
+      .setRelayConnectionIssue(
+        willReconnect
+          ? "unreachable"
+          : status?.disconnectReason
+            ? status.disconnectReason
+            : "disconnected",
+      );
     invalidateBindingRecovery(timers);
     previewController.dispose();
     useAppStore.getState().setProxyOnline(false);
     useAppStore.getState().invalidateProxyList();
+    if (!willReconnect) {
+      clearReconnectFallback(timers);
+      return;
+    }
     if (s.phase !== "connecting") {
       if (s.phase !== "reconnecting") {
         useAppStore.getState().setPhase("reconnecting");

@@ -4,6 +4,7 @@ import {
   MessageEnvelopeSchema,
   RELAY_CONTROL_PROTOCOL_VERSION,
   RelayControlSchema,
+  RelayProtocolRejectReason,
 } from "@dev-anywhere/shared";
 import type {
   AgentStatusPayload,
@@ -101,7 +102,15 @@ type FileUploadResult = {
   path?: string;
 } & RequestError;
 
-type RelayTransport = Pick<WebSocketManager, "close" | "onMessage" | "onStatusChange" | "send">;
+type RelayTransport = Pick<
+  WebSocketManager,
+  | "failPermanently"
+  | "markProtocolReady"
+  | "onMessage"
+  | "onStatusChange"
+  | "send"
+  | "sendAdmission"
+>;
 type SessionCreateRequest = Extract<RelayControlMessage, { type: "session_create" }>;
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
 type SessionCreateInput<T> = T extends unknown
@@ -312,7 +321,9 @@ export class RelayClient {
     this.ws.onMessage((raw) => {
       const parsed = parseInboundMessage(raw);
       if (!parsed) {
-        if (!this.registered || isClientRegisterResponse(raw)) this.ws.close();
+        if (!this.registered || isClientRegisterResponse(raw)) {
+          this.ws.failPermanently(RelayProtocolRejectReason.PROTOCOL_MISMATCH);
+        }
         return;
       }
       if (parsed.type === "client_register_response") {
@@ -327,8 +338,9 @@ export class RelayClient {
           this.boundProxyId = null;
           this.previewScope = null;
         }
+        this.ws.markProtocolReady();
       } else if (!this.registered) {
-        this.ws.close();
+        this.ws.failPermanently(RelayProtocolRejectReason.PROTOCOL_MISMATCH);
         return;
       }
       if (this.messageHandlers.size === 0) {
@@ -356,7 +368,7 @@ export class RelayClient {
     this.boundProxyId = null;
     this.previewScope = null;
     const clientDevice = describeCurrentClientDevice();
-    this.ws.send(
+    this.ws.sendAdmission(
       JSON.stringify({
         type: "client_register",
         protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
@@ -1747,8 +1759,8 @@ export class RelayClient {
           settle(() => reject(new Error(`Relay 服务器拒绝请求: ${message}`)));
         }
       });
-      unsubscribeStatus = this.ws.onStatusChange((connected) => {
-        if (connected) return;
+      unsubscribeStatus = this.ws.onStatusChange((connected, status) => {
+        if (connected || status?.transportOpen === true) return;
         settle(() => reject(new Error("连接已断开")));
       });
       timer = setTimeout(() => {

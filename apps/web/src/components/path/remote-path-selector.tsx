@@ -14,6 +14,12 @@ import { useMediaQuery } from "@/hooks/use-media-query";
 import { useFileStore } from "@/stores/file-store";
 import { describeCurrentClientDevice } from "@/lib/client-device";
 import { cn } from "@/lib/utils";
+import {
+  normalizeRemoteAbsolutePath,
+  remoteParentDirectory,
+  remotePathSeparator,
+  withTrailingSeparator,
+} from "@/lib/remote-path";
 
 export type RemotePathSelectionKind = "file" | "directory" | "file-or-directory";
 
@@ -39,24 +45,24 @@ export interface RemotePathSelectorProps {
   onKeyDown?: KeyboardEventHandler<HTMLInputElement>;
 }
 
-function isAbsolutePosixPath(path: string): boolean {
-  return path.startsWith("/");
-}
-
-function parentDirectory(path: string): string {
-  const normalized = path.replace(/\/+$/, "") || "/";
-  if (normalized === "/") return "/";
-  const lastSlash = normalized.lastIndexOf("/");
-  return lastSlash <= 0 ? "/" : `${normalized.slice(0, lastSlash)}/`;
-}
-
 function pickerStart(
   value: string,
   homePath: string,
   selectionKind: RemotePathSelectionKind,
 ): string {
-  if (!isAbsolutePosixPath(value)) return homePath;
-  return selectionKind === "file" ? parentDirectory(value) : value;
+  const absolute = absoluteInputPath(value, homePath);
+  if (!absolute) return homePath;
+  return selectionKind === "file"
+    ? withTrailingSeparator(remoteParentDirectory(absolute))
+    : absolute;
+}
+
+function absoluteInputPath(path: string, homePath: string): string {
+  const normalized = normalizeRemoteAbsolutePath(path, homePath);
+  if (!normalized) return "";
+  const trailingSeparator =
+    path.endsWith("/") || (remotePathSeparator(normalized) === "\\" && path.endsWith("\\"));
+  return trailingSeparator ? withTrailingSeparator(normalized) : normalized;
 }
 
 export function RemotePathSelector({
@@ -144,16 +150,18 @@ export function RemotePathSelector({
   }
 
   function commitAbsolutePath(path: string): void {
-    if (!isAbsolutePosixPath(path)) return;
-    setBrowsePath(path);
-    setDesktopDraft(path);
-    onValueChange(path);
+    const absolute = absoluteInputPath(path, homePath);
+    if (!absolute) return;
+    setBrowsePath(absolute);
+    setDesktopDraft(absolute);
+    onValueChange(absolute);
     setOpen(false);
   }
 
   function navigate(path: string): void {
-    if (!isAbsolutePosixPath(path)) return;
-    setBrowsePath(path);
+    const absolute = absoluteInputPath(path, homePath);
+    if (!absolute) return;
+    setBrowsePath(absolute);
   }
 
   function handleDesktopKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
@@ -265,9 +273,10 @@ export function RemotePathSelector({
               onFocus={openPicker}
               onChange={(event) => {
                 const path = event.target.value;
+                const absolute = absoluteInputPath(path, homePath);
                 setDesktopDraft(path);
-                setBrowsePath(isAbsolutePosixPath(path) ? path : homePath);
-                onValueChange(path);
+                setBrowsePath(absolute || homePath);
+                onValueChange(absolute || path);
                 setOpen(true);
               }}
               onKeyDown={handleDesktopKeyDown}

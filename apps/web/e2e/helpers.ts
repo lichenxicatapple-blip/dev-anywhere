@@ -92,6 +92,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
       contentType: "application/json",
       body: JSON.stringify({
         status: "ok",
+        controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
         auth: { clientTokenRequired: false },
       }),
     });

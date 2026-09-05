@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { EventEmitter } from "node:events";
 import {
   encodeFileStreamFrame,
+  ProxyProtocolAdmissionDirection,
   RELAY_CONTROL_PROTOCOL_VERSION,
   RelayCloseCode,
 } from "@dev-anywhere/shared";
@@ -163,6 +164,139 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     });
   });
 
+  it("does not emit queued business traffic or proxy_disconnect before admission", async () => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    fakeWs.readyState = 1;
+    fakeWs.emit("open");
+    conn.sendRaw(JSON.stringify({ type: "session_list", sessions: [] }));
+
+    expect(fakeWs.send.mock.calls.map(([raw]) => JSON.parse(String(raw)).type)).toEqual([
+      "proxy_register",
+    ]);
+    conn.close();
+    expect(fakeWs.send.mock.calls.map(([raw]) => JSON.parse(String(raw)).type)).toEqual([
+      "proxy_register",
+    ]);
+  });
+
+  it("retires a transport stuck in CONNECTING and schedules one backoff reconnect", async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const mod = (await import("ws")) as unknown as MockWsModule;
+    const initialSocketCount = mod.default.instances.length;
+    const conn = new RelayConnection("ws://test:1234", {
+      proxyIdPath: "/tmp/test-proxy-id",
+      readyTimeoutMs: 20,
+    });
+    const disconnected = vi.fn();
+    conn.on("disconnected", disconnected);
+
+    try {
+      conn.connect();
+      const firstSocket = mod.default.lastInstance;
+      if (!firstSocket) throw new Error("mock WebSocket did not capture instance");
+
+      await vi.advanceTimersByTimeAsync(20);
+      expect(firstSocket.terminate).toHaveBeenCalledTimes(1);
+      expect(conn.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
+      expect(disconnected).toHaveBeenCalledTimes(1);
+
+      // A late duplicate close from the retired socket must not create another timer.
+      firstSocket.emit("close", 1006, Buffer.alloc(0));
+      await vi.advanceTimersByTimeAsync(499);
+      expect(mod.default.instances).toHaveLength(initialSocketCount + 1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(mod.default.instances).toHaveLength(initialSocketCount + 2);
+      expect(conn.getStatus()).toMatchObject({
+        connectionState: RelayConnectionState.CONNECTING,
+        reconnectAttempt: 1,
+      });
+    } finally {
+      conn.close();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("retries an OPEN transport which never receives a registration response", async () => {
+    vi.useFakeTimers();
+    const random = vi.spyOn(Math, "random").mockReturnValue(0.5);
+    const conn = new RelayConnection("ws://test:1234", {
+      proxyIdPath: "/tmp/test-proxy-id",
+      readyTimeoutMs: 20,
+    });
+
+    try {
+      conn.connect();
+      const mod = (await import("ws")) as unknown as MockWsModule;
+      const firstSocket = mod.default.lastInstance;
+      if (!firstSocket) throw new Error("mock WebSocket did not capture instance");
+      firstSocket.readyState = mod.default.OPEN;
+      firstSocket.emit("open");
+      expect(conn.getStatus().connectionState).toBe(RelayConnectionState.REGISTERING);
+
+      await vi.advanceTimersByTimeAsync(20);
+      expect(firstSocket.terminate).toHaveBeenCalledTimes(1);
+      expect(conn.getStatus().connectionState).toBe(RelayConnectionState.WAITING_RECONNECT);
+
+      await vi.advanceTimersByTimeAsync(500);
+      const secondSocket = mod.default.lastInstance;
+      if (!secondSocket || secondSocket === firstSocket) {
+        throw new Error("backoff did not create a replacement WebSocket");
+      }
+      secondSocket.readyState = mod.default.OPEN;
+      secondSocket.emit("open");
+      expect(conn.getStatus()).toMatchObject({
+        connectionState: RelayConnectionState.REGISTERING,
+        reconnectAttempt: 1,
+      });
+    } finally {
+      conn.close();
+      random.mockRestore();
+      vi.useRealTimers();
+    }
+  });
+
+  it("clears the ready deadline and retry budget only after a valid registration response", async () => {
+    vi.useFakeTimers();
+    const conn = new RelayConnection("ws://test:1234", {
+      proxyIdPath: "/tmp/test-proxy-id",
+      readyTimeoutMs: 20,
+    });
+
+    try {
+      conn.connect();
+      const mod = (await import("ws")) as unknown as MockWsModule;
+      const socket = mod.default.lastInstance;
+      if (!socket) throw new Error("mock WebSocket did not capture instance");
+      socket.readyState = mod.default.OPEN;
+      socket.emit("open");
+      socket.emit(
+        "message",
+        Buffer.from(
+          JSON.stringify({
+            type: "proxy_register_response",
+            protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+            status: "new",
+            relayVersion: "0.9.0",
+            connectionId: "connection-ready",
+          }),
+        ),
+      );
+
+      expect(conn.getStatus()).toMatchObject({
+        connectionState: RelayConnectionState.SYNCED,
+        reconnectAttempt: 0,
+      });
+      await vi.advanceTimersByTimeAsync(100);
+      expect(socket.terminate).not.toHaveBeenCalled();
+      expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
+    } finally {
+      conn.close();
+      vi.useRealTimers();
+    }
+  });
+
   it("emits the dedicated stream connection nonce from a successful registration", async () => {
     const { conn, fakeWs } = await connectAndGrabWs();
     const nonces: string[] = [];
@@ -207,7 +341,7 @@ describe("RelayConnection: async ws events arriving after close()", () => {
 
     expect(fakeWs.close).toHaveBeenCalledWith(
       RelayCloseCode.PROXY_PROTOCOL_REJECTED,
-      "invalid registration response",
+      ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH,
     );
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
     expect(connected).not.toHaveBeenCalled();
@@ -236,7 +370,7 @@ describe("RelayConnection: async ws events arriving after close()", () => {
 
     expect(fakeWs.close).toHaveBeenCalledWith(
       RelayCloseCode.PROXY_PROTOCOL_REJECTED,
-      "invalid registration response",
+      ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH,
     );
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
     expect(connected).not.toHaveBeenCalled();
@@ -270,6 +404,133 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     fakeWs.emit("message", Buffer.from(resp));
     expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
     expect(leaked).toEqual([]);
+  });
+
+  it("emits exactly one disconnect when a synced socket violates registration protocol", async () => {
+    const { conn, fakeWs } = await connectAndGrabWs();
+    const disconnected = vi.fn();
+    conn.on("disconnected", disconnected);
+    fakeWs.readyState = 1;
+    fakeWs.emit("open");
+    const response = Buffer.from(
+      JSON.stringify({
+        type: "proxy_register_response",
+        protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+        status: "new",
+        relayVersion: "0.9.0",
+        connectionId: "connection-1",
+      }),
+    );
+    fakeWs.emit("message", response);
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.SYNCED);
+
+    // Real WebSocket close handshakes complete asynchronously and normally echo our 4405 code.
+    // Do not let the default synchronous mock hide a duplicate-disconnect race.
+    fakeWs.close.mockImplementationOnce(() => {
+      fakeWs.readyState = 2;
+    });
+    fakeWs.emit("message", response);
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CLOSED);
+    expect(fakeWs.close).toHaveBeenCalledWith(
+      RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH,
+    );
+    expect(disconnected).toHaveBeenCalledTimes(1);
+
+    // Complete the asynchronous close handshake with the same permanent code we sent.
+    fakeWs.emit("close", RelayCloseCode.PROXY_PROTOCOL_REJECTED, Buffer.alloc(0));
+    expect(disconnected).toHaveBeenCalledTimes(1);
+  });
+
+  it("blocks without WebSocket retries when Relay reports that it is outdated", async () => {
+    vi.useFakeTimers();
+    const mod = (await import("ws")) as unknown as MockWsModule;
+    const initialSocketCount = mod.default.instances.length;
+    const { conn, fakeWs } = await connectAndGrabWs();
+    const disconnected = vi.fn();
+    conn.on("disconnected", disconnected);
+    fakeWs.readyState = mod.default.OPEN;
+    fakeWs.emit("open");
+
+    fakeWs.emit(
+      "close",
+      RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      Buffer.from(ProxyProtocolAdmissionDirection.RELAY_OUTDATED),
+    );
+    expect(conn.getStatus()).toMatchObject({
+      connectionState: RelayConnectionState.BLOCKED_REMOTE,
+      protocolAdmissionDirection: ProxyProtocolAdmissionDirection.RELAY_OUTDATED,
+    });
+    expect(disconnected).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mod.default.instances).toHaveLength(initialSocketCount + 1);
+
+    conn.applyProtocolAdmission(ProxyProtocolAdmissionDirection.RELAY_OUTDATED);
+    expect(disconnected).toHaveBeenCalledTimes(1);
+    conn.applyProtocolAdmission(ProxyProtocolAdmissionDirection.COMPATIBLE);
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CONNECTING);
+    expect(mod.default.instances).toHaveLength(initialSocketCount + 2);
+    conn.close();
+    vi.useRealTimers();
+  });
+
+  it.each([
+    [
+      ProxyProtocolAdmissionDirection.PROXY_OUTDATED,
+      ProxyProtocolAdmissionDirection.PROXY_OUTDATED,
+    ],
+    ["unknown_reason", ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH],
+  ])("fails closed without retries for permanent admission reason %s", async (reason, expected) => {
+    vi.useFakeTimers();
+    const mod = (await import("ws")) as unknown as MockWsModule;
+    const initialSocketCount = mod.default.instances.length;
+    const { conn, fakeWs } = await connectAndGrabWs();
+    const disconnected = vi.fn();
+    conn.on("disconnected", disconnected);
+    fakeWs.readyState = mod.default.OPEN;
+    fakeWs.emit("open");
+    fakeWs.emit("close", RelayCloseCode.PROXY_PROTOCOL_REJECTED, Buffer.from(reason));
+
+    expect(conn.getStatus()).toMatchObject({
+      connectionState: RelayConnectionState.CLOSED,
+      protocolAdmissionDirection: expected,
+    });
+    expect(disconnected).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(mod.default.instances).toHaveLength(initialSocketCount + 1);
+    vi.useRealTimers();
+  });
+
+  it("lets HTTP admission win a WebSocket race without duplicate disconnect or reconnect", async () => {
+    const mod = (await import("ws")) as unknown as MockWsModule;
+    const initialSocketCount = mod.default.instances.length;
+    const { conn, fakeWs } = await connectAndGrabWs();
+    const disconnected = vi.fn();
+    conn.on("disconnected", disconnected);
+    fakeWs.readyState = mod.default.OPEN;
+    fakeWs.emit("open");
+
+    // HTTP discovers the older Relay while this WebSocket is still awaiting registration.
+    conn.applyProtocolAdmission(ProxyProtocolAdmissionDirection.RELAY_OUTDATED);
+    expect(fakeWs.terminate).toHaveBeenCalledTimes(1);
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.BLOCKED_REMOTE);
+    expect(disconnected).toHaveBeenCalledTimes(1);
+
+    // The retired socket's asynchronous close and a repeated HTTP observation are stale/idempotent.
+    fakeWs.emit(
+      "close",
+      RelayCloseCode.PROXY_PROTOCOL_REJECTED,
+      Buffer.from(ProxyProtocolAdmissionDirection.RELAY_OUTDATED),
+    );
+    conn.applyProtocolAdmission(ProxyProtocolAdmissionDirection.RELAY_OUTDATED);
+    expect(disconnected).toHaveBeenCalledTimes(1);
+    expect(mod.default.instances).toHaveLength(initialSocketCount + 1);
+
+    conn.applyProtocolAdmission(ProxyProtocolAdmissionDirection.COMPATIBLE);
+    expect(mod.default.instances).toHaveLength(initialSocketCount + 2);
+    expect(conn.getStatus().connectionState).toBe(RelayConnectionState.CONNECTING);
+    conn.close();
   });
 
   it("terminates a half-open synced socket when heartbeat pong is missing", async () => {

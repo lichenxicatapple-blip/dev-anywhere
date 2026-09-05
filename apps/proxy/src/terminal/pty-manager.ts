@@ -2,6 +2,7 @@ import * as pty from "node-pty";
 import type { IPty } from "node-pty";
 import type { ProviderAdapter, ProviderHookContext } from "../providers/index.js";
 import { readTtySize, restoreHostTerminalModes } from "./tty.js";
+import { prepareCommandLaunch } from "../common/command-launch.js";
 
 interface PtyManagerOptions {
   provider: ProviderAdapter;
@@ -50,15 +51,22 @@ export class PtyManager {
     const { cols, rows } = this.initialSize ?? readTtySize(this.stdout);
 
     const command = this.provider.buildTerminalCommand(
-      { args: this.providerArgs, hook: this.hook },
+      { args: this.providerArgs, hook: this.hook, cwd: this.cwd },
       process.env,
     );
-    const child = pty.spawn(command.command, command.args, {
+    const launch = prepareCommandLaunch(
+      command.command,
+      command.args,
+      command.env,
+      process.platform,
+      this.cwd,
+    );
+    const child = pty.spawn(launch.command, launch.ptyArgs ?? launch.args, {
       name: process.env.TERM ?? "xterm-256color",
       cols,
       rows,
       cwd: this.cwd,
-      env: command.env as Record<string, string>,
+      env: launch.env as Record<string, string>,
     });
     this.child = child;
 

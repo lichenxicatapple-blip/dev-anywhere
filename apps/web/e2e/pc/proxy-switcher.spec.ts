@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "../helpers";
+import { dispatchTouchSwipe } from "../touch-input";
 
 // 桌面端 ≥ md 下 sidebar 顶部渲染 ProxySwitcher layout="dropdown"
 // trigger 带 data-slot="proxy-switcher-trigger", 点击后打开 Popover
@@ -123,40 +124,52 @@ test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
     const row = page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]');
     await expect(row).toHaveAttribute("data-online", "false");
     const foreground = row.locator('[data-slot="proxy-swipe-foreground"]');
-    await foreground.evaluate((node) => {
+    const remove = row.locator('[data-slot="proxy-mobile-remove"]');
+    await expect(row).not.toHaveAttribute("data-revealed", "true");
+    await expect(remove).toHaveAttribute("aria-hidden", "true");
+    await expect(page.locator('[data-slot="proxy-row-menu-trigger"]')).toHaveCount(0);
+    const closed = await foreground.evaluate((node) => {
       const rect = node.getBoundingClientRect();
-      const init = {
-        bubbles: true,
-        cancelable: true,
-        pointerId: 7,
-        pointerType: "touch",
-        isPrimary: true,
+      const hit = document.elementFromPoint(rect.right - 16, rect.top + rect.height / 2);
+      return {
+        opacity: getComputedStyle(node).opacity,
+        offset: node.getAttribute("data-offset"),
+        foregroundRight: rect.right,
+        hitForeground: hit?.closest('[data-slot="proxy-swipe-foreground"]') === node,
+        start: { x: rect.right - 16, y: rect.top + rect.height / 2 },
+        end: { x: rect.right - 96, y: rect.top + rect.height / 2 + 1 },
       };
-      node.dispatchEvent(
-        new PointerEvent("pointerdown", {
-          ...init,
-          clientX: rect.right - 16,
-          clientY: rect.top + rect.height / 2,
-        }),
-      );
-      node.dispatchEvent(
-        new PointerEvent("pointermove", {
-          ...init,
-          clientX: rect.right - 96,
-          clientY: rect.top + rect.height / 2 + 1,
-        }),
-      );
-      node.dispatchEvent(
-        new PointerEvent("pointerup", {
-          ...init,
-          clientX: rect.right - 96,
-          clientY: rect.top + rect.height / 2 + 1,
-        }),
-      );
     });
+    expect(closed).toMatchObject({ opacity: "1", offset: "0", hitForeground: true });
+
+    await dispatchTouchSwipe(page, closed.start, closed.end);
 
     await expect(row).toHaveAttribute("data-revealed", "true");
-    await row.locator('[data-slot="proxy-mobile-remove"]').click();
+    await expect(remove).not.toHaveAttribute("aria-hidden");
+    const revealed = await row.evaluate((node) => {
+      const rowRect = node.getBoundingClientRect();
+      const foregroundRect = node
+        .querySelector<HTMLElement>('[data-slot="proxy-swipe-foreground"]')!
+        .getBoundingClientRect();
+      const actionRect = node
+        .querySelector<HTMLElement>('[data-slot="proxy-mobile-remove"]')!
+        .getBoundingClientRect();
+      const hit = document.elementFromPoint(rowRect.right - 40, rowRect.top + rowRect.height / 2);
+      return {
+        foregroundRight: foregroundRect.right,
+        joinGap: actionRect.left - foregroundRect.right,
+        topDelta: actionRect.top - foregroundRect.top,
+        bottomDelta: actionRect.bottom - foregroundRect.bottom,
+        hitRemove: hit?.closest('[data-slot="proxy-mobile-remove"]') !== null,
+      };
+    });
+    expect(closed.foregroundRight - revealed.foregroundRight).toBeCloseTo(80, 0);
+    expect(revealed.joinGap).toBeCloseTo(0, 1);
+    expect(revealed.topDelta).toBeCloseTo(0, 1);
+    expect(revealed.bottomDelta).toBeCloseTo(0, 1);
+    expect(revealed.hitRemove).toBe(true);
+
+    await remove.click();
     const dialog = page.locator('[data-slot="proxy-removal-dialog"]');
     await expect(dialog).toContainText("不会阻止它再次连接");
     await dialog.locator('[data-slot="proxy-removal-confirm"]').click();

@@ -14,6 +14,9 @@ export function findCodexActiveWriter(
   threadId: string,
   env: NodeJS.ProcessEnv = process.env,
 ): CodexActiveWriter | null {
+  // This is optional owner discovery, not an idle check. On Windows the actual
+  // Codex startup error still reports active-writer conflicts without lsof.
+  if (process.platform === "win32") return null;
   if (!CODEX_THREAD_ID_RE.test(threadId)) return null;
   const configuredHome = env.CODEX_HOME?.trim();
   const codexHome =

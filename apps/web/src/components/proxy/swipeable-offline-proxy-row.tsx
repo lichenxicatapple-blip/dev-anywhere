@@ -1,6 +1,5 @@
 import { useRef, useState } from "react";
-import { Check, MoreHorizontal, Trash2 } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { Check } from "lucide-react";
 import { ProxyStatusDot } from "./proxy-status-dot";
 
 const ACTION_WIDTH_PX = 80;
@@ -116,7 +115,7 @@ export function SwipeableOfflineProxyRow({
 
   return (
     <li
-      className="relative min-h-11 overflow-hidden rounded-md"
+      className="relative h-11 overflow-hidden rounded-md border border-border bg-card"
       data-slot="proxy-item"
       data-swipeable="true"
       data-proxy-id={proxyId}
@@ -124,7 +123,7 @@ export function SwipeableOfflineProxyRow({
       data-revealed={revealed || undefined}
     >
       <div
-        className="relative z-10 flex min-h-11 w-full touch-pan-y select-none items-center gap-3 rounded-md border border-border bg-card px-3 text-left text-muted-foreground opacity-60 shadow-sm transition-transform duration-200 ease-out motion-reduce:transition-none"
+        className="relative z-10 flex h-full w-full touch-pan-y select-none items-center gap-3 bg-card px-3 text-left text-muted-foreground transition-transform duration-200 ease-out motion-reduce:transition-none"
         style={{
           transform: `translateX(-${effectiveOffset}px)`,
           transitionDuration: dragging ? "0ms" : undefined,
@@ -139,38 +138,20 @@ export function SwipeableOfflineProxyRow({
         onClick={handleForegroundClick}
       >
         <ProxyStatusDot status="offline" />
-        <span className="min-w-0 flex-1 truncate text-sm font-normal text-foreground">
-          {displayName}
-        </span>
+        <span className="min-w-0 flex-1 truncate text-sm font-normal">{displayName}</span>
         {selected && <Check className="size-4 shrink-0 text-primary" aria-label="已选" />}
         <span className="shrink-0 text-xs">离线</span>
-        <Button
-          type="button"
-          variant="ghost"
-          size="icon"
-          className="-mr-2 size-11 text-muted-foreground"
-          disabled={disabled}
-          aria-label={`显示移除 ${displayName} 操作`}
-          aria-expanded={revealed}
-          onClick={(event) => {
-            event.stopPropagation();
-            onRevealedChange(!revealed);
-          }}
-        >
-          <MoreHorizontal aria-hidden="true" />
-        </Button>
       </div>
       <button
         type="button"
-        className="absolute inset-y-0 right-0 z-0 flex w-20 min-h-11 flex-col items-center justify-center gap-0.5 rounded-r-md bg-destructive text-xs font-medium text-white outline-none transition-colors hover:bg-destructive/90 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50"
+        className={`absolute inset-y-0 right-0 z-0 flex w-20 items-center justify-center bg-destructive text-sm font-medium text-white outline-none transition-colors hover:bg-destructive/90 focus-visible:z-20 focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-inset disabled:pointer-events-none disabled:opacity-50 ${revealed ? "" : "pointer-events-none"}`}
         tabIndex={revealed ? 0 : -1}
         disabled={disabled}
         aria-label={`移除 ${displayName}`}
+        aria-hidden={revealed ? undefined : true}
         data-slot="proxy-mobile-remove"
-        onFocus={() => onRevealedChange(true)}
         onClick={onRemove}
       >
-        <Trash2 className="size-4" aria-hidden="true" />
         移除
       </button>
     </li>

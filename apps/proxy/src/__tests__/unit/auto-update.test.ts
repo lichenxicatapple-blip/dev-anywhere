@@ -2,10 +2,13 @@ import { EventEmitter } from "node:events";
 import { mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ChildProcess } from "node:child_process";
+import { PassThrough } from "node:stream";
+import { spawn, type ChildProcess } from "node:child_process";
 import type { Logger } from "pino";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRelayAutoUpdater } from "#src/auto-update.js";
+import type { ServiceCommandResult } from "#src/common/service-command-result.js";
+import { terminateOwnedProcessTree } from "#src/common/process-termination.js";
 import {
   compareStableVersions,
   parseStableVersion,
@@ -13,13 +16,24 @@ import {
 } from "#src/common/stable-version.js";
 import {
   acquireUpdateLock,
+  installVersion,
   planRelayDirectedUpdate,
   restartWithRecovery,
+  runProxyServiceCommand,
   runRelayDirectedUpdate,
   type RelayDirectedUpdateDeps,
   type RestartRecoveryDeps,
   type RunnerOptions,
 } from "#src/update-runner.js";
+
+vi.mock("node:child_process", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("node:child_process")>()),
+  spawn: vi.fn(),
+}));
+
+vi.mock("#src/common/process-termination.js", () => ({
+  terminateOwnedProcessTree: vi.fn(() => true),
+}));
 
 function fakeLogger(): Logger {
   return {
@@ -33,8 +47,13 @@ function fakeChild(): ChildProcess {
   return new EventEmitter() as ChildProcess;
 }
 
+const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+
 afterEach(() => {
   vi.useRealTimers();
+  vi.mocked(spawn).mockReset();
+  vi.mocked(terminateOwnedProcessTree).mockClear();
+  Object.defineProperty(process, "platform", platformDescriptor);
 });
 
 describe("stable Proxy versions", () => {
@@ -105,7 +124,6 @@ describe("Relay-directed update execution", () => {
   const options: RunnerOptions = {
     targetVersion: "0.7.0",
     runningVersion: "0.6.3",
-    daemonPid: 1234,
     relayName: "cloud",
   };
 
@@ -193,23 +211,104 @@ describe("auto-update restart recovery", () => {
   const options: RunnerOptions = {
     targetVersion: "0.7.0",
     runningVersion: "0.6.3",
-    daemonPid: 1234,
     relayName: "cloud",
   };
-  const result = (code: number) => ({
+  const result = (body: ServiceCommandResult | null, code = body?.status === "ready" ? 0 : 1) => ({
     code,
     signal: null,
-    stdout: "",
+    stdout: body === null ? "invalid result" : JSON.stringify(body),
     stderr: code === 0 ? "" : "Error: daemon failed to start",
     timedOut: false,
   });
+  const ready: ServiceCommandResult = {
+    status: "ready",
+    pid: 5678,
+    instanceId: "new-service",
+    version: options.targetVersion,
+    missingSessionIds: [],
+  };
+  const failedStartup: ServiceCommandResult = {
+    status: "failed",
+    code: "START_FAILED",
+    message: "Service child exited during startup",
+    recoveryToken: "failed-restart-token",
+  };
+
+  it("does not tree-kill a timed-out service command and its retained sessions", async () => {
+    vi.useFakeTimers();
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(() => true),
+    }) as unknown as ChildProcess;
+    vi.mocked(spawn).mockReturnValue(child);
+    const pending = runProxyServiceCommand("restart", options);
+    await vi.advanceTimersByTimeAsync(90_000);
+    expect(child.kill).toHaveBeenCalledWith("SIGTERM");
+    expect(terminateOwnedProcessTree).not.toHaveBeenCalled();
+    child.emit("close", 1, null);
+    await expect(pending).resolves.toMatchObject({ timedOut: true });
+  });
+
+  it("cleans up the npm installer subtree after a timeout", async () => {
+    vi.useFakeTimers();
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const child = Object.assign(new EventEmitter(), {
+      stdout: new PassThrough(),
+      stderr: new PassThrough(),
+      kill: vi.fn(() => true),
+    }) as unknown as ChildProcess;
+    vi.mocked(spawn).mockReturnValue(child);
+    const pending = installVersion(String.raw`C:\Program Files\nodejs\npm.cmd`, "0.7.0");
+    const failed = expect(pending).rejects.toThrow("timed out");
+    expect(vi.mocked(spawn).mock.calls[0]?.[0]).toMatch(/cmd\.exe$/i);
+    expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual([
+      "/d", "/s", "/v:off", "/c", expect.stringContaining("npm.cmd"),
+    ]);
+    expect(vi.mocked(spawn).mock.calls[0]?.[2]).toMatchObject({
+      windowsHide: true,
+      windowsVerbatimArguments: true,
+    });
+    await vi.advanceTimersByTimeAsync(5 * 60_000);
+    expect(terminateOwnedProcessTree).toHaveBeenCalledWith(child, "SIGTERM");
+    expect(child.kill).not.toHaveBeenCalled();
+    child.emit("close", 1, null);
+    await failed;
+  });
+
+  it.each(["restart", "start"] as const)(
+    "passes conditional lifecycle arguments for update %s",
+    async (action) => {
+      const child = Object.assign(new EventEmitter(), {
+        stdout: new PassThrough(),
+        stderr: new PassThrough(),
+      }) as unknown as ChildProcess;
+      vi.mocked(spawn).mockReturnValue(child);
+      const token = action === "start" ? "failed-restart-token" : undefined;
+
+      const pending = runProxyServiceCommand(action, options, token);
+
+      expect(vi.mocked(spawn).mock.calls[0]?.[1]).toEqual([
+        expect.any(String),
+        "--profile",
+        expect.any(String),
+        "serve",
+        action,
+        "--json",
+        ...(action === "restart" ? ["--if-running"] : []),
+        "--relay",
+        "cloud",
+        ...(token !== undefined ? ["--recover-from", token] : []),
+      ]);
+      child.emit("close", 0, null);
+      await expect(pending).resolves.toMatchObject({ code: 0, timedOut: false });
+    },
+  );
 
   function recoveryRuntime(): RestartRecoveryDeps {
     return {
       stopped: vi.fn(() => false),
-      runService: vi.fn(async (action) => result(action === "start" ? 0 : 1)),
-      socketIsReachable: vi.fn().mockResolvedValueOnce(false).mockResolvedValueOnce(true),
-      readDaemonPid: vi.fn(() => null),
+      runService: vi.fn(async (action) => result(action === "start" ? ready : failedStartup)),
       installVersion: vi.fn(async () => undefined),
       validateInstalledCli: vi.fn(async () => undefined),
     };
@@ -234,19 +333,110 @@ describe("auto-update restart recovery", () => {
     expect(deps.installVersion).toHaveBeenCalledWith("/node/bin/npm", "0.6.3");
     expect(deps.validateInstalledCli).toHaveBeenCalledWith("0.6.3");
     expect(deps.runService).toHaveBeenNthCalledWith(1, "restart", options);
-    expect(deps.runService).toHaveBeenNthCalledWith(2, "start", options);
+    expect(deps.runService).toHaveBeenNthCalledWith(2, "start", options, "failed-restart-token");
   });
 
-  it("accepts a new reachable daemon even when handover returns nonzero", async () => {
+  it("accepts confirmed readiness even when incomplete session handover returns nonzero", async () => {
     const deps = recoveryRuntime();
-    vi.mocked(deps.socketIsReachable).mockReset().mockResolvedValue(true);
-    vi.mocked(deps.readDaemonPid).mockReturnValue(5678);
+    vi.mocked(deps.runService).mockResolvedValue(
+      result({ ...ready, missingSessionIds: ["late-session"] }, 1),
+    );
 
     await expect(
       restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps),
     ).resolves.toBeUndefined();
     expect(deps.installVersion).not.toHaveBeenCalled();
     expect(deps.runService).toHaveBeenCalledOnce();
+  });
+
+  it.each(["STOP_FAILED", "UNSUPPORTED_SERVICE", "UNKNOWN_ERROR"])(
+    "does not roll back or start a service after %s",
+    async (code) => {
+      const deps = recoveryRuntime();
+      vi.mocked(deps.runService).mockResolvedValue(
+        result({ status: "failed", code, message: "Service could not be restarted" }),
+      );
+
+      await expect(
+        restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps),
+      ).rejects.toThrow("Proxy auto-update restart");
+      expect(deps.installVersion).not.toHaveBeenCalled();
+      expect(deps.runService).toHaveBeenCalledOnce();
+    },
+  );
+
+  it("does not infer success from a zero exit without a valid result", async () => {
+    const deps = recoveryRuntime();
+    vi.mocked(deps.runService).mockResolvedValue(result(null, 0));
+
+    await expect(
+      restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps),
+    ).rejects.toThrow("Proxy auto-update restart");
+    expect(deps.installVersion).not.toHaveBeenCalled();
+    expect(deps.runService).toHaveBeenCalledOnce();
+  });
+
+  it("does not recover from a timed-out restart even if output includes a recovery token", async () => {
+    const deps = recoveryRuntime();
+    vi.mocked(deps.runService).mockResolvedValue({ ...result(failedStartup), timedOut: true });
+
+    await expect(
+      restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps),
+    ).rejects.toThrow("timed out");
+    expect(deps.installVersion).not.toHaveBeenCalled();
+    expect(deps.runService).toHaveBeenCalledOnce();
+  });
+
+  it("requires a recovery token before rolling back a failed startup", async () => {
+    const deps = recoveryRuntime();
+    vi.mocked(deps.runService).mockResolvedValue(
+      result({ status: "failed", code: "START_FAILED", message: "Startup failed" }),
+    );
+
+    await expect(
+      restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps),
+    ).rejects.toThrow("Proxy auto-update restart");
+    expect(deps.installVersion).not.toHaveBeenCalled();
+    expect(deps.runService).toHaveBeenCalledOnce();
+  });
+
+  it("does not reinstall or recover a package this run did not install", async () => {
+    const deps = recoveryRuntime();
+
+    await expect(
+      restartWithRecovery(options, "/node/bin/npm", "0.6.3", false, deps),
+    ).rejects.toThrow("Proxy auto-update restart");
+    expect(deps.installVersion).not.toHaveBeenCalled();
+    expect(deps.runService).toHaveBeenCalledOnce();
+  });
+
+  it("honors a stop reported by the restart operation", async () => {
+    const deps = recoveryRuntime();
+    vi.mocked(deps.runService).mockResolvedValue(
+      result({ status: "failed", code: "STOPPED", message: "User stopped the service" }),
+    );
+
+    await expect(
+      restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps),
+    ).resolves.toBeUndefined();
+    expect(deps.installVersion).not.toHaveBeenCalled();
+    expect(deps.runService).toHaveBeenCalledOnce();
+  });
+
+  it("does not bypass a later user stop when conditional recovery is refused", async () => {
+    const deps = recoveryRuntime();
+    vi.mocked(deps.runService)
+      .mockResolvedValueOnce(result(failedStartup))
+      .mockResolvedValueOnce(
+        result({ status: "failed", code: "STOPPED", message: "Stop state changed" }),
+      );
+
+    await expect(
+      restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps),
+    ).rejects.toThrow("service recovery was cancelled because the stop state changed");
+    expect(deps.installVersion).toHaveBeenCalledWith("/node/bin/npm", "0.6.3");
+    expect(deps.runService).toHaveBeenCalledTimes(2);
+    expect(deps.runService).toHaveBeenLastCalledWith("start", options, "failed-restart-token");
   });
 });
 
@@ -265,7 +455,6 @@ describe("Relay auto-update coordinator", () => {
       profileName: "default",
       relayName: "cloud",
       runningVersion: "0.6.3",
-      daemonPid: 1234,
       logger: fakeLogger(),
       spawnRunner,
       retryInitialMs: 100,
@@ -282,8 +471,6 @@ describe("Relay auto-update coordinator", () => {
       "0.6.4",
       "--running-version",
       "0.6.3",
-      "--daemon-pid",
-      "1234",
       "--relay",
       "cloud",
     ]);
@@ -305,7 +492,6 @@ describe("Relay auto-update coordinator", () => {
         ...overrides,
         relayName: "cloud",
         runningVersion: "0.6.3",
-        daemonPid: 1234,
         logger: fakeLogger(),
         spawnRunner,
       });
@@ -319,7 +505,6 @@ describe("Relay auto-update coordinator", () => {
       profileName: "default",
       relayName: "cloud",
       runningVersion: "0.6.3",
-      daemonPid: 1234,
       logger: fakeLogger(),
       spawnRunner,
     });
@@ -339,7 +524,6 @@ describe("Relay auto-update coordinator", () => {
       profileName: "default",
       relayName: "cloud",
       runningVersion: "0.6.3",
-      daemonPid: 1234,
       logger: fakeLogger(),
       spawnRunner,
       retryInitialMs: 100,
@@ -366,7 +550,6 @@ describe("Relay auto-update coordinator", () => {
       profileName: "default",
       relayName: "cloud",
       runningVersion: "0.6.3",
-      daemonPid: 1234,
       logger: fakeLogger(),
       spawnRunner,
     });

@@ -52,6 +52,25 @@ function createAdapter(execFile: AndroidExecFile) {
 }
 
 describe("AndroidEmulatorAdapter discovery", () => {
+  it.each([
+    [
+      "win32",
+      { LocalAppData: "C:\\Users\\dev\\AppData\\Local" },
+      "C:\\Users\\dev\\AppData\\Local\\Android\\Sdk\\platform-tools\\adb.exe",
+    ],
+    ["win32", { android_home: "D:\\Android" }, "D:\\Android\\platform-tools\\adb.exe"],
+    ["win32", { Path: '"D:\\Android Tools";C:\\Tools' }, "D:\\Android Tools\\adb.exe"],
+    ["darwin", { HOME: "/Users/dev" }, "/Users/dev/Library/Android/sdk/platform-tools/adb"],
+    ["linux", { HOME: "/home/dev" }, "/home/dev/Android/Sdk/platform-tools/adb"],
+  ] as const)("finds adb in %s platform paths", async (platform, env, expected) => {
+    const execFile: AndroidExecFile = vi.fn(async (command) => {
+      if (command !== expected) throw new Error("not found");
+      return result("Android Debug Bridge version 1.0.41");
+    });
+    const adapter = new AndroidEmulatorAdapter({ platform, env, execFile });
+    await expect(adapter.inspect()).resolves.toMatchObject({ available: true, command: expected });
+  });
+
   it("only allows fully booted emulator serials and queries their metadata with an explicit -s", async () => {
     const calls: Array<{ command: string; args: readonly string[]; env: NodeJS.ProcessEnv }> = [];
     const responses = discoveryResponses({

@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer, type Server, type Socket } from "node:net";
 import { mkdirSync, rmSync } from "node:fs";
+import { localIpcEndpointPath } from "#src/common/paths.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import { WorkerRegistry } from "#src/serve/worker-registry.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
@@ -17,9 +18,14 @@ vi.mock("#src/common/managed-session-process.js", () => ({
   isManagedSessionProcess: isManagedSessionProcessMock,
 }));
 
-const paths = vi.hoisted(() => ({
-  dataDir: `/tmp/dev-anywhere-worker-reconnect-${process.pid}`,
-}));
+const paths = await vi.hoisted(async () => {
+  const { mkdtempSync } = await import("node:fs");
+  const { tmpdir } = await import("node:os");
+  const { join } = await import("node:path");
+  return {
+    dataDir: mkdtempSync(join(process.platform === "win32" ? tmpdir() : "/tmp", "da-worker-")),
+  };
+});
 
 vi.mock("#src/common/paths.js", async (importOriginal) => {
   const actual = await importOriginal<typeof import("#src/common/paths.js")>();
@@ -28,7 +34,7 @@ vi.mock("#src/common/paths.js", async (importOriginal) => {
     DATA_DIR: paths.dataDir,
     sessionPaths: (sessionId: string) => {
       const dir = `${paths.dataDir}/${sessionId}`;
-      return { dir, workerSock: `${dir}/worker.sock` };
+      return { dir, workerSock: actual.localIpcEndpointPath(`${dir}/worker.sock`) };
     },
   };
 });
@@ -39,7 +45,7 @@ describe("WorkerRegistry reconnect protocol handshake", () => {
   let registry: WorkerRegistry | null;
   const sessionId = "persisted-json-session";
   const sessionDir = `${paths.dataDir}/${sessionId}`;
-  const socketPath = `${sessionDir}/worker.sock`;
+  const socketPath = localIpcEndpointPath(`${sessionDir}/worker.sock`);
 
   beforeEach(() => {
     rmSync(paths.dataDir, { recursive: true, force: true });
