@@ -166,13 +166,71 @@ async function detachRemoteView(page: Page, sessionId: string): Promise<void> {
 test.describe("real local runtime PTY chaos", () => {
   test(`keeps a local-terminal ${provider} PTY usable across serve restart and detach`, async ({
     page,
-  }) => {
+  }, testInfo) => {
     test.skip(
       !enabled,
       "integration chaos: 需要 `pnpm dev:chaos` 编排起 local PTY runtime 并注入 chaos provider (DEV_ANYWHERE_LOCAL_PTY_CHAOS=1 + DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN)",
     );
     test.skip(!chaosBin, "DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN missing");
     const backendConfig = requireE2EBackendConfig();
+    const frames: Record<string, unknown>[] = [];
+    const enterEvents: Record<string, unknown>[] = [];
+    const enterPrefix = "local-pty-chaos-enter:";
+    page.on("websocket", (socket) => {
+      socket.on("framesent", ({ payload }) => {
+        try {
+          const message = JSON.parse(String(payload));
+          if (message.type !== "remote_input_raw") return;
+          frames.push({
+            time: Date.now(),
+            sessionId: message.sessionId,
+            data: String(message.data).slice(0, 512),
+            traceId: message.traceId,
+          });
+          if (frames.length > 100) frames.shift();
+        } catch {
+          // Binary PTY output and unrelated frames are not input evidence.
+        }
+      });
+    });
+    page.on("console", (message) => {
+      const text = message.text();
+      if (!text.startsWith(enterPrefix)) return;
+      enterEvents.push(JSON.parse(text.slice(enterPrefix.length)));
+      if (enterEvents.length > 100) enterEvents.shift();
+    });
+    await page.addInitScript((prefix) => {
+      localStorage.setItem("dev_anywhere_pty_input_latency_trace", "1");
+      window.addEventListener(
+        "keydown",
+        (event) => {
+          if (event.key !== "Enter") return;
+          const target = event.target instanceof Element ? event.target : null;
+          const ready = (): string | null =>
+            document
+              .querySelector('[data-slot="chat-pty-view"]')
+              ?.getAttribute("data-connection-ready") ?? null;
+          const before = {
+            time: Date.now(),
+            target: target?.outerHTML.slice(0, 512),
+            connectionReady: ready(),
+            isComposing: event.isComposing,
+          };
+          // A timer runs after all key handlers, including handlers that stop propagation.
+          setTimeout(() => {
+            console.debug(
+              prefix +
+                JSON.stringify({
+                  ...before,
+                  defaultPrevented: event.defaultPrevented,
+                  finalConnectionReady: ready(),
+                }),
+            );
+          }, 0);
+        },
+        true,
+      );
+    }, enterPrefix);
 
     const uniqueName = `dev-anywhere-local-pty-${provider}-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
@@ -212,6 +270,28 @@ test.describe("real local runtime PTY chaos", () => {
       await test.step("send input after serve restart", () =>
         sendRemoteLine(page, sessionId, "after-serve-restart"));
       await test.step("detach remote terminal view", () => detachRemoteView(page, sessionId));
+    } catch (error) {
+      try {
+        const latency = await page.evaluate(() =>
+          (window.__devAnywherePtyInputLatencyTrace ?? []).slice(-100),
+        );
+        await testInfo.attach("local-pty-input-evidence", {
+          contentType: "application/json",
+          body: Buffer.from(JSON.stringify({ frames, enterEvents, latency }, null, 2)),
+        });
+        console.error(
+          "Local PTY input failure:",
+          JSON.stringify({
+            sentFrames: frames.length,
+            lastFrames: frames.slice(-8),
+            enterEvents,
+            latencyTail: latency.slice(-8),
+          }),
+        );
+      } catch (diagnosticError) {
+        console.error("Could not capture local PTY input evidence:", String(diagnosticError));
+      }
+      throw error;
     } finally {
       await stopLocalRuntime(screenName);
     }

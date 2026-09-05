@@ -69,6 +69,7 @@ jobs:
           path: |
             ~/.dev-anywhere
             artifacts/release-deep
+            apps/web/test-results
           if-no-files-found: warn
           include-hidden-files: true
           retention-days: 7
