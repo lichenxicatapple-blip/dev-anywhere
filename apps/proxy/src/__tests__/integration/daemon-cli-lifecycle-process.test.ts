@@ -461,8 +461,16 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     expect(replacement.info?.config.relayUrlSource).toBe("env");
   }, 30_000);
 
-  it("keeps a local terminal session and its original PTY child alive across restart", async () => {
+  it("keeps a local terminal session and its original PTY child alive across restart", async ({
+    onTestFailed,
+  }) => {
     const fixture = await createFixture();
+    let phase = "ready";
+    onTestFailed(() => {
+      console.error(
+        `Local terminal preservation failed during ${phase}:\n${fixtureLogTails(fixture)}`,
+      );
+    });
     // Keep this fixture's file logs so a native PTY failure remains diagnosable after cleanup.
     delete fixture.env.VITEST;
     const agentPath = join(fixture.root, "fake-agent.mjs");
@@ -509,6 +517,7 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     let agentPid: number | undefined;
     let failed = false;
     let failure: unknown;
+    let failurePhase: string | undefined;
     try {
       const ready = await waitForOutput(/FAKE_AGENT_READY:(\d+)/);
       agentPid = Number(ready[1]);
@@ -529,6 +538,7 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       expect(processIsAlive(agentPid)).toBe(true);
       expect(exited).toBe(false);
 
+      phase = "restart";
       const restarted = await runCli(fixture, ["serve", "restart", "--json"]);
       expectSuccess(restarted);
       const response = JSON.parse(restarted.stdout);
@@ -542,15 +552,19 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       expect(processIsAlive(agentPid)).toBe(true);
       expect(output.match(/FAKE_AGENT_READY:/g)).toHaveLength(1);
 
+      phase = "pong";
       terminal.write("ping\r");
       const pong = await waitForOutput(/FAKE_AGENT_PONG:(\d+)/);
       expect(Number(pong[1])).toBe(agentPid);
     } catch (error) {
       failed = true;
       failure = error;
+      failurePhase = phase;
     } finally {
+      phase = "exit";
       try {
         if (!exited) terminal.write("exit\r");
+        await expect.poll(() => exited, { timeout: 5_000 }).toBe(true);
         expect((await terminalResult).exitCode, output).toBe(0);
         if (agentPid !== undefined) expect(await waitForProcessToExit(agentPid)).toBe(true);
       } catch (error) {
@@ -559,11 +573,13 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
         } else {
           failed = true;
           failure = error;
+          failurePhase = phase;
         }
       }
     }
     if (failed) {
-      const logs = `Local terminal preservation fixture logs:\n${fixtureLogTails(fixture)}`;
+      phase = failurePhase ?? phase;
+      const logs = `Local terminal preservation failed during ${phase}:\n${fixtureLogTails(fixture)}`;
       if (failure instanceof Error) {
         // JSON reporters preserve errors, but may omit captured console output.
         failure.stack = `${failure.stack ?? String(failure)}\n${logs}`;
