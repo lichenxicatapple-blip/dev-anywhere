@@ -272,9 +272,12 @@ test.describe("real local runtime PTY chaos", () => {
       await test.step("detach remote terminal view", () => detachRemoteView(page, sessionId));
     } catch (error) {
       try {
-        const latency = await page.evaluate(() =>
-          (window.__devAnywherePtyInputLatencyTrace ?? []).slice(-100),
-        );
+        const latency = await page.evaluate(() => {
+          const tracedWindow = window as Window & {
+            __devAnywherePtyInputLatencyTrace?: unknown[];
+          };
+          return (tracedWindow.__devAnywherePtyInputLatencyTrace ?? []).slice(-100);
+        });
         await testInfo.attach("local-pty-input-evidence", {
           contentType: "application/json",
           body: Buffer.from(JSON.stringify({ frames, enterEvents, latency }, null, 2)),
