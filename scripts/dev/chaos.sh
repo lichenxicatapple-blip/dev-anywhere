@@ -824,6 +824,14 @@ wait_until "proxy reconnects to chaos relay" 30 proxy_relay_connected_observed
 run_real_ui_smoke "under relay duplicate/reorder/delay"
 run check_dev_health
 
+# Keep injected reordering in this phase; later restart scenarios use normal FIFO delivery.
+kill_port "$RELAY_PORT" "chaos relay"
+wait_until "relay HTTP status is down" 10 relay_http_down
+mark_service_log
+start_relay_only 0
+wait_until "proxy reconnects to normal relay" 30 proxy_relay_connected_observed
+run check_dev_health
+
 section "Chaos 5: PTY render-time stale snapshot and duplicate frames"
 run_render_chaos_smoke
 
