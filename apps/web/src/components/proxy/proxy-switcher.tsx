@@ -28,6 +28,7 @@ import {
   markPendingProxyRemoval,
 } from "@/services/proxy-removal-state";
 import { ProxyStatusDot } from "./proxy-status-dot";
+import { ProxyIdentity } from "./proxy-identity";
 import { ProxyRemovalDialog, type ProxyRemovalTarget } from "./proxy-removal-dialog";
 import { SwipeableOfflineProxyRow } from "./swipeable-offline-proxy-row";
 
@@ -266,6 +267,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
                     key={p.proxyId}
                     proxyId={p.proxyId}
                     name={p.name}
+                    osName={p.osName}
                     selected={selectedProxyId === p.proxyId}
                     revealed={revealedProxyId === p.proxyId}
                     disabled={isSelectionPending || removingProxyId !== null}
@@ -286,7 +288,8 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
                     aria-busy={isSelectingThis || undefined}
                     onClick={() => handleSelect(p.proxyId, p.name)}
                     className={cn(
-                      "flex h-11 min-h-[44px] w-full items-center gap-3 rounded-md border bg-card px-3 text-left transition-colors disabled:cursor-not-allowed disabled:hover:bg-card",
+                      "flex min-h-[44px] w-full items-center gap-3 rounded-md border bg-card px-3 text-left transition-colors disabled:cursor-not-allowed disabled:hover:bg-card",
+                      p.osName ? "h-14" : "h-11",
                       isSelectingThis
                         ? "border-primary/40 bg-accent text-accent-foreground"
                         : "border-border hover:bg-accent",
@@ -297,9 +300,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
                     aria-pressed={selectedProxyId === p.proxyId}
                   >
                     <ProxyStatusDot status="online" />
-                    <span className="min-w-0 flex-1 truncate text-sm font-normal">
-                      {p.name ?? p.proxyId}
-                    </span>
+                    <ProxyIdentity name={p.name ?? p.proxyId} osName={p.osName} />
                     {isSelectingThis ? (
                       <>
                         <span className="shrink-0 text-xs text-muted-foreground">正在连接</span>
@@ -336,21 +337,17 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
               "group transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
               variant === "sidebarChrome"
                 ? "inline-flex min-h-9 min-w-0 max-w-full items-center justify-start gap-1.5 rounded-md text-left text-foreground hover:text-primary"
-                : "flex h-10 w-full items-center gap-2 rounded-md border border-border bg-background px-4 hover:bg-accent",
+                : "flex min-h-10 w-full items-center gap-2 rounded-md border border-border bg-background px-4 py-1.5 hover:bg-accent",
             )}
             aria-label={`当前连接：${currentProxyName}`}
           >
             {variant === "default" && <span className="h-4 w-4 shrink-0" aria-hidden />}
-            <span
-              className={cn(
-                "truncate",
-                variant === "sidebarChrome"
-                  ? "min-w-0 text-base font-semibold leading-none"
-                  : "flex-1 text-center text-sm font-normal",
-              )}
-            >
-              {currentProxyName}
-            </span>
+            <ProxyIdentity
+              name={currentProxyName}
+              osName={currentProxy?.osName}
+              className={variant === "sidebarChrome" ? "flex-initial" : "text-center"}
+              nameClassName={variant === "sidebarChrome" ? "text-base font-semibold" : undefined}
+            />
             <ChevronDown
               className="h-4 w-4 text-muted-foreground shrink-0 transition-transform group-data-[state=open]:rotate-180"
               aria-hidden
@@ -377,7 +374,8 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
                       aria-busy={isSelectingThis || undefined}
                       onClick={() => handleSelect(p.proxyId, p.name)}
                       className={cn(
-                        "flex h-9 min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        "flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 text-left transition-colors disabled:cursor-not-allowed disabled:hover:bg-transparent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                        p.osName ? "h-12" : "h-9",
                         isSelectingThis ? "bg-accent text-accent-foreground" : "hover:bg-accent",
                         isSelectionPending && !isSelectingThis ? "opacity-50" : "",
                         !p.online ? "opacity-50" : "",
@@ -386,9 +384,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
                       title={!p.online ? "这台开发机离线" : undefined}
                     >
                       <ProxyStatusDot status={p.online ? "online" : "offline"} />
-                      <span className="text-sm font-normal flex-1 truncate min-w-0">
-                        {p.name ?? p.proxyId}
-                      </span>
+                      <ProxyIdentity name={p.name ?? p.proxyId} osName={p.osName} />
                       {isSelectingThis ? (
                         <Loader2
                           className="h-4 w-4 animate-spin text-primary shrink-0"

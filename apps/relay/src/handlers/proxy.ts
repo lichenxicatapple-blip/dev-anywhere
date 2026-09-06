@@ -358,10 +358,10 @@ export function handleProxyConnection(
         closeRejectedProxyProtocol(proxyWs, ProxyProtocolAdmissionDirection.PROTOCOL_MISMATCH);
         return;
       }
-      const { proxyId, name, proxyVersion } = result.message;
+      const { proxyId, name, osName, proxyVersion } = result.message;
       proxyWs.admissionPhase = "ready";
       clearAdmissionTimeout();
-      const status = registry.registerProxy(proxyId, proxyWs, proxyVersion, name);
+      const status = registry.registerProxy(proxyId, proxyWs, proxyVersion, name, osName);
       proxyWs.proxyId = proxyId;
       registrationCompleted = true;
       const connectionId = devicePreviewBridge.registerProxyConnection(proxyId, proxyWs);

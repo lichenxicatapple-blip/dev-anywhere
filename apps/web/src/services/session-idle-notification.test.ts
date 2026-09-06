@@ -11,6 +11,7 @@ vi.mock("@/lib/browser-notifications", () => ({
 
 import { isBusyToIdleTransition, notifySessionIdleTransition } from "./session-idle-notification";
 import { useAppStore } from "@/stores/app-store";
+import { useFileStore } from "@/stores/file-store";
 
 function makeSession(overrides: Partial<Pick<SessionInfo, "state">> = {}): SessionInfo {
   return {
@@ -29,6 +30,7 @@ function makeSession(overrides: Partial<Pick<SessionInfo, "state">> = {}): Sessi
 
 describe("session idle notifications", () => {
   beforeEach(() => {
+    useFileStore.setState({ homePath: "/home/dev" });
     localStorage.clear();
     showBrowserNotification.mockReset();
     showBrowserNotification.mockResolvedValue(true);

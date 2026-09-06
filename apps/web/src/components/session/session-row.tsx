@@ -13,6 +13,7 @@ import { cn } from "@/lib/utils";
 import { formatRelativeTime } from "@/utils/relative-time";
 import { formatSessionName, formatUnlockedTerminalPathName } from "@/lib/format-session-name";
 import { providerLabel } from "@/lib/session-provider";
+import { useFileStore } from "@/stores/file-store";
 
 interface SessionRowProps {
   session: SessionInfo;
@@ -115,10 +116,11 @@ export function SessionRow({
   onRename,
   onTerminate,
 }: SessionRowProps) {
+  const homePath = useFileStore((s) => s.homePath);
   const lastActive = session.lastActive;
   const rawName = session.cwd;
-  const formattedName = formatSessionName(session.name);
-  const terminalPathName = formatUnlockedTerminalPathName(session);
+  const formattedName = formatSessionName(session.name, homePath);
+  const terminalPathName = formatUnlockedTerminalPathName(session, homePath);
   const displayName =
     session.nameLocked && session.name
       ? session.name

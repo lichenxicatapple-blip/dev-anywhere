@@ -1,6 +1,7 @@
 import { useRef, useState } from "react";
 import { Check } from "lucide-react";
 import { ProxyStatusDot } from "./proxy-status-dot";
+import { ProxyIdentity } from "./proxy-identity";
 
 const ACTION_WIDTH_PX = 80;
 const DIRECTION_LOCK_PX = 8;
@@ -19,6 +20,7 @@ interface DragState {
 interface SwipeableOfflineProxyRowProps {
   proxyId: string;
   name?: string;
+  osName?: string;
   selected: boolean;
   revealed: boolean;
   disabled?: boolean;
@@ -33,6 +35,7 @@ function clampOffset(value: number): number {
 export function SwipeableOfflineProxyRow({
   proxyId,
   name,
+  osName,
   selected,
   revealed,
   disabled = false,
@@ -115,7 +118,7 @@ export function SwipeableOfflineProxyRow({
 
   return (
     <li
-      className="relative h-11 overflow-hidden rounded-md border border-border bg-card"
+      className={`relative ${osName ? "h-14" : "h-11"} overflow-hidden rounded-md border border-border bg-card`}
       data-slot="proxy-item"
       data-swipeable="true"
       data-proxy-id={proxyId}
@@ -138,7 +141,7 @@ export function SwipeableOfflineProxyRow({
         onClick={handleForegroundClick}
       >
         <ProxyStatusDot status="offline" />
-        <span className="min-w-0 flex-1 truncate text-sm font-normal">{displayName}</span>
+        <ProxyIdentity name={displayName} osName={osName} />
         {selected && <Check className="size-4 shrink-0 text-primary" aria-label="已选" />}
         <span className="shrink-0 text-xs">离线</span>
       </div>

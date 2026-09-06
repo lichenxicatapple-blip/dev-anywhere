@@ -51,6 +51,7 @@ export const RELAY_CONTROL_PROTOCOL_VERSION = 1 as const;
 export const ProxyInfoSchema = z.object({
   proxyId: IdSchema,
   name: z.string().optional(),
+  osName: z.string().min(1).max(64).optional(),
   version: z.string().min(1).max(64),
   online: z.boolean(),
   sessions: z.array(z.string()),
@@ -779,6 +780,7 @@ const relayControlDefinitions = [
     protocolVersion: z.literal(RELAY_CONTROL_PROTOCOL_VERSION),
     proxyId: IdSchema,
     name: z.string().optional(),
+    osName: z.string().min(1).max(64).optional(),
     proxyVersion: z.string().min(1).max(64),
   }),
   control("proxy_register_response", {

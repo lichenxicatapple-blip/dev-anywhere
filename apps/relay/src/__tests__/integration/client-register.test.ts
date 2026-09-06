@@ -113,6 +113,7 @@ describe("client_register protocol", () => {
       JSON.stringify({
         ...proxyRegister("extended-proxy"),
         name: "Development machine",
+        osName: "Windows",
         metadata: { platform: "win32", proxyId: "forged-proxy" },
         connectionId: "forged-connection",
         sessions: ["forged-session"],
@@ -141,6 +142,7 @@ describe("client_register protocol", () => {
       {
         proxyId: "extended-proxy",
         name: "Development machine",
+        osName: "Windows",
         version: "0.9.0",
         online: true,
         sessions: [],

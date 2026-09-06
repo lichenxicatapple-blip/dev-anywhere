@@ -1,8 +1,10 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { SessionRow } from "./session-row";
+import { useFileStore } from "@/stores/file-store";
 
 describe("SessionRow", () => {
+  beforeEach(() => useFileStore.setState({ homePath: "/Users/dev" }));
   afterEach(() => cleanup());
 
   it("shows user rename while keeping full cwd in the hover title", () => {

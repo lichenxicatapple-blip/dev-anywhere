@@ -32,6 +32,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet";
 import { useSessionStore } from "@/stores/session-store";
+import { useFileStore } from "@/stores/file-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
@@ -55,6 +56,7 @@ type RestoreMode = "pty" | "json";
 type RestorePermissionMode = "default" | "auto" | "plan" | "bypassPermissions";
 
 export function HistoryList({ now }: HistoryListProps) {
+  const homePath = useFileStore((s) => s.homePath);
   const historySessions = useSessionStore((s) => s.historySessions);
   const historyLoadStatus = useSessionStore((s) => s.historyLoadStatus);
   const [resumingId, setResumingId] = useState<string | null>(null);
@@ -92,11 +94,11 @@ export function HistoryList({ now }: HistoryListProps) {
         sessions: Array.from(projectMap.values()).flatMap((group) => group.sessions),
         projects: Array.from(projectMap.values()).map((group) => ({
           dir: group.dir,
-          shortDir: formatSessionName(group.dir),
+          shortDir: formatSessionName(group.dir, homePath),
           sessions: group.sessions,
         })),
       }));
-  }, [historySessions]);
+  }, [historySessions, homePath]);
 
   function openRestoreDialog(h: HistorySession) {
     setRestoreTarget(h);

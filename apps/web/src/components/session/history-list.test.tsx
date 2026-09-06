@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -32,6 +32,7 @@ vi.mock("@/components/toast", () => ({
 
 import { ControlErrorCode, type HistorySession } from "@dev-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
+import { useFileStore } from "@/stores/file-store";
 import { type HistoryLoadStatus, useSessionStore } from "@/stores/session-store";
 import { HistoryList } from "./history-list";
 import { CodexActiveWriterDialog } from "./codex-active-writer-dialog";
@@ -71,6 +72,7 @@ function expandHistory(container: HTMLElement) {
 
 describe("HistoryList", () => {
   beforeEach(() => {
+    useFileStore.setState({ homePath: "/Users/dev" });
     createSession.mockReset();
     createSession.mockResolvedValue({
       type: "session_create_response",
@@ -130,6 +132,45 @@ describe("HistoryList", () => {
       "/Users/dev/project",
     );
     expect(groupHeaders[0].textContent).toContain("2");
+  });
+
+  it("updates Windows home display without changing the directory group or restored cwd", async () => {
+    const projectDir = "C:\\Users\\liche\\Documents\\demo";
+    useFileStore.setState({ homePath: "" });
+    const { container } = renderHistoryList([
+      {
+        id: "windows-history",
+        title: "Windows project",
+        projectDir,
+        updatedAt: 1,
+        provider: "claude",
+        preferredMode: "json",
+      },
+    ]);
+    fireEvent.click(container.querySelector('[data-slot="history-section-header"]')!);
+    const group = container.querySelector('[data-slot="history-group-header"]')!;
+    const label = group.querySelector("[title]")!;
+    expect(label.textContent).toBe("C:\\…\\Documents\\demo");
+    fireEvent.click(group);
+
+    act(() => useFileStore.getState().setHomePath("c:/users/LICHE/"));
+    expect(label.textContent).toBe("~\\Documents\\demo");
+    expect(label.getAttribute("title")).toBe(projectDir);
+    expect(container.querySelectorAll('[data-slot="history-group-header"]')).toHaveLength(1);
+    expect(container.querySelector('[data-slot="history-group-header"]')).toBe(group);
+    expect(useSessionStore.getState().historySessions[0].projectDir).toBe(projectDir);
+
+    act(() => useFileStore.getState().prepareForProxySwitch());
+    expect(label.textContent).toBe("C:\\…\\Documents\\demo");
+    act(() => useFileStore.getState().setHomePath("C:\\Users\\liche"));
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：Windows project" }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+    await waitFor(() =>
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({ cwd: projectDir, resumeSessionId: "windows-history" }),
+      ),
+    );
   });
 
   it.each(["claude", "codex", "kimi"] as const)(

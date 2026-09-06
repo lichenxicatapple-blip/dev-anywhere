@@ -1,6 +1,42 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator, type Page } from "@playwright/test";
 import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "../helpers";
 import { dispatchTouchSwipe } from "../touch-input";
+
+async function reportProxyOs(page: Page, osName: string, name = "Local Mac"): Promise<void> {
+  await page.evaluate(
+    ({ osName, name }) => {
+      window.__devAnywhereE2E?.socket?.emitJson({
+        type: "proxy_list_response",
+        proxies: [
+          { proxyId: "proxy-1", name, osName, version: "0.9.5", online: true, sessions: [] },
+        ],
+      });
+    },
+    { osName, name },
+  );
+}
+
+async function expectTwoLineIdentity(row: Locator): Promise<void> {
+  await expect(row.locator('[data-slot="proxy-os"]')).toBeVisible();
+  const geometry = await row.evaluate((element) => {
+    const name = element.querySelector<HTMLElement>('[data-slot="proxy-name"]')!;
+    const os = element.querySelector<HTMLElement>('[data-slot="proxy-os"]')!;
+    const nameRect = name.getBoundingClientRect();
+    const osRect = os.getBoundingClientRect();
+    const rowRect = element.getBoundingClientRect();
+    return {
+      separateLine: osRect.top >= nameRect.bottom - 1,
+      aligned: Math.abs(nameRect.left - osRect.left) <= 1,
+      fits:
+        nameRect.left >= rowRect.left &&
+        nameRect.right <= rowRect.right &&
+        osRect.bottom <= rowRect.bottom,
+      smaller:
+        parseFloat(getComputedStyle(os).fontSize) < parseFloat(getComputedStyle(name).fontSize),
+    };
+  });
+  expect(geometry).toEqual({ separateLine: true, aligned: true, fits: true, smaller: true });
+}
 
 // 桌面端 ≥ md 下 sidebar 顶部渲染 ProxySwitcher layout="dropdown"
 // trigger 带 data-slot="proxy-switcher-trigger", 点击后打开 Popover
@@ -9,6 +45,24 @@ test.describe("ProxySwitcher — dropdown layout (desktop)", () => {
 
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
+  });
+
+  test("keeps OS subtitles below long names in the current selection and dropdown", async ({
+    page,
+  }, testInfo) => {
+    await gotoWithFakeProxy(page, "/#/sessions");
+    await reportProxyOs(page, "Windows", "Workstation-".repeat(12));
+    const trigger = page.locator('[data-slot="proxy-switcher-trigger"]');
+    await expectTwoLineIdentity(trigger);
+    await trigger.click();
+    await expectTwoLineIdentity(
+      page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible'),
+    );
+    await expect(page.locator('[data-slot="popover-content"]')).toHaveCSS("opacity", "1");
+    await testInfo.attach("desktop-proxy-os", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
   });
 
   test("switching proxy from a chat route returns to the session list", async ({ page }) => {
@@ -95,6 +149,32 @@ test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
     await installFakeRelay(page);
   });
 
+  test("keeps reported OS below the name on a narrow phone and its current-machine action", async ({
+    page,
+  }, testInfo) => {
+    await page.setViewportSize({ width: 320, height: 667 });
+    await page.goto(`${BASE_URL}/#/`);
+    const row = page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]');
+    await expect(row).toBeVisible();
+    await reportProxyOs(page, "Windows", "Workstation-".repeat(12));
+    await expectTwoLineIdentity(row);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+    await testInfo.attach("mobile-proxy-os", {
+      body: await page.screenshot(),
+      contentType: "image/png",
+    });
+    await row.click();
+    const action = page.locator('[data-slot="mobile-switch-proxy"]');
+    await expect(action.locator('[data-slot="proxy-os"]')).toBeVisible();
+    await expect(action.locator('[data-slot="proxy-name"]')).toHaveText("Workstation-".repeat(12));
+    await expectTwoLineIdentity(action);
+    expect(
+      await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),
+    ).toBe(true);
+  });
+
   test("shows immediate feedback while selecting a proxy on slow connections", async ({ page }) => {
     await page.goto(`${BASE_URL}/#/`);
     await page.evaluate(() => window.__devAnywhereE2E?.setProxySelectDelay(800));
@@ -119,6 +199,8 @@ test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
     await expect(
       page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible'),
     ).toBeVisible();
+    await reportProxyOs(page, "macOS");
+    await expect(page.locator('[data-slot="proxy-os"]')).toBeVisible();
     await page.evaluate(() => window.__devAnywhereE2E?.setProxyOnline(false));
 
     const row = page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]');

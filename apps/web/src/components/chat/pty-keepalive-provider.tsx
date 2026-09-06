@@ -20,6 +20,7 @@ interface CachedPtyEntry extends PtyKeepAliveEntry {
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   findRequest?: number;
+  fitRequest?: string;
 }
 
 interface ViewportRect {
@@ -40,6 +41,7 @@ interface PtyKeepAliveContextValue {
   deactivate: (sessionId: string) => void;
   updateViewportRect: (sessionId: string, rect: ViewportRect | null) => void;
   updateFindRequest: (sessionId: string, request: number | undefined) => void;
+  updateFitRequest: (sessionId: string, request: string | undefined) => void;
 }
 
 const HIDDEN_WIDTH = 1024;
@@ -109,6 +111,15 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const updateFitRequest = useCallback((sessionId: string, request: string | undefined): void => {
+    if (request === undefined || activeSessionIdRef.current !== sessionId) return;
+    setEntries((current) =>
+      current.map((entry) =>
+        entry.sessionId === sessionId ? { ...entry, fitRequest: request } : entry,
+      ),
+    );
+  }, []);
+
   useEffect(() => {
     if (!sessionListLoaded) return;
     const activeIds = new Set(activeSessionIdsKey ? activeSessionIdsKey.split("\n") : []);
@@ -131,8 +142,8 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
   }, [selectedProxyId]);
 
   const contextValue = useMemo<PtyKeepAliveContextValue>(
-    () => ({ activate, deactivate, updateFindRequest, updateViewportRect }),
-    [activate, deactivate, updateFindRequest, updateViewportRect],
+    () => ({ activate, deactivate, updateFindRequest, updateFitRequest, updateViewportRect }),
+    [activate, deactivate, updateFindRequest, updateFitRequest, updateViewportRect],
   );
 
   return (
@@ -148,11 +159,13 @@ export function PtyKeepAliveViewport({
   sessionKind,
   provider,
   findRequest,
+  fitRequest,
 }: {
   sessionId: string;
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   findRequest?: number;
+  fitRequest?: string;
 }) {
   const context = useContext(PtyKeepAliveContext);
   const ref = useRef<HTMLDivElement>(null);
@@ -161,7 +174,7 @@ export function PtyKeepAliveViewport({
     throw new Error("PtyKeepAliveViewport must be used within PtyKeepAliveProvider");
   }
 
-  const { activate, deactivate, updateFindRequest, updateViewportRect } = context;
+  const { activate, deactivate, updateFindRequest, updateFitRequest, updateViewportRect } = context;
 
   useLayoutEffect(() => {
     activate({ sessionId, sessionKind, provider });
@@ -171,6 +184,10 @@ export function PtyKeepAliveViewport({
   useLayoutEffect(() => {
     updateFindRequest(sessionId, findRequest);
   }, [findRequest, sessionId, updateFindRequest]);
+
+  useLayoutEffect(() => {
+    updateFitRequest(sessionId, fitRequest);
+  }, [fitRequest, sessionId, updateFitRequest]);
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -253,6 +270,7 @@ function PtyKeepAliveLayer({
                 provider={entry.provider}
                 active={active}
                 findRequest={entry.findRequest}
+                fitRequest={entry.fitRequest}
               />
             </ImagePreviewProvider>
           </div>

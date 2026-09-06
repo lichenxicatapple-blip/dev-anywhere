@@ -26,6 +26,14 @@ import { PROXY_VERSION } from "../version.js";
 // 默认 proxyId 存储路径
 const DEFAULT_PROXY_ID_PATH = join(homedir(), ".dev-anywhere", "proxy-id");
 
+export function proxyOsName(platform: NodeJS.Platform = process.platform): string | undefined {
+  return (
+    { darwin: "macOS", win32: "Windows", linux: "Linux" } as Partial<
+      Record<NodeJS.Platform, string>
+    >
+  )[platform];
+}
+
 // 指数退避上限 30 秒
 const MAX_BACKOFF_MS = 30000;
 // 退避基数 1 秒
@@ -210,12 +218,14 @@ export class RelayConnection extends EventEmitter {
           { proxyId: this.proxyId, url: base, tokenSet: !!this.token },
           "Connected to relay server",
         );
+        const osName = proxyOsName();
         socket.send(
           serializeControl({
             type: "proxy_register",
             protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
             proxyId: this.proxyId,
             ...(this.name ? { name: this.name } : {}),
+            ...(osName ? { osName } : {}),
             proxyVersion: this.version,
           }),
         );

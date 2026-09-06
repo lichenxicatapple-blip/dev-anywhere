@@ -12,6 +12,7 @@ import { Toaster, toast } from "@/components/toast";
 import { Button } from "@/components/ui/button";
 import { PtyAutoYesController } from "@/components/chat/pty-auto-yes-controller";
 import { PtyKeepAliveProvider } from "@/components/chat/pty-keepalive-provider";
+import { ProxyIdentity } from "@/components/proxy/proxy-identity";
 import { CodexActiveWriterDialog } from "@/components/session/codex-active-writer-dialog";
 import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -47,6 +48,9 @@ export function AppShell() {
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const selectedProxyName = useAppStore((s) => s.selectedProxyName);
+  const selectedProxyOsName = useAppStore(
+    (s) => s.proxies.find((proxy) => proxy.proxyId === s.selectedProxyId)?.osName,
+  );
   const sessionCount = useSessionStore((s) => s.sessions.length);
   const pendingToast = useAppStore((s) => s.pendingToast);
   const setPendingToast = useAppStore((s) => s.setPendingToast);
@@ -74,12 +78,11 @@ export function AppShell() {
       onClick={() => navigate("/")}
     >
       <Monitor className="size-4 text-primary" aria-hidden="true" />
-      <span className="min-w-0 truncate">
-        <span className="text-foreground">切换开发机</span>
-        {selectedProxyLabel ? (
-          <span className="ml-1 text-muted-foreground/75">· {selectedProxyLabel}</span>
-        ) : null}
-      </span>
+      <ProxyIdentity
+        name={selectedProxyLabel ?? "切换开发机"}
+        osName={selectedProxyOsName}
+        nameClassName="text-foreground"
+      />
     </Button>
   ) : null;
   // 通知容器挂载后，消费启动阶段暂存的消息。

@@ -3,11 +3,21 @@ import {
   joinRemoteChildDirectory,
   normalizeRemoteAbsolutePath,
   remoteParentDirectory,
+  remotePathRoot,
   resolveRemotePath,
   withTrailingSeparator,
 } from "./remote-path";
 
 describe("remote paths", () => {
+  it.each([
+    ["/home/dev", "/"],
+    ["c:/Users/dev", "C:\\"],
+    ["\\\\server\\share\\app", "\\\\server\\share\\"],
+    ["relative/path", ""],
+  ])("extracts the remote root of %s", (path, expected) => {
+    expect(remotePathRoot(path)).toBe(expected);
+  });
+
   it.each([
     ["/", "/"],
     ["/home/dev/../app/", "/home/app"],

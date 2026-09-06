@@ -9,11 +9,13 @@ vi.mock("./chat-pty-view", () => ({
     provider,
     active,
     findRequest,
+    fitRequest,
   }: {
     sessionId: string;
     provider?: "claude" | "codex";
     active?: boolean;
     findRequest?: number;
+    fitRequest?: string;
   }) => (
     <div
       data-slot="mock-chat-pty-view"
@@ -21,6 +23,7 @@ vi.mock("./chat-pty-view", () => ({
       data-provider={provider}
       data-active={String(active)}
       data-find-request={findRequest}
+      data-fit-request={fitRequest}
     />
   ),
 }));
@@ -116,6 +119,38 @@ describe("PtyKeepAliveProvider", () => {
       expect(entry?.getAttribute("data-active")).toBe("true");
       expect(view?.getAttribute("data-find-request")).toBe("1");
     });
+  });
+
+  it("forwards fit commands only to the requested active entry without remounting it", async () => {
+    const original = useSessionStore.getState().sessions[0]!;
+    useSessionStore.setState({
+      sessions: [original, { ...original, sessionId: "pty-2" }],
+    });
+    const view = (sessionId: string, fitRequest?: string) => (
+      <PtyKeepAliveProvider>
+        <PtyKeepAliveViewport sessionId={sessionId} fitRequest={fitRequest} />
+      </PtyKeepAliveProvider>
+    );
+    const { container, rerender } = render(view("pty-1"));
+    const first = container.querySelector(
+      '[data-slot="mock-chat-pty-view"][data-session-id="pty-1"]',
+    );
+    rerender(view("pty-1", "fit-1"));
+    await waitFor(() => expect(first?.getAttribute("data-fit-request")).toBe("fit-1"));
+    rerender(view("pty-2"));
+    rerender(view("pty-2", "fit-2"));
+    await waitFor(() => {
+      const second = container.querySelector(
+        '[data-slot="mock-chat-pty-view"][data-session-id="pty-2"]',
+      );
+      expect(second?.getAttribute("data-fit-request")).toBe("fit-2");
+      expect(second?.getAttribute("data-active")).toBe("true");
+    });
+    expect(
+      container.querySelector('[data-slot="mock-chat-pty-view"][data-session-id="pty-1"]'),
+    ).toBe(first);
+    expect(first?.getAttribute("data-fit-request")).toBe("fit-1");
+    expect(first?.getAttribute("data-active")).toBe("false");
   });
 
   it("keeps every visited live PTY mounted without a capacity limit", async () => {

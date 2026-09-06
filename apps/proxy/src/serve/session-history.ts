@@ -6,7 +6,11 @@ import { summarizeToolActivity, type SessionHistoryMessage } from "@dev-anywhere
 import { collectJsonlFiles, collectFilesNamed } from "./history/files.js";
 import { claudeProjectsDir, codexSessionsDir, kimiSessionsDir } from "./history/paths.js";
 import { readCodexSessionId } from "./history/codex.js";
-import { normalizeHistoryTitle, isClaudeContinuationSummary } from "./history/title.js";
+import {
+  normalizeHistoryTitle,
+  isClaudeContinuationSummary,
+  isCodexInjectedContextBlock,
+} from "./history/title.js";
 import { SAFE_SESSION_ID_PATTERN } from "./history/types.js";
 
 async function readKimiSessionState(filePath: string): Promise<Record<string, unknown> | null> {
@@ -20,8 +24,18 @@ async function readKimiSessionState(filePath: string): Promise<Record<string, un
 type WithoutCursor<T> = T extends unknown ? Omit<T, "cursor"> : never;
 type SessionMessage = SessionHistoryMessage;
 type UnpositionedSessionMessage = WithoutCursor<SessionHistoryMessage>;
+interface ExtractedMessage {
+  kind: "message";
+  message: UnpositionedSessionMessage;
+  codex?: {
+    source: "response_item" | "event_msg";
+    id?: string;
+    turnId?: string;
+    phase?: string;
+  };
+}
 type ExtractedHistoryItem =
-  | { kind: "message"; message: UnpositionedSessionMessage }
+  | ExtractedMessage
   | { kind: "tool-result"; toolId: string; isError: boolean };
 
 interface SessionMessagesPage {
@@ -674,6 +688,81 @@ function extractClaudeContentItems(
   return items;
 }
 
+function extractCodexMessage(
+  payload: Record<string, unknown>,
+  source: "response_item" | "event_msg",
+  timestamp?: number,
+  turnId?: unknown,
+): ExtractedHistoryItem[] {
+  const role = payload.role;
+  if (role !== "user" && role !== "assistant") return [];
+  const texts =
+    typeof payload.content === "string"
+      ? [payload.content]
+      : Array.isArray(payload.content)
+        ? payload.content.flatMap((value) => {
+            const block = asRecord(value);
+            return block &&
+              (block.type === "input_text" ||
+                block.type === "output_text" ||
+                block.type === "text" ||
+                block.type === "Text") &&
+              typeof block.text === "string"
+              ? [block.text]
+              : [];
+          })
+        : [];
+  const text = texts
+    .filter((value) => role !== "user" || !isCodexInjectedContextBlock(value))
+    .map(normalizeConversationText)
+    .filter(Boolean)
+    .join("\n");
+  if (!text) return [];
+  const metadata = asRecord(payload.internal_chat_message_metadata_passthrough);
+  const messageTurnId = turnId ?? metadata?.turn_id;
+  return [
+    {
+      kind: "message",
+      message: { role, text, ...(timestamp !== undefined ? { timestamp } : {}) },
+      codex: {
+        source,
+        ...(typeof payload.id === "string" ? { id: payload.id } : {}),
+        ...(typeof messageTurnId === "string" ? { turnId: messageTurnId } : {}),
+        ...(typeof payload.phase === "string" ? { phase: payload.phase } : {}),
+      },
+    },
+  ];
+}
+
+function singleCodexMessage(items: ExtractedHistoryItem[]): ExtractedMessage | undefined {
+  const item = items.length === 1 ? items[0] : undefined;
+  return item?.kind === "message" && item.codex ? item : undefined;
+}
+
+/** Only adjacent cross-source mirrors are copies, never repeated text elsewhere in a turn. */
+function mergeCodexMessageCopies(
+  first: ExtractedMessage | undefined,
+  second: ExtractedMessage | undefined,
+): ExtractedMessage | undefined {
+  const a = first?.codex;
+  const b = second?.codex;
+  if (!first || !second || !a || !b || a.source === b.source) return undefined;
+  if (first.message.role !== second.message.role || first.message.text !== second.message.text) {
+    return undefined;
+  }
+  if (a.turnId && b.turnId && a.turnId !== b.turnId) return undefined;
+  if (a.phase && b.phase && a.phase !== b.phase) return undefined;
+
+  const sameTimestamp =
+    first.message.timestamp !== undefined && first.message.timestamp === second.message.timestamp;
+  // Current UserMessage events have a different ID from their response_item copy, but
+  // share the turn and exact timestamp. AgentMessage copies share their message ID.
+  const sameIdentity =
+    (a.id && a.id === b.id) ||
+    (first.message.role === "user" && a.turnId && a.turnId === b.turnId && sameTimestamp);
+  return sameIdentity ? (a.source === "response_item" ? first : second) : undefined;
+}
+
 function extractConversationItemsFromJson(obj: unknown): ExtractedHistoryItem[] {
   if (!obj || typeof obj !== "object") return [];
   const record = obj as {
@@ -733,10 +822,17 @@ function extractConversationItemsFromJson(obj: unknown): ExtractedHistoryItem[] 
     return [];
   }
   if (record.type === "event_msg") {
-    const payload =
-      record.payload && typeof record.payload === "object"
-        ? (record.payload as { type?: unknown; message?: unknown })
-        : null;
+    const payload = asRecord(record.payload);
+    if (payload?.type === "item_completed") {
+      const item = asRecord(payload.item);
+      if (!item || (item.type !== "UserMessage" && item.type !== "AgentMessage")) return [];
+      return extractCodexMessage(
+        { ...item, role: item.type === "UserMessage" ? "user" : "assistant" },
+        "event_msg",
+        timestamp,
+        payload.turn_id,
+      );
+    }
     if (!payload || typeof payload.message !== "string") return [];
     const role =
       payload.type === "user_message"
@@ -745,18 +841,17 @@ function extractConversationItemsFromJson(obj: unknown): ExtractedHistoryItem[] 
           ? "assistant"
           : null;
     if (!role) return [];
-    const text = normalizeConversationText(payload.message);
-    if (!text) return [];
-    return [
-      {
-        kind: "message",
-        message: { role, text, ...(timestamp !== undefined ? { timestamp } : {}) },
-      },
-    ];
+    return extractCodexMessage(
+      { ...payload, role, content: payload.message },
+      "event_msg",
+      timestamp,
+      payload.turn_id,
+    );
   }
   if (record.type === "response_item") {
     const payload = asRecord(record.payload);
     if (!payload || typeof payload.type !== "string") return [];
+    if (payload.type === "message") return extractCodexMessage(payload, "response_item", timestamp);
     if (payload.type === "function_call" || payload.type === "custom_tool_call") {
       const toolId =
         typeof payload.call_id === "string"
@@ -821,6 +916,7 @@ async function readSessionMessagesPageFromFile(
     let carry: Buffer = Buffer.alloc(0);
     const collected: SessionMessage[] = [];
     const toolResults = new Map<string, boolean>();
+    let previousCodexMessage: ExtractedMessage | undefined;
 
     while (position > 0 && collected.length <= limit) {
       const readSize = Math.min(HISTORY_READ_CHUNK_BYTES, position);
@@ -841,6 +937,18 @@ async function readSessionMessagesPageFromFile(
         try {
           const parsed = JSON.parse(line.toString("utf-8"));
           const items = extractConversationItemsFromJson(parsed);
+          const codexMessage = singleCodexMessage(items);
+          const merged = mergeCodexMessageCopies(previousCodexMessage, codexMessage);
+          previousCodexMessage = merged ? undefined : codexMessage;
+          if (merged) {
+            // The existing limit+1 lookbehind completes a mirror pair before the page
+            // ends. Its earliest byte cursor excludes both copies from the next page.
+            collected[collected.length - 1] = {
+              ...merged.message,
+              cursor: encodeHistoryCursor(segment.start),
+            };
+            continue;
+          }
           for (let itemIndex = items.length - 1; itemIndex >= 0; itemIndex -= 1) {
             const item = items[itemIndex];
             if (!item) continue;
@@ -867,6 +975,7 @@ async function readSessionMessagesPageFromFile(
           }
           if (collected.length > limit) break;
         } catch {
+          previousCodexMessage = undefined;
           /* skip malformed lines */
         }
       }
@@ -894,6 +1003,7 @@ export async function readSessionMessages(
 
   const messages: SessionMessage[] = [];
   const toolMessageIndexes = new Map<string, number>();
+  let previousCodexMessage: ExtractedMessage | undefined;
   return new Promise((resolve) => {
     const rl = createInterface({
       input: createReadStream(filePath, { encoding: "utf-8" }),
@@ -904,6 +1014,13 @@ export async function readSessionMessages(
       if (!line.trim()) return;
       try {
         const items = extractConversationItemsFromJson(JSON.parse(line));
+        const codexMessage = singleCodexMessage(items);
+        const merged = mergeCodexMessageCopies(previousCodexMessage, codexMessage);
+        previousCodexMessage = merged ? undefined : codexMessage;
+        if (merged) {
+          messages[messages.length - 1] = merged.message;
+          return;
+        }
         for (const item of items) {
           if (item.kind === "tool-result") {
             const messageIndex = toolMessageIndexes.get(item.toolId);
@@ -922,6 +1039,7 @@ export async function readSessionMessages(
           messages.push(item.message);
         }
       } catch {
+        previousCodexMessage = undefined;
         /* skip */
       }
     });

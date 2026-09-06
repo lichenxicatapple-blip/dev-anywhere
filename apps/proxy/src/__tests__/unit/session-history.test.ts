@@ -1359,6 +1359,334 @@ describe("readSessionMessages", () => {
     expect(page.hasMore).toBe(false);
   });
 
+  it("reads Codex response messages and joins text blocks without injected context", async () => {
+    writeCodexConversation(
+      "codex-response-history",
+      [
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "developer",
+            content: [{ type: "input_text", text: "internal instructions" }],
+          },
+        },
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "<environment_context>cwd</environment_context>" },
+            ],
+          },
+        },
+        {
+          timestamp: "2026-09-05T16:05:39.915Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "user",
+            content: [
+              { type: "input_text", text: "# AGENTS.md instructions for /redacted" },
+              { type: "input_text", text: "<environment_context>cwd</environment_context>" },
+              { type: "input_text", text: "  如何安装？  " },
+              { type: "input_image", image_url: "data:image/png;base64,redacted" },
+              { type: "input_text", text: "请给出步骤。" },
+            ],
+          },
+        },
+        {
+          timestamp: "2026-09-05T16:07:23.714Z",
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            phase: "final_answer",
+            content: [
+              { type: "output_text", text: "安装 Node.js。" },
+              { type: "output_text", text: "然后安装应用。" },
+              { type: "reasoning_text", text: "not visible conversation" },
+            ],
+          },
+        },
+      ].map((record) => JSON.stringify(record)),
+    );
+
+    const messages = await readSessionMessages("codex-response-history", "codex");
+    expect(messages).toEqual([
+      {
+        role: "user",
+        text: "如何安装？\n请给出步骤。",
+        timestamp: Date.parse("2026-09-05T16:05:39.915Z"),
+      },
+      {
+        role: "assistant",
+        text: "安装 Node.js。\n然后安装应用。",
+        timestamp: Date.parse("2026-09-05T16:07:23.714Z"),
+      },
+    ]);
+    const page = await readSessionMessagesPage("codex-response-history", { limit: 10 }, "codex");
+    expect(page.messages.map(({ cursor: _cursor, ...message }) => message)).toEqual(messages);
+  });
+
+  it("preserves assistant examples that start with Codex context markers", async () => {
+    const examples = [
+      "# AGENTS.md instructions for /example\nUse the existing test runner.",
+      "<environment_context>example cwd</environment_context>",
+    ];
+    writeCodexConversation(
+      "codex-assistant-context-examples",
+      [
+        {
+          type: "response_item",
+          payload: {
+            type: "message",
+            role: "assistant",
+            content: [{ type: "output_text", text: examples[0] }],
+          },
+        },
+        { type: "event_msg", payload: { type: "agent_message", message: examples[1] } },
+      ].map((record) => JSON.stringify(record)),
+    );
+
+    const full = await readSessionMessages("codex-assistant-context-examples", "codex");
+    expect(full).toEqual(examples.map((text) => ({ role: "assistant", text })));
+    const page = await readSessionMessagesPage(
+      "codex-assistant-context-examples",
+      { limit: 10 },
+      "codex",
+    );
+    expect(page.messages.map(({ cursor: _cursor, ...message }) => message)).toEqual(full);
+  });
+
+  it("reads standalone Codex completed user and agent message items", async () => {
+    writeCodexConversation(
+      "codex-completed-history",
+      [
+        { type: "UserMessage", content: [{ type: "text", text: "检查安装" }] },
+        {
+          type: "AgentMessage",
+          phase: "commentary",
+          content: [
+            { type: "Text", text: "正在检查。" },
+            { type: "Text", text: "稍后汇报。" },
+          ],
+        },
+        { type: "Reasoning", content: [{ type: "Text", text: "not a chat message" }] },
+        {
+          type: "AgentMessage",
+          phase: "final_answer",
+          content: [{ type: "Text", text: "检查完成。" }],
+        },
+      ].map((item, index) =>
+        JSON.stringify({
+          type: "event_msg",
+          payload: {
+            type: "item_completed",
+            turn_id: "turn-completed",
+            item: { ...item, id: `item-${index}` },
+          },
+        }),
+      ),
+    );
+
+    const messages = await readSessionMessages("codex-completed-history", "codex");
+    expect(messages.map(({ role, text }) => [role, text])).toEqual([
+      ["user", "检查安装"],
+      ["assistant", "正在检查。\n稍后汇报。"],
+      ["assistant", "检查完成。"],
+    ]);
+    const page = await readSessionMessagesPage("codex-completed-history", { limit: 10 }, "codex");
+    expect(page.messages.map(({ cursor: _cursor, ...message }) => message)).toEqual(messages);
+  });
+
+  it.each([1, 2])(
+    "paginates Codex mirror records once with limit %i and preserves repeated turns",
+    async (limit) => {
+      // Minimal current rollout shape: user copies have distinct IDs and equal timestamps;
+      // assistant copies share an ID but the response arrives a few milliseconds later.
+      const lines: string[] = [];
+      const expectedCursors: string[] = [];
+      const expectedMessages = [];
+      for (const turn of [1, 2]) {
+        for (const role of ["user", "assistant"] as const) {
+          const timestamp = turn * 1000 + (role === "assistant" ? 100 : 0);
+          const text = role === "user" ? "继续" : "安装步骤如下。";
+          const phase = role === "assistant" ? "final_answer" : undefined;
+          const response = {
+            type: "response_item",
+            timestamp,
+            payload: {
+              type: "message",
+              id: `msg-${turn}-${role}`,
+              role,
+              phase,
+              content: [{ type: role === "user" ? "input_text" : "output_text", text }],
+              internal_chat_message_metadata_passthrough: { turn_id: `turn-${turn}` },
+              // Force a mirror pair across the reader's 64 KiB chunk boundary.
+              ...(turn === 2 && role === "assistant" ? { padding: "x".repeat(64 * 1024) } : {}),
+            },
+          };
+          const event = {
+            type: "event_msg",
+            timestamp: timestamp - (role === "assistant" ? 5 : 0),
+            payload: {
+              type: "item_completed",
+              turn_id: `turn-${turn}`,
+              item: {
+                type: role === "user" ? "UserMessage" : "AgentMessage",
+                id: role === "user" ? `user-event-${turn}` : response.payload.id,
+                phase,
+                content: [{ type: role === "user" ? "text" : "Text", text }],
+              },
+            },
+          };
+          expectedCursors.push(`b:${Buffer.byteLength(lines.map((line) => `${line}\n`).join(""))}`);
+          expectedMessages.push({ role, text, timestamp });
+          lines.push(
+            ...(role === "user" ? [response, event] : [event, response]).map((record) =>
+              JSON.stringify(record),
+            ),
+          );
+        }
+      }
+      writeCodexConversation("codex-mirror-history", lines);
+
+      const full = await readSessionMessages("codex-mirror-history", "codex");
+      expect(full).toEqual(expectedMessages);
+      let before: string | undefined;
+      let flattened: typeof full = [];
+      let cursors: Array<string | undefined> = [];
+      for (let pageNumber = 0; pageNumber < expectedMessages.length; pageNumber += 1) {
+        const page = await readSessionMessagesPage(
+          "codex-mirror-history",
+          { limit, before },
+          "codex",
+        );
+        expect(page.messages).toHaveLength(limit);
+        flattened = [
+          ...page.messages.map(({ cursor: _cursor, ...message }) => message),
+          ...flattened,
+        ];
+        cursors = [...page.messages.map((message) => message.cursor), ...cursors];
+        if (!page.hasMore) {
+          expect(page.nextBefore).toBeUndefined();
+          break;
+        }
+        expect(page.nextBefore).toBe(page.messages[0].cursor);
+        expect(page.nextBefore).not.toBe(before);
+        before = page.nextBefore;
+      }
+      expect(flattened).toEqual(expectedMessages);
+      expect(cursors).toEqual(expectedCursors);
+    },
+  );
+
+  it("does not merge Codex text across conflicting identities, phases or intervening records", async () => {
+    const response = (id: string, turnId: string, phase = "final_answer") => ({
+      type: "response_item",
+      timestamp: 1000,
+      payload: {
+        type: "message",
+        role: "assistant",
+        id,
+        phase,
+        internal_chat_message_metadata_passthrough: { turn_id: turnId },
+        content: [{ type: "output_text", text: "同样的文字" }],
+      },
+    });
+    const event = (id: string, turnId: string, phase = "final_answer") => ({
+      type: "event_msg",
+      timestamp: 1000,
+      payload: {
+        type: "item_completed",
+        turn_id: turnId,
+        item: {
+          type: "AgentMessage",
+          id,
+          phase,
+          content: [{ type: "Text", text: "同样的文字" }],
+        },
+      },
+    });
+    const boundary = { type: "event_msg", payload: { type: "task_started", turn_id: "next-turn" } };
+    const records = [
+      response("one", "turn-one"),
+      event("two", "turn-one"),
+      boundary,
+      response("three", "turn-two"),
+      event("three", "turn-three"),
+      boundary,
+      response("four", "turn-four", "commentary"),
+      event("four", "turn-four"),
+      boundary,
+      response("five", "turn-five"),
+      boundary,
+      event("five", "turn-five"),
+      boundary,
+      response("six", "turn-six"),
+      response("six", "turn-six"),
+    ];
+    writeCodexConversation(
+      "codex-distinct-history",
+      records.map((record) => JSON.stringify(record)),
+    );
+
+    const full = await readSessionMessages("codex-distinct-history", "codex");
+    expect(full).toHaveLength(10);
+    const page = await readSessionMessagesPage("codex-distinct-history", { limit: 20 }, "codex");
+    expect(page.messages.map(({ cursor: _cursor, ...message }) => message)).toEqual(full);
+  });
+
+  it("preserves legacy Codex records without a shared identity even at the same timestamp", async () => {
+    const records = [
+      {
+        type: "response_item",
+        timestamp: 1000,
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "你好" }],
+        },
+      },
+      { type: "event_msg", timestamp: 1000, payload: { type: "user_message", message: "你好" } },
+      { type: "event_msg", timestamp: 2000, payload: { type: "agent_message", message: "收到" } },
+      {
+        type: "response_item",
+        timestamp: 2000,
+        payload: {
+          type: "message",
+          role: "assistant",
+          content: [{ type: "output_text", text: "收到" }],
+        },
+      },
+      {
+        type: "response_item",
+        timestamp: 3000,
+        payload: {
+          type: "message",
+          role: "user",
+          content: [{ type: "input_text", text: "继续" }],
+        },
+      },
+      { type: "event_msg", timestamp: 4000, payload: { type: "user_message", message: "继续" } },
+    ];
+    writeCodexConversation(
+      "codex-legacy-mirror-history",
+      records.map((record) => JSON.stringify(record)),
+    );
+
+    const full = await readSessionMessages("codex-legacy-mirror-history", "codex");
+    expect(full.map(({ text }) => text)).toEqual(["你好", "你好", "收到", "收到", "继续", "继续"]);
+    const page = await readSessionMessagesPage(
+      "codex-legacy-mirror-history",
+      { limit: 10 },
+      "codex",
+    );
+    expect(page.messages.map(({ cursor: _cursor, ...message }) => message)).toEqual(full);
+  });
+
   it("restores Codex function calls alongside visible event messages", async () => {
     writeCodexConversation("codex-tool-history", [
       JSON.stringify({

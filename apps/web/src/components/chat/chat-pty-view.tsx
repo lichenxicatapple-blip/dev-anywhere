@@ -24,6 +24,7 @@ interface ChatPtyViewProps {
   provider?: SessionProvider;
   active?: boolean;
   findRequest?: number;
+  fitRequest?: string;
 }
 
 export function ChatPtyView({
@@ -32,6 +33,7 @@ export function ChatPtyView({
   provider,
   active = true,
   findRequest,
+  fitRequest,
 }: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
@@ -53,6 +55,14 @@ export function ChatPtyView({
   });
   const handleMetrics = view.ptySelectionHandleMetrics;
   const { clearFind, findNext, findPrevious, findReady, findResultCount, findResultIndex } = view;
+  const lastFitRequestRef = useRef(fitRequest);
+  const { fitToWindow } = view;
+
+  useEffect(() => {
+    if (fitRequest === undefined || fitRequest === lastFitRequestRef.current) return;
+    lastFitRequestRef.current = fitRequest;
+    if (active) fitToWindow();
+  }, [active, fitRequest, fitToWindow]);
 
   const previousFindResult = useCallback(() => {
     findPrevious(findQuery);

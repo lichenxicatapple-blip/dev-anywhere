@@ -47,6 +47,10 @@ export function remotePathSeparator(path: string, basePath?: string): "/" | "\\"
   return parseAbsolutePath(path, basePath)?.separator ?? "/";
 }
 
+export function remotePathRoot(path: string, basePath?: string): string {
+  return parseAbsolutePath(path, basePath)?.root ?? "";
+}
+
 export function withTrailingSeparator(path: string, basePath = path): string {
   if (!path) return path;
   const separator = remotePathSeparator(normalizeRemoteAbsolutePath(path, basePath) || basePath);

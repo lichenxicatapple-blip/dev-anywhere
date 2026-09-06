@@ -26,6 +26,7 @@ import { EMPTY_SLICE, useChatStore } from "@/stores/chat-store";
 import { useVisualViewportInsets } from "@/hooks/use-visual-viewport";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { describeCurrentClientDevice } from "@/lib/client-device";
+import { createClientOperationId } from "@/lib/client-operation-id";
 import {
   dismissFloatingKeyboardHint,
   isFloatingKeyboardHintDismissed,
@@ -59,6 +60,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     sessionId: string;
     sequence: number;
   } | null>(null);
+  const [fitRequest, setFitRequest] = useState<{ sessionId: string; requestId: string } | null>(
+    null,
+  );
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
@@ -249,7 +253,17 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           data-keyboard-offset={effectiveKbOffset}
           data-keyboard-layout-inset={effectiveLayoutKbInset}
         >
-          <ChatHeader sessionId={id} mode={mode} onFind={requestFind} />
+          <ChatHeader
+            sessionId={id}
+            mode={mode}
+            onFind={requestFind}
+            onFitTerminal={() =>
+              setFitRequest({
+                sessionId: id,
+                requestId: createClientOperationId("pty-fit"),
+              })
+            }
+          />
           {mode === "json" && presentation === "ok" && <VoicePilotController sessionId={id} />}
           {!isTerminalSession && !showPtyApprovalHint && <StatusLine state={statusState} />}
           {showPtyApprovalHint && (
@@ -274,6 +288,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                 sessionKind={session?.kind}
                 provider={session?.provider}
                 findRequest={activeFindRequest}
+                fitRequest={fitRequest?.sessionId === id ? fitRequest.requestId : undefined}
               />
             ) : (
               <ChatJsonView sessionId={id} findRequest={activeFindRequest} />

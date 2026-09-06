@@ -202,6 +202,42 @@ describe("ProxySwitcher offline removal", () => {
     await new Promise((resolve) => setTimeout(resolve, 0));
   });
 
+  it.each(["page", "dropdown"] as const)(
+    "shows reported OS separately from names in the %s selector",
+    async (layout) => {
+      const described = proxies.map((proxy, index) => ({
+        ...proxy,
+        osName: index === 0 ? "Windows" : "macOS",
+      }));
+      useAppStore.setState({ proxies: described });
+      renderSwitcher(layout);
+      if (layout === "dropdown") {
+        const trigger = document.querySelector<HTMLElement>(
+          '[data-slot="proxy-switcher-trigger"]',
+        )!;
+        expect(trigger.querySelector('[data-slot="proxy-name"]')?.textContent).toBe(
+          described[0]!.name,
+        );
+        expect(trigger.querySelector('[data-slot="proxy-os"]')?.textContent).toBe(
+          described[0]!.osName,
+        );
+        fireEvent.click(trigger);
+      }
+      for (const proxy of described) {
+        const row = document.querySelector(
+          `[data-slot="proxy-item"][data-proxy-id="${proxy.proxyId}"]`,
+        )!;
+        expect(row.querySelector('[data-slot="proxy-name"]')?.textContent).toBe(proxy.name);
+        expect(row.querySelector('[data-slot="proxy-os"]')?.textContent).toBe(proxy.osName);
+      }
+    },
+  );
+
+  it("does not invent an OS subtitle when a proxy has not reported one", () => {
+    renderSwitcher("page");
+    expect(document.querySelector('[data-slot="proxy-os"]')).toBeNull();
+  });
+
   it("keeps removal hidden until an offline mobile row is swiped", () => {
     renderSwitcher("page");
 

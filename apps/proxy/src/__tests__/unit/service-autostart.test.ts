@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createServiceAutostart } from "#src/common/service-autostart.js";
+import { buildWindowsAutostartLauncher } from "#src/common/windows-autostart-launcher.js";
 
 const roots: string[] = [];
 afterEach(async () => {
@@ -214,15 +215,39 @@ describe("Proxy login startup registration", () => {
     expect(script).toContain("-Priority 4");
     expect(script).toContain("-AllowStartIfOnBatteries -DontStopIfGoingOnBatteries");
     expect(script).not.toMatch(/Password|RestartCount|Start-ScheduledTask|do-not-save/);
-    const encodedLauncher = script.match(
-      /-WindowStyle Hidden -EncodedCommand ([a-zA-Z0-9+/=]+)/,
-    )![1]!;
-    const launcher = Buffer.from(encodedLauncher, "base64").toString("utf16le");
-    expect(launcher).toContain("$info.CreateNoWindow = $true");
-    expect(launcher).toContain("$info.UseShellExecute = $false");
-    expect(launcher).toContain(
-      '"C:\\DEV Anywhere\\index.js" "--profile" "default" "serve" "autostart" "run"',
+    const launcher = buildWindowsAutostartLauncher({
+      home: options.home,
+      profile: "default",
+      executable: "C:\\Program Files\\nodejs\\node.exe",
+      args: ["C:\\DEV Anywhere\\index.js", "--profile", "default", "serve", "autostart", "run"],
+    });
+    expect(script).toContain(launcher.compileScript);
+    expect(script).toContain(
+      `$action = New-ScheduledTaskAction -Execute '${launcher.path}' -WorkingDirectory '${options.home}';`,
     );
+    expect(script).not.toContain("-WindowStyle");
+    expect(script.indexOf("Add-Type")).toBeLessThan(script.indexOf("Register-ScheduledTask"));
+    expect(script).toContain("-Force | Out-Null");
+  });
+
+  it("updates the same Windows task idempotently without overwriting a running launcher", async () => {
+    const { manager, run } = await fixture("win32");
+    await manager.enable();
+    await manager.enable();
+    expect(run.mock.calls[1]).toEqual(run.mock.calls[0]);
+    const script = Buffer.from(run.mock.calls[0]![1][3]!, "base64").toString("utf16le");
+    expect(script).toContain("if (!(Test-Path -LiteralPath $launcherPath -PathType Leaf))");
+    expect(script).not.toMatch(/Unregister-ScheduledTask|Stop-ScheduledTask|Start-ScheduledTask/);
+  });
+
+  it("surfaces Windows compilation or registration errors without removing the previous task", async () => {
+    const { manager, run } = await fixture("win32");
+    run.mockRejectedValue(new Error("registration denied"));
+    await expect(manager.enable()).rejects.toThrow("registration denied");
+    expect(run).toHaveBeenCalledTimes(1);
+    const script = Buffer.from(run.mock.calls[0]![1][3]!, "base64").toString("utf16le");
+    expect(script.startsWith("$ErrorActionPreference = 'Stop';")).toBe(true);
+    expect(script).not.toMatch(/Unregister-ScheduledTask|Stop-ScheduledTask|taskkill/);
   });
 
   it("Windows cancellation only deletes its task, without terminating the current Proxy", async () => {

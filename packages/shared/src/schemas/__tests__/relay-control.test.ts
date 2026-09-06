@@ -9,6 +9,35 @@ import {
 } from "../relay-control.js";
 
 describe("RelayControlSchema", () => {
+  it("carries optional Proxy OS descriptions without changing identity or rejecting future metadata", () => {
+    const registration = {
+      type: "proxy_register",
+      protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      proxyId: "proxy-1",
+      proxyVersion: "0.9.5",
+      name: "Workstation",
+    };
+    expect(RelayControlSchema.parse(registration)).toEqual(registration);
+    expect(
+      RelayControlSchema.parse({ ...registration, osName: "Windows", displayHint: "office" }),
+    ).toEqual({ ...registration, osName: "Windows" });
+    expect(RelayControlSchema.safeParse({ ...registration, osName: 1 }).success).toBe(false);
+    const listing = {
+      type: "proxy_list_response",
+      proxies: [
+        {
+          proxyId: "proxy-1",
+          name: "Workstation",
+          osName: "Windows",
+          version: "0.9.5",
+          online: true,
+          sessions: [],
+        },
+      ],
+    };
+    expect(RelayControlSchema.parse(listing)).toEqual(listing);
+  });
+
   it("rejects proxy_register with empty proxyId", () => {
     expect(() =>
       RelayControlSchema.parse({

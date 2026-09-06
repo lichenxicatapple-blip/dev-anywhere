@@ -122,6 +122,16 @@ function shouldPreserveSystemMetaShortcut(event: KeyboardEvent): boolean {
   return event.metaKey;
 }
 
+function shouldPreserveBrowserPasteShortcut(event: KeyboardEvent): boolean {
+  if (event.type !== "keydown" || event.key.toLowerCase() !== "v" || event.altKey) return false;
+  // This is the browser's OS, never the remote development machine's OS. On Apple clients,
+  // Cmd+V pastes locally while Ctrl+V remains an intentional terminal shortcut (e.g. Codex).
+  const appleClient =
+    typeof navigator !== "undefined" &&
+    /Mac|iPhone|iPad|iPod/u.test(navigator.platform || navigator.userAgent);
+  return appleClient ? event.metaKey && !event.ctrlKey : event.ctrlKey && !event.metaKey;
+}
+
 type HelperTextareaSnapshot = {
   inputMode: string | null;
   enterKeyHint: string | null;
@@ -498,6 +508,10 @@ export function attachXtermRawInput(
   term.textarea?.addEventListener("compositionend", onCompositionEnd);
   term.textarea?.addEventListener("blur", onTextareaBlur);
   term.attachCustomKeyEventHandler?.((event) => {
+    // Return before xterm encodes Ctrl+V as U+0016 and cancels the native paste event. Do not
+    // preventDefault: the browser must deliver its actual clipboard data to the paste handler.
+    // This also preserves Ctrl+Shift+V on non-Apple clients without reading a remote clipboard.
+    if (shouldPreserveBrowserPasteShortcut(event)) return false;
     if (isPhysicalKeyboardMode()) {
       if (
         shouldPreserveSystemInputSourceShortcut(event) ||

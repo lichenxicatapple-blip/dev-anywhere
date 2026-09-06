@@ -3,7 +3,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { dirname, join, win32 } from "node:path";
 import { promisify } from "node:util";
-import { quoteWindowsArgument } from "./command-launch.js";
+import { buildWindowsAutostartLauncher } from "./windows-autostart-launcher.js";
 
 interface AutostartOptions {
   platform: NodeJS.Platform;
@@ -150,20 +150,10 @@ WantedBy=default.target
   }
 
   function windowsTask(): string {
-    const launcher = `$ErrorActionPreference = 'Stop';
-$info = New-Object System.Diagnostics.ProcessStartInfo;
-$info.FileName = ${psString(executable)};
-$info.Arguments = ${psString(args.map(quoteWindowsArgument).join(" "))};
-$info.WorkingDirectory = ${psString(home)};
-$info.EnvironmentVariables['USERPROFILE'] = ${psString(home)};
-$info.EnvironmentVariables['HOME'] = ${psString(home)};
-$info.UseShellExecute = $false;
-$info.CreateNoWindow = $true;
-$child = [System.Diagnostics.Process]::Start($info);
-$child.WaitForExit();
-exit $child.ExitCode;`;
-    return `$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name;
-$action = New-ScheduledTaskAction -Execute ${psString(powershell)} -Argument ${psString(`-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand ${encodePowerShell(launcher)}`)};
+    const launcher = buildWindowsAutostartLauncher({ home, profile, executable, args });
+    return `${launcher.compileScript}
+$user = [System.Security.Principal.WindowsIdentity]::GetCurrent().Name;
+$action = New-ScheduledTaskAction -Execute ${psString(launcher.path)} -WorkingDirectory ${psString(home)};
 $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user;
 $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Limited;
 $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -ExecutionTimeLimit ([TimeSpan]::Zero) -MultipleInstances IgnoreNew -Priority 4;

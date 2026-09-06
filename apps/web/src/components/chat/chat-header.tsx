@@ -1,10 +1,10 @@
 // 桌面端有常驻侧栏，返回入口只在移动端显示。
 import {
   ArrowLeft,
-  Check,
   ImageIcon,
   Keyboard,
   Lightbulb,
+  Maximize,
   Mic,
   Minus,
   MoreVertical,
@@ -14,6 +14,7 @@ import {
   Search,
   Type,
   Upload,
+  Zap,
 } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
 import { useNavigate } from "react-router";
@@ -37,6 +38,7 @@ import {
 import { useAppStore } from "@/stores/app-store";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 import { formatUnlockedTerminalPathName } from "@/lib/format-session-name";
+import { useFileStore } from "@/stores/file-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
 import { toast } from "@/components/toast";
@@ -65,6 +67,7 @@ interface ChatHeaderProps {
   sessionId: string;
   mode?: "json" | "pty";
   onFind: () => void;
+  onFitTerminal?: () => void;
 }
 
 function splitPtyTitle(title: string): { indicator?: string; label: string } {
@@ -150,7 +153,8 @@ function ShortcutKeyIcon({ label }: { label: string }) {
   );
 }
 
-export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeaderProps) {
+  const homePath = useFileStore((s) => s.homePath);
   const uploadPickerPolicy = getUploadPickerPolicy();
   const navigate = useNavigate();
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === sessionId));
@@ -160,6 +164,8 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
+  const connected = useAppStore((s) => s.connected);
+  const proxyOnline = useAppStore((s) => s.proxyOnline);
   const adjustPtyFontSize = useAppStore((s) => s.adjustPtyFontSize);
   const adjustChatContentFontSize = useAppStore((s) => s.adjustChatContentFontSize);
   const setChatContentFontSize = useAppStore((s) => s.setChatContentFontSize);
@@ -183,7 +189,7 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
   const enableVoicePilot = useVoicePilotStore((s) => s.enable);
   const disableVoicePilot = useVoicePilotStore((s) => s.disable);
   const hasLockedName = Boolean(session?.nameLocked && session?.name);
-  const terminalPathTitle = formatUnlockedTerminalPathName(session);
+  const terminalPathTitle = formatUnlockedTerminalPathName(session, homePath);
   const title =
     (hasLockedName && session?.name) ||
     terminalPathTitle ||
@@ -417,6 +423,19 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
                 </ChatMenuIcon>
                 重命名
               </DropdownMenuItem>
+              {session?.mode === "pty" && session.ptyOwner === "proxy-hosted" && onFitTerminal && (
+                <DropdownMenuItem
+                  className={menuItemClass}
+                  data-slot="chat-menu-fit-terminal"
+                  disabled={!connected || !proxyOnline || session.state === "error"}
+                  onSelect={onFitTerminal}
+                >
+                  <ChatMenuIcon>
+                    <Maximize aria-hidden="true" />
+                  </ChatMenuIcon>
+                  按窗口调整终端尺寸
+                </DropdownMenuItem>
+              )}
               <DropdownMenuCheckboxItem
                 checked={screenWakeLockChecked}
                 className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
@@ -448,7 +467,7 @@ export function ChatHeader({ sessionId, mode, onFind }: ChatHeaderProps) {
                   }}
                 >
                   <ChatMenuIcon>
-                    <Check aria-hidden="true" />
+                    <Zap aria-hidden="true" />
                   </ChatMenuIcon>
                   <span className="min-w-0 flex-1">Always yes</span>
                 </DropdownMenuCheckboxItem>

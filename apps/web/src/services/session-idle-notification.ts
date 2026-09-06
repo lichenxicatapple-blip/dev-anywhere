@@ -2,6 +2,7 @@ import type { SessionInfo } from "@dev-anywhere/shared";
 import { showBrowserNotification } from "@/lib/browser-notifications";
 import { formatSessionName, formatUnlockedTerminalPathName } from "@/lib/format-session-name";
 import { useAppStore } from "@/stores/app-store";
+import { useFileStore } from "@/stores/file-store";
 
 const BUSY_SESSION_STATES = new Set<SessionInfo["state"]>(["working", "compacting"]);
 
@@ -15,9 +16,10 @@ export function isBusyToIdleTransition(
 }
 
 function sessionNotificationLabel(session: SessionInfo): string {
-  const terminalPath = formatUnlockedTerminalPathName(session);
+  const homePath = useFileStore.getState().homePath;
+  const terminalPath = formatUnlockedTerminalPathName(session, homePath);
   if (terminalPath) return terminalPath;
-  const formatted = formatSessionName(session.name ?? session.cwd);
+  const formatted = formatSessionName(session.name ?? session.cwd, homePath);
   return formatted === "New Session" ? session.sessionId.slice(0, 8) : formatted;
 }
 

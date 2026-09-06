@@ -25,6 +25,7 @@ interface ProxyState {
   sessions: Set<string>;
   disconnectedAt: number | null;
   name?: string;
+  osName?: string;
   version: string;
 }
 
@@ -64,6 +65,7 @@ export class RelayRegistry {
     ws: WebSocket,
     version: string,
     name?: string,
+    osName?: string,
   ): "new" | "reconnected" {
     const existing = this.proxyStates.get(proxyId);
     if (existing) {
@@ -75,6 +77,7 @@ export class RelayRegistry {
       existing.connectionState = "online";
       existing.disconnectedAt = null;
       if (name !== undefined) existing.name = name;
+      existing.osName = osName;
       existing.version = version;
       return "reconnected";
     }
@@ -85,6 +88,7 @@ export class RelayRegistry {
       sessions: new Set(),
       disconnectedAt: null,
       name,
+      osName,
       version,
     });
     return "new";
@@ -186,12 +190,14 @@ export class RelayRegistry {
   listProxiesWithName(): Array<{
     proxyId: string;
     name?: string;
+    osName?: string;
     version: string;
     online: boolean;
   }> {
     return Array.from(this.proxyStates.entries()).map(([proxyId, state]) => ({
       proxyId,
       ...(state.name !== undefined ? { name: state.name } : {}),
+      ...(state.osName !== undefined ? { osName: state.osName } : {}),
       version: state.version,
       online: state.connectionState === "online",
     }));

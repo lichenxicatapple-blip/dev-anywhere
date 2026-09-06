@@ -122,10 +122,7 @@ export function PreviewRow({
       </span>
       <span className="flex h-5 min-w-0 items-center gap-1.5 text-xs leading-5">
         <Globe2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
-        <span
-          className="min-w-0 flex-1 truncate font-mono text-muted-foreground"
-          title={sourceLabel}
-        >
+        <span className="min-w-0 truncate font-mono text-muted-foreground" title={sourceLabel}>
           {sourceLabel}
         </span>
         <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">

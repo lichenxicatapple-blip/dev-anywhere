@@ -47,6 +47,7 @@ export type InboundMessage = MessageEnvelope | RelayControlMessage;
 type ProxyInfoResult = Array<{
   proxyId: string;
   name?: string;
+  osName?: string;
   online: boolean;
   sessions: string[];
 }>;

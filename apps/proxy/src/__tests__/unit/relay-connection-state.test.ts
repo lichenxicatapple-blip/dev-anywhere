@@ -8,7 +8,7 @@ import {
 } from "@dev-anywhere/shared";
 
 // RelayConnectionState 需要从 relay-connection.ts 导出
-import { RelayConnection, RelayConnectionState } from "#src/serve/relay-connection.js";
+import { RelayConnection, RelayConnectionState, proxyOsName } from "#src/serve/relay-connection.js";
 
 // mock ws 模块：用 EventEmitter 派生类，每次 new 把实例挂到 static lastInstance 供测试访问
 vi.mock("ws", async () => {
@@ -138,6 +138,15 @@ describe("RelayConnection state machine", () => {
   });
 });
 
+it.each([
+  ["darwin", "macOS"],
+  ["win32", "Windows"],
+  ["linux", "Linux"],
+  ["freebsd", undefined],
+] as const)("reports OS metadata from platform %s without guessing", (platform, expected) => {
+  expect(proxyOsName(platform)).toBe(expected);
+});
+
 // 复现 ws 异步回调 vs. 同步 close() 的竞态：open/message 事件到达时 FSM 已 CLOSED，
 // 当前 transitionTo 非法转换 throw 会冒到 unhandledException
 describe("RelayConnection: async ws events arriving after close()", () => {
@@ -161,6 +170,7 @@ describe("RelayConnection: async ws events arriving after close()", () => {
     expect(JSON.parse(String(fakeWs.send.mock.calls[0]?.[0]))).toMatchObject({
       type: "proxy_register",
       protocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
+      ...(proxyOsName() ? { osName: proxyOsName() } : {}),
     });
   });
 

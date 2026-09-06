@@ -72,6 +72,12 @@ describe("RelayConnection", () => {
     // 验证 proxy 已注册到 relay
     expect(relay.registry.getProxy(proxyId)).toBeDefined();
     expect(relay.registry.getProxy(proxyId)?.extensions).toContain("permessage-deflate");
+    const reportedOs = (
+      { darwin: "macOS", win32: "Windows", linux: "Linux" } as Record<string, string>
+    )[process.platform];
+    const proxyMetadata = relay.registry.listProxiesWithName()[0];
+    if (reportedOs) expect(proxyMetadata).toHaveProperty("osName", reportedOs);
+    else expect(proxyMetadata).not.toHaveProperty("osName");
   });
 
   it("exchanges Proxy and Relay versions during registration", async () => {

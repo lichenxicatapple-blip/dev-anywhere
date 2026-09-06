@@ -86,12 +86,14 @@ vi.mock("@/lib/screen-wake-lock-manager", () => ({
 import { ChatHeader } from "./chat-header";
 import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 import { useAppStore } from "@/stores/app-store";
+import { useFileStore } from "@/stores/file-store";
 import { useVoicePilotStore } from "@/voice/voice-pilot-store";
 
 describe("ChatHeader PTY upload menu", () => {
   afterEach(() => cleanup());
 
   beforeEach(() => {
+    useFileStore.setState({ homePath: "/Users/dev" });
     sessionStorage.clear();
     window.history.replaceState({}, "", "/");
     Object.defineProperty(navigator, "mediaDevices", {
@@ -180,18 +182,67 @@ describe("ChatHeader PTY upload menu", () => {
     return input;
   }
 
-  it("lets PTY agent sessions toggle Always yes from the overflow menu", async () => {
+  it.each([false, true])("renders and toggles Always yes when enabled=%s", async (enabled) => {
     const key = ptyAutoYesSessionKey("proxy-1", "s1");
     if (!key) throw new Error("missing PTY auto yes key");
+    useSessionStore.getState().setPtyAutoYes(key, enabled);
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
     const menuTrigger = screen.getByRole("button", { name: "会话操作" });
     fireEvent.keyDown(menuTrigger, { key: "Enter" });
 
     const item = await screen.findByRole("menuitemcheckbox", { name: "Always yes" });
+    expect(item).toHaveAttribute("aria-checked", String(enabled));
+    expect(item.querySelectorAll(".lucide-check")).toHaveLength(enabled ? 1 : 0);
     fireEvent.click(item);
 
-    expect(useSessionStore.getState().ptyAutoYesBySessionKey[key]).toBe(true);
+    expect(useSessionStore.getState().ptyAutoYesBySessionKey[key]).toBe(enabled ? undefined : true);
+  });
+
+  it.each(["agent", "terminal"] as const)("offers manual fit for a hosted %s PTY", async (kind) => {
+    useSessionStore.setState({
+      sessions: [
+        {
+          sessionId: "s1",
+          kind,
+          mode: "pty",
+          provider: "claude",
+          cwd: "/tmp/project",
+          ptyOwner: "proxy-hosted",
+          state: "idle",
+          lastActive: 1,
+        },
+      ],
+    });
+    useAppStore.setState({ connected: true, proxyOnline: true });
+    const fit = vi.fn();
+    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onFitTerminal={fit} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("menuitem", { name: "按窗口调整终端尺寸" }));
+    expect(fit).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not offer manual fit for a locally owned PTY", async () => {
+    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onFitTerminal={vi.fn()} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+    await screen.findByRole("menuitem", { name: "重命名" });
+    expect(screen.queryByRole("menuitem", { name: "按窗口调整终端尺寸" })).toBeNull();
+  });
+
+  it("prevents a fit command while the developer machine is offline", async () => {
+    useSessionStore.setState({
+      sessions: [
+        { ...useSessionStore.getState().sessions[0]!, mode: "pty", ptyOwner: "proxy-hosted" },
+      ],
+    });
+    useAppStore.setState({ connected: true, proxyOnline: false });
+    const fit = vi.fn();
+    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onFitTerminal={fit} />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+    const item = await screen.findByRole("menuitem", { name: "按窗口调整终端尺寸" });
+    expect(item.getAttribute("aria-disabled")).toBe("true");
+    fireEvent.click(item);
+    expect(fit).not.toHaveBeenCalled();
   });
 
   it("uploads picked file and writes the @<path> token into the terminal", async () => {

@@ -33,6 +33,18 @@ describe("RelayRegistry", () => {
   });
 
   describe("proxy registration", () => {
+    it("preserves reported OS offline and replaces it with each new registration", () => {
+      registry.registerProxy("p1", createMockWs(), "0.9.5", "Workstation", "Windows");
+      registry.transitionProxy("p1", "online", "offline");
+      expect(registry.listProxiesWithName()).toEqual([
+        { proxyId: "p1", name: "Workstation", osName: "Windows", version: "0.9.5", online: false },
+      ]);
+      registry.registerProxy("p1", createMockWs(), "0.9.5", "Workstation", "Linux");
+      expect(registry.listProxiesWithName()[0]?.osName).toBe("Linux");
+      registry.registerProxy("p1", createMockWs(), "0.9.4", "Workstation");
+      expect(registry.listProxiesWithName()[0]).not.toHaveProperty("osName");
+    });
+
     it("registerProxy returns 'new' for first registration", () => {
       const ws = createMockWs();
       const status = registerProxy(registry, "p1", ws);
