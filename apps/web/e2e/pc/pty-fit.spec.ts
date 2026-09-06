@@ -143,7 +143,8 @@ test("fits on the first click after leaving and returning to a cached PTY", asyn
   const entry = page.locator(`[data-slot="pty-keepalive-entry"][data-session-id="${sessionId}"]`);
   await page.locator('[data-slot="chat-back-button"]').click();
   await expect(page).toHaveURL(/#\/sessions$/);
-  expect(await header.evaluate((node) => node.isConnected)).toBe(false);
+  // The URL updates before React commits the route change and detaches the old header.
+  await expect.poll(() => header.evaluate((node) => node.isConnected)).toBe(false);
   await expect(entry).toHaveAttribute("data-active", "false");
 
   await page.goBack();
