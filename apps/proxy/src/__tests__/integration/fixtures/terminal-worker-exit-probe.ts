@@ -1,5 +1,5 @@
 import { appendFileSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { basename, dirname, resolve } from "node:path";
 import { isMainThread } from "node:worker_threads";
 
 // Plain JavaScript so the test can copy it to an isolated .mjs preload.
@@ -13,6 +13,30 @@ const samePath = (a = "", b = "") =>
   (process.platform === "win32"
     ? resolve(a).toLowerCase() === resolve(b).toLowerCase()
     : resolve(a) === resolve(b));
+
+if (
+  isMainThread &&
+  tracePath &&
+  samePath(process.env.HOME, dirname(tracePath)) &&
+  samePath(process.env.USERPROFILE, dirname(tracePath)) &&
+  /^conpty_console_list_agent(?:\.js)?$/.test(basename(process.argv[1] ?? ""))
+) {
+  const recordHelper = (stage = "", code = process.exitCode, error = "") => {
+    try {
+      appendFileSync(
+        tracePath,
+        `${JSON.stringify({ stage, pid: process.pid, ppid: process.ppid, at: Date.now(), code, error })}\n`,
+      );
+    } catch {
+      /* Fixture diagnostics do not control helper behavior. */
+    }
+  };
+  recordHelper("console-list-start");
+  process.on("uncaughtExceptionMonitor", (error) =>
+    recordHelper("console-list-error", undefined, error.message),
+  );
+  process.on("exit", (code) => recordHelper("console-list-exit", code));
+}
 
 // NODE_OPTIONS is inherited by the fixture's CLI, fake Agent and node-pty helpers too.
 // Only its main terminal-worker process may be observed or have process.exit wrapped.
