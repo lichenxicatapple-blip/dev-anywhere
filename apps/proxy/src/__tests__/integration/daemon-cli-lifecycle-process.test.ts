@@ -39,6 +39,7 @@ const PROCESS_TIMEOUT_MS = 45_000;
 const OUTPUT_LIMIT_BYTES = 128 * 1024;
 const REPO_ROOT = fileURLToPath(new URL("../../../../../", import.meta.url));
 const CLI_PATH = fileURLToPath(new URL("../../index.ts", import.meta.url));
+const BUNDLED_CLI_PATH = fileURLToPath(new URL("../../../dist/index.js", import.meta.url));
 const AUTO_START_PATH = fileURLToPath(
   new URL("./fixtures/daemon-auto-start-client.ts", import.meta.url),
 );
@@ -47,6 +48,7 @@ const FAKE_AGENT_SOURCE = fileURLToPath(new URL("./fixtures/fake-agent.ts", impo
 interface Fixture {
   root: string;
   profile: string;
+  runtime?: "source" | "bundled";
   env: NodeJS.ProcessEnv;
   paths: ReturnType<typeof buildProxyProfilePaths>;
   observedInstances: Map<string, number>;
@@ -112,8 +114,8 @@ async function createFixture(profile = "default", sharedRoot?: string): Promise<
   return fixture;
 }
 
-function startNode(args: string[], env: NodeJS.ProcessEnv): ChildProcess {
-  const child = spawn(process.execPath, ["--import", "tsx", ...args], {
+function startNode(args: string[], env: NodeJS.ProcessEnv, loadTsx = true): ChildProcess {
+  const child = spawn(process.execPath, loadTsx ? ["--import", "tsx", ...args] : args, {
     cwd: REPO_ROOT,
     env,
     stdio: ["ignore", "pipe", "pipe"],
@@ -182,11 +184,13 @@ async function runCli(
   args: string[],
   envOverrides: NodeJS.ProcessEnv = {},
 ): Promise<ProcessResult> {
+  const bundled = fixture.runtime === "bundled";
   const result = await collectProcess(
-    startNode([CLI_PATH, "--profile", fixture.profile, ...args], {
-      ...fixture.env,
-      ...envOverrides,
-    }),
+    startNode(
+      [bundled ? BUNDLED_CLI_PATH : CLI_PATH, "--profile", fixture.profile, ...args],
+      { ...fixture.env, ...envOverrides },
+      !bundled,
+    ),
   );
   await observeService(fixture);
   return result;
@@ -649,6 +653,8 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
 
   it("preserves a hosted Agent's worker, PTY and offline output until explicit termination", async () => {
     const fixture = await createFixture("hosted");
+    // Diagnostic branch only: switch this fixture's entry points, not its lifecycle assertions.
+    fixture.runtime = process.env.DA_LIFECYCLE_RUNTIME === "bundled" ? "bundled" : "source";
     delete fixture.env.VITEST;
     const workDir = join(fixture.root, "工作 目录");
     mkdirSync(workDir);
@@ -680,7 +686,12 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       DA_LIFECYCLE_AGENT_CONTROL: controlPath,
       DA_LIFECYCLE_EXIT_TRACE: exitTracePath,
       DA_LIFECYCLE_WORKER_ENTRY: fileURLToPath(
-        new URL("../../terminal-worker.ts", import.meta.url),
+        new URL(
+          fixture.runtime === "bundled"
+            ? "../../../dist/terminal-worker.js"
+            : "../../terminal-worker.ts",
+          import.meta.url,
+        ),
       ),
       DA_LIFECYCLE_PROFILE: fixture.profile,
       NODE_OPTIONS: `${fixture.env.NODE_OPTIONS ?? ""} --import ${JSON.stringify(pathToFileURL(exitProbePath).href)}`,

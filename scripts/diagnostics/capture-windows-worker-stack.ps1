@@ -21,6 +21,7 @@ $diagResult = [ordered]@{
     status = 'error'
     cdbExitCode = $null
     elapsedMs = 0
+    stackFrameCount = 0
     tracePath = $TracePath
     stderrPath = "$TracePath.stderr.log"
 }
@@ -61,10 +62,14 @@ try {
     $diagStartInfo.RedirectStandardInput = $true
     $diagStartInfo.RedirectStandardOutput = $true
     $diagStartInfo.RedirectStandardError = $true
+    $diagCaptureId = [Guid]::NewGuid().ToString('N')
+    $diagBegin = "DA_NATIVE_STACK_BEGIN_$diagCaptureId"
+    $diagEnd = "DA_NATIVE_STACK_END_$diagCaptureId"
+    $diagCommands = ".reload /f node.exe; .echo $diagBegin; ~* kc 40; .echo $diagEnd; qd"
     foreach ($diagArgument in @(
-        '-pv', '-pd', '-p', [string]$TargetProcessId,
+        '-pv', '-p', [string]$TargetProcessId,
         '-sins', '-y', $diagSymbols, '-noshell', '-nosqm',
-        '-c', '.reload /f node.exe; ~* kc 40; qd'
+        '-c', $diagCommands
     )) {
         $diagStartInfo.ArgumentList.Add($diagArgument)
     }
@@ -92,17 +97,14 @@ try {
         }
     }
     if (-not $diagFinished) {
-        # Kill only this debugger, never the target or its process tree. -pd detaches.
+        # -pv does not establish a normal debugger attachment. Stop only this CDB.
         $diagProcess.Kill()
         if (-not $diagProcess.WaitForExit(2000)) {
             throw 'CDB did not finish after its own timeout termination.'
         }
     } else {
         $diagResult.cdbExitCode = $diagProcess.ExitCode
-        if ($diagProcess.ExitCode -eq 0) {
-            $diagResult.status = 'completed'
-            $diagExitCode = 0
-        } else {
+        if ($diagProcess.ExitCode -ne 0) {
             $diagResult.status = 'cdb-error'
         }
     }
@@ -110,6 +112,29 @@ try {
         [System.Threading.Tasks.Task[]]@($diagOutputCopy, $diagErrorCopy), 2000
     )) {
         throw 'CDB output pipes did not finish draining.'
+    }
+    $diagOutput.Dispose()
+    $diagOutput = $null
+    if ($diagFinished -and $diagResult.cdbExitCode -eq 0) {
+        $diagText = [System.IO.File]::ReadAllText($TracePath)
+        # Whole-line markers exclude the startup command echoed by CDB itself.
+        $diagBeginMatch = [regex]::Match($diagText, "(?m)^$diagBegin\r?$")
+        $diagEndMatch = [regex]::Match($diagText, "(?m)^$diagEnd\r?$")
+        if ($diagBeginMatch.Success -and $diagEndMatch.Success -and
+            $diagEndMatch.Index -gt $diagBeginMatch.Index) {
+            $diagStackStart = $diagBeginMatch.Index + $diagBeginMatch.Length
+            $diagStack = $diagText.Substring($diagStackStart, $diagEndMatch.Index - $diagStackStart)
+            $diagResult.stackFrameCount = [regex]::Matches(
+                $diagStack, '(?m)^\s*(?:[0-9a-fA-F]+\s+)?[\w.-]+![^\r\n]+\r?$'
+            ).Count
+        }
+        if ($diagResult.stackFrameCount -gt 0) {
+            $diagResult.status = 'completed'
+            $diagExitCode = 0
+        } else {
+            $diagResult.status = 'incomplete-capture'
+            $diagResult.error = 'CDB returned without a complete marked native stack.'
+        }
     }
 } catch {
     $diagResult.error = $_.Exception.Message

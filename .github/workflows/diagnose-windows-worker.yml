@@ -13,8 +13,14 @@ concurrency:
 
 jobs:
   diagnose:
+    strategy:
+      fail-fast: false
+      matrix:
+        runtime: [source, bundled]
     runs-on: windows-latest
     timeout-minutes: 15
+    env:
+      DA_LIFECYCLE_RUNTIME: ${{ matrix.runtime }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -71,6 +77,31 @@ jobs:
             )
             if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
           }
+      - name: Verify native capture on a disposable Node process
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $captureFixture = [System.Diagnostics.Process]::new()
+          $captureFixture.StartInfo.FileName = (Get-Command node).Source
+          $captureFixture.StartInfo.UseShellExecute = $false
+          $captureFixture.StartInfo.CreateNoWindow = $true
+          $captureFixture.StartInfo.RedirectStandardOutput = $true
+          $captureFixture.StartInfo.ArgumentList.Add('-e')
+          $captureFixture.StartInfo.ArgumentList.Add('console.log("ready"); setInterval(() => {}, 1000)')
+          try {
+            if (-not $captureFixture.Start()) { throw 'Capture fixture did not start' }
+            $captureReady = $captureFixture.StandardOutput.ReadLineAsync()
+            if (-not $captureReady.Wait(10000) -or $captureReady.Result -ne 'ready') { throw 'Capture fixture is not ready' }
+            & $env:DA_LIFECYCLE_STACK_HOOK -TargetProcessId $captureFixture.Id -TracePath (Join-Path $env:DA_LIFECYCLE_ARTIFACT_DIR 'capture-preflight.log')
+            if ($LASTEXITCODE -ne 0) { throw 'Native capture preflight failed' }
+            if ($captureFixture.HasExited) { throw 'Noninvasive capture unexpectedly stopped its target' }
+          } finally {
+            if ($captureFixture.Id -and -not $captureFixture.HasExited) {
+              $captureFixture.Kill()
+              [void]$captureFixture.WaitForExit(5000)
+            }
+            $captureFixture.Dispose()
+          }
       - name: Reproduce with a retained process handle
         shell: pwsh
         run: |
@@ -84,7 +115,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: windows-worker-exit-evidence
+          name: windows-worker-exit-evidence-${{ matrix.runtime }}
           path: ${{ runner.temp }}/da-windows-exit/evidence
           if-no-files-found: warn
           retention-days: 7
