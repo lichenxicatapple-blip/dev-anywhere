@@ -38,7 +38,7 @@ afterEach(() => {
   rmSync(fixture.root, { recursive: true, force: true });
 });
 
-function createRuntime(options: Partial<PtyRuntimeOptions> = {}) {
+function prepareRuntime(options: Partial<PtyRuntimeOptions> = {}) {
   const events = {
     output: vi.fn<PtyRuntimeEvents["output"]>(),
     resize: vi.fn<PtyRuntimeEvents["resize"]>(),
@@ -64,6 +64,11 @@ function createRuntime(options: Partial<PtyRuntimeOptions> = {}) {
   } as PtyRuntimeOptions;
   const runtime = new PtyRuntime(settings, events);
   runtimes.push(runtime);
+  return { runtime, events };
+}
+
+function createRuntime(options: Partial<PtyRuntimeOptions> = {}) {
+  const { runtime, events } = prepareRuntime(options);
   const pid = runtime.start();
   const child = spawnMock.mock.results.at(-1)!.value;
   return {
@@ -160,16 +165,50 @@ describe("PTY runtime", () => {
     );
   });
 
-  it("terminates only the owned child once and ignores callbacks after disposal", () => {
+  it("disposes immediately but waits for public PTY exit after killing the owned child once", async () => {
     const { runtime, child, events, data, exit } = createRuntime();
-    runtime.terminate();
-    runtime.terminate();
+    const completion = runtime.terminate();
+    expect(runtime.terminate()).toBe(completion);
+    let completed = false;
+    void completion.then(() => {
+      completed = true;
+    });
+    runtime.write("late input");
+    runtime.resize(100, 40);
     data("late");
+    await Promise.resolve();
+    expect(completed).toBe(false);
+    expect(child.write).not.toHaveBeenCalled();
+    expect(child.resize).not.toHaveBeenCalled();
     exit({ exitCode: 1, signal: 0 });
+    await completion;
+    expect(completed).toBe(true);
     expect(child.kill).toHaveBeenCalledOnce();
     expect(events.output).not.toHaveBeenCalled();
     expect(events.exit).not.toHaveBeenCalled();
     expect(() => runtime.start()).toThrow("already");
+  });
+
+  it("resolves termination when no PTY was started", async () => {
+    const { runtime } = prepareRuntime();
+    await expect(runtime.terminate()).resolves.toBeUndefined();
+    expect(spawnMock).not.toHaveBeenCalled();
+  });
+
+  it("resolves termination when PTY spawn failed", async () => {
+    const { runtime } = prepareRuntime();
+    spawnMock.mockImplementationOnce(() => {
+      throw new Error("fixture spawn failed");
+    });
+    expect(() => runtime.start()).toThrow("fixture spawn failed");
+    await expect(runtime.terminate()).resolves.toBeUndefined();
+  });
+
+  it("resolves termination after natural exit without killing the child again", async () => {
+    const { runtime, child, exit } = createRuntime();
+    exit({ exitCode: 0, signal: 0 });
+    await expect(runtime.terminate()).resolves.toBeUndefined();
+    expect(child.kill).not.toHaveBeenCalled();
   });
 
   it("reports natural exit and structured Codex active-writer facts", () => {

@@ -306,19 +306,20 @@ class TerminalWorker {
 
   private shutdown(exitCode: number): void {
     if (this.exiting) return;
-    this.runtime?.terminate();
-    this.exit({ exitCode });
+    void this.exit({ exitCode });
   }
 
-  private exit(event: PtyRuntimeExit): void {
+  private async exit(event: PtyRuntimeExit): Promise<void> {
     if (this.exiting) return;
     this.exiting = true;
-    this.runtime?.terminate();
+    const runtime = this.runtime;
     this.runtime = null;
+    await runtime?.terminate();
     log.info({ sessionId: this.identity.sessionId, ...event }, "Terminal worker PTY exited");
-    if (this.socket?.writable) {
+    const socket = this.socket;
+    if (socket?.writable) {
       const timer = setTimeout(() => process.exit(event.exitCode), 500);
-      this.socket.end(
+      socket.end(
         serializeIpc({ type: "pty_deregister", sessionId: this.identity.sessionId, ...event }),
         () => {
           clearTimeout(timer);
