@@ -3,7 +3,8 @@ import type { PreviewSummary } from "@dev-anywhere/shared";
 import { installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../helpers";
 
 const sources = [
-  { previewId: "short-url", url: "http://localhost:5173" },
+  // Leave room for platform font differences in the narrow desktop sidebar.
+  { previewId: "short-url", url: "http://[::1]" },
   {
     previewId: "long-url",
     url: `http://localhost:5173/${"long-preview-path/".repeat(12)}`,
