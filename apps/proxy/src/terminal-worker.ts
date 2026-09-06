@@ -313,19 +313,22 @@ class TerminalWorker {
   private exit(event: PtyRuntimeExit): void {
     if (this.exiting) return;
     this.exiting = true;
+    process.exitCode = event.exitCode;
     this.runtime?.terminate();
     this.runtime = null;
     log.info({ sessionId: this.identity.sessionId, ...event }, "Terminal worker PTY exited");
-    if (this.socket?.writable) {
-      const timer = setTimeout(() => process.exit(event.exitCode), 500);
-      this.socket.end(
+    const socket = this.socket;
+    if (socket?.writable) {
+      const timer = setTimeout(() => socket.destroy(), 500);
+      socket.once("close", () => clearTimeout(timer));
+      socket.end(
         serializeIpc({ type: "pty_deregister", sessionId: this.identity.sessionId, ...event }),
         () => {
           clearTimeout(timer);
-          process.exit(event.exitCode);
+          socket.destroy();
         },
       );
-    } else process.exit(event.exitCode);
+    } else socket?.destroy();
   }
 }
 
