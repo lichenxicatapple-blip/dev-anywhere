@@ -1,4 +1,4 @@
-import { execFileSync, spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -12,7 +12,7 @@ import {
 } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn as spawnPty, type IPty } from "node-pty";
@@ -32,7 +32,6 @@ import {
   processArgvMatchesManagedSession,
   readProcessArgv,
 } from "#src/common/managed-session-process.js";
-import { parseWindowsCommandLine } from "#src/common/windows-process.js";
 import { buildProxyProfilePaths } from "#src/common/paths.js";
 import { requestServiceControl, type ServiceStatus } from "#src/common/service-control.js";
 
@@ -659,6 +658,9 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     const controlPath = join(fixture.root, "agent-control.txt");
     const exitTracePath = join(fixture.root, "worker-exit-trace.jsonl");
     const exitProbePath = join(fixture.root, "terminal-worker-exit-probe.mjs");
+    const nativeTracePath = join(fixture.root, "worker-handle-trace.jsonl");
+    const terminationPath = join(fixture.root, "worker-termination.txt");
+    const observerStopPath = join(fixture.root, "worker-observer-stop.txt");
     copyFileSync(FAKE_AGENT_SOURCE, agentPath);
     copyFileSync(
       fileURLToPath(new URL("./fixtures/terminal-worker-exit-probe.ts", import.meta.url)),
@@ -700,6 +702,9 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     let agentPid: number | undefined;
     let socketError: string | undefined;
     let terminationStartedAt: number | undefined;
+    let observer: ChildProcess | undefined;
+    let observerClosed: Promise<void> | undefined;
+    let observerError = "";
     let failure: unknown;
     const journal = () => (existsSync(journalPath) ? readFileSync(journalPath, "utf8") : "");
     const exitTrace = () => (existsSync(exitTracePath) ? readFileSync(exitTracePath, "utf8") : "");
@@ -714,45 +719,55 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
         return { at, alive: code === "EPERM", result: "error", code, errno };
       }
     };
-    const probeWindowsProcess = (
-      pid: number,
-    ): {
-      status: "found" | "absent" | "error" | "timeout";
-      parentPid?: number;
-      commandLine?: string | null;
-      native?: Record<string, number | null>;
-      errorCode?: string;
-    } => {
-      const source = readFileSync(
-        new URL("./fixtures/windows-process-exit-probe.ps1", import.meta.url),
-        "utf8",
+    const readTrace = (path: string) => (existsSync(path) ? readFileSync(path, "utf8") : "");
+    const nativeRecords = () =>
+      readTrace(nativeTracePath)
+        .split("\n")
+        .flatMap((line) => {
+          try {
+            return [JSON.parse(line) as { stage: string; pid: number; creationFileTime?: string }];
+          } catch {
+            return [];
+          }
+        });
+    const nativeStage = (stage: string) => nativeRecords().find((record) => record.stage === stage);
+    const startObserver = async () => {
+      if (process.platform !== "win32") return;
+      observer = spawn(
+        "powershell.exe",
+        [
+          "-NoProfile",
+          "-NonInteractive",
+          "-ExecutionPolicy",
+          "Bypass",
+          "-File",
+          fileURLToPath(new URL("./fixtures/windows-process-exit-probe.ps1", import.meta.url)),
+          "-TargetProcessId",
+          String(workerPid),
+          "-TracePath",
+          nativeTracePath,
+          "-TerminationPath",
+          terminationPath,
+          "-StopPath",
+          observerStopPath,
+        ],
+        { windowsHide: true, stdio: ["ignore", "ignore", "pipe"], env: fixture.env },
       );
-      try {
-        return JSON.parse(
-          execFileSync(
-            "powershell.exe",
-            [
-              "-NoProfile",
-              "-NonInteractive",
-              "-Command",
-              `& { ${source} } -TargetProcessId ${pid}`,
-            ],
-            {
-              encoding: "utf8",
-              timeout: 5_000,
-              maxBuffer: 128 * 1024,
-              windowsHide: true,
-              stdio: ["ignore", "pipe", "ignore"],
-            },
-          ),
-        );
-      } catch (error) {
-        const code = (error as NodeJS.ErrnoException).code;
-        return {
-          status: code === "ETIMEDOUT" ? "timeout" : "error",
-          errorCode: code ?? "QUERY_FAILED",
-        };
-      }
+      observer.stderr?.setEncoding("utf8");
+      observer.stderr?.on("data", (chunk: string) => {
+        observerError = `${observerError}${chunk}`.slice(-2_048);
+      });
+      observer.on("error", (error) => {
+        observerError = error.message;
+      });
+      observerClosed = new Promise<void>((resolve) => observer!.once("close", () => resolve()));
+      commandChildren.set(observer, observerClosed);
+      await expect
+        .poll(() => nativeStage("armed"), { timeout: 15_000 })
+        .toMatchObject({
+          pid: workerPid,
+          creationFileTime: expect.stringMatching(/^\d+$/),
+        });
     };
     const persistedSessions = () =>
       (existsSync(fixture.paths.sessionsPath)
@@ -915,6 +930,7 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
         pid: workerPid,
         sessionId,
       });
+      await startObserver();
       const initialSnapshot = await snapshot();
 
       phase = "restart";
@@ -973,9 +989,12 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
 
       phase = "explicit session termination";
       terminationStartedAt = performance.now();
+      if (observer) writeFileSync(terminationPath, String(Date.now()));
       send({ type: "session_terminate", sessionId });
       expect(await waitForProcessToExit(agentPid)).toBe(true);
       expect(await waitForProcessToExit(workerPid!)).toBe(true);
+      if (observer)
+        await expect.poll(() => nativeStage("signaled"), { timeout: 1_000 }).toBeDefined();
       expect(
         exitTrace()
           .trim()
@@ -991,95 +1010,48 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       expect((await readyService(fixture)).info?.sessions).toEqual([]);
       expect(journal().match(/FAKE_AGENT_READY:/g)).toHaveLength(1);
     } catch (error) {
-      // Capture before cleanup can signal anything. A missing/inaccessible argv is unknown,
-      // not proof of exit; never print command lines or environment variables into CI logs.
-      const checkedAt = Date.now();
-      const terminationElapsedMs =
-        terminationStartedAt === undefined ? null : performance.now() - terminationStartedAt;
-      const agentSignal = probeSignal(agentPid);
-      const workerSignal = probeSignal(workerPid);
-      const workerWindows =
-        process.platform === "win32" && workerSignal.alive && workerPid !== undefined
-          ? probeWindowsProcess(workerPid)
-          : null;
-      const workerArgv =
-        workerSignal.alive && workerPid !== undefined
-          ? process.platform === "win32"
-            ? workerWindows?.commandLine
-              ? parseWindowsCommandLine(workerWindows.commandLine)
-              : null
-            : readProcessArgv(workerPid)
-          : null;
-      const fixtureLogs = fixtureFailureLogs(fixture, sessionId);
-      const startedPty = fixtureLogs.split("\n").flatMap((line) => {
-        try {
-          const record = JSON.parse(line);
-          return record.msg === "PTY runtime started" && record.sessionId === sessionId
-            ? [record]
-            : [];
-        } catch {
-          return [];
-        }
-      })[0] as { pid?: number } | undefined;
-      const ptyPid =
-        typeof startedPty?.pid === "number" &&
-        Number.isSafeInteger(startedPty.pid) &&
-        startedPty.pid > 0
-          ? startedPty.pid
-          : undefined;
-      const ptySignal = probeSignal(ptyPid);
-      const ptyProcess =
-        process.platform === "win32" && ptySignal.alive && ptyPid !== undefined
-          ? probeWindowsProcess(ptyPid)
-          : null;
+      // The native observer already holds the original process handle. No cold process
+      // queries here: they would lose the timing evidence while the worker is exiting.
       const processEvidence = {
-        checkedAt,
-        terminationElapsedMs,
-        agentAlive: agentSignal.alive,
-        workerAlive: workerSignal.alive,
-        agentSignal,
-        workerSignal,
-        workerSignalAfterWindowsQuery: workerWindows ? probeSignal(workerPid) : null,
-        workerWindowsQuery: workerWindows
-          ? {
-              status: workerWindows.status,
-              errorCode: workerWindows.errorCode,
-              native: workerWindows.native,
-            }
-          : null,
-        workerIdentityMatches:
-          workerArgv && sessionId
-            ? processArgvMatchesManagedSession(workerArgv, {
-                id: sessionId,
-                kind: "agent",
-                mode: "pty",
-                provider: "kimi",
-                ptyOwner: "proxy-hosted",
-              })
-            : null,
-        ptyPid,
-        ptyAlive: ptySignal.alive,
-        ptySignal,
-        ptyWindowsQuery: ptyProcess
-          ? {
-              status: ptyProcess.status,
-              errorCode: ptyProcess.errorCode,
-              native: ptyProcess.native,
-            }
-          : null,
-        ptyParentIsWorker:
-          ptyProcess?.status === "found" ? ptyProcess.parentPid === workerPid : null,
-        ptyMentionsFixtureLauncher: ptyProcess?.commandLine?.includes(agentBin) ?? null,
+        checkedAt: Date.now(),
+        terminationElapsedMs:
+          terminationStartedAt === undefined ? null : performance.now() - terminationStartedAt,
+        agentSignal: probeSignal(agentPid),
+        workerSignal: probeSignal(workerPid),
       };
+      if (observer && terminationStartedAt !== undefined && nativeStage("armed")) {
+        // This cannot turn the failed 5-second assertion into a pass. Keep the failed
+        // worker alive for the independent observer/hook, then clean up only our fixture.
+        const deadline = performance.now() + 90_000;
+        while (
+          performance.now() < deadline &&
+          !nativeStage("signaled") &&
+          !nativeStage("diagnostic-complete") &&
+          !nativeStage("observer-complete")
+        )
+          await sleep(50);
+        if (nativeStage("diagnostic-ready") && !nativeStage("diagnostic-complete")) {
+          while (
+            performance.now() < deadline &&
+            !nativeStage("diagnostic-complete") &&
+            !nativeStage("observer-complete")
+          )
+            await sleep(50);
+        }
+      }
       failure = new Error(
         `${String(error)}\nHosted lifecycle failed during ${phase}.\n` +
           `runtime=${process.version}, executable=${process.execPath}\n` +
           `sessionId=${sessionId}, workerPid=${workerPid}, agentPid=${agentPid}, socketError=${socketError}\n` +
           `Pre-cleanup processes: ${JSON.stringify(processEvidence)}\n` +
           `Worker exit trace:\n${exitTrace().slice(-4_096)}\n` +
+          `Worker native handle trace:\n${readTrace(nativeTracePath).slice(-8_192)}\n` +
+          `Observer stderr:\n${observerError}\n` +
+          `Worker native stack:\n${readTrace(`${nativeTracePath}.stack.log`).slice(-16_384)}\n` +
+          `Stack capture:\n${readTrace(`${nativeTracePath}.capture.json`).slice(-2_048)}\n` +
           `Agent journal:\n${journal().slice(-4_096)}\n` +
           `Web messages:\n${JSON.stringify(messages.slice(-8)).slice(-4_096)}\n` +
-          fixtureLogs,
+          fixtureFailureLogs(fixture, sessionId),
         { cause: error },
       );
     } finally {
@@ -1089,10 +1061,39 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
         if (failure) console.error(`Hosted fixture cleanup also failed: ${String(error)}`);
         else failure = error;
       } finally {
-        client?.terminate();
-        await relay.close();
+        try {
+          if (observer) {
+            writeFileSync(observerStopPath, "stop");
+            if (
+              !(await Promise.race([
+                observerClosed!.then(() => true),
+                sleep(15_000, false, { ref: false }),
+              ]))
+            )
+              observer.kill("SIGKILL");
+            await observerClosed;
+            const artifactRoot = process.env.DA_LIFECYCLE_ARTIFACT_DIR;
+            if (artifactRoot) {
+              const artifactDir = join(artifactRoot, basename(fixture.root));
+              mkdirSync(artifactDir, { recursive: true });
+              for (const path of [
+                exitTracePath,
+                nativeTracePath,
+                `${nativeTracePath}.stack.log`,
+                `${nativeTracePath}.stack.log.stderr.log`,
+                `${nativeTracePath}.capture.json`,
+                `${nativeTracePath}.capture-error.log`,
+              ]) {
+                if (existsSync(path)) copyFileSync(path, join(artifactDir, basename(path)));
+              }
+            }
+          }
+        } finally {
+          client?.terminate();
+          await relay.close();
+        }
       }
     }
     if (failure) throw failure;
-  }, 90_000);
+  }, 150_000);
 });

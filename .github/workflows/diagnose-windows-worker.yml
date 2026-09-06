@@ -1,0 +1,90 @@
+name: Diagnose Windows worker exit
+
+on:
+  push:
+    branches: [diagnostics/windows-worker-exit]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-windows-worker-exit
+  cancel-in-progress: true
+
+jobs:
+  diagnose:
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - name: Prepare native debugger and matching Node symbols
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $diagCdb = "${env:ProgramFiles(x86)}\Windows Kits\10\Debuggers\x64\cdb.exe"
+          if (-not (Test-Path -LiteralPath $diagCdb)) { throw 'CDB is unavailable on this runner' }
+          & $diagCdb -version
+          if ((node --version) -ne 'v22.22.2' -or (node -p 'process.arch') -ne 'x64') {
+            throw 'Unexpected Node runtime'
+          }
+          $diagRoot = Join-Path $env:RUNNER_TEMP 'da-windows-exit'
+          $diagNodeSymbols = Join-Path $diagRoot 'node-symbols'
+          $diagWindowsSymbols = Join-Path $diagRoot 'windows-symbols'
+          $diagEvidence = Join-Path $diagRoot 'evidence'
+          New-Item -ItemType Directory -Force -Path $diagNodeSymbols, $diagWindowsSymbols, $diagEvidence | Out-Null
+          $diagArchive = Join-Path $diagRoot 'node_pdb.7z'
+          Invoke-WebRequest -Uri 'https://nodejs.org/download/release/v22.22.2/win-x64/node_pdb.7z' -OutFile $diagArchive -TimeoutSec 120
+          $expectedHash = '0431a2383c9ceec6bd46d5d96fec1342c0adf7bd57528312fe4812e32e1d2e5c'
+          if ((Get-FileHash -LiteralPath $diagArchive -Algorithm SHA256).Hash.ToLowerInvariant() -ne $expectedHash) {
+            throw 'Node symbols checksum mismatch'
+          }
+          & 7z x $diagArchive "-o$diagNodeSymbols" -y | Out-Null
+          if ($LASTEXITCODE -ne 0) { throw 'Node symbols extraction failed' }
+          $nodePdb = Get-ChildItem -LiteralPath $diagNodeSymbols -Recurse -Filter node.pdb | Select-Object -First 1
+          if (-not $nodePdb) { throw 'node.pdb is missing' }
+          "DA_LIFECYCLE_DEBUGGER=$diagCdb" >> $env:GITHUB_ENV
+          "DA_LIFECYCLE_SYMBOL_PATH=$($nodePdb.DirectoryName);srv*$diagWindowsSymbols*https://msdl.microsoft.com/download/symbols" >> $env:GITHUB_ENV
+          "DA_LIFECYCLE_STACK_HOOK=$(Join-Path $env:GITHUB_WORKSPACE 'scripts/diagnostics/capture-windows-worker-stack.ps1')" >> $env:GITHUB_ENV
+          "DA_LIFECYCLE_ARTIFACT_DIR=$diagEvidence" >> $env:GITHUB_ENV
+      - name: Check diagnostic PowerShell syntax
+        shell: pwsh
+        run: |
+          foreach ($scriptPath in @(
+            'apps/proxy/src/__tests__/integration/fixtures/windows-process-exit-probe.ps1',
+            'scripts/diagnostics/capture-windows-worker-stack.ps1'
+          )) {
+            $parseErrors = $null
+            $parseTokens = $null
+            [void][System.Management.Automation.Language.Parser]::ParseFile(
+              (Join-Path $env:GITHUB_WORKSPACE $scriptPath), [ref]$parseTokens, [ref]$parseErrors
+            )
+            if ($parseErrors.Count -gt 0) { throw ($parseErrors | Out-String) }
+          }
+      - name: Reproduce with a retained process handle
+        shell: pwsh
+        run: |
+          # Bounded reproduction, not retries: the first failure remains a failure and stops the job.
+          for ($caseNumber = 1; $caseNumber -le 5; $caseNumber++) {
+            Write-Host "Diagnostic case $caseNumber of 5"
+            pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/daemon-cli-lifecycle-process.test.ts -t 'preserves a hosted Agent' --maxWorkers=1 --retry=0 --hookTimeout=30000 --reporter=verbose
+            if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          }
+      - name: Upload fixture exit evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-worker-exit-evidence
+          path: ${{ runner.temp }}/da-windows-exit/evidence
+          if-no-files-found: warn
+          retention-days: 7
