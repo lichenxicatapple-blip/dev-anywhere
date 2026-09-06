@@ -30,6 +30,11 @@ async function selectFirstProxy(page: Page): Promise<void> {
   const firstProxy = page.locator('[data-slot="proxy-item"]:visible').first();
   await expect(firstProxy).toBeVisible({ timeout: 15_000 });
   await firstProxy.click();
+  await expect(switcher).toHaveAttribute("aria-expanded", "false");
+  await expect(page.locator('[data-slot="popover-content"]')).toHaveCount(0);
+  // Closing the popover restores focus after its exit animation and unmount.
+  // Let that finish before opening the terminal and sending keyboard input.
+  await expect(switcher).toBeFocused();
 }
 
 async function runProcess(file: string, args: string[], timeout: number): Promise<void> {

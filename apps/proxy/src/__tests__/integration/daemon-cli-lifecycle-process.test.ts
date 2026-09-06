@@ -14,7 +14,7 @@ import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { spawn as spawnPty, type IPty } from "node-pty";
 import { WebSocket } from "ws";
 import { afterEach, describe, expect, it } from "vitest";
@@ -32,6 +32,7 @@ import {
   processArgvMatchesManagedSession,
   readProcessArgv,
 } from "#src/common/managed-session-process.js";
+import { readWindowsProcess } from "#src/common/windows-process.js";
 import { buildProxyProfilePaths } from "#src/common/paths.js";
 import { requestServiceControl, type ServiceStatus } from "#src/common/service-control.js";
 
@@ -656,7 +657,13 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     const agentBin = join(workDir, process.platform === "win32" ? "kimi.cmd" : "kimi");
     const journalPath = join(fixture.root, "agent-journal.txt");
     const controlPath = join(fixture.root, "agent-control.txt");
+    const exitTracePath = join(fixture.root, "worker-exit-trace.jsonl");
+    const exitProbePath = join(fixture.root, "terminal-worker-exit-probe.mjs");
     copyFileSync(FAKE_AGENT_SOURCE, agentPath);
+    copyFileSync(
+      fileURLToPath(new URL("./fixtures/terminal-worker-exit-probe.ts", import.meta.url)),
+      exitProbePath,
+    );
     const shellQuote = (value: string) => `'${value.replaceAll("'", "'\\''")}'`;
     writeFileSync(
       agentBin,
@@ -669,6 +676,12 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       KIMI_BIN: agentBin,
       DA_LIFECYCLE_AGENT_JOURNAL: journalPath,
       DA_LIFECYCLE_AGENT_CONTROL: controlPath,
+      DA_LIFECYCLE_EXIT_TRACE: exitTracePath,
+      DA_LIFECYCLE_WORKER_ENTRY: fileURLToPath(
+        new URL("../../terminal-worker.ts", import.meta.url),
+      ),
+      DA_LIFECYCLE_PROFILE: fixture.profile,
+      NODE_OPTIONS: `${fixture.env.NODE_OPTIONS ?? ""} --import ${JSON.stringify(pathToFileURL(exitProbePath).href)}`,
     });
     const relay = createRelayServer({
       logger: createLogger({ name: "hosted-lifecycle-fixture", silent: true }),
@@ -686,8 +699,10 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     let workerPid: number | undefined;
     let agentPid: number | undefined;
     let socketError: string | undefined;
+    let terminationStartedAt: number | undefined;
     let failure: unknown;
     const journal = () => (existsSync(journalPath) ? readFileSync(journalPath, "utf8") : "");
+    const exitTrace = () => (existsSync(exitTracePath) ? readFileSync(exitTracePath, "utf8") : "");
     const persistedSessions = () =>
       (existsSync(fixture.paths.sessionsPath)
         ? JSON.parse(readFileSync(fixture.paths.sessionsPath, "utf8"))
@@ -844,6 +859,11 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       expect(workerPid).toBeGreaterThan(0);
       expect(workerPid).not.toBe(agentPid);
       expect(workerPid).not.toBe(original.pid);
+      expect(JSON.parse(exitTrace().trim())).toMatchObject({
+        stage: "armed",
+        pid: workerPid,
+        sessionId,
+      });
       const initialSnapshot = await snapshot();
 
       phase = "restart";
@@ -901,21 +921,84 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
         .toContain(`FAKE_AGENT_PONG:${agentPid}`);
 
       phase = "explicit session termination";
+      terminationStartedAt = performance.now();
       send({ type: "session_terminate", sessionId });
       expect(await waitForProcessToExit(agentPid)).toBe(true);
       expect(await waitForProcessToExit(workerPid!)).toBe(true);
+      expect(
+        exitTrace()
+          .trim()
+          .split("\n")
+          .map((line) => JSON.parse(line)),
+      ).toEqual(
+        ["armed", "process.exit", "exit"].map((stage) =>
+          expect.objectContaining({ stage, pid: workerPid, sessionId }),
+        ),
+      );
       await expect.poll(() => persistedSessions().map((session) => session.id)).toEqual([]);
       expectSuccess(await runCli(fixture, ["serve", "restart", "--json"]));
       expect((await readyService(fixture)).info?.sessions).toEqual([]);
       expect(journal().match(/FAKE_AGENT_READY:/g)).toHaveLength(1);
     } catch (error) {
+      // Capture before cleanup can signal anything. A missing/inaccessible argv is unknown,
+      // not proof of exit; never print command lines or environment variables into CI logs.
+      const checkedAt = Date.now();
+      const terminationElapsedMs =
+        terminationStartedAt === undefined ? null : performance.now() - terminationStartedAt;
+      const agentAlive = agentPid === undefined ? null : processIsAlive(agentPid);
+      const workerAlive = workerPid === undefined ? null : processIsAlive(workerPid);
+      const workerArgv = workerAlive && workerPid !== undefined ? readProcessArgv(workerPid) : null;
+      const fixtureLogs = fixtureFailureLogs(fixture, sessionId);
+      const startedPty = fixtureLogs.split("\n").flatMap((line) => {
+        try {
+          const record = JSON.parse(line);
+          return record.msg === "PTY runtime started" && record.sessionId === sessionId
+            ? [record]
+            : [];
+        } catch {
+          return [];
+        }
+      })[0] as { pid?: number } | undefined;
+      const ptyPid =
+        typeof startedPty?.pid === "number" &&
+        Number.isSafeInteger(startedPty.pid) &&
+        startedPty.pid > 0
+          ? startedPty.pid
+          : undefined;
+      const ptyAlive = ptyPid === undefined ? null : processIsAlive(ptyPid);
+      const ptyProcess =
+        process.platform === "win32" && ptyAlive && ptyPid !== undefined
+          ? readWindowsProcess(ptyPid)
+          : null;
+      const processEvidence = {
+        checkedAt,
+        terminationElapsedMs,
+        agentAlive,
+        workerAlive,
+        workerIdentityMatches:
+          workerArgv && sessionId
+            ? processArgvMatchesManagedSession(workerArgv, {
+                id: sessionId,
+                kind: "agent",
+                mode: "pty",
+                provider: "kimi",
+                ptyOwner: "proxy-hosted",
+              })
+            : null,
+        ptyPid,
+        ptyAlive,
+        ptyParentIsWorker: ptyProcess ? ptyProcess.parentPid === workerPid : null,
+        ptyMentionsFixtureLauncher: ptyProcess?.commandLine?.includes(agentBin) ?? null,
+      };
       failure = new Error(
         `${String(error)}\nHosted lifecycle failed during ${phase}.\n` +
           `runtime=${process.version}, executable=${process.execPath}\n` +
           `sessionId=${sessionId}, workerPid=${workerPid}, agentPid=${agentPid}, socketError=${socketError}\n` +
+          `Pre-cleanup processes: ${JSON.stringify(processEvidence)}\n` +
+          `Worker exit trace:\n${exitTrace().slice(-4_096)}\n` +
           `Agent journal:\n${journal().slice(-4_096)}\n` +
           `Web messages:\n${JSON.stringify(messages.slice(-8)).slice(-4_096)}\n` +
-          fixtureFailureLogs(fixture, sessionId),
+          fixtureLogs,
         { cause: error },
       );
     } finally {
