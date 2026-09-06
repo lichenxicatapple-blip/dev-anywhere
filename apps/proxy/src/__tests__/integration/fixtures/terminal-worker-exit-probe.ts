@@ -45,4 +45,17 @@ if (
     return originalExit.apply(process, args);
   };
   process.on("exit", (code) => record("exit", code));
+  const originalReallyExit = Reflect.get(process, "reallyExit");
+  if (typeof originalReallyExit === "function") {
+    Reflect.set(
+      process,
+      "reallyExit",
+      new Proxy(originalReallyExit, {
+        apply(target, receiver, args) {
+          record("reallyExit", args[0] ?? process.exitCode);
+          return Reflect.apply(target, receiver, args);
+        },
+      }),
+    );
+  }
 }

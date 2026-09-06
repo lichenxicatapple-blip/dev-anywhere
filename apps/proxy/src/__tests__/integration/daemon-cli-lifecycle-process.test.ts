@@ -1,4 +1,4 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { execFileSync, spawn, type ChildProcess } from "node:child_process";
 import {
   copyFileSync,
   existsSync,
@@ -32,7 +32,7 @@ import {
   processArgvMatchesManagedSession,
   readProcessArgv,
 } from "#src/common/managed-session-process.js";
-import { readWindowsProcess } from "#src/common/windows-process.js";
+import { parseWindowsCommandLine } from "#src/common/windows-process.js";
 import { buildProxyProfilePaths } from "#src/common/paths.js";
 import { requestServiceControl, type ServiceStatus } from "#src/common/service-control.js";
 
@@ -703,6 +703,57 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
     let failure: unknown;
     const journal = () => (existsSync(journalPath) ? readFileSync(journalPath, "utf8") : "");
     const exitTrace = () => (existsSync(exitTracePath) ? readFileSync(exitTracePath, "utf8") : "");
+    const probeSignal = (pid: number | undefined) => {
+      const at = Date.now();
+      if (pid === undefined) return { at, alive: null, result: "unknown" };
+      try {
+        process.kill(pid, 0);
+        return { at, alive: true, result: "success" };
+      } catch (error) {
+        const { code, errno } = error as NodeJS.ErrnoException;
+        return { at, alive: code === "EPERM", result: "error", code, errno };
+      }
+    };
+    const probeWindowsProcess = (
+      pid: number,
+    ): {
+      status: "found" | "absent" | "error" | "timeout";
+      parentPid?: number;
+      commandLine?: string | null;
+      native?: Record<string, number | null>;
+      errorCode?: string;
+    } => {
+      const source = readFileSync(
+        new URL("./fixtures/windows-process-exit-probe.ps1", import.meta.url),
+        "utf8",
+      );
+      try {
+        return JSON.parse(
+          execFileSync(
+            "powershell.exe",
+            [
+              "-NoProfile",
+              "-NonInteractive",
+              "-Command",
+              `& { ${source} } -TargetProcessId ${pid}`,
+            ],
+            {
+              encoding: "utf8",
+              timeout: 5_000,
+              maxBuffer: 128 * 1024,
+              windowsHide: true,
+              stdio: ["ignore", "pipe", "ignore"],
+            },
+          ),
+        );
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        return {
+          status: code === "ETIMEDOUT" ? "timeout" : "error",
+          errorCode: code ?? "QUERY_FAILED",
+        };
+      }
+    };
     const persistedSessions = () =>
       (existsSync(fixture.paths.sessionsPath)
         ? JSON.parse(readFileSync(fixture.paths.sessionsPath, "utf8"))
@@ -931,7 +982,7 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
           .split("\n")
           .map((line) => JSON.parse(line)),
       ).toEqual(
-        ["armed", "process.exit", "exit"].map((stage) =>
+        ["armed", "process.exit", "exit", "reallyExit"].map((stage) =>
           expect.objectContaining({ stage, pid: workerPid, sessionId }),
         ),
       );
@@ -945,9 +996,20 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
       const checkedAt = Date.now();
       const terminationElapsedMs =
         terminationStartedAt === undefined ? null : performance.now() - terminationStartedAt;
-      const agentAlive = agentPid === undefined ? null : processIsAlive(agentPid);
-      const workerAlive = workerPid === undefined ? null : processIsAlive(workerPid);
-      const workerArgv = workerAlive && workerPid !== undefined ? readProcessArgv(workerPid) : null;
+      const agentSignal = probeSignal(agentPid);
+      const workerSignal = probeSignal(workerPid);
+      const workerWindows =
+        process.platform === "win32" && workerSignal.alive && workerPid !== undefined
+          ? probeWindowsProcess(workerPid)
+          : null;
+      const workerArgv =
+        workerSignal.alive && workerPid !== undefined
+          ? process.platform === "win32"
+            ? workerWindows?.commandLine
+              ? parseWindowsCommandLine(workerWindows.commandLine)
+              : null
+            : readProcessArgv(workerPid)
+          : null;
       const fixtureLogs = fixtureFailureLogs(fixture, sessionId);
       const startedPty = fixtureLogs.split("\n").flatMap((line) => {
         try {
@@ -965,16 +1027,26 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
         startedPty.pid > 0
           ? startedPty.pid
           : undefined;
-      const ptyAlive = ptyPid === undefined ? null : processIsAlive(ptyPid);
+      const ptySignal = probeSignal(ptyPid);
       const ptyProcess =
-        process.platform === "win32" && ptyAlive && ptyPid !== undefined
-          ? readWindowsProcess(ptyPid)
+        process.platform === "win32" && ptySignal.alive && ptyPid !== undefined
+          ? probeWindowsProcess(ptyPid)
           : null;
       const processEvidence = {
         checkedAt,
         terminationElapsedMs,
-        agentAlive,
-        workerAlive,
+        agentAlive: agentSignal.alive,
+        workerAlive: workerSignal.alive,
+        agentSignal,
+        workerSignal,
+        workerSignalAfterWindowsQuery: workerWindows ? probeSignal(workerPid) : null,
+        workerWindowsQuery: workerWindows
+          ? {
+              status: workerWindows.status,
+              errorCode: workerWindows.errorCode,
+              native: workerWindows.native,
+            }
+          : null,
         workerIdentityMatches:
           workerArgv && sessionId
             ? processArgvMatchesManagedSession(workerArgv, {
@@ -986,8 +1058,17 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
               })
             : null,
         ptyPid,
-        ptyAlive,
-        ptyParentIsWorker: ptyProcess ? ptyProcess.parentPid === workerPid : null,
+        ptyAlive: ptySignal.alive,
+        ptySignal,
+        ptyWindowsQuery: ptyProcess
+          ? {
+              status: ptyProcess.status,
+              errorCode: ptyProcess.errorCode,
+              native: ptyProcess.native,
+            }
+          : null,
+        ptyParentIsWorker:
+          ptyProcess?.status === "found" ? ptyProcess.parentPid === workerPid : null,
         ptyMentionsFixtureLauncher: ptyProcess?.commandLine?.includes(agentBin) ?? null,
       };
       failure = new Error(
