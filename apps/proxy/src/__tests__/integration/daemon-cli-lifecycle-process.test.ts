@@ -1013,7 +1013,7 @@ describe.sequential("daemon CLI lifecycle process boundary", () => {
           .map((line) => JSON.parse(line))
           .filter((record) => record.pid === workerPid),
       ).toEqual(
-        ["armed", "exit"].map((stage) =>
+        ["armed", "process.exit", "exit", "reallyExit"].map((stage) =>
           expect.objectContaining({ stage, pid: workerPid, sessionId }),
         ),
       );

@@ -103,6 +103,8 @@ export function normalizePtyEnv(env: NodeJS.ProcessEnv): Record<string, string> 
 /** Owns one PTY and its canonical screen independently of any Proxy connection. */
 export class PtyRuntime {
   private child: IPty | null = null;
+  private childExit: Promise<void> = Promise.resolve();
+  private resolveChildExit: (() => void) | null = null;
   private readonly renderSequencer: PtyRenderSequencer;
   private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
   private readonly xtermHistoryCompat: CodexXtermHistoryCompat | null;
@@ -193,8 +195,14 @@ export class PtyRuntime {
       throw error;
     }
     this.child = child;
+    this.childExit = new Promise<void>((resolve) => {
+      this.resolveChildExit = resolve;
+    });
     child.onData((data) => this.handleData(data));
     child.onExit(({ exitCode, signal }) => {
+      // Disposal stops application work immediately; public PTY close may arrive later.
+      this.resolveChildExit?.();
+      this.resolveChildExit = null;
       if (this.closed) return;
       const code = signal ? 128 + signal : exitCode;
       const errorTail = code === 0 ? "" : sanitizeProviderErrorTail(this.outputTail);
@@ -282,8 +290,8 @@ export class PtyRuntime {
     if (!this.closed && this.options.kind === "agent") this.emitSemantic();
   }
 
-  terminate(): void {
-    if (this.closed) return;
+  terminate(): Promise<void> {
+    if (this.closed) return this.childExit;
     const child = this.child;
     this.dispose();
     try {
@@ -291,6 +299,7 @@ export class PtyRuntime {
     } catch {
       /* The owned child may already have exited. */
     }
+    return this.childExit;
   }
 
   private handleData(data: string): void {
