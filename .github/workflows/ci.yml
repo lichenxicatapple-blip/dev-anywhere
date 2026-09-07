@@ -86,7 +86,10 @@ jobs:
         run: |
           powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy/install-powershell.test.ps1
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy/install-powershell.test.ps1 -InstallerPath ./install.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           & ./scripts/deploy/install-powershell.test.ps1
+          & ./scripts/deploy/install-powershell.test.ps1 -InstallerPath ./install.ps1
       - uses: pnpm/action-setup@v4
         with:
           version: 9

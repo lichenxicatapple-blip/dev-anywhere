@@ -1,10 +1,14 @@
 # Run with Windows PowerShell 5.1 or PowerShell 7. This suite never contacts a
 # server: HTTP is mocked, and a local executable captures SSH argv and stdin.
 [CmdletBinding()]
-param([string]$InstallerPath = (Join-Path $PSScriptRoot '../../install.ps1'))
+param([string]$InstallerPath)
 
 Set-StrictMode -Version 2.0
 $ErrorActionPreference = 'Stop'
+# Resolve the script directory after parameter binding in Windows PowerShell.
+if ([string]::IsNullOrWhiteSpace($InstallerPath)) {
+    $InstallerPath = Join-Path $PSScriptRoot '../../install.ps1'
+}
 $InstallerPath = (Resolve-Path $InstallerPath).Path
 $utf8 = New-Object System.Text.UTF8Encoding($false, $true)
 $testDirectory = Join-Path ([System.IO.Path]::GetTempPath()) ('dev-anywhere-powershell-test-' + [guid]::NewGuid().ToString('N'))
