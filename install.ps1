@@ -60,8 +60,20 @@ sh -c 'set -eu; if [ "$(uname -s)" != Linux ]; then printf "%s\n" "error: the ta
         $process = New-Object System.Diagnostics.Process
         $process.StartInfo = $startInfo
         try {
-            if (-not $process.Start()) {
-                throw 'Could not start OpenSSH.'
+            # .NET Framework creates the stdin writer with Console.InputEncoding
+            # and immediately flushes its preamble, even for BaseStream writes.
+            # Pin a BOM-free encoding only while that writer is constructed.
+            $previousInputEncoding = [Console]::InputEncoding
+            $previousInputReader = [Console]::In
+            try {
+                [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($false)
+                if (-not $process.Start()) {
+                    throw 'Could not start OpenSSH.'
+                }
+            }
+            finally {
+                [Console]::InputEncoding = $previousInputEncoding
+                [Console]::SetIn($previousInputReader)
             }
             $writeError = $null
             try {

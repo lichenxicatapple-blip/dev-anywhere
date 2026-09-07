@@ -18,6 +18,8 @@ foreach ($name in @('REGISTRY_BASE', 'IMAGE_TAG', 'DEV_ANYWHERE_RELAY_PORT', 'DE
     $savedEnvironment[$name] = [System.Environment]::GetEnvironmentVariable($name)
 }
 $originalTls = [System.Net.ServicePointManager]::SecurityProtocol
+$originalInputEncoding = [Console]::InputEncoding
+$originalInputReader = [Console]::In
 
 function Assert-True {
     param([bool]$Condition, [string]$Message)
@@ -140,8 +142,14 @@ exit "${DEV_ANYWHERE_TEST_SSH_EXIT:-0}"
     [System.Environment]::SetEnvironmentVariable('REGISTRY_BASE', $specialSetting)
     [System.Environment]::SetEnvironmentVariable('IMAGE_TAG', 'v1.2.3')
     [System.Environment]::SetEnvironmentVariable('DEV_ANYWHERE_RELAY_PORT', '43100')
+    # A UTF-8 console can prepend a BOM when .NET Framework opens child stdin.
+    # Reproduce this regardless of the machine's default console code page.
+    [Console]::InputEncoding = New-Object System.Text.UTF8Encoding($true)
+    $inputReaderBeforeSsh = [Console]::In
     $script:scenario = 'success'
     Install-DevAnywhereRelay -SshTarget 'root@fixture.example' -PublicHost 'relay.example.com'
+    Assert-True ([Console]::InputEncoding.CodePage -eq 65001 -and [Console]::InputEncoding.GetPreamble().Length -eq 3) 'SSH startup must restore the original console input encoding.'
+    Assert-True ([object]::ReferenceEquals([Console]::In, $inputReaderBeforeSsh)) 'SSH startup must preserve the existing console input reader.'
 
     Assert-True ($script:httpRequests.Count -eq 3) 'Expected one SHA request and two component downloads.'
     Assert-True ($script:httpRequests[0].Headers.Accept -eq 'application/vnd.github.sha') 'SHA lookup must request the raw SHA representation.'
@@ -160,7 +168,9 @@ exit "${DEV_ANYWHERE_TEST_SSH_EXIT:-0}"
     $wireBytes = [System.IO.File]::ReadAllBytes($capturePath + '.stdin')
     $headerEnd = [Array]::IndexOf($wireBytes, [byte]10)
     Assert-True ($headerEnd -gt 0) 'Transport must include a byte-count header.'
-    $expectedSize = [int][System.Text.Encoding]::ASCII.GetString($wireBytes, 0, $headerEnd)
+    $headerText = [System.Text.Encoding]::ASCII.GetString($wireBytes, 0, $headerEnd)
+    Assert-True ($headerText -cmatch '\A[0-9]+\z') 'Transport header must contain only ASCII digits, without a BOM.'
+    $expectedSize = [int]$headerText
     Assert-True ($expectedSize -eq ($wireBytes.Length - $headerEnd - 1)) 'Declared payload length must match actual UTF-8 bytes.'
     $payloadText = $utf8.GetString($wireBytes, $headerEnd + 1, $expectedSize)
     Assert-True ($payloadText.StartsWith("set -euo pipefail`n")) 'Payload must start without a UTF-8 BOM.'
@@ -199,6 +209,10 @@ exit "${DEV_ANYWHERE_TEST_SSH_EXIT:-0}"
     $script:scenario = 'success'
     [System.Environment]::SetEnvironmentVariable('DEV_ANYWHERE_TEST_SSH_EXIT', '37')
     Assert-Fails { Install-DevAnywhereRelay -SshTarget 'root@fixture.example' -PublicHost 'relay.example.com' } 'exit code 37'
+    Assert-True ([Console]::InputEncoding.CodePage -eq 65001 -and [Console]::InputEncoding.GetPreamble().Length -eq 3) 'Failed SSH must restore the original console input encoding.'
+    Assert-Fails { Invoke-RelaySsh -SshPath (Join-Path $testDirectory 'missing-ssh.exe') -Target 'root@fixture.example' -Payload ([byte[]]@(49, 10)) } ''
+    Assert-True ([Console]::InputEncoding.CodePage -eq 65001 -and [Console]::InputEncoding.GetPreamble().Length -eq 3) 'Failed process startup must restore the original console input encoding.'
+    Assert-True ([object]::ReferenceEquals([Console]::In, $inputReaderBeforeSsh)) 'Failed process startup must preserve the existing console input reader.'
     [System.Environment]::SetEnvironmentVariable('DEV_ANYWHERE_TEST_SSH_EXIT', '0')
     Install-DevAnywhereRelay
     $promptedArgs = [System.IO.File]::ReadAllLines($capturePath + '.args', $utf8)
@@ -228,5 +242,7 @@ finally {
         [System.Environment]::SetEnvironmentVariable($entry.Key, $entry.Value)
     }
     [System.Net.ServicePointManager]::SecurityProtocol = $originalTls
+    [Console]::InputEncoding = $originalInputEncoding
+    [Console]::SetIn($originalInputReader)
     [System.IO.Directory]::Delete($testDirectory, $true)
 }
