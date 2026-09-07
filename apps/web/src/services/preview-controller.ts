@@ -334,11 +334,31 @@ export class PreviewController {
   }
 
   syncWebSnapshot(scope: PreviewScope): Promise<WebPreviewReduceResult> {
-    return this.startWebSnapshot(this.requireActive(scope));
+    const active = this.requireActive(scope);
+    const snapshot = this.startWebSnapshot(active);
+    void snapshot.catch(() => {
+      if (
+        this.isCurrent(active) &&
+        usePreviewStore.getState().authoritative?.syncStatus === "awaiting-snapshot"
+      ) {
+        this.scheduleWebResyncRetry(active);
+      }
+    });
+    return snapshot;
   }
 
   syncDeviceSnapshot(scope: PreviewScope): Promise<DevicePreviewReduceResult> {
-    return this.startDeviceSnapshot(this.requireActive(scope));
+    const active = this.requireActive(scope);
+    const snapshot = this.startDeviceSnapshot(active);
+    void snapshot.catch(() => {
+      if (
+        this.isCurrent(active) &&
+        useDevicePreviewStore.getState().authoritative?.syncStatus === "awaiting-snapshot"
+      ) {
+        this.scheduleDeviceResyncRetry(active);
+      }
+    });
+    return snapshot;
   }
 
   applyWebPreviewState(
@@ -978,8 +998,10 @@ export class PreviewController {
     const requiredAfterSequence = this.webResyncAfterSequence;
     const requiresPostEventSnapshot =
       requiredAfterSequence !== null && this.webSnapshotSequence <= requiredAfterSequence;
+    const syncStatus = usePreviewStore.getState().authoritative?.syncStatus;
     if (
-      usePreviewStore.getState().authoritative?.syncStatus !== "needs-resync" &&
+      syncStatus !== "needs-resync" &&
+      syncStatus !== "awaiting-snapshot" &&
       !requiresPostEventSnapshot
     ) {
       this.webResyncRequested = false;
@@ -1033,7 +1055,9 @@ export class PreviewController {
     this.webResyncRetryAttempt += 1;
     this.webResyncRetryTimer = setTimeout(() => {
       this.webResyncRetryTimer = null;
-      this.requestWebResync(active);
+      if (!this.isCurrent(active)) return;
+      this.webResyncRequested = true;
+      this.drainWebResync(active);
     }, delay);
   }
 
@@ -1057,8 +1081,10 @@ export class PreviewController {
     const requiredAfterSequence = this.deviceResyncAfterSequence;
     const requiresPostEventSnapshot =
       requiredAfterSequence !== null && this.deviceSnapshotSequence <= requiredAfterSequence;
+    const syncStatus = useDevicePreviewStore.getState().authoritative?.syncStatus;
     if (
-      useDevicePreviewStore.getState().authoritative?.syncStatus !== "needs-resync" &&
+      syncStatus !== "needs-resync" &&
+      syncStatus !== "awaiting-snapshot" &&
       !requiresPostEventSnapshot
     ) {
       this.deviceResyncRequested = false;
@@ -1118,7 +1144,9 @@ export class PreviewController {
     this.deviceResyncRetryAttempt += 1;
     this.deviceResyncRetryTimer = setTimeout(() => {
       this.deviceResyncRetryTimer = null;
-      this.requestDeviceResync(active);
+      if (!this.isCurrent(active)) return;
+      this.deviceResyncRequested = true;
+      this.drainDeviceResync(active);
     }, delay);
   }
 

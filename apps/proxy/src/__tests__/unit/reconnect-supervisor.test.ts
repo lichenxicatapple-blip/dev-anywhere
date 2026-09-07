@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { ReconnectSupervisor } from "#src/terminal/reconnect-supervisor.js";
+import { ReconnectSupervisor } from "#src/common/reconnect-supervisor.js";
 
 function deferred(): { promise: Promise<void>; resolve: () => void } {
   let resolve!: () => void;

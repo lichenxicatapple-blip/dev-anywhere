@@ -35,6 +35,8 @@ interface ProxyProfilePaths {
   previewsPath: string;
   hookRegistryPath: string;
   previewRunDir: string;
+  previewWorkerSock: string;
+  previewWorkerLock: string;
   dataDir: string;
   proxyIdPath: string;
   logDir: string;
@@ -143,6 +145,8 @@ export function buildProxyProfilePaths(
     previewsPath: `${stateDir}/previews.json`,
     hookRegistryPath: `${stateDir}/hooks.json`,
     previewRunDir: `${runDir}/previews`,
+    previewWorkerSock: localIpcEndpointPath(`${runDir}/preview-worker.sock`, platform),
+    previewWorkerLock: `${runDir}/preview-worker.lock`,
     dataDir,
     proxyIdPath: isDefaultProfile ? `${appDir}/proxy-id` : `${profileDir}/proxy-id`,
     logDir,
@@ -197,6 +201,8 @@ export const HISTORY_METADATA_PATH = PROFILE_PATHS.historyMetadataPath;
 export const PREVIEWS_PATH = PROFILE_PATHS.previewsPath;
 export const HOOK_REGISTRY_PATH = PROFILE_PATHS.hookRegistryPath;
 export const PREVIEW_RUN_DIR = PROFILE_PATHS.previewRunDir;
+export const PREVIEW_WORKER_SOCK = PROFILE_PATHS.previewWorkerSock;
+export const PREVIEW_WORKER_LOCK = PROFILE_PATHS.previewWorkerLock;
 
 // 会话数据
 export const DATA_DIR = PROFILE_PATHS.dataDir;

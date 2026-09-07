@@ -16,8 +16,6 @@ import {
   HISTORY_METADATA_PATH,
   PROXY_ID_PATH,
   PROFILE_NAME,
-  PREVIEWS_PATH,
-  PREVIEW_RUN_DIR,
   ensureProfileWorkspace,
   sessionPaths,
 } from "./common/paths.js";
@@ -55,11 +53,7 @@ import { createRelayAutoUpdater } from "./auto-update.js";
 import { createRelayUpgradeBootstrapMonitor } from "./relay-upgrade-bootstrap.js";
 import { selectHighestStableVersion } from "./common/stable-version.js";
 import { PROXY_VERSION } from "./version.js";
-import { PreviewManager } from "./serve/preview/preview-manager.js";
-import { cleanupStalePreviewRuntimes } from "./serve/preview/stale-preview-runtime.js";
-import { DefaultDevicePreviewBackend } from "./serve/device-preview/default-device-preview-backend.js";
-import { DevicePreviewManager } from "./serve/device-preview/device-preview-manager.js";
-import { DevicePreviewStreamConnection } from "./serve/device-preview/device-preview-stream-connection.js";
+import { PreviewWorkerClient } from "./serve/preview/preview-worker-client.js";
 import { startServiceControl } from "./common/service-control.js";
 import {
   removeLocalIpcEndpoint,
@@ -140,7 +134,6 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   ensureProfileWorkspace();
   await claimServiceRuntime();
   const instanceId = randomUUID();
-  await cleanupStalePreviewRuntimes(PREVIEW_RUN_DIR);
 
   const permissionBroker = new PermissionBroker((sessionId) => {
     const socket = terminalSockets.get(sessionId);
@@ -288,72 +281,11 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   });
   upgradeBootstrap.request();
   const relaySend = (data: string): void => relayConnection.sendRaw(data);
-  const previewManager = new PreviewManager({
-    persistPath: PREVIEWS_PATH,
-    runtimeRoot: PREVIEW_RUN_DIR,
-    onEvent: (event) => {
-      relaySend(
-        serializeControl(
-          event.type === "state"
-            ? {
-                type: "preview_state_event",
-                epoch: event.epoch,
-                revision: event.revision,
-                preview: event.preview,
-              }
-            : {
-                type: "preview_removed_event",
-                epoch: event.epoch,
-                revision: event.revision,
-                previewId: event.previewId,
-              },
-        ),
-      );
-    },
+  const previewRuntime = new PreviewWorkerClient({
+    relay: { relayUrl, proxyId: relayConnection.getProxyId(), token: relayToken },
+    send: relaySend,
   });
-  const devicePreviewStream = new DevicePreviewStreamConnection({
-    relayUrl,
-    proxyId: relayConnection.getProxyId(),
-    token: relayToken,
-    onFlow: (streamId, paused, resyncRequired) =>
-      devicePreviewManager.setFlowPaused(streamId, paused, resyncRequired),
-  });
-  const devicePreviewManager = new DevicePreviewManager({
-    backend: new DefaultDevicePreviewBackend(),
-    streamTransport: {
-      sendFrame: (streamId, frameSequence, jpeg) =>
-        devicePreviewStream.sendFrame(streamId, frameSequence, jpeg),
-      sendH264Packet: (streamId, packetSequence, packet) =>
-        devicePreviewStream.sendH264Packet(streamId, packetSequence, packet),
-      sendComplete: (payload) => {
-        relaySend(
-          serializeControl({
-            type: "device_preview_stream_complete",
-            ...payload,
-          }),
-        );
-      },
-    },
-    onEvent: (event) => {
-      relaySend(
-        serializeControl(
-          event.type === "state"
-            ? {
-                type: "device_preview_state_event",
-                epoch: event.epoch,
-                revision: event.revision,
-                preview: event.preview,
-              }
-            : {
-                type: "device_preview_removed_event",
-                epoch: event.epoch,
-                revision: event.revision,
-                previewId: event.previewId,
-              },
-        ),
-      );
-    },
-  });
+  previewRuntime.start();
   const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
 
   const eventBridge = createEventBridge({
@@ -404,7 +336,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   });
 
   relayConnection.on("stream_connection", (connectionId: string) => {
-    devicePreviewStream.register(connectionId);
+    previewRuntime.register(connectionId);
   });
 
   relayConnection.connect();
@@ -442,8 +374,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     remoteFileStreamManager,
     remoteFileUploadManager,
     terminalSubscriptionBacklog,
-    previewManager,
-    devicePreviewManager,
+    previewRuntime,
   });
 
   relayConnection.on("message", (msg: Record<string, unknown>) => relayRouter.handle(msg));
@@ -469,8 +400,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     broadcastBridgeStatus(true);
   });
   relayConnection.on("disconnected", () => {
-    devicePreviewStream.disconnectMain();
-    devicePreviewManager.disconnectTransport();
+    previewRuntime.disconnectRelay();
     broadcastBridgeStatus(false);
   });
 
@@ -547,9 +477,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     },
     sessionManagerStopReaper: () => sessionManager.stopReaper(),
     relayRouterDestroy: () => relayRouter.destroy(),
-    previewManagerShutdown: () => previewManager.shutdown(),
-    devicePreviewManagerShutdown: () => devicePreviewManager.shutdown(),
-    devicePreviewStreamClose: () => devicePreviewStream.close(),
+    previewRuntimeDetach: () => previewRuntime.close(),
     hookServerClose: () => hookRuntime.hookServer.close(),
     relayConnectionClose: () => relayConnection.close(),
     workerRegistryDestroyAll: () => workerRegistry.destroyAll(),

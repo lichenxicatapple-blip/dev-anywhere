@@ -12,7 +12,8 @@ import {
   setLocalIpcEndpointPermissions,
 } from "#src/common/local-ipc-endpoint.js";
 import { tryConnectSocket } from "#src/common/socket-connect.js";
-import { readServeConnection, takeoverServeSocket } from "#src/worker/serve-socket-takeover.js";
+import { readServeConnection } from "#src/worker/serve-connection.js";
+import { takeoverWorkerSocket } from "#src/ipc/worker-connection.js";
 import { serializeWorkerMsg, WORKER_IPC_PROTOCOL_VERSION } from "#src/ipc/ipc-protocol.js";
 
 const roots: string[] = [];
@@ -74,7 +75,7 @@ async function workerListener(path: string): Promise<void> {
       "fixture",
       {
         onAccepted: () => {
-          current = takeoverServeSocket(current, socket);
+          current = takeoverWorkerSocket(current, socket);
           socket.write("accepted\nprivate-fixture-state\n");
         },
         onMessage: (message) => {

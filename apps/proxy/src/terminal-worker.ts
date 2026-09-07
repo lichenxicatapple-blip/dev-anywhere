@@ -26,7 +26,7 @@ import {
   waitForMessage,
 } from "./terminal/serve-bootstrap.js";
 import { swapServeSocket } from "./terminal/serve-socket-swap.js";
-import { ReconnectSupervisor } from "./terminal/reconnect-supervisor.js";
+import { ReconnectSupervisor } from "./common/reconnect-supervisor.js";
 import {
   requestTerminalAdmission,
   TerminalAdmissionRetiredError,

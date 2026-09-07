@@ -24,26 +24,32 @@ function readConfigLogLevel(): string | undefined {
 
 // 三级 precedence：LOG_LEVEL env > config.logLevel > 各 logger 自己的默认。
 const overrideLevel = env.logLevel ?? readConfigLogLevel();
+const isPreviewWorker = process.env.DEV_ANYWHERE_PROCESS_ROLE === "preview-worker";
 
 export const serviceLogger = createLogger({
-  name: "service",
+  name: isPreviewWorker ? "preview-worker" : "service",
   level: overrideLevel ?? "info",
   logDir: LOG_DIR,
   silent: env.isVitest,
 });
 
-export const terminalLogger = createLogger({
-  name: "terminal",
-  level: overrideLevel ?? "debug",
-  logDir: LOG_DIR,
-  silent: env.isVitest,
-});
+// A detached preview worker must not create unrelated files or replace their latest symlinks.
+export const terminalLogger = isPreviewWorker
+  ? serviceLogger
+  : createLogger({
+      name: "terminal",
+      level: overrideLevel ?? "debug",
+      logDir: LOG_DIR,
+      silent: env.isVitest,
+    });
 
 // 自动升级器会跨 daemon 重启继续运行，使用独立日志名，避免它创建 logger 时把
 // service.log 的 latest symlink 抢走，导致用户正在 tail 的服务日志突然切文件。
-export const autoUpdateLogger = createLogger({
-  name: "auto-update",
-  level: overrideLevel ?? "info",
-  logDir: LOG_DIR,
-  silent: env.isVitest,
-});
+export const autoUpdateLogger = isPreviewWorker
+  ? serviceLogger
+  : createLogger({
+      name: "auto-update",
+      level: overrideLevel ?? "info",
+      logDir: LOG_DIR,
+      silent: env.isVitest,
+    });

@@ -9,7 +9,7 @@ import {
   waitForMessage,
 } from "./terminal/serve-bootstrap.js";
 import { createIdleChecker, type IdleChecker } from "./common/pty-idle-checker.js";
-import { ReconnectSupervisor } from "./terminal/reconnect-supervisor.js";
+import { ReconnectSupervisor } from "./common/reconnect-supervisor.js";
 import {
   requestTerminalAdmission,
   TerminalAdmissionRetiredError,

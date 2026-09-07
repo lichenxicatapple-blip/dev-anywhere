@@ -56,7 +56,7 @@ export class ReconnectSupervisor {
       const delayMs = Math.min(this.options.initialDelayMs * attempt, this.options.maxDelayMs);
       await this.wait(delayMs);
       // Stop may be requested while the timer is pending. Do not perform one final connection
-      // attempt after a terminal process has already begun shutting down.
+      // attempt after the connection owner has already begun shutting down.
       if (request.shouldStop()) return;
 
       const result = await request.attempt(attempt);

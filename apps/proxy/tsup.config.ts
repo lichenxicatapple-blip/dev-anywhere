@@ -9,6 +9,7 @@ export default defineConfig({
     "src/serve.ts",
     "src/session-worker.ts",
     "src/terminal-worker.ts",
+    "src/preview-worker.ts",
     "src/update-runner.ts",
   ],
   format: ["esm"],

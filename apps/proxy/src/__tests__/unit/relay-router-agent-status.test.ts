@@ -56,8 +56,7 @@ describe("RelayRouter agent_status_request", () => {
       remoteFileStreamManager: createRemoteFileStreamManagerFake(),
       remoteFileUploadManager: createRemoteFileUploadManagerFake(),
       terminalSubscriptionBacklog: new TerminalSubscriptionBacklog(),
-      previewManager: {} as never,
-      devicePreviewManager: {} as never,
+      previewRuntime: { handle: vi.fn() },
     });
   }
 

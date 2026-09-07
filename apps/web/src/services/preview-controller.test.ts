@@ -379,6 +379,189 @@ describe("PreviewController binding lifecycle", () => {
 });
 
 describe("PreviewController snapshots and events", () => {
+  it("retries failed initial Web and Device snapshots with backoff and one flight per list", async () => {
+    vi.useFakeTimers();
+    const scope = createPreviewScope("proxy-a", "binding-restarted");
+    const fake = createFakeRelay(scope);
+    const webRecovery =
+      deferred<Awaited<ReturnType<PreviewControllerRelay["requestWebPreviewList"]>>>();
+    const deviceRecovery =
+      deferred<Awaited<ReturnType<PreviewControllerRelay["requestDevicePreviewList"]>>>();
+    fake.api.requestWebPreviewList
+      .mockRejectedValueOnce(new Error("initial snapshot timed out"))
+      .mockRejectedValueOnce(new Error("worker still reconnecting"))
+      .mockReturnValueOnce(webRecovery.promise);
+    fake.api.requestDevicePreviewList
+      .mockRejectedValueOnce(new Error("initial snapshot timed out"))
+      .mockRejectedValueOnce(new Error("worker still reconnecting"))
+      .mockReturnValueOnce(deviceRecovery.promise);
+    const controller = new PreviewController({ reportBackgroundError: vi.fn() });
+
+    try {
+      controller.activate(fake.relay, scope);
+      const webInitial = controller.syncWebSnapshot(scope);
+      const deviceInitial = controller.syncDeviceSnapshot(scope);
+      expect(controller.syncWebSnapshot(scope)).toBe(webInitial);
+      expect(controller.syncDeviceSnapshot(scope)).toBe(deviceInitial);
+      await Promise.allSettled([webInitial, deviceInitial]);
+
+      await vi.advanceTimersByTimeAsync(99);
+      expect(fake.api.requestWebPreviewList).toHaveBeenCalledTimes(1);
+      expect(fake.api.requestDevicePreviewList).toHaveBeenCalledTimes(1);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(fake.api.requestWebPreviewList).toHaveBeenCalledTimes(2);
+      expect(fake.api.requestDevicePreviewList).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(199);
+      expect(fake.api.requestWebPreviewList).toHaveBeenCalledTimes(2);
+      expect(fake.api.requestDevicePreviewList).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(1);
+
+      const webRetry = controller.syncWebSnapshot(scope);
+      const deviceRetry = controller.syncDeviceSnapshot(scope);
+      await vi.advanceTimersByTimeAsync(5_000);
+      expect(fake.api.requestWebPreviewList).toHaveBeenCalledTimes(3);
+      expect(fake.api.requestDevicePreviewList).toHaveBeenCalledTimes(3);
+
+      webRecovery.resolve({
+        epoch: "retained-web-worker",
+        revision: 7,
+        previews: [webPreview("web-1")],
+      });
+      deviceRecovery.resolve({
+        epoch: "retained-device-worker",
+        revision: 9,
+        previews: [devicePreview("device-1")],
+      });
+      await Promise.all([webRetry, deviceRetry]);
+      expect(usePreviewStore.getState().authoritative).toMatchObject({
+        scope,
+        syncStatus: "synchronized",
+        epoch: "retained-web-worker",
+        revision: 7,
+        previews: [expect.objectContaining({ previewId: "web-1" })],
+      });
+      expect(useDevicePreviewStore.getState().authoritative).toMatchObject({
+        scope,
+        syncStatus: "synchronized",
+        epoch: "retained-device-worker",
+        revision: 9,
+        previews: [expect.objectContaining({ previewId: "device-1" })],
+      });
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fake.api.requestWebPreviewList).toHaveBeenCalledTimes(3);
+      expect(fake.api.requestDevicePreviewList).toHaveBeenCalledTimes(3);
+    } finally {
+      controller.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("cancels initial retry timers and aborts old requests when the same Proxy gets a new binding", async () => {
+    vi.useFakeTimers();
+    const oldScope = createPreviewScope("proxy-a", "binding-old");
+    const newScope = createPreviewScope("proxy-a", "binding-new");
+    const oldRelay = createFakeRelay(oldScope);
+    const newRelay = createFakeRelay(newScope);
+    oldRelay.api.requestWebPreviewList.mockRejectedValue(new Error("old snapshot timed out"));
+    oldRelay.api.requestDevicePreviewList.mockImplementation((_scope, options) =>
+      rejectWhenAborted(options?.signal),
+    );
+    newRelay.api.requestWebPreviewList.mockResolvedValue({
+      epoch: "retained-web-worker",
+      revision: 7,
+      previews: [webPreview("web-1")],
+    });
+    newRelay.api.requestDevicePreviewList.mockResolvedValue({
+      epoch: "retained-device-worker",
+      revision: 9,
+      previews: [devicePreview("device-1")],
+    });
+    const controller = new PreviewController({ reportBackgroundError: vi.fn() });
+
+    try {
+      controller.activate(oldRelay.relay, oldScope);
+      const oldWeb = controller.syncWebSnapshot(oldScope);
+      const oldDevice = controller.syncDeviceSnapshot(oldScope);
+      const oldResults = Promise.allSettled([oldWeb, oldDevice]);
+      await expect(oldWeb).rejects.toThrow("old snapshot timed out");
+
+      controller.activate(newRelay.relay, newScope);
+      expect(oldRelay.api.requestWebPreviewList.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+      expect(oldRelay.api.requestDevicePreviewList.mock.calls[0]?.[1]?.signal?.aborted).toBe(true);
+      await oldResults;
+      await Promise.all([
+        controller.syncWebSnapshot(newScope),
+        controller.syncDeviceSnapshot(newScope),
+      ]);
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      expect(oldRelay.api.requestWebPreviewList).toHaveBeenCalledTimes(1);
+      expect(oldRelay.api.requestDevicePreviewList).toHaveBeenCalledTimes(1);
+      expect(newRelay.api.requestWebPreviewList).toHaveBeenCalledTimes(1);
+      expect(newRelay.api.requestDevicePreviewList).toHaveBeenCalledTimes(1);
+      expect(controller.getActiveScope()).toEqual(newScope);
+      expect(usePreviewStore.getState().authoritative).toMatchObject({
+        scope: newScope,
+        previews: [expect.objectContaining({ previewId: "web-1" })],
+      });
+      expect(useDevicePreviewStore.getState().authoritative).toMatchObject({
+        scope: newScope,
+        previews: [expect.objectContaining({ previewId: "device-1" })],
+      });
+    } finally {
+      controller.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it("does not request another initial retry when an overlapping manual sync recovers both lists", async () => {
+    vi.useFakeTimers();
+    const scope = createPreviewScope("proxy-a", "binding-restarted");
+    const fake = createFakeRelay(scope);
+    const webRecovery =
+      deferred<Awaited<ReturnType<PreviewControllerRelay["requestWebPreviewList"]>>>();
+    const deviceRecovery =
+      deferred<Awaited<ReturnType<PreviewControllerRelay["requestDevicePreviewList"]>>>();
+    fake.api.requestWebPreviewList
+      .mockRejectedValueOnce(new Error("initial snapshot timed out"))
+      .mockReturnValueOnce(webRecovery.promise);
+    fake.api.requestDevicePreviewList
+      .mockRejectedValueOnce(new Error("initial snapshot timed out"))
+      .mockReturnValueOnce(deviceRecovery.promise);
+    const controller = new PreviewController({ reportBackgroundError: vi.fn() });
+
+    try {
+      controller.activate(fake.relay, scope);
+      await Promise.allSettled([
+        controller.syncWebSnapshot(scope),
+        controller.syncDeviceSnapshot(scope),
+      ]);
+      const webManual = controller.syncWebSnapshot(scope);
+      const deviceManual = controller.syncDeviceSnapshot(scope);
+      await vi.advanceTimersByTimeAsync(100);
+      expect(fake.api.requestWebPreviewList).toHaveBeenCalledTimes(2);
+      expect(fake.api.requestDevicePreviewList).toHaveBeenCalledTimes(2);
+
+      webRecovery.resolve({ epoch: "web-epoch", revision: 1, previews: [webPreview("web-1")] });
+      deviceRecovery.resolve({
+        epoch: "device-epoch",
+        revision: 1,
+        previews: [devicePreview("device-1")],
+      });
+      await Promise.all([webManual, deviceManual]);
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(fake.api.requestWebPreviewList).toHaveBeenCalledTimes(2);
+      expect(fake.api.requestDevicePreviewList).toHaveBeenCalledTimes(2);
+      expect(usePreviewStore.getState().authoritative?.previews[0]?.previewId).toBe("web-1");
+      expect(useDevicePreviewStore.getState().authoritative?.previews[0]?.previewId).toBe(
+        "device-1",
+      );
+    } finally {
+      controller.dispose();
+      vi.useRealTimers();
+    }
+  });
+
   it("single-flights Web and Device snapshots independently", async () => {
     const scope = createPreviewScope("proxy-a", "binding-a");
     const fake = createFakeRelay(scope);

@@ -97,6 +97,7 @@ requireFile("dist/index.js");
 requireFile("dist/serve.js");
 requireFile("dist/session-worker.js");
 requireFile("dist/terminal-worker.js");
+requireFile("dist/preview-worker.js");
 requireFile("dist/update-runner.js");
 requireFile("scripts/postinstall.cjs");
 requireFile("assets/fonts/sarasa-fixed-sc/result.css");

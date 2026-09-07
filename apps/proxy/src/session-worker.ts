@@ -24,11 +24,11 @@ import {
   type WorkerMessage,
 } from "./ipc/ipc-protocol.js";
 import {
-  acceptCurrentServeSocketMessage,
-  readServeConnection,
-  releaseServeSocket,
-  takeoverServeSocket,
-} from "./worker/serve-socket-takeover.js";
+  acceptCurrentWorkerSocketMessage,
+  releaseWorkerSocket,
+  takeoverWorkerSocket,
+} from "./ipc/worker-connection.js";
+import { readServeConnection } from "./worker/serve-connection.js";
 import type { ProviderHookContext, ProviderId } from "./providers/index.js";
 import { ControlErrorCode } from "@dev-anywhere/shared";
 import {
@@ -362,7 +362,7 @@ function handleServeConnection(socket: Socket): void {
     onAccepted: () => {
       const previousServeSocket = serveSocket;
       serveSocket = socket;
-      takeoverServeSocket(previousServeSocket, socket);
+      takeoverWorkerSocket(previousServeSocket, socket);
       socket.write(
         serializeWorkerMsg({
           type: "worker_protocol_hello",
@@ -375,7 +375,7 @@ function handleServeConnection(socket: Socket): void {
       replayServeState(socket);
     },
     onMessage: (msg: WorkerMessage) => {
-      if (!acceptCurrentServeSocketMessage(serveSocket, socket)) return;
+      if (!acceptCurrentWorkerSocketMessage(serveSocket, socket)) return;
       if (!providerReady && msg.type !== "worker_stop") {
         console.error(`[worker] serve message ${msg.type} arrived before provider readiness`);
         socket.destroy();
@@ -436,12 +436,12 @@ function handleServeConnection(socket: Socket): void {
   });
 
   socket.on("close", () => {
-    serveSocket = releaseServeSocket(serveSocket, socket, () => {
+    serveSocket = releaseWorkerSocket(serveSocket, socket, () => {
       rejectAllPendingApprovals("Serve connection closed");
     });
   });
   socket.on("error", () => {
-    serveSocket = releaseServeSocket(serveSocket, socket, () => {
+    serveSocket = releaseWorkerSocket(serveSocket, socket, () => {
       rejectAllPendingApprovals("Serve connection error");
     });
   });

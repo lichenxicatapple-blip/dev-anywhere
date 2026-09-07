@@ -7,6 +7,8 @@ import {
 } from "@dev-anywhere/shared";
 import { IpcMessageSchema } from "#src/ipc/ipc-protocol.js";
 import { RelayRouter } from "#src/serve/relay-router.js";
+import { PreviewControlRouter } from "#src/serve/preview/preview-control-router.js";
+import type { PreviewControlRequest } from "#src/ipc/preview-worker-protocol.js";
 import { RelayInputHandlers } from "#src/serve/relay-input-handlers.js";
 import { PermissionBroker } from "#src/serve/permission-broker.js";
 import { AgentStatusRegistry } from "#src/serve/agent-status-registry.js";
@@ -78,11 +80,13 @@ function createRouter(options: {
   findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
   previewManager?: PreviewManager;
   devicePreviewManager?: DevicePreviewManager;
+  previewRuntime?: { handle(message: PreviewControlRequest): void | Promise<void> };
 }): RelayRouter {
   const terminalSockets = new Map<string, Socket>();
   if (options.terminalWrite) {
     terminalSockets.set("s1", createWritableSocketFake(options.terminalWrite).socket);
   }
+  const relaySend = options.relaySend ?? vi.fn();
 
   return new RelayRouter({
     sessionManager:
@@ -138,7 +142,7 @@ function createRouter(options: {
       cleanup: options.controlCleanup ?? vi.fn(),
     } as never,
     relayConnection: (options.relayConnection ?? createRelayConnectionFake()).relayConnection,
-    relaySend: options.relaySend ?? vi.fn(),
+    relaySend,
     terminalSockets,
     terminalWorkerSpawner: {
       start: (config: { kind: string; sessionId: string }) => ({
@@ -176,34 +180,179 @@ function createRouter(options: {
     voiceSummaryRunner: options.voiceSummaryRunner,
     findCodexActiveWriter: options.findCodexActiveWriter,
     findClosestAncestorPid: options.findClosestAncestorPid,
-    previewManager:
-      options.previewManager ??
-      ({
-        inspectCapabilities: vi.fn(async () => ({
-          cloudflared: { available: false, error: "cloudflared not found" },
-          cpolar: { available: false, error: "cpolar not found" },
-        })),
-      } as unknown as PreviewManager),
-    devicePreviewManager:
-      options.devicePreviewManager ??
-      ({
-        inspectCapabilities: vi.fn(async () => ({
-          ios: {
-            supported: false,
-            available: false,
-            interactive: false,
-            error: "iOS Simulator is unsupported on this platform",
-          },
-          android: {
-            supported: true,
-            available: false,
-            interactive: false,
-            error: "adb not found",
-          },
-        })),
-      } as unknown as DevicePreviewManager),
+    previewRuntime:
+      options.previewRuntime ??
+      new PreviewControlRouter({
+        relaySend,
+        previewManager:
+          options.previewManager ??
+          ({
+            inspectCapabilities: vi.fn(async () => ({
+              cloudflared: { available: false, error: "cloudflared not found" },
+              cpolar: { available: false, error: "cpolar not found" },
+            })),
+          } as unknown as PreviewManager),
+        devicePreviewManager:
+          options.devicePreviewManager ??
+          ({
+            inspectCapabilities: vi.fn(async () => ({
+              ios: {
+                supported: false,
+                available: false,
+                interactive: false,
+                error: "iOS Simulator is unsupported on this platform",
+              },
+              android: {
+                supported: true,
+                available: false,
+                interactive: false,
+                error: "adb not found",
+              },
+            })),
+          } as unknown as DevicePreviewManager),
+      }),
   });
 }
+
+describe("RelayRouter preview runtime boundary", () => {
+  const scope = { proxyId: "proxy-1", bindingId: "binding-1" };
+  const request = { requestId: "request-1", scope };
+  const mutation = { ...request, operationId: "operation-1", previewId: "preview-1" };
+  const requests = {
+    preview_capability_request: {
+      ...request,
+      type: "preview_capability_request",
+      refreshPath: true,
+    },
+    preview_static_inspect_request: {
+      ...request,
+      type: "preview_static_inspect_request",
+      path: "/tmp/site",
+    },
+    preview_create_request: {
+      ...request,
+      type: "preview_create_request",
+      operationId: "operation-1",
+      source: { kind: "local", url: "http://localhost:5173/" },
+      tunnelProvider: "cloudflare",
+    },
+    preview_list_request: { ...request, type: "preview_list_request" },
+    preview_rename_request: { ...mutation, type: "preview_rename_request", name: "Site" },
+    preview_reconnect_request: { ...mutation, type: "preview_reconnect_request" },
+    preview_close_request: { ...mutation, type: "preview_close_request" },
+    device_preview_capability_request: {
+      ...request,
+      type: "device_preview_capability_request",
+      refreshPath: true,
+    },
+    device_preview_targets_request: {
+      ...request,
+      type: "device_preview_targets_request",
+      refresh: true,
+    },
+    device_preview_create_request: {
+      ...request,
+      type: "device_preview_create_request",
+      operationId: "operation-1",
+      targetId: "device-1",
+    },
+    device_preview_list_request: { ...request, type: "device_preview_list_request" },
+    device_preview_rename_request: {
+      ...mutation,
+      type: "device_preview_rename_request",
+      name: "Phone",
+    },
+    device_preview_reconnect_request: { ...mutation, type: "device_preview_reconnect_request" },
+    device_preview_close_request: { ...mutation, type: "device_preview_close_request" },
+    device_preview_stream_start: {
+      type: "device_preview_stream_start",
+      previewId: "preview-1",
+      leaseId: "lease-1",
+      streamId: "stream-1",
+      format: "h264_annex_b",
+    },
+    device_preview_stream_stop: {
+      type: "device_preview_stream_stop",
+      streamId: "stream-1",
+      reason: "client_closed",
+    },
+    device_preview_input_revoke: {
+      type: "device_preview_input_revoke",
+      leaseId: "lease-1",
+      reason: "control_taken_over",
+    },
+    device_preview_input: {
+      type: "device_preview_input",
+      scope,
+      leaseId: "lease-1",
+      inputSeq: 7,
+      input: { kind: "touch", phase: "move", x: 0.4, y: 0.6 },
+    },
+  } satisfies Record<PreviewControlRequest["type"], PreviewControlRequest>;
+
+  it.each(Object.values(requests))(
+    "forwards $type exactly once without handling it in Serve",
+    (message) => {
+      const handle = vi.fn();
+      const relaySend = vi.fn();
+      const router = createRouter({ mode: "json", relaySend, previewRuntime: { handle } });
+
+      router.handle(message);
+
+      expect(handle).toHaveBeenCalledExactlyOnceWith(message);
+      expect(relaySend).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not forward invalid preview requests, preview events, or unrelated control messages", () => {
+    const handle = vi.fn();
+    const relaySend = vi.fn();
+    const router = createRouter({ mode: "json", relaySend, previewRuntime: { handle } });
+
+    router.handle({
+      ...request,
+      type: "preview_create_request",
+      operationId: "invalid-operation",
+      source: { kind: "static", path: "/tmp/site" },
+      tunnelProvider: "cloudflare",
+    });
+    router.handle({
+      type: "preview_removed_event",
+      epoch: "epoch-1",
+      revision: 1,
+      previewId: "preview-1",
+    });
+    router.handle({ type: "latency_web_proxy_ping", requestId: "latency-1" });
+
+    expect(handle).not.toHaveBeenCalled();
+    expect(relaySend).toHaveBeenCalledOnce();
+    expect(JSON.parse(relaySend.mock.calls[0][0])).toMatchObject({
+      type: "latency_web_proxy_pong",
+      requestId: "latency-1",
+    });
+  });
+
+  it.each(["throw", "reject"] as const)(
+    "contains a runtime %s without breaking later dispatch",
+    async (failure) => {
+      const error = new Error("Preview connection unavailable");
+      const handle = vi
+        .fn<(_: PreviewControlRequest) => void | Promise<void>>()
+        .mockImplementationOnce(() => {
+          if (failure === "throw") throw error;
+          return Promise.reject(error);
+        });
+      const router = createRouter({ mode: "json", previewRuntime: { handle } });
+      expect(() => router.handle(requests.preview_list_request)).not.toThrow();
+      expect(handle.mock.results[0]?.type).toBe(failure === "throw" ? "throw" : "return");
+      // Let rejected promises settle; Vitest treats an unhandled rejection as a test-run failure.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      router.handle(requests.device_preview_list_request);
+      expect(handle).toHaveBeenCalledTimes(2);
+      expect(handle).toHaveBeenLastCalledWith(requests.device_preview_list_request);
+    },
+  );
+});
 
 describe("RelayRouter input routing", () => {
   afterEach(() => {
@@ -364,19 +513,19 @@ describe("RelayRouter input routing", () => {
     ]);
   });
 
-  it("uses one operation journal across Web and Device Preview mutations", async () => {
+  it("preserves the runtime's shared Web/Device journal when RelayRouter is replaced", async () => {
     const relaySend = vi.fn();
     const renameWebPreview = vi.fn(() => ({ previewId: "web-preview-1", name: "Docs demo" }));
     const renameDevicePreview = vi.fn(() => ({
       previewId: "device-preview-1",
       name: "QA phone",
     }));
-    const router = createRouter({
-      mode: "json",
+    const previewRuntime = new PreviewControlRouter({
       relaySend,
       previewManager: { rename: renameWebPreview } as unknown as PreviewManager,
       devicePreviewManager: { rename: renameDevicePreview } as unknown as DevicePreviewManager,
     });
+    const router = createRouter({ mode: "json", previewRuntime });
 
     router.handle({
       type: "preview_rename_request",
@@ -387,7 +536,9 @@ describe("RelayRouter input routing", () => {
       name: "Docs demo",
     });
     await vi.waitFor(() => expect(renameWebPreview).toHaveBeenCalledOnce());
-    router.handle({
+    router.destroy();
+    const replacement = createRouter({ mode: "json", previewRuntime });
+    replacement.handle({
       type: "device_preview_rename_request",
       requestId: "rename-device-shared",
       scope: { proxyId: "proxy-1", bindingId: "binding-1" },

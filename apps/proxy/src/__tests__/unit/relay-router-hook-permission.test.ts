@@ -46,8 +46,7 @@ describe("RelayRouter hook permission decisions", () => {
       remoteFileStreamManager: createRemoteFileStreamManagerFake(),
       remoteFileUploadManager: createRemoteFileUploadManagerFake(),
       terminalSubscriptionBacklog: new TerminalSubscriptionBacklog(),
-      previewManager: {} as never,
-      devicePreviewManager: {} as never,
+      previewRuntime: { handle: vi.fn() },
     });
   }
 

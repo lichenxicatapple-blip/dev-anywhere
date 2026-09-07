@@ -33,11 +33,10 @@ import type { RemoteFileUploadManager } from "./remote-file-upload.js";
 import type { RemoteFileStreamManager } from "./remote-file-stream.js";
 import type { TerminalSubscriptionBacklog } from "./terminal-subscription-backlog.js";
 import type { CodexActiveWriter } from "../common/codex-active-writer.js";
-import { RelayPreviewHandlers } from "./preview/relay-preview-handlers.js";
-import type { PreviewManager } from "./preview/preview-manager.js";
-import { RelayDevicePreviewHandlers } from "./device-preview/relay-device-preview-handlers.js";
-import type { DevicePreviewManager } from "./device-preview/device-preview-manager.js";
-import { PreviewOperationJournal } from "./preview/preview-operation-journal.js";
+import {
+  isPreviewControlRequest,
+  type PreviewControlRequest,
+} from "../ipc/preview-worker-protocol.js";
 
 interface RelayRouterDeps {
   sessionManager: SessionManager;
@@ -68,8 +67,7 @@ interface RelayRouterDeps {
   voiceSummaryRunner?: VoiceSummaryRunner;
   findCodexActiveWriter?: (threadId: string, env?: NodeJS.ProcessEnv) => CodexActiveWriter | null;
   findClosestAncestorPid?: (processPid: number, candidatePids: readonly number[]) => number | null;
-  previewManager: PreviewManager;
-  devicePreviewManager: DevicePreviewManager;
+  previewRuntime: { handle(message: PreviewControlRequest): void | Promise<void> };
 }
 
 // 按 type 分发入站 Relay 消息到独立 handler；不符合当前协议的消息直接拒绝。
@@ -80,9 +78,6 @@ export class RelayRouter {
   private readonly resourceHandlers: RelayResourceHandlers;
   private readonly sessionCreateHandler: RelaySessionCreateHandler;
   private readonly voiceSummaryHandler: VoiceSummaryHandler;
-  private readonly previewHandlers: RelayPreviewHandlers;
-  private readonly devicePreviewHandlers: RelayDevicePreviewHandlers;
-  private readonly previewOperationJournal = new PreviewOperationJournal();
 
   constructor(private deps: RelayRouterDeps) {
     this.historyHandlers = new RelayHistoryHandlers({
@@ -136,23 +131,12 @@ export class RelayRouter {
       getProviderEnv: deps.getProviderEnv,
       runner: deps.voiceSummaryRunner,
     });
-    this.previewHandlers = new RelayPreviewHandlers({
-      relaySend: deps.relaySend,
-      previewManager: deps.previewManager,
-      operationJournal: this.previewOperationJournal,
-    });
-    this.devicePreviewHandlers = new RelayDevicePreviewHandlers({
-      relaySend: deps.relaySend,
-      manager: deps.devicePreviewManager,
-      operationJournal: this.previewOperationJournal,
-    });
   }
 
   // shutdown 链路上提供单一 destroy 入口：把 sessionCreateHandler 内部 pending retry timer 清掉
   // 并 cleanup 已 spawn 但未 connect 的 worker 子进程，避免在 SIGTERM 之后变成孤儿。
   destroy(): void {
     this.sessionCreateHandler.destroy();
-    this.previewOperationJournal.clear();
   }
 
   // 入站消息统一入口：proxy 收两类消息——relay control 与 envelope（user_input 这一种）。
@@ -196,6 +180,12 @@ export class RelayRouter {
   }
 
   private dispatch(msg: RelayControlMessage): void {
+    if (isPreviewControlRequest(msg)) {
+      void Promise.resolve(this.deps.previewRuntime.handle(msg)).catch((error: unknown) => {
+        serviceLogger.warn({ type: msg.type, error: String(error) }, "Relay handler threw");
+      });
+      return;
+    }
     switch (msg.type) {
       case "remote_input_raw":
         this.inputHandlers.onRemoteInputRaw(msg);
@@ -232,60 +222,6 @@ export class RelayRouter {
         return;
       case "proxy_info_request":
         void this.resourceHandlers.onProxyInfoRequest(msg);
-        return;
-      case "preview_capability_request":
-        void this.previewHandlers.onCapability(msg);
-        return;
-      case "preview_static_inspect_request":
-        void this.previewHandlers.onStaticInspect(msg);
-        return;
-      case "preview_create_request":
-        void this.previewHandlers.onCreate(msg);
-        return;
-      case "preview_list_request":
-        this.previewHandlers.onList(msg);
-        return;
-      case "preview_rename_request":
-        void this.previewHandlers.onRename(msg);
-        return;
-      case "preview_reconnect_request":
-        void this.previewHandlers.onReconnect(msg);
-        return;
-      case "preview_close_request":
-        void this.previewHandlers.onClose(msg);
-        return;
-      case "device_preview_capability_request":
-        void this.devicePreviewHandlers.onCapability(msg);
-        return;
-      case "device_preview_targets_request":
-        void this.devicePreviewHandlers.onTargets(msg);
-        return;
-      case "device_preview_create_request":
-        void this.devicePreviewHandlers.onCreate(msg);
-        return;
-      case "device_preview_list_request":
-        this.devicePreviewHandlers.onList(msg);
-        return;
-      case "device_preview_rename_request":
-        void this.devicePreviewHandlers.onRename(msg);
-        return;
-      case "device_preview_reconnect_request":
-        void this.devicePreviewHandlers.onReconnect(msg);
-        return;
-      case "device_preview_close_request":
-        void this.devicePreviewHandlers.onClose(msg);
-        return;
-      case "device_preview_stream_start":
-        void this.devicePreviewHandlers.onStreamStart(msg);
-        return;
-      case "device_preview_stream_stop":
-        this.devicePreviewHandlers.onStreamStop(msg);
-        return;
-      case "device_preview_input_revoke":
-        this.devicePreviewHandlers.onInputRevoke(msg);
-        return;
-      case "device_preview_input":
-        void this.devicePreviewHandlers.onInput(msg);
         return;
       case "agent_cli_config_update":
         this.resourceHandlers.onAgentCliConfigUpdate(msg);
