@@ -122,7 +122,7 @@ docs/       长期维护的中文文档和 README 媒体资源
 
 ## 深入文档
 
-- [PTY 网络同步机制](./PTY-NETWORK-SYNC.md)：实时帧、`outputSeq`、快照、重连、丢帧恢复、协议上限与测试方法。
+- [PTY 网络同步设计](./PTY-NETWORK-SYNC.md)：系统模型、消息协议、一致性约束与故障恢复策略。
 
 ## 配置
 
