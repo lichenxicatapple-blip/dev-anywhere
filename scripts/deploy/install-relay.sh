@@ -1,14 +1,17 @@
 #!/usr/bin/env bash
 # Deploy dev-anywhere on a VPS using the pre-built Relay image from Aliyun ACR.
 #
+# The public installation entry point downloads this internal script and its helpers.
+# Use the same online command to install or upgrade; no repository checkout is needed.
 # Two modes:
 #
 #   1) Run from your laptop; auto-ssh into a remote VPS and deploy there:
-#        ./scripts/deploy/install-relay.sh --ssh user@vps-host <domain-or-public-ip>
-#      Requires ssh-key access to the remote host and sudo for that user.
+#        curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh user@vps-host <domain-or-public-ip>
+#      Requires ssh-key access and, for non-root users, passwordless sudo.
 #
 #   2) Run directly on the VPS:
-#        sudo ./scripts/deploy/install-relay.sh <domain-or-public-ip>
+#        curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | sudo bash -s -- <domain-or-public-ip>
+#      When already logged in as root, omit sudo.
 #
 # Arguments:
 #   public_host  — public DNS name pointing at the VPS, or its public IPv4 address.
@@ -50,10 +53,14 @@ fi
 # --ssh mode: feed this very script over stdin to a remote bash.
 if [ "${1:-}" = "--ssh" ]; then
   shift
-  SSH_HOST="${1:?Usage: install-relay.sh --ssh <ssh-host> <domain-or-public-ip> [proxy_token] [client_token]}"
-  PUBLIC_HOST_ARG="${2:?Usage: install-relay.sh --ssh <ssh-host> <domain-or-public-ip> [proxy_token] [client_token]}"
+  SSH_HOST="${1:?Usage: install.sh --ssh <ssh-host> <domain-or-public-ip> [proxy_token] [client_token]}"
+  PUBLIC_HOST_ARG="${2:?Usage: install.sh --ssh <ssh-host> <domain-or-public-ip> [proxy_token] [client_token]}"
   PROXY_TOKEN_ARG="${3:-}"
   CLIENT_TOKEN_ARG="${4:-}"
+  if [[ "$SSH_HOST" == -* ]]; then
+    echo "error: SSH host must not start with '-'" >&2
+    exit 1
+  fi
   SELF_PATH="${BASH_SOURCE[0]}"
   if [ ! -f "$SELF_PATH" ]; then
     echo "error: --ssh mode needs the script on disk (can't pipe from curl)" >&2
@@ -66,16 +73,35 @@ if [ "${1:-}" = "--ssh" ]; then
     exit 1
   fi
   echo "==> deploying to $SSH_HOST (public host: $PUBLIC_HOST_ARG)"
-  # sudo strips env vars; use `sudo env VAR=val` to thread REGISTRY_BASE / IMAGE_TAG through
+  # SSH passes one command string to the remote login shell. Quote each argument
+  # for that shell, including quotes and command substitutions inside user input.
+  quote_remote_arg() {
+    local value="$1"
+    local escaped_quote="'\\''"
+    printf "'%s'" "${value//\'/$escaped_quote}"
+  }
+  REMOTE_COMMAND=""
+  for argument in \
+    "env" \
+    "REGISTRY_BASE=${REGISTRY_BASE:-}" \
+    "IMAGE_TAG=${IMAGE_TAG:-}" \
+    "DEV_ANYWHERE_RELAY_PORT=${DEV_ANYWHERE_RELAY_PORT:-}" \
+    "bash" "-s" "--" \
+    "$PUBLIC_HOST_ARG" "$PROXY_TOKEN_ARG" "$CLIENT_TOKEN_ARG"; do
+    REMOTE_COMMAND+="$(quote_remote_arg "$argument") "
+  done
+  # A root login does not need sudo installed. Other accounts must have
+  # passwordless sudo because stdin carries the installer, not a password.
+  REMOTE_COMMAND="if [ \"\$(id -u)\" -eq 0 ]; then exec $REMOTE_COMMAND; else exec sudo -n $REMOTE_COMMAND; fi"
   {
     cat "$RENDER_LIB"
     printf '\n'
     cat "$SELF_PATH"
-  } | ssh -t "$SSH_HOST" "sudo env REGISTRY_BASE='${REGISTRY_BASE:-}' IMAGE_TAG='${IMAGE_TAG:-}' DEV_ANYWHERE_RELAY_PORT='${DEV_ANYWHERE_RELAY_PORT:-}' bash -s -- '$PUBLIC_HOST_ARG' '$PROXY_TOKEN_ARG' '$CLIENT_TOKEN_ARG'"
+  } | ssh -T -- "$SSH_HOST" "$REMOTE_COMMAND"
   exit $?
 fi
 
-PUBLIC_HOST="${1:?Usage: install-relay.sh <domain-or-public-ip> [proxy_token] [client_token]  |  install-relay.sh --ssh <host> <domain-or-public-ip> [proxy_token] [client_token]}"
+PUBLIC_HOST="${1:?Usage: install.sh <domain-or-public-ip> [proxy_token] [client_token]  |  install.sh --ssh <host> <domain-or-public-ip> [proxy_token] [client_token]}"
 PROXY_TOKEN="${2:-}"
 CLIENT_TOKEN="${3:-}"
 INSTALL_DIR="/opt/dev-anywhere"
@@ -397,8 +423,8 @@ if curl -fsS "https://$PUBLIC_HOST/health" >/dev/null 2>&1; then
   echo
   echo "Open the Web UI URL above once. The client token is stored in local browser storage for future launches."
   echo
-  echo "To upgrade later:"
-  echo "  sudo env IMAGE_TAG=$IMAGE_TAG ./scripts/deploy/install-relay.sh $PUBLIC_HOST"
+  echo "To upgrade later, run on the VPS as root:"
+  printf '  curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | env IMAGE_TAG=%q bash -s -- %q\n' "$IMAGE_TAG" "$PUBLIC_HOST"
 else
   echo "error: health check failed; run 'docker compose logs' in $INSTALL_DIR to investigate" >&2
   exit 1

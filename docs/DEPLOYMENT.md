@@ -7,11 +7,13 @@
 部署前需要：
 
 - 一台有公网 IPv4 的 Linux VPS；
-- 可以通过 SSH 密钥登录，并能执行 `sudo` 的账户；
+- VPS 的 root 账户，或能执行 `sudo` 的普通账户；
 - 对公网开放的 `80` 和 `443` 端口；
-- 本地安装 Git，并能运行 Bash 脚本。
+- 直接在 VPS 部署时需要 Bash 和 `curl`；从本地部署时，macOS/Linux 使用 Bash、`curl` 和 SSH，Windows 使用原生 PowerShell 和 OpenSSH 客户端。
 
 公网入口可以直接使用 VPS 的 IPv4 地址，也可以使用一个已经将 `A` 记录指向该 VPS 的域名。两种方式都只提供 HTTPS/WSS，不会把应用直接暴露在 HTTP 上。
+
+无需安装 Git 或克隆仓库。macOS、Linux 和 Windows 都可以发起 SSH 部署；运行 Relay 的 VPS 仍须为 Linux。
 
 部署脚本支持使用 `apt-get` 或 `yum` 的发行版。缺少 Docker、Nginx 或 Certbot 时会自动安装，Docker Compose 必须为 v2。公网 IP 模式需要 Certbot 5.4 或更高版本；系统版本过低时，脚本会在独立虚拟环境中安装新版本，这要求系统提供 Python 3.10 或更高版本。
 
@@ -25,7 +27,7 @@ dig +short dev-anywhere.example.com
 
 ## 配置 SSH 免密登录
 
-从本地执行部署脚本前，需要确保本机可以通过 SSH 密钥登录 VPS。下文使用 `203.0.113.10` 代表 VPS 的公网 IPv4，使用 `dev-anywhere.example.com` 代表指向 VPS 的域名。两者都是文档专用的示例地址，不会指向真实服务器；执行命令前必须替换为自己的实际地址。
+从本地发起部署前，需要确保本机可以通过 SSH 密钥登录 VPS。直接登录 VPS 部署时可跳过本节。下文使用 `203.0.113.10` 代表 VPS 的公网 IPv4，使用 `dev-anywhere.example.com` 代表指向 VPS 的域名。两者都是文档专用的示例地址；执行命令前必须替换为自己的实际地址。
 
 如果本机还没有 SSH 密钥，先生成一对密钥：
 
@@ -49,42 +51,47 @@ ssh -o BatchMode=yes root@203.0.113.10 'echo SSH ready'
 
 ## 部署 Relay
 
-在本地电脑拉取仓库：
+根据当前使用的终端，选择下面一种方式。最后的公网入口可使用域名，也可直接使用 VPS 的公网 IPv4。
+
+### 直接在 VPS 上运行
+
+以 root 登录 Linux VPS 后执行：
 
 ```bash
-git clone https://github.com/lichenxicatapple-blip/dev-anywhere.git
-cd dev-anywhere
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- dev-anywhere.example.com
 ```
 
-可以先检查目标 VPS 是否满足部署条件。最后一个参数使用计划中的公网入口：
+使用普通账户时，让 `sudo` 执行安装脚本：
 
 ```bash
-bash scripts/deploy/check-prerequisite.sh root@your-vps 203.0.113.10
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | sudo bash -s -- dev-anywhere.example.com
 ```
 
-通过 SSH 部署到 VPS。直接使用公网 IP：
+### 从 macOS 或 Linux 本地部署
+
+在本地终端执行，替换 SSH 目标和公网入口：
 
 ```bash
-bash scripts/deploy/install-relay.sh \
-  --ssh root@your-vps \
-  203.0.113.10
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
 ```
 
-使用域名：
+也可以将 SSH 目标换成普通账户，例如 `deploy@203.0.113.10`，但该账户必须能够免交互执行 `sudo`。
 
-```bash
-bash scripts/deploy/install-relay.sh \
-  --ssh root@your-vps \
-  dev-anywhere.example.com
+### 从 Windows PowerShell 本地部署
+
+在原生 PowerShell 中执行，无需 Bash 或 WSL：
+
+```powershell
+irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
 
-也可以将 `root@your-vps` 换成其他 SSH 账户，例如 `deploy@your-vps`，但该账户必须能够免交互执行 `sudo`。
+按提示输入 SSH 目标（例如 `root@203.0.113.10`）和公网域名/IP。也可以直接传入参数：
 
-上述命令会从本地电脑通过 SSH 完成部署。如果你选择直接操作服务器，也可以先登录 VPS、克隆仓库，然后在仓库目录中执行：
-
-```bash
-sudo bash scripts/deploy/install-relay.sh dev-anywhere.example.com
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1))) -SshTarget root@203.0.113.10 -PublicHost dev-anywhere.example.com
 ```
+
+### 确认部署结果
 
 脚本会识别最后一个参数是域名还是公网 IP，配置 Docker、Nginx 与对应的 HTTPS 证书，启动 Relay 容器，并请求公网健康检查。Relay 只监听 VPS 的 `127.0.0.1:3100`，公网流量由 Nginx 通过 HTTPS 转发；`80` 端口仅响应证书验证并跳转到 HTTPS。
 
@@ -216,47 +223,42 @@ ssh root@your-vps \
 
 ## 升级
 
-从此前版本首次升级到 0.9.2，需要进行一次手动更新。先在每台开发机上使用升级前的 CLI 停止 Proxy，确保这一步在升级 Relay 或安装新版之前完成：
+> **历史版本迁移：** 仍使用 0.9.2 之前版本时，需要先用旧 CLI 在每台开发机执行 `dev-anywhere serve stop`，再升级 Relay，最后手动安装 `@dev-anywhere/proxy@latest` 并启动 Proxy。此次迁移会结束旧终端会话，更新后需重新启动。背景见 [0.9.2 升级说明](../CHANGELOG.md#092---2026-09-05)。
+
+重新执行对应平台的 [部署命令](#部署-relay)，即可拉取最新发布的 Relay 镜像。SSH 目标与公网域名/IP 应与首次部署一致。例如从 macOS/Linux 本地升级：
 
 ```bash
-dev-anywhere serve stop
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
 ```
 
-进入 DEV Anywhere 项目目录，运行以下命令升级 Relay：
+Windows PowerShell 仍使用同一个入口，并填写原来的 SSH 目标与公网入口：
 
-```bash
-git pull --ff-only
-bash scripts/deploy/install-relay.sh \
-  --ssh root@your-vps \
-  203.0.113.10
+```powershell
+irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
 
-部署脚本会复用 `/opt/dev-anywhere/.env` 中已有的 Token。
+脚本默认拉取 `latest` 镜像，并复用 `/opt/dev-anywhere/.env` 中已有的 Token。通过 npm 全局安装的 Proxy 默认开启自动更新，会跟随 Relay 的新版本完成升级并重新连接。完成后刷新浏览器，并运行 `dev-anywhere serve status` 确认版本及连接状态。
 
-Relay 更新后，在每台开发机上安装并启动 0.9.2：
+如果开发机设置了 `"autoUpdate": false`，请在该开发机上先执行 `dev-anywhere serve stop`，再运行 `npm install -g @dev-anywhere/proxy@latest` 和 `dev-anywhere serve start --relay cloud`。
 
-```bash
-npm install -g @dev-anywhere/proxy@0.9.2
-dev-anywhere serve start --relay cloud
-```
+### 固定版本
 
-本次升级会结束升级前启动的终端会话。全部开发机更新完成后，请刷新浏览器并重新启动这些终端会话。
-
-升级命令的最后一个参数应与首次部署保持一致：首次使用域名就继续传域名，首次使用公网 IP 就继续传公网 IP。
-
-需要固定版本时，在同一个终端执行：
+将 `x.y.z` 替换为需要的发布版本。在 macOS/Linux 本地终端执行；`IMAGE_TAG` 必须传给管道右侧的安装脚本：
 
 ```bash
-dev-anywhere serve stop
 VERSION=x.y.z
-IMAGE_TAG="$VERSION" bash scripts/deploy/install-relay.sh \
-  --ssh root@your-vps \
-  203.0.113.10
-npm install -g "@dev-anywhere/proxy@$VERSION"
-dev-anywhere serve start --relay cloud
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | env IMAGE_TAG="$VERSION" bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
 ```
 
-同时在开发机的 `~/.dev-anywhere/config.json` 顶层设置 `"autoUpdate": false`，否则 Proxy 连接 Relay 后会重新跟随其版本。
+Windows PowerShell：
+
+```powershell
+$env:IMAGE_TAG = "x.y.z"
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1))) -SshTarget root@203.0.113.10 -PublicHost dev-anywhere.example.com
+Remove-Item Env:IMAGE_TAG
+```
+
+若需固定开发机版本，在 `~/.dev-anywhere/config.json` 顶层设置 `"autoUpdate": false`，然后停止 Proxy，运行 `npm install -g @dev-anywhere/proxy@x.y.z` 并重新启动。Proxy 自动更新只会升级，不会随 Relay 自动降级；回退版本时需要手动安装匹配的 Proxy。
 
 ## 排障
 

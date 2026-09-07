@@ -94,6 +94,20 @@ Quick Tunnel 的随机域名会变化，进程退出后地址立即失效，也�
 
 VPS 是 Virtual Private Server 的缩写，通常就是一台可以通过公网访问的云服务器。长期使用时，推荐在 Linux VPS 上部署 Relay。你可以直接使用 VPS 的公网 IPv4，也可以使用指向该 VPS 的域名；部署脚本会识别两种入口并自动配置对应的 HTTPS 证书。公网环境只通过 HTTPS/WSS 提供服务，HTTP 端口仅用于证书验证和跳转。一个 Relay 容器会同时托管 Web、HTTP API、文件、语音和 WebSocket 服务。
 
+无需克隆仓库。在 macOS 或 Linux 本地终端执行，替换 SSH 目标和公网域名/IP：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
+```
+
+Windows 在原生 PowerShell 中执行，并按提示填写 SSH 目标和公网域名/IP，无需 Bash、WSL 或 Git：
+
+```powershell
+irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
+```
+
+从本地部署需要先配置 [SSH 密钥登录](./docs/DEPLOYMENT.md#配置-ssh-免密登录)。也可以 [直接登录 VPS 部署](./docs/DEPLOYMENT.md#直接在-vps-上运行)。三种本地平台都部署到 Linux VPS。
+
 部署 Relay 后，在开发机上初始化 DEV Anywhere：
 
 ```bash
@@ -190,40 +204,28 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
-从此前版本首次升级到 0.9.2，需要进行一次手动更新。先在每台开发机上使用升级前的 CLI 停止 Proxy，再继续以下升级步骤：
+重新运行部署命令即可拉取最新发布的 Relay 镜像。macOS 或 Linux：
 
 ```bash
-dev-anywhere serve stop
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
 ```
 
-进入 DEV Anywhere 项目目录，运行以下命令升级 Relay：
+Windows PowerShell：
 
-```bash
-git pull --ff-only
-bash scripts/deploy/install-relay.sh \
-  --ssh root@your-vps \
-  dev-anywhere.example.com
+```powershell
+irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
 
-最后一个参数应与首次部署时保持一致：使用域名部署就继续传域名，使用公网 IP 部署就传公网 IP。部署脚本会复用 VPS 上已有的 Token。
+SSH 目标和公网域名/IP 应与首次部署一致。脚本会复用 VPS 上已有的 Token。通过 npm 全局安装且开启自动更新的 Proxy 会自动跟随 Relay 升级并重新连接；更新后刷新浏览器。
 
-Relay 更新后，在每台开发机上安装并启动 0.9.2：
-
-```bash
-npm install -g @dev-anywhere/proxy@0.9.2
-dev-anywhere serve start --relay cloud
-```
-
-本次升级会结束升级前启动的终端会话。全部开发机更新完成后，请刷新浏览器并重新启动这些终端会话。
-
-升级后可在任意开发机确认版本和连接状态：
+在开发机确认版本和连接状态：
 
 ```bash
 dev-anywhere --version
 dev-anywhere serve status
 ```
 
-安装指定版本的命令见 [VPS 部署指南的升级章节](./docs/DEPLOYMENT.md#升级)；如果升级后 Web 无法访问或开发机无法上线，请按 [排障步骤](./docs/DEPLOYMENT.md#排障) 查看 Relay 与 Nginx 日志。
+固定版本、关闭自动更新或从 0.9.2 之前版本迁移，见 [VPS 部署指南的升级章节](./docs/DEPLOYMENT.md#升级)；连接异常时见 [排障步骤](./docs/DEPLOYMENT.md#排障)。
 
 ## 主要功能
 

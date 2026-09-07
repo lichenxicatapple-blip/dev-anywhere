@@ -55,7 +55,13 @@ For the bundled web client, open the app URL, then paste `RELAY_CLIENT_TOKEN` in
 
 ## TLS
 
-This package serves the complete application over plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare for TLS termination. The turnkey VPS setup (one Docker container + nginx + certbot) is available via `install-relay.sh` in the [repo](https://github.com/lichenxicatapple-blip/dev-anywhere).
+This package serves the complete application over plain HTTP + WS. For production, put it behind nginx / Caddy / Cloudflare for TLS termination. To install or upgrade the turnkey setup (one Docker container + nginx + certbot), run this as root on a Linux VPS, replacing the public domain/IP:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- dev-anywhere.example.com
+```
+
+The installer pulls the latest published image and preserves existing tokens. For deployment from macOS, Linux, or native Windows PowerShell, see the [VPS deployment guide](https://github.com/lichenxicatapple-blip/dev-anywhere/blob/main/docs/DEPLOYMENT.md). No repository clone is needed.
 
 ## Using the embedded server programmatically
 

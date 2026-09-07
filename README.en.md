@@ -94,6 +94,20 @@ The random domain changes between runs, the URL stops working when the process e
 
 For long-term use, deploy the Relay to a Linux VPS with a public IP. You can use the VPS's public IPv4 address directly or a domain pointing to it; the deployment script detects either form and configures the matching HTTPS certificate automatically. Public deployments serve the application only over HTTPS/WSS. Port 80 is used only for certificate validation and redirects. One Relay container serves the Web interface, HTTP API, files, voice endpoints, and WebSockets.
 
+No repository clone is needed. From a local macOS or Linux terminal, replace the SSH target and public domain/IP:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
+```
+
+On Windows, run this in native PowerShell and enter the SSH target and public domain/IP when prompted. Bash, WSL, and Git are not required:
+
+```powershell
+irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
+```
+
+Local deployment requires [SSH key access](./docs/DEPLOYMENT.md#配置-ssh-免密登录). You can also [run the installer directly on the VPS](./docs/DEPLOYMENT.md#直接在-vps-上运行). All three local platforms deploy to a Linux VPS.
+
 After deploying the Relay, initialize DEV Anywhere on the development machine:
 
 ```bash
@@ -190,40 +204,28 @@ dev-anywhere tunnel
 
 ### VPS Relay
 
-The first upgrade from an earlier release to 0.9.2 requires a one-time manual update. On every development machine, stop the Proxy with the existing CLI before proceeding:
+Rerun the deployment command to pull the latest published Relay image. On macOS or Linux:
 
 ```bash
-dev-anywhere serve stop
+curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
 ```
 
-From the DEV Anywhere project directory, run the following commands to upgrade the Relay:
+On Windows PowerShell:
 
-```bash
-git pull --ff-only
-bash scripts/deploy/install-relay.sh \
-  --ssh root@your-vps \
-  dev-anywhere.example.com
+```powershell
+irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
 
-Keep the last argument consistent with the initial deployment: pass the domain again for a domain deployment, or the public IP for an IP deployment. The installer reuses the existing tokens on the VPS.
+Use the same SSH target and public domain/IP as the initial deployment. The installer reuses the existing tokens on the VPS. Globally npm-installed Proxies with automatic updates enabled follow the Relay version and reconnect automatically. Refresh the browser after the update.
 
-After upgrading the Relay, install and start 0.9.2 on every development machine:
-
-```bash
-npm install -g @dev-anywhere/proxy@0.9.2
-dev-anywhere serve start --relay cloud
-```
-
-This upgrade ends terminal sessions started before the upgrade. After all development machines are updated, refresh the browser and restart those terminal sessions.
-
-You can then verify the version and connection on any development machine:
+Verify the version and connection on the development machine:
 
 ```bash
 dev-anywhere --version
 dev-anywhere serve status
 ```
 
-For pinned versions or VPS container checks, see the [VPS deployment guide](./docs/DEPLOYMENT.md#升级).
+For pinned versions, disabled automatic updates, or migration from a release older than 0.9.2, see the [VPS deployment guide](./docs/DEPLOYMENT.md#升级). For connection problems, see [troubleshooting](./docs/DEPLOYMENT.md#排障).
 
 ## Main features
 

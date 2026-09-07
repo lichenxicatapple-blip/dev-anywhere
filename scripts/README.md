@@ -14,6 +14,10 @@ specific workflow.
 | `tools/`   | Ad hoc diagnostics such as Android emulator CDP helpers.     |
 | `lib/`     | Shared shell/Node helpers sourced by the workflow scripts.   |
 
+For VPS installation and upgrades, use the public `install.sh` or `install.ps1`
+entrypoint described in the [deployment guide](../docs/DEPLOYMENT.md).
+The scripts in `deploy/` support those entrypoints and repository maintenance.
+
 ## Real iPad Voice Pilot
 
 The fixed-recording UAT drives a connected physical iPad through Safari

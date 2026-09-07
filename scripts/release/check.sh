@@ -27,6 +27,9 @@ bash -n scripts/release/deep.sh
 bash -n scripts/lib/stage-timing.sh
 bash -n scripts/quality/check.sh
 bash -n scripts/deploy/install-relay.sh
+bash -n install.sh
+bash -n scripts/deploy/install-bootstrap.test.sh
+bash -n scripts/deploy/install-relay-ssh.test.sh
 bash -n scripts/lib/install-relay-render.sh
 bash -n scripts/deploy/check-prerequisite.sh
 bash -n scripts/dev/restart.sh
@@ -38,6 +41,8 @@ node --check scripts/quality/check-source-comment-refs.mjs
 node --check scripts/lib/resolve-dev-profile.mjs
 if [[ "$STATIC_ONLY" != "1" ]]; then
   bash scripts/deploy/install-relay-render.test.sh
+  bash scripts/deploy/install-bootstrap.test.sh
+  bash scripts/deploy/install-relay-ssh.test.sh
   bash scripts/release/options.test.sh
   node scripts/release/config.test.mjs
 else

@@ -81,6 +81,12 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
+      - name: Test online installer with Windows PowerShell and PowerShell 7
+        shell: pwsh
+        run: |
+          powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/deploy/install-powershell.test.ps1
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          & ./scripts/deploy/install-powershell.test.ps1
       - uses: pnpm/action-setup@v4
         with:
           version: 9
