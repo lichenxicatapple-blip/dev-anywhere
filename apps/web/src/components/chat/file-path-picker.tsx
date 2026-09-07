@@ -17,6 +17,7 @@ import { relayClientRef } from "@/hooks/use-relay-setup";
 import type { RelayClient } from "@/services/relay-client";
 import { cn } from "@/lib/utils";
 import { resolvePickerTarget } from "@/lib/file-path-picker-target";
+import { formatRemotePath } from "@/lib/format-remote-path";
 import {
   joinRemoteChildDirectory,
   remoteParentDirectory,
@@ -315,7 +316,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
               data-slot="file-path-picker-current-directory"
               title={absolutePath}
             >
-              {absolutePath || "正在读取路径"}
+              {formatRemotePath(absolutePath, homePath) || "正在读取路径"}
             </p>
           </div>
           <div

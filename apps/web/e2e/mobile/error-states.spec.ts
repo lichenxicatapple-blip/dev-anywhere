@@ -26,7 +26,11 @@ test.describe("L4 mobile / error UI states", () => {
     await cwdControl.click();
     await dialog.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
     await dialog.locator('[data-slot="select-current-directory"]').click();
-    await expect(cwdControl).toContainText("/home/dev/sample-app/");
+    await expect(cwdControl).toHaveText("~/sample-app");
+    await expect(cwdControl.locator("span[title]")).toHaveAttribute(
+      "title",
+      "/home/dev/sample-app/",
+    );
     await dialog.getByRole("button", { name: "创建" }).click();
 
     // 错误文案出现; dialog 不关闭, 用户仍能编辑.
@@ -41,6 +45,7 @@ test.describe("L4 mobile / error UI states", () => {
       (m) => m.type === "session_create",
     );
     expect(responses.length).toBeGreaterThanOrEqual(1);
+    expect(responses.at(-1)).toMatchObject({ cwd: "/home/dev/sample-app/" });
   });
 
   test("create-session dialog stays touch-safe on long agent CLI path input", async ({
@@ -68,7 +73,7 @@ test.describe("L4 mobile / error UI states", () => {
     }
     await cliPathCard.locator('[data-slot="file-entry"][data-entry-name="README.md"]').click();
     await expect(cliPathControl).toContainText(
-      "/home/dev/.local/bin/src/src/src/src/src/src/src/src/README.md",
+      "~/.local/bin/src/src/src/src/src/src/src/src/README.md",
     );
     await expect(cliPathCard.locator('[data-slot="agent-cli-path-actions"]')).toBeVisible();
     await expectNoHorizontalDocumentOverflow(emuPage);

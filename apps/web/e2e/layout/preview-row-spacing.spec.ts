@@ -1,5 +1,5 @@
 import { expect, test } from "@playwright/test";
-import type { PreviewSummary } from "@dev-anywhere/shared";
+import { MESSAGE_ENVELOPE_VERSION, type PreviewSummary } from "@dev-anywhere/shared";
 import { installFakeRelay, selectFakeProxy, sentFakeRelayMessages } from "../helpers";
 
 const sources = [
@@ -54,6 +54,7 @@ for (const viewport of [
       await expect(row).toBeVisible();
       await row.scrollIntoViewIfNeeded();
       const source = row.getByTitle(url, { exact: true });
+      await expect(source).toHaveText(url);
       const status = row.getByText("可访问", { exact: true });
       const menu = row.getByRole("button", { name: "预览操作" });
       await expect(status).toBeInViewport();
@@ -105,5 +106,123 @@ for (const viewport of [
         await expect(page.locator('[data-slot="preview-row-menu"]')).toBeVisible();
       }
     }
+  });
+
+  test(`static preview paths use the remote Windows home at ${viewport.width}px`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await installFakeRelay(page);
+    await selectFakeProxy(page);
+    await expect
+      .poll(async () =>
+        (await sentFakeRelayMessages(page)).find(
+          (message) => message.type === "preview_list_request",
+        ),
+      )
+      .toBeTruthy();
+    const request = (await sentFakeRelayMessages(page)).find(
+      (message) => message.type === "preview_list_request",
+    )!;
+    const homePath = "C:\\Users\\remote-dev";
+    const projectPath = `${homePath}\\projects\\sample-app\\output`;
+    const cases = [
+      {
+        previewId: "home-entry",
+        rootPath: homePath,
+        entryPath: "index.html",
+        absolute: `${homePath}\\index.html`,
+        display: "~\\index.html",
+      },
+      {
+        previewId: "nested-entry",
+        rootPath: `${projectPath}\\`,
+        entryPath: "pages/index.html",
+        absolute: `${projectPath}\\pages\\index.html`,
+        display: "~\\projects\\sample-app\\output\\pages\\index.html",
+      },
+      {
+        previewId: "other-home",
+        rootPath: `${homePath}-other\\projects\\output`,
+        entryPath: "index.html",
+        absolute: `${homePath}-other\\projects\\output\\index.html`,
+        display: `${homePath}-other\\projects\\output\\index.html`,
+      },
+    ];
+    const previews: PreviewSummary[] = cases.map(({ previewId, rootPath, entryPath }) => ({
+      previewId,
+      name: previewId,
+      source: { kind: "static", rootPath, entryPath },
+      tunnelProvider: "cloudflare",
+      state: "ready",
+      publicUrl: `https://${previewId}.trycloudflare.com`,
+      createdAt: 1,
+      updatedAt: 1,
+    }));
+    await page.evaluate(
+      ({ homePath, projectPath, version, previewSnapshot }) => {
+        const socket = window.__devAnywhereE2E!.socket!;
+        socket.emitJson({
+          type: "proxy_info",
+          homePath,
+          agentCli: {
+            claude: { available: false },
+            codex: { available: false },
+            kimi: { available: false },
+          },
+        });
+        socket.emitJson({
+          type: "session_list",
+          seq: Date.now(),
+          timestamp: Date.now(),
+          source: "proxy",
+          version,
+          payload: {
+            sessions: [
+              {
+                sessionId: "windows-project",
+                kind: "agent",
+                name: projectPath,
+                cwd: projectPath,
+                state: "idle",
+                mode: "pty",
+                provider: "claude",
+                ptyOwner: "proxy-hosted",
+                lastActive: Date.now(),
+              },
+            ],
+          },
+        });
+        socket.emitJson(previewSnapshot);
+      },
+      {
+        homePath,
+        projectPath,
+        version: MESSAGE_ENVELOPE_VERSION,
+        previewSnapshot: {
+          type: "preview_list_response",
+          requestId: request.requestId,
+          scope: request.scope,
+          epoch: "preview-path-display",
+          revision: 0,
+          previews,
+        },
+      },
+    );
+
+    for (const { previewId, absolute, display } of cases) {
+      const row = page.locator(`[data-preview-id="${previewId}"]:visible`);
+      await expect(row).toBeVisible();
+      await expect(row.getByTitle(absolute, { exact: true })).toHaveText(display);
+      await expect(row.locator('[data-slot="preview-row-open"]')).toHaveAttribute(
+        "href",
+        `https://${previewId}.trycloudflare.com`,
+      );
+    }
+    await expect(
+      page
+        .locator('[data-session-id="windows-project"]:visible')
+        .getByTitle(projectPath, { exact: true }),
+    ).toHaveText("~\\…\\sample-app\\output");
   });
 }

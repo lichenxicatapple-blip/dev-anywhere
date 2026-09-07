@@ -213,6 +213,54 @@ describe("RemotePathSelector", () => {
     expect(container.querySelector('input[type="text"]')).toBeNull();
   });
 
+  it.each([
+    ["/Users/dev", "/Users/dev/projects/sample-app/pages", "~/projects/sample-app/pages"],
+    [
+      "C:\\Users\\dev",
+      "C:\\Users\\dev\\projects\\sample-app\\pages",
+      "~\\projects\\sample-app\\pages",
+    ],
+  ])(
+    "abbreviates remote Home %s on touch controls while preserving form and browser paths",
+    (homePath, value, displayPath) => {
+      media.coarse = true;
+      useFileStore.setState({ homePath });
+      const { container, getByRole, onValueChange } = renderSelector({
+        value,
+        name: "remotePath",
+      });
+      const control = getByRole("button", { name: "远程路径" });
+
+      expect(control).toHaveTextContent(displayPath);
+      expect(control.querySelector("[title]")).toHaveAttribute("title", value);
+      expect(container.querySelector('input[type="hidden"][name="remotePath"]')).toHaveValue(value);
+
+      fireEvent.click(control);
+      expect(browser(container)).toHaveAttribute("data-filter", value);
+      expect(onValueChange).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    ["/Users/dev", "/Users/dev/projects/sample-app"],
+    ["C:\\Users\\dev", "C:\\Users\\dev\\projects\\sample-app"],
+  ])("keeps editable paths absolute for remote Home %s", (homePath, value) => {
+    useFileStore.setState({ homePath });
+    const { container, getByRole, onValueChange } = renderSelector({ value });
+    const input = getByRole("textbox", { name: "远程路径" });
+
+    expect(input).toHaveValue(value);
+    fireEvent.focus(input);
+    expect(input).toHaveValue(value);
+    expect(browser(container)).toHaveAttribute("data-filter", value);
+
+    const editedPath = `${value}-edited`;
+    fireEvent.change(input, { target: { value: editedPath } });
+    expect(input).toHaveValue(editedPath);
+    expect(onValueChange).toHaveBeenLastCalledWith(editedPath);
+    expect(browser(container)).toHaveAttribute("data-filter", editedPath);
+  });
+
   it("lets an outside action finish before closing an inline picker", () => {
     media.coarse = true;
     const outsideAction = vi.fn();

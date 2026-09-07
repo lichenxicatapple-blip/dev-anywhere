@@ -10,7 +10,10 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { toast } from "@/components/toast";
 import { copyText } from "@/lib/copy-text";
+import { formatRemotePath } from "@/lib/format-remote-path";
+import { resolveRemotePath } from "@/lib/remote-path";
 import { cn } from "@/lib/utils";
+import { useFileStore } from "@/stores/file-store";
 
 interface PreviewRowProps {
   preview: PreviewSummary;
@@ -56,7 +59,7 @@ const STATE_STYLE: Record<
 function previewSourceLabel(preview: PreviewSummary): string {
   return preview.source.kind === "local"
     ? preview.source.url
-    : `${preview.source.rootPath.replace(/\/$/, "")}/${preview.source.entryPath}`;
+    : resolveRemotePath(preview.source.rootPath, preview.source.entryPath);
 }
 
 async function copyPreviewLink(url: string): Promise<void> {
@@ -85,6 +88,7 @@ export function PreviewRow({
   onReconnect,
   onClose,
 }: PreviewRowProps) {
+  const homePath = useFileStore((state) => state.homePath);
   const authoritativeStyle = STATE_STYLE[preview.state];
   const style =
     pendingOperation === "reconnect"
@@ -108,6 +112,8 @@ export function PreviewRow({
   const canShare =
     canOpen && typeof navigator !== "undefined" && typeof navigator.share === "function";
   const sourceLabel = previewSourceLabel(preview);
+  const displaySourceLabel =
+    preview.source.kind === "static" ? formatRemotePath(sourceLabel, homePath) : sourceLabel;
   const rowContents = (
     <>
       <span className="flex items-center gap-2 min-w-0">
@@ -123,7 +129,7 @@ export function PreviewRow({
       <span className="flex h-5 min-w-0 items-center gap-1.5 text-xs leading-5">
         <Globe2 className="size-3.5 shrink-0 text-muted-foreground" aria-hidden="true" />
         <span className="min-w-0 truncate font-mono text-muted-foreground" title={sourceLabel}>
-          {sourceLabel}
+          {displaySourceLabel}
         </span>
         <span className="shrink-0 text-muted-foreground/60" aria-hidden="true">
           ·

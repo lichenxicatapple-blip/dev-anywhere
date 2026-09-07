@@ -498,13 +498,13 @@ test.describe("mobile UX contract", () => {
       })
       .toBe(true);
     await cliPathCard.locator('[data-slot="file-entry"][data-entry-name="README.md"]').click();
-    await expect(cliPathControl).toContainText("/home/dev/.local/bin/README.md");
+    await expect(cliPathControl).toHaveText("~/.local/bin/README.md");
     const cliPathActions = cliPathCard.locator('[data-slot="agent-cli-path-actions"]');
     await expect(cliPathActions).toBeVisible();
     await expectTouchTarget(cliPathActions.getByRole("button", { name: "取消" }));
     await expectTouchTarget(cliPathActions.getByRole("button", { name: "保存" }));
     await cliPathActions.getByRole("button", { name: "取消" }).click();
-    await expect(cliPathControl).toContainText("/home/dev/.local/bin/claude");
+    await expect(cliPathControl).toHaveText("~/.local/bin/claude");
     await expect(cliPathActions).toHaveCount(0);
 
     await cwdControl.click();
@@ -530,16 +530,20 @@ test.describe("mobile UX contract", () => {
     await expectTouchTarget(pathPicker.locator('[data-slot="file-entry"]').first());
     await pathPicker.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
     await expect(pathPicker.locator('[data-slot="file-path-picker-current-directory"]')).toHaveText(
-      "/home/dev/sample-app",
+      "~/sample-app",
     );
-    await expect(cwdControl).toContainText("/home/dev");
+    await expect(cwdControl).toHaveText("~");
     await parentAction.click();
     await expect(pathPicker.locator('[data-slot="file-path-picker-current-directory"]')).toHaveText(
-      "/home/dev",
+      "~",
     );
     await pathPicker.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
     await selectAction.click();
-    await expect(cwdControl).toContainText("/home/dev/sample-app/");
+    await expect(cwdControl).toHaveText("~/sample-app");
+    await expect(cwdControl.locator("span[title]")).toHaveAttribute(
+      "title",
+      "/home/dev/sample-app/",
+    );
   });
 
   test("mobile web preview chooses a path without exposing a text field", async ({ page }) => {
@@ -562,7 +566,11 @@ test.describe("mobile UX contract", () => {
     await previewSheet.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
     await previewSheet.locator('[data-slot="select-current-directory"]').click();
 
-    await expect(pathControl).toContainText("/home/dev/sample-app/");
+    await expect(pathControl).toHaveText("~/sample-app");
+    await expect(pathControl.locator("span[title]")).toHaveAttribute(
+      "title",
+      "/home/dev/sample-app/",
+    );
     await expect(
       previewSheet.locator('[data-slot="web-preview-static-inspection"]'),
     ).toHaveAttribute("data-status", "ready");

@@ -13,6 +13,7 @@ import type { PickerHandle } from "@/components/chat/picker-handle";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useFileStore } from "@/stores/file-store";
 import { describeCurrentClientDevice } from "@/lib/client-device";
+import { formatRemotePath } from "@/lib/format-remote-path";
 import { cn } from "@/lib/utils";
 import {
   normalizeRemoteAbsolutePath,
@@ -246,7 +247,7 @@ export function RemotePathSelector({
                 )}
                 title={value || undefined}
               >
-                {value || placeholder}
+                {formatRemotePath(value, homePath) || placeholder}
               </span>
             </button>
             {name ? <input type="hidden" name={name} value={value} required={required} /> : null}

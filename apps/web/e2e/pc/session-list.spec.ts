@@ -100,6 +100,9 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await expect(pathPicker).toBeVisible();
     const pathLabel = pathPicker.locator('[data-slot="file-path-picker-title"]');
     const currentPath = pathPicker.locator('[data-slot="file-path-picker-current-directory"]');
+    await expect(cwdInput).toHaveValue("/home/dev/projects/");
+    await expect(currentPath).toHaveText("~/projects");
+    await expect(currentPath).toHaveAttribute("title", "/home/dev/projects");
     const actions = pathPicker.locator('[data-slot="file-path-picker-actions"]');
     const parentAction = actions.locator('[data-slot="file-path-picker-parent"]');
     const [labelBox, pathBox, actionsBox, parentBox] = await Promise.all([
@@ -151,7 +154,8 @@ test.describe("CreateSessionDialog — 字段校验", () => {
 
     await pathPicker.locator('[data-slot="file-entry"][data-entry-name="src"]').click();
     await expect(cwdInput).toHaveValue("/home/dev/projects/");
-    await expect(currentPath).toHaveText("/home/dev/projects/src");
+    await expect(currentPath).toHaveText("~/projects/src");
+    await expect(currentPath).toHaveAttribute("title", "/home/dev/projects/src");
     await pathPicker.locator('[data-slot="select-current-directory"]').click();
     await expect(cwdInput).toHaveValue("/home/dev/projects/src/");
 

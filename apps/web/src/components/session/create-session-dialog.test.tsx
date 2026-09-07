@@ -580,7 +580,8 @@ describe("CreateSessionDialog", () => {
     const { baseElement, getByRole, queryByRole } = renderDialog();
     const cwdButton = await waitFor(() => {
       const control = getByRole("button", { name: "工作目录" });
-      expect(control).toHaveTextContent("/home/dev");
+      expect(control).toHaveTextContent("~");
+      expect(control.querySelector("[title]")).toHaveAttribute("title", "/home/dev");
       return control;
     });
     expect(cwdButton).toHaveAttribute("data-path-control", "button");
@@ -592,7 +593,8 @@ describe("CreateSessionDialog", () => {
     );
     expect(createSession).not.toHaveBeenCalled();
     fireEvent.click(baseElement.querySelector('[data-slot="select-current-directory"]')!);
-    expect(cwdButton).toHaveTextContent("/home/dev/projects/");
+    expect(cwdButton).toHaveTextContent("~/projects");
+    expect(cwdButton.querySelector("[title]")).toHaveAttribute("title", "/home/dev/projects/");
 
     fireEvent.click(getByRole("button", { name: "创建" }));
     await waitFor(() => {

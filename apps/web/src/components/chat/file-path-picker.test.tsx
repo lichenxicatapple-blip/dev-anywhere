@@ -43,6 +43,45 @@ describe("FilePathPicker", () => {
 
   afterEach(() => cleanup());
 
+  it.each([
+    ["/Users/dev", "/", "~/projects/sample-app/pages"],
+    ["C:\\Users\\dev", "\\", "~\\projects\\sample-app\\pages"],
+  ])(
+    "abbreviates Home %s in the directory heading while emitting absolute paths",
+    (homePath, separator, displayPath) => {
+      const directory = [homePath, "projects", "sample-app", "pages"].join(separator);
+      useFileStore.setState({
+        homePath,
+        tree: new Map([[directory, [{ name: "index.html", isDir: false }]]]),
+      });
+      const onSelect = vi.fn();
+      const onNavigate = vi.fn();
+      const onSelectCurrentDirectory = vi.fn();
+      const { container } = render(
+        <FilePathPicker
+          mode="select"
+          filter={directory}
+          onSelect={onSelect}
+          onNavigate={onNavigate}
+          onSelectCurrentDirectory={onSelectCurrentDirectory}
+        />,
+      );
+      const heading = container.querySelector('[data-slot="file-path-picker-current-directory"]');
+
+      expect(heading).toHaveTextContent(displayPath);
+      expect(heading).toHaveAttribute("title", directory);
+
+      fireEvent.click(container.querySelector('[data-entry-name="index.html"]')!);
+      expect(onSelect).toHaveBeenCalledWith(`${directory}${separator}index.html`);
+      fireEvent.click(container.querySelector('[data-slot="select-current-directory"]')!);
+      expect(onSelectCurrentDirectory).toHaveBeenCalledWith(`${directory}${separator}`);
+      fireEvent.click(container.querySelector('[data-slot="file-path-picker-parent"]')!);
+      expect(onNavigate).toHaveBeenCalledWith(
+        [homePath, "projects", "sample-app", ""].join(separator),
+      );
+    },
+  );
+
   it("loads a Windows directory and uses the normalized response cache", async () => {
     useFileStore.setState({ homePath: "C:\\Users\\dev" });
     requestDirectoryList.mockResolvedValueOnce({

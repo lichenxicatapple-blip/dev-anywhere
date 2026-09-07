@@ -36,7 +36,7 @@ import { useFileStore } from "@/stores/file-store";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
-import { formatSessionName } from "@/lib/format-session-name";
+import { formatRemotePath } from "@/lib/format-remote-path";
 import {
   compareProvider,
   historySessionProvider,
@@ -94,7 +94,7 @@ export function HistoryList({ now }: HistoryListProps) {
         sessions: Array.from(projectMap.values()).flatMap((group) => group.sessions),
         projects: Array.from(projectMap.values()).map((group) => ({
           dir: group.dir,
-          shortDir: formatSessionName(group.dir, homePath),
+          shortDir: formatRemotePath(group.dir, homePath, { compact: true }),
           sessions: group.sessions,
         })),
       }));

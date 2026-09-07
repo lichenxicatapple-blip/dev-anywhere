@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { PreviewState, PreviewSummary } from "@dev-anywhere/shared";
 
@@ -14,6 +14,7 @@ vi.mock("@/components/toast", () => ({
 }));
 
 import { PreviewRow } from "./preview-row";
+import { useFileStore } from "@/stores/file-store";
 
 function preview(state: "ready"): Extract<PreviewSummary, { state: "ready" }>;
 function preview(state: "failed"): Extract<PreviewSummary, { state: "failed" }>;
@@ -51,6 +52,91 @@ describe("PreviewRow", () => {
     copyText.mockReset();
     toastSuccess.mockReset();
     toastError.mockReset();
+    useFileStore.getState().setHomePath("");
+  });
+
+  it.each([
+    {
+      home: "/Users/dev",
+      root: "/Users/dev/projects/album/output/",
+      full: "/Users/dev/projects/album/output/pages/index.html",
+      display: "~/projects/album/output/pages/index.html",
+    },
+    {
+      home: "C:\\Users\\dev",
+      root: "c:/Users/dev/projects/album/output/",
+      full: "C:\\Users\\dev\\projects\\album\\output\\pages\\index.html",
+      display: "~\\projects\\album\\output\\pages\\index.html",
+    },
+    {
+      home: "\\\\server\\users\\dev",
+      root: "\\\\server\\users\\dev\\site\\",
+      full: "\\\\server\\users\\dev\\site\\pages\\index.html",
+      display: "~\\site\\pages\\index.html",
+    },
+    {
+      home: "/Users/dev",
+      root: "/Users/developer/site",
+      full: "/Users/developer/site/pages/index.html",
+      display: "/Users/developer/site/pages/index.html",
+    },
+  ])(
+    "abbreviates static source $root without changing its link or source",
+    ({ home, root, full, display }) => {
+      useFileStore.getState().setHomePath(home);
+      const item: PreviewSummary = {
+        ...preview("ready"),
+        source: { kind: "static", rootPath: root, entryPath: "pages/index.html" },
+      };
+      const { getByTitle } = render(
+        <PreviewRow preview={item} onRename={vi.fn()} onReconnect={vi.fn()} onClose={vi.fn()} />,
+      );
+
+      expect(getByTitle(full)).toHaveTextContent(display);
+      expect(document.querySelector('[data-slot="preview-row-open"]')).toHaveAttribute(
+        "href",
+        item.publicUrl,
+      );
+      expect(item.source).toEqual({
+        kind: "static",
+        rootPath: root,
+        entryPath: "pages/index.html",
+      });
+    },
+  );
+
+  it("updates display when the reported home arrives or changes", () => {
+    const full = "/Users/dev/site/index.html";
+    const { getByTitle } = render(
+      <PreviewRow
+        preview={{
+          ...preview("ready"),
+          source: { kind: "static", rootPath: "/Users/dev/site", entryPath: "index.html" },
+        }}
+        onRename={vi.fn()}
+        onReconnect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(getByTitle(full)).toHaveTextContent(full);
+    act(() => useFileStore.getState().setHomePath("/Users/dev"));
+    expect(getByTitle(full)).toHaveTextContent("~/site/index.html");
+    act(() => useFileStore.getState().setHomePath("/Users/another"));
+    expect(getByTitle(full)).toHaveTextContent(full);
+  });
+
+  it("keeps a running website URL unchanged even when it contains the home path", () => {
+    useFileStore.getState().setHomePath("/Users/dev");
+    const url = "http://localhost:5173/Users/dev/site";
+    const { getByTitle } = render(
+      <PreviewRow
+        preview={{ ...preview("ready"), source: { kind: "local", url } }}
+        onRename={vi.fn()}
+        onReconnect={vi.fn()}
+        onClose={vi.fn()}
+      />,
+    );
+    expect(getByTitle(url)).toHaveTextContent(url);
   });
 
   it("renders a ready preview as a real external anchor with copy/share/close actions", async () => {

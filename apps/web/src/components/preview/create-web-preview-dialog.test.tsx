@@ -588,7 +588,8 @@ describe("CreateWebPreviewDialog", () => {
     fireEvent.click(
       baseElement.querySelector('[data-slot="file-entry"][data-entry-name="landing.html"]')!,
     );
-    expect(pathButton).toHaveTextContent("/home/dev/landing.html");
+    expect(pathButton).toHaveTextContent("~/landing.html");
+    expect(pathButton.querySelector("[title]")).toHaveAttribute("title", "/home/dev/landing.html");
 
     await waitFor(() => {
       expect(inspectStaticWebPreview).toHaveBeenCalledWith(
