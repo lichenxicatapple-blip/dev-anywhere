@@ -94,8 +94,10 @@ describe.skipIf(
     const command = win32.join(process.env.SystemRoot ?? "C:\\Windows", "System32", "cmd.exe");
     const script = [
       `const pty=require(${JSON.stringify(ptyModule)});`,
+      "console.log('Starting service PTY as '+require('node:os').userInfo().username);",
       `const shell=pty.spawn(${JSON.stringify(command)},['/d','/c','whoami'],{cwd:${JSON.stringify(home)},env:process.env,cols:80,rows:24,useConptyDll:true});`,
-      "let output='';shell.onData(data=>output+=data);const timer=setTimeout(()=>process.exit(3),15000);",
+      "console.log('Service PTY started: '+shell.pid);",
+      "let output='';shell.onData(data=>output+=data);const timer=setTimeout(()=>{console.error('Service PTY timed out: '+JSON.stringify(output));process.exit(3)},15000);",
       `shell.onExit(({exitCode})=>{clearTimeout(timer);require('node:fs').writeFileSync(${JSON.stringify(ready)},JSON.stringify({user:require('node:os').userInfo().username,pid:process.pid,home:process.env.HOME,shellExit:exitCode,shellOutput:output}));});`,
       `process.stdin.on('data',()=>{require('node:fs').writeFileSync(${JSON.stringify(stopped)},'stopped');process.exit(0)});`,
     ].join("");
@@ -107,6 +109,7 @@ describe.skipIf(
       args: ["-e", script],
       env: { HOME: home, USERPROFILE: home },
     });
+    let failed = false;
     try {
       powershell(wrapper.compileScript);
       // Credentials exist only in this disposable test. Never prompt for or use a real account.
@@ -132,18 +135,40 @@ Start-Service -Name ${psString(label)};`);
         `Stop-Service -Name ${psString(label)}; (Get-Service -Name ${psString(label)}).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20));`,
       );
       expect(await readFile(stopped, "utf8")).toBe("stopped");
+    } catch (error) {
+      failed = true;
+      console.error(
+        "SCM service log before failure:",
+        await readFile(wrapper.logPath, "utf8").catch(() => "No service log was created"),
+      );
+      throw error;
     } finally {
       try {
         powershell(`$service = Get-Service -Name ${psString(label)} -ErrorAction SilentlyContinue;
-if ($service) { Stop-Service -InputObject $service -ErrorAction SilentlyContinue; & sc.exe delete ${psString(label)} | Out-Null; }
+if ($service) {
+  $serviceProcessId = (Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)}).ProcessId;
+  Stop-Service -InputObject $service -ErrorAction SilentlyContinue;
+  $service.WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20));
+  if ($serviceProcessId) { Wait-Process -Id $serviceProcessId -Timeout 5 -ErrorAction SilentlyContinue; }
+  & sc.exe delete ${psString(label)} | Out-Null;
+}
 $account = Get-LocalUser -Name ${psString(name)} -ErrorAction SilentlyContinue;
 if ($account) {
-  Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $account.SID.Value } | Remove-CimInstance;
+  # SCM releases the account profile asynchronously after the service process exits.
+  for ($attempt = 0; $attempt -lt 30; $attempt++) {
+    try {
+      Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $account.SID.Value } | Remove-CimInstance;
+      break;
+    } catch { if ($attempt -eq 29) { throw; }; Start-Sleep -Milliseconds 500; }
+  }
   Remove-LocalUser -Name ${psString(name)};
 }
 exit 0;`);
+      } catch (error) {
+        if (!failed) throw error;
+        console.error("SCM fixture cleanup also failed:", error);
       } finally {
-        await rm(home, { recursive: true, force: true });
+        await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
       }
     }
   }, 90_000);
