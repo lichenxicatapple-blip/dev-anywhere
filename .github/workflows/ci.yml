@@ -12,6 +12,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  windows-update-diagnostic:
+    name: Diagnose running Windows npm upgrade
+    runs-on: windows-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+      - run: node apps/proxy/scripts/diagnose-windows-update.mjs
+
   verify:
     name: Test release artifacts
     runs-on: ubuntu-latest
