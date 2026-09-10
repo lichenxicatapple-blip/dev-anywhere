@@ -19,6 +19,7 @@ import { parseServiceCommandResult } from "./common/service-command-result.js";
 import { compareStableVersions, parseStableVersion } from "./common/stable-version.js";
 import { spawnCommand } from "./common/command-launch.js";
 import { terminateOwnedProcessTree } from "./common/process-termination.js";
+import { createNpmInstallBackup, type NpmInstallBackup } from "./common/npm-install-backup.js";
 import { PROXY_PACKAGE_NAME, PROXY_PACKAGE_ROOT } from "./version.js";
 
 const LOCK_STALE_AFTER_MS = 30 * 60_000;
@@ -69,11 +70,13 @@ export interface RelayDirectedUpdateDeps {
   readInstalledVersion(): string;
   installVersion(npm: string, version: string): Promise<void>;
   validateInstalledCli(version: string): Promise<void>;
+  backupInstallation(): Promise<NpmInstallBackup>;
   restartWithRecovery(
     options: RunnerOptions,
     npm: string,
     previousInstalledVersion: string,
     installedByThisRun: boolean,
+    backup: NpmInstallBackup | null,
   ): Promise<void>;
 }
 
@@ -182,7 +185,7 @@ function canonicalPath(path: string): string {
   return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
-async function verifyNpmManagedGlobalInstall(npm: string): Promise<void> {
+async function verifyNpmManagedGlobalInstall(npm: string): Promise<string[]> {
   const result = await runCommand(
     npm,
     ["root", "--global", "--loglevel=error"],
@@ -207,6 +210,13 @@ async function verifyNpmManagedGlobalInstall(npm: string): Promise<void> {
       "The active Proxy and adjacent npm use different global installation roots",
     );
   }
+  const binDirectory =
+    process.platform === "win32" ? dirname(npmRoot) : join(dirname(dirname(npmRoot)), "bin");
+  return (
+    process.platform === "win32"
+      ? ["dev-anywhere", "dev-anywhere.cmd", "dev-anywhere.ps1"]
+      : ["dev-anywhere"]
+  ).map((name) => join(binDirectory, name));
 }
 
 function readInstalledVersion(): string {
@@ -312,6 +322,8 @@ export async function installVersion(npm: string, version: string): Promise<void
       "--no-audit",
       "--no-fund",
       "--loglevel=error",
+      "--fetch-timeout=30000",
+      "--fetch-retries=2",
     ],
     NPM_INSTALL_TIMEOUT_MS,
     true,
@@ -374,6 +386,7 @@ export async function restartWithRecovery(
   previousInstalledVersion: string,
   installedByThisRun: boolean,
   deps?: RestartRecoveryDeps,
+  backup: NpmInstallBackup | null = null,
 ): Promise<void> {
   const runtime: RestartRecoveryDeps = deps ?? {
     stopped: () => existsSync(STOPPED_PATH),
@@ -420,7 +433,8 @@ export async function restartWithRecovery(
     { targetVersion: options.targetVersion, rollbackVersion: previousInstalledVersion },
     "Updated Proxy did not become ready; rolling package back",
   );
-  await runtime.installVersion(npm, previousInstalledVersion);
+  if (backup) await backup.restore();
+  else await runtime.installVersion(npm, previousInstalledVersion);
   await runtime.validateInstalledCli(previousInstalledVersion);
   // The lifecycle owner checks this token while holding its operation lock. A later user stop
   // replaces the token, so package rollback cannot override that stop by starting the service.
@@ -446,14 +460,24 @@ export async function runRelayDirectedUpdate(
   options: RunnerOptions,
   deps?: RelayDirectedUpdateDeps,
 ): Promise<number> {
+  let binPaths: string[] = [];
   const runtime: RelayDirectedUpdateDeps = deps ?? {
     acquireLock: () => acquireUpdateLock(),
     resolveNpm: adjacentNpmExecutable,
-    verifyNpm: verifyNpmManagedGlobalInstall,
+    verifyNpm: async (npm) => {
+      binPaths = await verifyNpmManagedGlobalInstall(npm);
+    },
     readInstalledVersion,
     installVersion,
     validateInstalledCli,
-    restartWithRecovery,
+    backupInstallation: () =>
+      createNpmInstallBackup({
+        packageRoot: PROXY_PACKAGE_ROOT,
+        packageName: PROXY_PACKAGE_NAME,
+        binPaths,
+      }),
+    restartWithRecovery: (options, npm, previous, installed, backup) =>
+      restartWithRecovery(options, npm, previous, installed, undefined, backup),
   };
   const lock = runtime.acquireLock();
   if (!lock) {
@@ -461,6 +485,7 @@ export async function runRelayDirectedUpdate(
     return LOCK_BUSY_EXIT_CODE;
   }
 
+  let backup: NpmInstallBackup | null = null;
   try {
     const npm = runtime.resolveNpm();
     await runtime.verifyNpm(npm);
@@ -492,6 +517,8 @@ export async function runRelayDirectedUpdate(
 
     const installedByThisRun = plan.kind === "install-and-restart";
     if (installedByThisRun) {
+      await runtime.validateInstalledCli(installedVersion);
+      backup = await runtime.backupInstallation();
       logger.info(
         { from: installedVersion, to: plan.version },
         "Installing Relay-matched Proxy version",
@@ -502,45 +529,35 @@ export async function runRelayDirectedUpdate(
       } catch (updateError) {
         logger.error(
           { from: installedVersion, to: plan.version },
-          "Proxy package installation or validation failed; checking previous package",
+          "Proxy package installation or validation failed; restoring the local backup",
         );
-        let previousPackageIsIntact = false;
         try {
-          previousPackageIsIntact = runtime.readInstalledVersion() === installedVersion;
-          if (previousPackageIsIntact) {
-            await runtime.validateInstalledCli(installedVersion);
-          }
-        } catch {
-          previousPackageIsIntact = false;
-        }
-        if (!previousPackageIsIntact) {
-          try {
-            await runtime.installVersion(npm, installedVersion);
-            await runtime.validateInstalledCli(installedVersion);
-          } catch (rollbackError) {
-            throw new AggregateError(
-              [updateError, rollbackError],
-              `Proxy ${plan.version} failed and package rollback to ${installedVersion} also failed`,
-              { cause: rollbackError },
-            );
-          }
-          throw new Error(
-            `Proxy ${plan.version} failed package validation; restored ${installedVersion}`,
-            { cause: updateError },
+          await backup.restore();
+          await runtime.validateInstalledCli(installedVersion);
+        } catch (rollbackError) {
+          throw new AggregateError(
+            [updateError, rollbackError],
+            `Proxy ${plan.version} failed and package rollback to ${installedVersion} also failed`,
+            { cause: rollbackError },
           );
         }
-        throw new Error(
-          `Proxy ${plan.version} update failed; previous package ${installedVersion} remains intact`,
-          { cause: updateError },
-        );
+        throw new Error(`Proxy ${plan.version} update failed; restored ${installedVersion}`, {
+          cause: updateError,
+        });
       }
     } else {
       await runtime.validateInstalledCli(plan.version);
     }
-    await runtime.restartWithRecovery(options, npm, installedVersion, installedByThisRun);
+    await runtime.restartWithRecovery(options, npm, installedVersion, installedByThisRun, backup);
     return 0;
   } finally {
-    lock.release();
+    try {
+      await backup?.dispose();
+    } catch (error) {
+      logger.warn({ error: String(error) }, "Could not remove auto-update backup files");
+    } finally {
+      lock.release();
+    }
   }
 }
 

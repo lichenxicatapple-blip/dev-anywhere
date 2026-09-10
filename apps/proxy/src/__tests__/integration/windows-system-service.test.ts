@@ -162,9 +162,16 @@ ${windowsServiceRegistration(label, wrapper.path)}`);
       const ownerSid = owner.sid;
       owner.sid = "S-1-5-18";
       await expect(manager.activate()).rejects.toThrow(
-        "Existing service belongs to another account",
+        /Existing service belongs to another[\s\S]*account/,
       );
       owner.sid = ownerSid;
+      powershell(`$service = Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)};
+$result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ StartPassword = ${psString(`${password}-incorrect`)} };
+if ($result.ReturnValue -ne 0) { throw 'Could not set the disposable wrong password'; }`);
+      await expect(manager.activate()).rejects.toThrow(/1069[\s\S]*services\.msc/);
+      powershell(`$service = Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)};
+$result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ StartPassword = ${psString(password)} };
+if ($result.ReturnValue -ne 0) { throw 'Could not restore the disposable password'; }`);
       await manager.activate();
       const deadline = Date.now() + 20_000;
       while (!existsSync(ready) && Date.now() < deadline) await sleep(100);

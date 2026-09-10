@@ -152,6 +152,8 @@ jobs:
             'src/__tests__/unit/process-termination.test.ts',
             'src/__tests__/unit/service-autostart.test.ts',
             'src/__tests__/unit/system-service-autostart.test.ts',
+            'src/__tests__/unit/auto-update.test.ts',
+            'src/__tests__/unit/npm-install-backup.test.ts',
             'src/__tests__/unit/service-host-control.test.ts',
             'src/__tests__/unit/windows-autostart-launcher.test.ts',
             'src/__tests__/unit/profile-paths.test.ts',
