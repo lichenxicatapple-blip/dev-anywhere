@@ -209,7 +209,15 @@ async function pack(kind: "proxy" | "relay", version: string) {
   delete manifest.scripts.prepack;
   delete manifest.scripts.prepublishOnly;
   await writeFile(join(directory, "package.json"), JSON.stringify(manifest));
-  const output = JSON.parse(await command(npm, ["pack", "--ignore-scripts", "--json"], directory));
+  // npm pack seeds its content-addressed cache. Keep that cache away from the updater so
+  // the failure exercise must actually download the tarball through the loopback registry.
+  const output = JSON.parse(
+    await command(
+      npm,
+      ["pack", "--ignore-scripts", "--json", "--cache", join(root, "pack-cache")],
+      directory,
+    ),
+  );
   const tar = await readFile(join(directory, output[0].filename));
   artifacts.set(`${kind}-${version}`, {
     manifest,
