@@ -83,7 +83,7 @@ try {
     configPath,
     JSON.stringify({
       autoUpdate: false,
-      profiles: {},
+      profiles: { [profile]: { relay: "diagnostic" } },
       relays: { diagnostic: { url: "ws://127.0.0.1:49387" } },
     }),
   );
@@ -127,6 +127,22 @@ try {
     log("RENAME_RUNNING_PACKAGE", "succeeded");
   } catch (error) {
     log("RENAME_RUNNING_PACKAGE", { code: error.code, message: error.message });
+  }
+  const loaded = JSON.parse(nativeModules(servicePid));
+  for (const module of Array.isArray(loaded) ? loaded : [loaded]) {
+    if (!module?.FileName || !existsSync(module.FileName)) continue;
+    const moved = join(root, "retired-" + module.ModuleName);
+    try {
+      renameSync(module.FileName, moved);
+      renameSync(moved, module.FileName);
+      log("RENAME_LOADED_FILE", { name: module.ModuleName, result: "succeeded" });
+    } catch (error) {
+      log("RENAME_LOADED_FILE", {
+        name: module.ModuleName,
+        code: error.code,
+        message: error.message,
+      });
+    }
   }
   log("SERVICE_STOP", cli(recoveryRoot, ["stop"]));
   await delay(6000);
