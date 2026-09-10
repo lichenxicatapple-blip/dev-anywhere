@@ -6,19 +6,25 @@ import {
   SERVICE_OPERATION_LOCK_PATH,
   STOPPED_PATH,
   ensureProfileWorkspace,
+  SERVICE_HOST_PATH,
+  SYSTEM_AUTOSTART_PATH,
 } from "./paths.js";
+import { existsSync } from "node:fs";
 import { spawnScript } from "./env.js";
 import { daemonRelayArgs } from "./daemon-env.js";
 import { createServiceLifecycle } from "./service-lifecycle.js";
+import { withSystemServiceHost } from "./system-service-lifecycle.js";
 
 export function createProfileServiceLifecycle(
   options: {
     relayName?: string;
     env?: NodeJS.ProcessEnv;
+    /** Only the system host's command subprocess bypasses IPC delegation. */
+    hostCommand?: boolean;
   } = {},
 ) {
   ensureProfileWorkspace();
-  return createServiceLifecycle({
+  const local = createServiceLifecycle({
     profile: PROFILE_NAME,
     socketPath: SOCK_PATH,
     controlPath: SERVICE_CONTROL_PATH,
@@ -32,4 +38,12 @@ export function createProfileServiceLifecycle(
         unref: false,
       }),
   });
+  return options.hostCommand
+    ? local
+    : withSystemServiceHost(local, {
+        endpoint: SERVICE_HOST_PATH,
+        profile: PROFILE_NAME,
+        relay: options.relayName,
+        registered: () => existsSync(SYSTEM_AUTOSTART_PATH),
+      });
 }

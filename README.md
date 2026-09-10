@@ -159,6 +159,8 @@ dev-anywhere serve autostart status
 
 使用 `dev-anywhere serve autostart disable` 取消。开启或取消只影响之后的登录，不会启动、重启或停止当前 Proxy。支持 macOS、提供 systemd 用户服务的 Linux，以及 Windows 当前用户。
 
+需要开机后无需桌面登录即可运行时，使用 `dev-anywhere serve autostart enable --system --now`。支持 macOS、systemd Linux 和 Windows；安装时请求管理员权限，运行时使用原用户账户。`--now` 会重启 Proxy 并立即切换，新建会话可在退出桌面后继续使用。配置、验证和切回步骤见[系统服务指南](./docs/SYSTEM-SERVICE.md)。
+
 ### 3. 启动或接管会话
 
 连接建立后，可以在浏览器中接管开发机终端里启动的 coding agent 会话，或直接启动新会话。

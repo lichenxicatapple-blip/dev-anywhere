@@ -26,6 +26,9 @@ interface ProxyProfilePaths {
   serviceControlPath: string;
   serviceRuntimeLockPath: string;
   serviceOperationLockPath: string;
+  serviceHostPath: string;
+  serviceHostLockPath: string;
+  systemAutostartPath: string;
   stoppedPath: string;
   desiredRelayPath: string;
   stateDir: string;
@@ -136,6 +139,9 @@ export function buildProxyProfilePaths(
     serviceControlPath: localIpcEndpointPath(`${runDir}/service-control.sock`, platform),
     serviceRuntimeLockPath: `${runDir}/service-runtime.lock`,
     serviceOperationLockPath: `${runDir}/service-operation.lock`,
+    serviceHostPath: localIpcEndpointPath(`${runDir}/service-host.sock`, platform),
+    serviceHostLockPath: `${runDir}/service-host.lock`,
+    systemAutostartPath: `${profileDir}/system-autostart`,
     stoppedPath: `${runDir}/stopped`,
     desiredRelayPath: `${runDir}/desired-relay`,
     stateDir,
@@ -184,6 +190,9 @@ export const PID_PATH = PROFILE_PATHS.pidPath;
 export const SERVICE_CONTROL_PATH = PROFILE_PATHS.serviceControlPath;
 export const SERVICE_RUNTIME_LOCK_PATH = PROFILE_PATHS.serviceRuntimeLockPath;
 export const SERVICE_OPERATION_LOCK_PATH = PROFILE_PATHS.serviceOperationLockPath;
+export const SERVICE_HOST_PATH = PROFILE_PATHS.serviceHostPath;
+export const SERVICE_HOST_LOCK_PATH = PROFILE_PATHS.serviceHostLockPath;
+export const SYSTEM_AUTOSTART_PATH = PROFILE_PATHS.systemAutostartPath;
 // 停机标记文件。用户执行 `dev-anywhere stop` 时创建，其它时候不存在。文件内容无意义。
 // 作用：terminal 重连逻辑检查此标记，存在则仅 tryConnect 不主动 spawn daemon，
 // 防止 stop 结束 daemon 后 terminal 立即将其重新拉起。

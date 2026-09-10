@@ -7,6 +7,7 @@ import {
   PROFILE_NAME,
   isInitialized,
   initWorkspace,
+  SERVICE_HOST_PATH,
 } from "./common/paths.js";
 import { prepareDaemonSpawnEnvironment } from "./common/daemon-spawn-env.js";
 import { setDesiredDaemonRelay } from "./common/daemon-env.js";
@@ -18,10 +19,13 @@ import { PROXY_VERSION } from "./version.js";
 import { createProfileServiceLifecycle } from "./common/profile-service.js";
 import { ServiceLifecycleError } from "./common/service-lifecycle.js";
 import type { ServiceCommandResult } from "./common/service-command-result.js";
+import { requestServiceHost } from "./common/service-host-control.js";
 
 async function showStatus(): Promise<number> {
   const lines: string[] = [`Profile: ${PROFILE_NAME}`];
   try {
+    const host = await requestServiceHost(SERVICE_HOST_PATH, PROFILE_NAME, { action: "probe" });
+    if (host?.status === "host") lines.push(`Manager: system service (PID ${host.pid})`);
     const service = await createProfileServiceLifecycle().status();
     if (!service) {
       lines.push("Service: not running");
@@ -59,15 +63,25 @@ async function showStatus(): Promise<number> {
 
 async function runServiceCommand(
   action: "start" | "stop" | "restart",
-  options: { relay?: string; json?: boolean; recoverFrom?: string; ifRunning?: boolean },
+  options: {
+    relay?: string;
+    json?: boolean;
+    recoverFrom?: string;
+    ifRunning?: boolean;
+    recover?: boolean;
+    hostCommand?: boolean;
+  },
 ): Promise<void> {
   let result: ServiceCommandResult;
   try {
-    if (action !== "stop") setDesiredDaemonRelay(options.relay);
+    // The public command chooses a relay. Host commands also serve automatic starts,
+    // which must preserve that choice when no new relay was requested.
+    if (action !== "stop" && !options.hostCommand) setDesiredDaemonRelay(options.relay);
     const environment = action === "stop" ? undefined : await prepareDaemonSpawnEnvironment();
     const lifecycle = createProfileServiceLifecycle({
       relayName: options.relay,
       env: environment?.env,
+      hostCommand: options.hostCommand,
     });
     if (action === "stop") {
       await lifecycle.stop();
@@ -82,8 +96,8 @@ async function runServiceCommand(
           : [];
       const { service } =
         action === "restart"
-          ? await lifecycle.restart(options.ifRunning ? "recover" : "explicit")
-          : await lifecycle.start("explicit", options.recoverFrom);
+          ? await lifecycle.restart(options.ifRunning || options.recover ? "recover" : "explicit")
+          : await lifecycle.start(options.recover ? "recover" : "explicit", options.recoverFrom);
       const missingSessionIds = await waitForSessionHandover({
         expectedSessionIds,
         loadActiveSessionIds: async () =>
@@ -231,27 +245,44 @@ serve
 
 program.addCommand(serve);
 
-const autostart = serve.command("autostart").description("Start Proxy automatically at user login");
+const autostart = serve
+  .command("autostart")
+  .description("Start Proxy automatically at login or system boot");
 for (const [action, description] of [
-  ["enable", "Enable automatic startup at login"],
+  ["enable", "Enable automatic startup (at login by default)"],
   ["disable", "Disable automatic startup without stopping Proxy"],
   ["status", "Show automatic startup status"],
 ] as const) {
   autostart
     .command(action)
     .description(description)
-    .action(async () => {
+    .option("--system", "Use a system service that runs without desktop login")
+    .option("--now", "Start the system service now and restart Proxy (enable --system only)")
+    .action(async (options) => {
       const { runAutostartCommand } = await import("./autostart.js");
-      await runAutostartCommand(action);
+      await runAutostartCommand(action, options);
     });
 }
 autostart
   .command("run", { hidden: true })
   .option("--daemon", "Detach after service readiness (systemd login trigger)")
+  .option("--system", "Run the persistent system service host")
   .action(async (_options, command: Command) => {
     const { startAutostartService } = await import("./autostart.js");
-    await startAutostartService(Boolean(command.optsWithGlobals().daemon));
+    const options = command.optsWithGlobals();
+    await startAutostartService(Boolean(options.daemon), Boolean(options.system));
   });
+
+const hostExec = autostart.command("exec", { hidden: true });
+for (const action of ["start", "stop", "restart"] as const) {
+  hostExec
+    .command(action)
+    .option("--json")
+    .option("--relay <name>")
+    .option("--recover")
+    .option("--recover-from <token>")
+    .action(async (options) => runServiceCommand(action, { ...options, hostCommand: true }));
+}
 
 const relay = new Command("relay").description("Inspect and manage relay configuration");
 

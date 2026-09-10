@@ -34,6 +34,7 @@ import {
 } from "#src/common/managed-session-process.js";
 import { buildProxyProfilePaths } from "#src/common/paths.js";
 import { requestServiceControl, type ServiceStatus } from "#src/common/service-control.js";
+import { requestServiceHost } from "#src/common/service-host-control.js";
 
 const PROCESS_TIMEOUT_MS = 45_000;
 const OUTPUT_LIMIT_BYTES = 128 * 1024;
@@ -112,11 +113,11 @@ async function createFixture(profile = "default", sharedRoot?: string): Promise<
   return fixture;
 }
 
-function startNode(args: string[], env: NodeJS.ProcessEnv): ChildProcess {
+function startNode(args: string[], env: NodeJS.ProcessEnv, keepStdin = false): ChildProcess {
   const child = spawn(process.execPath, ["--import", "tsx", ...args], {
     cwd: REPO_ROOT,
     env,
-    stdio: ["ignore", "pipe", "pipe"],
+    stdio: [keepStdin ? "pipe" : "ignore", "pipe", "pipe"],
     windowsHide: true,
   });
   commandChildren.set(child, new Promise<void>((resolve) => child.once("close", () => resolve())));
@@ -308,6 +309,76 @@ afterEach(async () => {
 });
 
 describe.sequential("daemon CLI lifecycle process boundary", () => {
+  it("keeps starts, restarts and updater recovery in the system host's environment", async () => {
+    const fixture = await createFixture();
+    const config = JSON.parse(readFileSync(fixture.paths.configPath, "utf8"));
+    config.relays.selected = { url: "ws://127.0.0.1:22105" };
+    writeFileSync(fixture.paths.configPath, JSON.stringify(config));
+    mkdirSync(fixture.paths.runDir, { recursive: true });
+    writeFileSync(fixture.paths.desiredRelayPath, "selected\n");
+    writeFileSync(fixture.paths.systemAutostartPath, "fixture-system-service");
+    const hostRelay = "ws://127.0.0.1:22103";
+    const desktopRelay = "ws://127.0.0.1:22104";
+    const host = startNode(
+      [CLI_PATH, "--profile", fixture.profile, "serve", "autostart", "run", "--system"],
+      { ...fixture.env, RELAY_URL: hostRelay },
+      true,
+    );
+    const hostResult = collectProcess(host);
+    const first = await waitForReady(fixture);
+    expect(first.pid).not.toBe(host.pid);
+    expect(first.info?.config.relayUrl).toBe(hostRelay);
+    expect(first.info?.config.relayName).toBe("selected");
+    expectSuccess(await runAutoStart(fixture));
+    expect(readFileSync(fixture.paths.desiredRelayPath, "utf8").trim()).toBe("selected");
+    const starts = await Promise.all([
+      runCli(fixture, ["serve", "start"], { RELAY_URL: desktopRelay }),
+      runAutoStart(fixture),
+    ]);
+    starts.forEach(expectSuccess);
+    expect((await readyService(fixture)).instanceId).toBe(first.instanceId);
+    expect((await runCli(fixture, ["serve", "status"])).stdout).toContain(
+      "Manager: system service",
+    );
+
+    expectSuccess(
+      await runCli(fixture, ["serve", "restart", "--relay", "selected", "--if-running", "--json"], {
+        RELAY_URL: desktopRelay,
+      }),
+    );
+    const replacement = await readyService(fixture);
+    expect(replacement.instanceId).not.toBe(first.instanceId);
+    expect(replacement.info?.config.relayUrl).toBe(hostRelay);
+    expect(replacement.info?.config.relayName).toBe("selected");
+    expect(await waitForProcessToExit(first.pid)).toBe(true);
+    expectSuccess(await runCli(fixture, ["serve", "stop"]));
+    expect(await observeService(fixture)).toBeNull();
+    expect(
+      await requestServiceHost(fixture.paths.serviceHostPath, fixture.profile, { action: "probe" }),
+    ).toEqual({ status: "host", pid: host.pid });
+
+    const recovery = await runCli(fixture, ["serve", "restart", "--if-running", "--json"]);
+    expect(JSON.parse(recovery.stdout)).toMatchObject({ status: "failed", code: "STOPPED" });
+    expect(await observeService(fixture)).toBeNull();
+    expectSuccess(await runCli(fixture, ["serve", "start"], { RELAY_URL: desktopRelay }));
+    expect((await readyService(fixture)).info?.config.relayUrl).toBe(hostRelay);
+    if (process.platform === "win32") host.stdin!.end("stop\n");
+    else host.kill("SIGTERM");
+    expectSuccess(await hostResult);
+    expect(await observeService(fixture)).toBeNull();
+    expect(runtimeIsFree(fixture)).toBe(true);
+  }, 40_000);
+
+  it("does not fall back to a desktop process while configured system startup is pending", async () => {
+    const fixture = await createFixture();
+    writeFileSync(fixture.paths.systemAutostartPath, "fixture-system-service");
+    const result = await runCli(fixture, ["serve", "start", "--json"]);
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout).message).toContain("system service is not running");
+    expect(await observeService(fixture)).toBeNull();
+    expectSuccess(await runCli(fixture, ["serve", "stop"]));
+  }, 15_000);
+
   it("starts normally when a stale PID file names an unrelated process", async () => {
     const fixture = await createFixture();
     const unrelated = startNode(["-e", "setInterval(() => {}, 1000)"], fixture.env);

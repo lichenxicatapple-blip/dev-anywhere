@@ -159,6 +159,8 @@ dev-anywhere serve autostart status
 
 Use `dev-anywhere serve autostart disable` to turn it off. Enabling or disabling autostart only affects future logins; it does not start, restart, or stop the current Proxy. This is available on macOS, Linux with systemd user services, and Windows for the current user.
 
+For startup before desktop login, use `dev-anywhere serve autostart enable --system --now` on macOS, systemd Linux, or Windows. Installation requires administrator authorization, and the service runs as your user account. `--now` restarts Proxy immediately; sessions created afterward can continue after desktop logout. See the [system service guide](./docs/SYSTEM-SERVICE.md) (Chinese) for setup, verification, and switching back.
+
 ### 3. Start or take over a session
 
 Once connected, use the browser to take over a coding agent session started in a terminal on the development machine or start a new session directly.

@@ -1,63 +1,22 @@
 import { execFile } from "node:child_process";
-import { createHash } from "node:crypto";
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join, win32 } from "node:path";
 import { promisify } from "node:util";
 import { buildWindowsAutostartLauncher } from "./windows-autostart-launcher.js";
-
-interface AutostartOptions {
-  platform: NodeJS.Platform;
-  home: string;
-  profile: string;
-  executable: string;
-  /** Absolute CLI entry and any runtime arguments (e.g. the source-mode TS loader). */
-  args: string[];
-  env: NodeJS.ProcessEnv;
-  uid?: number;
-  run?: (command: string, args: string[]) => Promise<string>;
-}
-
-function checkText(value: string): string {
-  if ([...value].some((char) => char.charCodeAt(0) <= 31 || char.charCodeAt(0) === 127)) {
-    throw new Error("Autostart paths and environment must not contain control characters");
-  }
-  return value;
-}
-
-function xml(value: string): string {
-  return checkText(value).replace(
-    /[&<>"']/g,
-    (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&apos;" })[char]!,
-  );
-}
-
-function unitString(value: string): string {
-  return `"${checkText(value).replaceAll("\\", "\\\\").replaceAll('"', '\\"').replaceAll("%", "%%")}"`;
-}
-
-function psString(value: string): string {
-  return `'${checkText(value).replaceAll("'", "''")}'`;
-}
+import {
+  autostartLabel,
+  checkAutostartText as checkText,
+  xmlString as xml,
+  unitValue,
+  unitString,
+  psString,
+  readIfPresent,
+  removeIfPresent,
+  type AutostartOptions,
+} from "./autostart-definition.js";
 
 function encodePowerShell(script: string): string {
   return Buffer.from(script, "utf16le").toString("base64");
-}
-
-async function readIfPresent(path: string): Promise<string | null> {
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
-    throw error;
-  }
-}
-
-async function removeIfPresent(path: string): Promise<void> {
-  try {
-    await unlink(path);
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-  }
 }
 
 const execFileAsync = promisify(execFile);
@@ -68,8 +27,7 @@ export function createServiceAutostart(options: AutostartOptions) {
   if (!["darwin", "linux", "win32"].includes(platform)) {
     throw new Error(`Proxy autostart is not supported on ${platform}`);
   }
-  const identity = createHash("sha256").update(`${home}\0${profile}`).digest("hex").slice(0, 20);
-  const label = `dev-anywhere-${identity}`;
+  const label = autostartLabel(home, profile);
   const args = [...options.args, "--profile", profile, "serve", "autostart", "run"];
   const run =
     options.run ??
@@ -137,7 +95,7 @@ Description=DEV Anywhere Proxy (${checkText(profile)})
 Type=oneshot
 RemainAfterExit=yes
 Restart=no
-WorkingDirectory=${unitString(home)}
+WorkingDirectory=${unitValue(home)}
 ${Object.entries(environment)
   .map(([key, value]) => `Environment=${unitString(`${key}=${value}`)}`)
   .join("\n")}

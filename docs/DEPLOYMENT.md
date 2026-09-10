@@ -176,7 +176,19 @@ dev-anywhere serve autostart status
 dev-anywhere serve autostart disable
 ```
 
-这些设置只影响之后的登录，不会启动、重启或停止当前 Proxy。macOS 使用当前用户的 LaunchAgent，Linux 需要 systemd 用户服务，Windows 使用当前用户的登录任务。使用其他 profile 时，将 `--profile 名称` 放在 `serve` 前。
+这些设置只影响之后的登录，不会启动、重启或停止当前 Proxy。支持 macOS、提供 systemd 用户服务的 Linux，以及 Windows。使用其他 profile 时，将 `--profile 名称` 放在 `serve` 前。
+
+### 可选：无需桌面登录的系统服务
+
+macOS、systemd Linux 和 Windows 开发机可使用系统服务，在开机后、尚未登录桌面时连接 Relay：
+
+```bash
+dev-anywhere serve autostart enable --system --now
+dev-anywhere serve autostart status --system
+dev-anywhere serve status
+```
+
+安装时请求管理员权限，服务使用你的用户账户运行。`--now` 会重启 Proxy 并立即生效；省略时只设置下一次开机启动。Windows 首次安装还需要账户密码。退出桌面后需要继续使用的会话，请在启用服务后新建。配置、验证和取消方式见[系统服务指南](./SYSTEM-SERVICE.md)。
 
 ## 连接浏览器
 

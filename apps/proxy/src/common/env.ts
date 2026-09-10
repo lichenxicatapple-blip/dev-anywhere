@@ -62,7 +62,9 @@ export function spawnScript(
   const scriptBaseUrl = typeof script === "string" ? resolveTopLevelScript(script) : script;
   const basePath = fileURLToPath(scriptBaseUrl);
   const scriptPath = `${basePath}${IS_DEV ? ".ts" : ".js"}`;
-  const runtimeArgs = IS_DEV ? ["--import", "tsx", scriptPath, ...args] : [scriptPath, ...args];
+  const runtimeArgs = IS_DEV
+    ? ["--import", import.meta.resolve("tsx"), scriptPath, ...args]
+    : [scriptPath, ...args];
   const child = spawn(process.execPath, runtimeArgs, {
     detached: true,
     ...(process.platform === "win32" ? { windowsHide: true } : {}),

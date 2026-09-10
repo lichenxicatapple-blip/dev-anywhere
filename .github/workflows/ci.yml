@@ -75,6 +75,30 @@ jobs:
             artifacts/test-layout
             artifacts/test-pc
 
+  system-services:
+    name: Native system service (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22.22.2"
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @dev-anywhere/shared build
+      - name: Test a disposable system service under the runner account
+        env:
+          DEV_ANYWHERE_TEST_SYSTEM_SERVICE: "1"
+        run: pnpm --filter @dev-anywhere/proxy test src/__tests__/integration/system-service-registration.test.ts --maxWorkers=1
+
   windows-proxy:
     name: Native Windows Proxy
     runs-on: windows-latest
@@ -123,6 +147,8 @@ jobs:
             'src/__tests__/unit/android-emulator-adapter.test.ts',
             'src/__tests__/unit/process-termination.test.ts',
             'src/__tests__/unit/service-autostart.test.ts',
+            'src/__tests__/unit/system-service-autostart.test.ts',
+            'src/__tests__/unit/service-host-control.test.ts',
             'src/__tests__/unit/windows-autostart-launcher.test.ts',
             'src/__tests__/unit/profile-paths.test.ts',
             'src/__tests__/unit/local-ipc-endpoint.test.ts',
@@ -139,7 +165,12 @@ jobs:
             'src/__tests__/integration/file-lock-process.test.ts',
             'src/__tests__/integration/daemon-cli-lifecycle-process.test.ts',
             'src/__tests__/integration/windows-process.test.ts',
-            'src/__tests__/integration/windows-autostart-launcher.test.ts'
+            'src/__tests__/integration/windows-autostart-launcher.test.ts',
+            'src/__tests__/integration/windows-system-service.test.ts'
           )
           # Native process suites share the runner's PowerShell/CIM capacity.
           pnpm --filter @dev-anywhere/proxy exec vitest run @tests --maxWorkers=1 --testTimeout=60000 --hookTimeout=30000
+      - name: Test a disposable SCM service under an ordinary user without desktop login
+        env:
+          DEV_ANYWHERE_TEST_SYSTEM_SERVICE: "1"
+        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/windows-system-service.test.ts --maxWorkers=1 --hookTimeout=30000
