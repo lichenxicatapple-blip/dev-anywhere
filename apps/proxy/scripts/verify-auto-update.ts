@@ -2,9 +2,8 @@ import assert from "node:assert/strict";
 import { spawn, type ChildProcess } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { createServer } from "node:http";
-import { createRequire } from "node:module";
 import { cp, mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -71,32 +70,36 @@ const log = (event: string, details: unknown = {}) =>
 const registry = createServer((req, res) => {
   const url = new URL(req.url!, "http://localhost");
   const name = decodeURIComponent(url.pathname);
-  if (name === "/@dev-anywhere/proxy") {
+  const packageMatch = /^\/@dev-anywhere\/(proxy|relay)$/.exec(name);
+  if (packageMatch) {
+    const kind = packageMatch[1]!;
     res.setHeader("Content-Type", "application/json");
     res.setHeader("Cache-Control", "no-store");
     res.end(
       JSON.stringify({
-        name: "@dev-anywhere/proxy",
+        name: `@dev-anywhere/${kind}`,
         "dist-tags": { latest: "0.0.3" },
         versions: Object.fromEntries(
-          [...artifacts].map(([version, item]) => [
-            version,
-            {
-              ...item.manifest,
-              dist: { tarball: `${registryUrl}/proxy-${version}.tgz`, integrity: item.integrity },
-            },
-          ]),
+          [...artifacts]
+            .filter(([key]) => key.startsWith(`${kind}-`))
+            .map(([key, item]) => [
+              item.manifest.version,
+              {
+                ...item.manifest,
+                dist: { tarball: `${registryUrl}/${key}.tgz`, integrity: item.integrity },
+              },
+            ]),
         ),
       }),
     );
-  } else if (/^\/proxy-[\d.]+\.tgz$/.test(name)) {
-    const version = name.slice("/proxy-".length, -".tgz".length);
-    const artifact = artifacts.get(version);
+  } else if (/^\/(proxy|relay)-[\d.]+\.tgz$/.test(name)) {
+    const key = name.slice(1, -".tgz".length);
+    const artifact = artifacts.get(key);
     if (!artifact) {
       res.writeHead(404).end();
       return;
     }
-    if (blockTarball && version === "0.0.3") {
+    if (blockTarball && key === "proxy-0.0.3") {
       blockedRequests++;
       log("tarball_download_stalled", { request: blockedRequests });
       // Send a partial body and leave it open. npm must enforce its actual fetch timeout.
@@ -184,28 +187,31 @@ async function logs(prefix: string) {
 async function status() {
   return requestServiceControl(paths.serviceControlPath, "status", 2000).catch(() => null);
 }
-async function pack(version: string) {
-  const directory = join(root, `package-${version}`);
-  const manifest = JSON.parse(await readFile(join(source, "package.json"), "utf8"));
+async function pack(kind: "proxy" | "relay", version: string) {
+  const packageSource = kind === "proxy" ? source : resolve(source, "../relay");
+  const directory = join(root, `${kind}-${version}`);
+  const manifest = JSON.parse(await readFile(join(packageSource, "package.json"), "utf8"));
   await mkdir(directory, { recursive: true });
   for (const name of manifest.files)
-    await cp(join(source, name), join(directory, name), { recursive: true });
+    await cp(join(packageSource, name), join(directory, name), { recursive: true });
   manifest.version = version;
-  manifest.dependencies["@dev-anywhere/relay"] = JSON.parse(
-    await readFile(join(source, "../relay/package.json"), "utf8"),
-  ).version;
+  if (kind === "proxy") manifest.dependencies["@dev-anywhere/relay"] = version;
   delete manifest.devDependencies;
   delete manifest.scripts.prepack;
   delete manifest.scripts.prepublishOnly;
   await writeFile(join(directory, "package.json"), JSON.stringify(manifest));
   const output = JSON.parse(await command(npm, ["pack", "--ignore-scripts", "--json"], directory));
   const tar = await readFile(join(directory, output[0].filename));
-  artifacts.set(version, {
+  artifacts.set(`${kind}-${version}`, {
     manifest,
     tar,
     integrity: `sha512-${createHash("sha512").update(tar).digest("base64")}`,
   });
-  log("candidate_packed", { version, sha256: createHash("sha256").update(tar).digest("hex") });
+  log("candidate_packed", {
+    kind,
+    version,
+    sha256: createHash("sha256").update(tar).digest("hex"),
+  });
 }
 async function stopRelay() {
   client?.terminate();
@@ -271,7 +277,8 @@ async function connectBrowser() {
   client.on("message", (data, binary) => {
     if (binary) {
       const frame = decodeBinaryFrame(Buffer.from(data as Buffer));
-      if (frame?.sessionId === sessionId) shellOutput += Buffer.from(frame.data).toString("utf8");
+      if (frame && frame.sessionId === sessionId)
+        shellOutput += Buffer.from(frame.data).toString("utf8");
     } else messages.push(JSON.parse(data.toString()));
   });
   await waitFor("browser connection", () => client?.readyState === WebSocket.OPEN);
@@ -313,7 +320,10 @@ async function checkShell(label: string) {
 }
 try {
   log("acceptance_started", { node: process.version, root });
-  for (const version of ["0.0.1", "0.0.2", "0.0.3"]) await pack(version);
+  for (const version of ["0.0.1", "0.0.2", "0.0.3"]) {
+    await pack("relay", version);
+    await pack("proxy", version);
+  }
   // Install the baseline once. From this point target versions are installed only by Proxy.
   log("baseline_install", {
     output: await command(npm, [
@@ -324,11 +334,9 @@ try {
       "--no-fund",
     ]),
   });
-  const baselineRequire = createRequire(join(packageRoot, "package.json"));
-  const installedRelay = dirname(dirname(baselineRequire.resolve("@dev-anywhere/relay/server")));
   const relayCopy = join(root, "relay-runtime");
   await cp(packageRoot, relayCopy, { recursive: true, verbatimSymlinks: true });
-  relayRoot = installedRelay.replace(packageRoot, relayCopy);
+  relayRoot = join(relayCopy, "node_modules", "@dev-anywhere", "relay");
   const portServer = createServer();
   await new Promise<void>((done) => portServer.listen(0, "127.0.0.1", done));
   const address = portServer.address();
@@ -379,6 +387,7 @@ try {
       ? await requestServiceHost(paths.serviceHostPath, profile, { action: "probe" })
       : undefined;
   if (mode === "system") assert.equal(host?.status, "host");
+  if (host?.status === "host") log("system_service_identity", service!.verifyHost(host.pid));
   log("baseline_connected", { daemonPid: baseline.pid, host, service: service?.label });
   await connectBrowser();
   send({
@@ -408,6 +417,20 @@ try {
   await connectBrowser();
   await checkShell("after-first-upgrade");
   log("automatic_upgrade_passed", { from: "0.0.1", to: "0.0.2", daemonPid: updated.pid });
+  const retired = (await readdir(dirname(packageRoot))).filter((name) =>
+    name.startsWith(".proxy-"),
+  );
+  log("npm_retired_directories", {
+    directories: retired.map((name) => ({
+      name,
+      manifestPresent: existsSync(join(dirname(packageRoot), name, "package.json")),
+    })),
+  });
+  if (process.platform === "win32")
+    assert(
+      retired.length > 0,
+      "Expected npm to retain binaries used by the original Windows terminal",
+    );
   blockTarball = true;
   await startRelay("0.0.3");
   const retry = await waitFor(

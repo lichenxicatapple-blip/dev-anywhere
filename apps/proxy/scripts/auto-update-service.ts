@@ -1,5 +1,7 @@
 import { execFileSync } from "node:child_process";
+import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
+import { readFileSync } from "node:fs";
 import { userInfo } from "node:os";
 import { createSystemServiceAutostart } from "../src/common/system-service-autostart.js";
 import { psString } from "../src/common/autostart-definition.js";
@@ -96,7 +98,43 @@ Remove-LocalUser -Name ${psString(name)} -ErrorAction SilentlyContinue;
   try {
     await manager.enable();
     await manager.activate();
-    return { label: manager.label, dispose };
+    return {
+      label: manager.label,
+      dispose,
+      verifyHost(pid: number) {
+        if (process.platform === "win32") {
+          const identity = JSON.parse(
+            powershell(`
+$service = Get-CimInstance Win32_Service -Filter ${psString(`Name='${manager.label}'`)};
+$hostProcess = Get-CimInstance Win32_Process -Filter ${psString(`ProcessId=${pid}`)};
+@{ state=$service.State; account=$service.StartName; wrapperPid=$service.ProcessId; hostParent=$hostProcess.ParentProcessId } | ConvertTo-Json -Compress;
+`),
+          );
+          assert.equal(identity.state, "Running");
+          assert.equal(identity.account, `.\\${name}`);
+          assert.equal(identity.hostParent, identity.wrapperPid);
+          return identity;
+        }
+        if (process.platform === "linux") {
+          assert(
+            readFileSync(`/proc/${pid}/cgroup`, "utf8").includes(
+              `system.slice/${manager.label}.service`,
+            ),
+          );
+        } else {
+          assert(
+            execFileSync("/bin/launchctl", ["print", `system/${manager.label}`], {
+              encoding: "utf8",
+            }).includes(`pid = ${pid}`),
+          );
+        }
+        return {
+          account: userInfo().username,
+          manager: process.platform === "linux" ? "systemd" : "launchd",
+          pid,
+        };
+      },
+    };
   } catch (error) {
     await dispose().catch((cleanupError) => console.error("Service cleanup:", cleanupError));
     throw error;

@@ -1,4 +1,5 @@
 import { cp, lstat, mkdtemp, readFile, readdir, rename, rm, unlink } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { basename, dirname, join } from "node:path";
 
 export interface NpmInstallBackup {
@@ -11,6 +12,8 @@ export async function createNpmInstallBackup(options: {
   packageRoot: string;
   packageName: string;
   binPaths: string[];
+  /** Preserve npm's path spelling for its deterministic retirement hash (not a realpath). */
+  npmPackageRoot?: string;
 }): Promise<NpmInstallBackup> {
   const { packageRoot, packageName, binPaths } = options;
   const directory = await mkdtemp(join(dirname(packageRoot), ".dev-anywhere-update-"));
@@ -40,6 +43,13 @@ export async function createNpmInstallBackup(options: {
     // over those DLLs and fails with EBUSY. Quarantine the retired directory before npm runs,
     // including that partially cleaned state; loaded modules continue using their open files.
     const prefix = `.${basename(packageRoot)}-`;
+    const retiredName =
+      prefix +
+      createHash("sha1")
+        .update(options.npmPackageRoot ?? packageRoot)
+        .digest("base64")
+        .replace(/[^a-zA-Z0-9]+/g, "")
+        .slice(0, 8);
     for (const entry of await readdir(dirname(packageRoot), { withFileTypes: true })) {
       if (
         !entry.isDirectory() ||
@@ -54,7 +64,8 @@ export async function createNpmInstallBackup(options: {
         } | null;
         if (manifest?.name !== packageName) continue;
       } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT" || entry.name !== retiredName)
+          continue;
       }
       await rename(retired, join(directory, entry.name));
     }

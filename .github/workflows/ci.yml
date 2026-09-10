@@ -31,8 +31,7 @@ jobs:
           node-version: "22.22.2"
           cache: pnpm
       - run: pnpm install --frozen-lockfile
-      - run: pnpm --filter @dev-anywhere/shared build
-      - run: pnpm --filter @dev-anywhere/proxy build
+      - run: pnpm build
       - name: Verify consecutive upgrades, retained shells and the real 15-minute retry
         run: pnpm --filter @dev-anywhere/proxy exec tsx scripts/verify-auto-update.ts --${{ matrix.mode }}
       - uses: actions/upload-artifact@v4

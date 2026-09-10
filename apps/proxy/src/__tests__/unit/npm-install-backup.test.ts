@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdtemp,
   mkdir,
@@ -117,11 +118,16 @@ describe("npm installation recovery", () => {
 
   it("quarantines npm's partially cleaned retired package after its manifest was deleted", async () => {
     const f = await fixture();
-    const retired = join(dirname(f.packageRoot), ".proxy-6BH2bq16");
+    const hash = createHash("sha1")
+      .update(f.packageRoot)
+      .digest("base64")
+      .replace(/[^a-zA-Z0-9]+/g, "")
+      .slice(0, 8);
+    const retired = join(dirname(f.packageRoot), `.proxy-${hash}`);
     const nativeDirectory = join(retired, "node_modules", "fixture-dep");
     await mkdir(nativeDirectory, { recursive: true });
     await writeFile(join(nativeDirectory, "locked.node"), "loaded native module");
-    const unknown = join(dirname(f.packageRoot), ".proxy-personal-backup");
+    const unknown = join(dirname(f.packageRoot), ".proxy-personal");
     await mkdir(unknown);
 
     const backup = await createNpmInstallBackup(f);
