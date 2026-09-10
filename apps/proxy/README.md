@@ -48,6 +48,9 @@ dev-anywhere serve status     # show daemon status
 dev-anywhere serve autostart enable  # start automatically at user login
 dev-anywhere serve autostart disable # cancel automatic startup
 dev-anywhere serve autostart status  # show automatic startup setting
+dev-anywhere serve autostart enable --system --now # install and start before-login service; restart Proxy
+dev-anywhere serve autostart status --system       # show system startup and service state
+dev-anywhere serve autostart disable --system      # disable future boot startup; keep Proxy running
 dev-anywhere init             # create default config at ~/.dev-anywhere/config.json
 dev-anywhere tunnel           # temporary account-free Cloudflare Quick Tunnel
 dev-anywhere claude [...args] # start/attach a Claude Code terminal session
@@ -58,7 +61,11 @@ dev-anywhere --help
 
 The daemon connects to the relay server over WebSocket and manages local AI CLI sessions. A mobile/web client connected to the same relay can then see and drive those sessions.
 
-Autostart is optional and applies to the selected profile. Enabling or disabling it does not start, restart, or stop the current Proxy. It is available on macOS, Linux with systemd user services, and Windows for the current user.
+Login autostart is optional and applies to the selected profile. Enabling or disabling it does not start, restart, or stop the current Proxy. It is available on macOS, Linux with systemd user services, and Windows for the current user.
+
+Add `--system` to run at boot without desktop login on macOS, systemd Linux, or Windows. Installation requires administrator authorization, and the service runs as your user account. Add `--now` to start it immediately and restart Proxy; otherwise it takes effect at the next boot. Create new Shell or Agent sessions after enabling the service to keep using them after desktop logout.
+
+Windows also requires your account password on first installation. See the [system service guide](https://github.com/lichenxicatapple-blip/dev-anywhere/blob/main/docs/SYSTEM-SERVICE.md) for setup, verification, and switching back.
 
 Arguments after `claude`, `codex`, or `kimi` are passed through to the real CLI:
 
