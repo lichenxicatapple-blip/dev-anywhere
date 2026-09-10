@@ -158,7 +158,7 @@ jobs:
       - name: Test a disposable SCM service under an ordinary user without desktop login
         env:
           DEV_ANYWHERE_TEST_SYSTEM_SERVICE: "1"
-        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/windows-system-service.test.ts --maxWorkers=1 --hookTimeout=30000
+        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/windows-system-service.test.ts src/__tests__/integration/windows-pipe-permissions.test.ts --maxWorkers=1 --hookTimeout=30000
       - name: Test native processes, IPC, terminal handover and startup registration
         shell: pwsh
         run: |

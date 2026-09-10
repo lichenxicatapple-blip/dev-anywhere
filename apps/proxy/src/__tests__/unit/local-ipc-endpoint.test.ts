@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { chmodSync, existsSync, mkdirSync, unlinkSync } from "node:fs";
+import { setWindowsPipePermissions } from "#src/common/windows-pipe-permissions.js";
 import {
   isNamedPipeEndpoint,
   localIpcEndpointMayExist,
@@ -14,6 +15,9 @@ vi.mock("node:fs", () => ({
   mkdirSync: vi.fn(),
   unlinkSync: vi.fn(),
 }));
+vi.mock("#src/common/windows-pipe-permissions.js", () => ({
+  setWindowsPipePermissions: vi.fn(),
+}));
 
 afterEach(() => vi.clearAllMocks());
 
@@ -23,6 +27,7 @@ describe("local IPC filesystem boundary", () => {
       expect(isNamedPipeEndpoint(endpoint)).toBe(true);
       prepareLocalIpcEndpoint(endpoint);
       setLocalIpcEndpointPermissions(endpoint);
+      expect(setWindowsPipePermissions).toHaveBeenCalledWith(endpoint);
       removeLocalIpcEndpoint(endpoint);
       expect(localIpcEndpointMayExist(endpoint)).toBe(true);
     }
