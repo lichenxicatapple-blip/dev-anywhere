@@ -349,14 +349,9 @@ describe("CreateSessionDialog", () => {
     });
   });
 
-  it("sends selected provider/mode permission labels as permissionMode", async () => {
-    for (const [
-      providerLabel,
-      mode,
-      provider,
-      permissionLabel,
-      permissionMode,
-    ] of sessionCreatePermissionCases) {
+  it.each(sessionCreatePermissionCases)(
+    "sends %s %s provider %s permission %s as %s",
+    async (providerLabel, mode, provider, permissionLabel, permissionMode) => {
       const caseLabel = `${providerLabel} ${mode} ${permissionLabel}`;
       createSession.mockResolvedValueOnce({
         type: "session_create_response",
@@ -405,10 +400,8 @@ describe("CreateSessionDialog", () => {
           expect.any(Number),
         );
       });
-      cleanup();
-      createSession.mockReset();
-    }
-  });
+    },
+  );
 
   it("requires a second destructive action before creating a bypass session", async () => {
     useFileStore.setState({
