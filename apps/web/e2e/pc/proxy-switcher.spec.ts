@@ -228,6 +228,14 @@ test.describe("ProxySwitcher — page layout (mobile viewport)", () => {
 
     await expect(row).toHaveAttribute("data-revealed", "true");
     await expect(remove).not.toHaveAttribute("aria-hidden");
+    await expect
+      .poll(() =>
+        foreground.evaluate(
+          (node, closedRight) => closedRight - node.getBoundingClientRect().right,
+          closed.foregroundRight,
+        ),
+      )
+      .toBeCloseTo(80, 0);
     const revealed = await row.evaluate((node) => {
       const rowRect = node.getBoundingClientRect();
       const foregroundRect = node
