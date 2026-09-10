@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
@@ -15,8 +15,8 @@ import {
   WINDOWS_SERVICE_POWERSHELL_PREAMBLE,
 } from "#src/common/windows-service.js";
 
-function powershell(script: string): string {
-  return execFileSync(
+function powershell(script: string, includeDiagnostics = false): string {
+  const result = spawnSync(
     win32.join(
       process.env.SystemRoot ?? "C:\\Windows",
       "System32",
@@ -33,7 +33,13 @@ function powershell(script: string): string {
       ),
     ],
     { timeout: 45_000, windowsHide: true, encoding: "utf8" },
-  ).trim();
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0)
+    throw new Error(
+      `PowerShell failed (${result.status ?? result.signal}):\n${result.stderr}\n${result.stdout}`,
+    );
+  return (includeDiagnostics ? `${result.stdout}\n${result.stderr}` : result.stdout).trim();
 }
 
 describe.skipIf(process.platform !== "win32")("native Windows service wrapper", () => {
@@ -138,8 +144,8 @@ describe.skipIf(
     try {
       powershell(wrapper.compileScript);
       // Credentials exist only in this disposable test. Never prompt for or use a real account.
-      const registrationOutput =
-        powershell(`$password = ConvertTo-SecureString ${psString(password)} -AsPlainText -Force;
+      const registrationOutput = powershell(
+        `$password = ConvertTo-SecureString ${psString(password)} -AsPlainText -Force;
 New-LocalUser -Name ${psString(name)} -Password $password -AccountNeverExpires -PasswordNeverExpires | Out-Null;
 $ownerName = $env:COMPUTERNAME + '\\' + ${psString(name)};
 $ownerSid = (New-Object Security.Principal.NTAccount($ownerName)).Translate([Security.Principal.SecurityIdentifier]).Value;
@@ -160,10 +166,10 @@ function Get-Credential {
   return New-Object Management.Automation.PSCredential($ownerName, $password);
 }
 $service = $null;
-& {
 ${windowsServiceRegistration(label, wrapper.path)}
-} 3>&1;
-if ($script:credentialAttempts -ne 2) { throw 'The incorrect password was not rejected before registration'; }`);
+if ($script:credentialAttempts -ne 2) { throw 'The incorrect password was not rejected before registration'; }`,
+        true,
+      );
       expect(registrationOutput).toContain("Windows 未接受这个账户密码");
       expect(registrationOutput).toContain("Windows 服务账户验证通过");
       owner = JSON.parse(
