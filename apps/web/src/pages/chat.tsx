@@ -1,7 +1,7 @@
 // ChatPage: ChatHeader + StatusLine (4px 色带) + content(JSON/PTY) + JSON QuotePreviewBar/InputBar
 // statusState 按优先级聚合 connection/terminated/approval/working/idle，StatusLine 放 Header 正下方
 // PTY 模式由 xterm 自己承载逐键输入，不再保留下方聊天式命令输入框。
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { clearLastChatRoute, consumeRestoredTarget } from "@/lib/route-restore";
 import { toast } from "@/components/toast";
@@ -55,6 +55,7 @@ export function ChatPage() {
 
 function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   useChatCommandSession(id);
+  const [scrollbarWidth, setScrollbarWidth] = useState(0);
   const findRequestSequenceRef = useRef(0);
   const [findRequest, setFindRequest] = useState<{
     sessionId: string;
@@ -250,7 +251,13 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
       <FileDownloadProvider sessionId={id}>
         <div
           className="flex flex-col h-full transition-[padding-bottom] duration-200 ease-out motion-reduce:transition-none"
-          style={effectiveLayoutKbInset ? { paddingBottom: effectiveLayoutKbInset } : undefined}
+          style={
+            {
+              paddingBottom: effectiveLayoutKbInset || undefined,
+              "--dev-chat-scrollbar-compensation":
+                mode === "json" ? `${scrollbarWidth}px` : undefined,
+            } as CSSProperties
+          }
           data-keyboard-offset={effectiveKbOffset}
           data-keyboard-layout-inset={effectiveLayoutKbInset}
         >
@@ -293,7 +300,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                 fitRequest={fitRequest?.sessionId === id ? fitRequest.requestId : undefined}
               />
             ) : (
-              <ChatJsonView sessionId={id} findRequest={activeFindRequest} />
+              <ChatJsonView
+                sessionId={id}
+                findRequest={activeFindRequest}
+                onScrollbarWidthChange={setScrollbarWidth}
+              />
             )}
             {(presentation === "relay-disconnected" || presentation === "proxy-offline") && (
               // Overlay 不替代 chat 主体: PTY 视图 unmount 会销毁 xterm 实例, BackToBottom

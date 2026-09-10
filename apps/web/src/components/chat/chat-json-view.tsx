@@ -33,13 +33,18 @@ import {
 interface ChatJsonViewProps {
   sessionId: string;
   findRequest?: number;
+  onScrollbarWidthChange?: (width: number) => void;
 }
 
 const HISTORY_PAGE_SIZE = 50;
 const HISTORY_LOAD_TOP_THRESHOLD = 96;
 type SearchHistoryMessage = SessionHistoryMessage;
 
-export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
+export function ChatJsonView({
+  sessionId,
+  findRequest,
+  onScrollbarWidthChange,
+}: ChatJsonViewProps) {
   const messages = useChatStore((s) => s.bySessionId[sessionId]?.messages ?? EMPTY_SLICE.messages);
   const historyHasMore = useChatStore(
     (s) => s.bySessionId[sessionId]?.historyHasMore ?? EMPTY_SLICE.historyHasMore,
@@ -73,6 +78,15 @@ export function ChatJsonView({ sessionId, findRequest }: ChatJsonViewProps) {
   );
 
   const [scrollEl, setScrollEl] = useState<HTMLDivElement | null>(null);
+  useLayoutEffect(() => {
+    if (!scrollEl || !onScrollbarWidthChange) return;
+    // Overlay scrollbars reserve no space; classic scrollbar widths vary by platform.
+    const update = () => onScrollbarWidthChange(scrollEl.offsetWidth - scrollEl.clientWidth);
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(scrollEl);
+    return () => observer.disconnect();
+  }, [scrollEl, onScrollbarWidthChange]);
   const { isAtBottom, scrollToBottom, releaseFollowLock } = useFollowOutput(scrollEl);
   const [newMsgsWhileAway, setNewMsgsWhileAway] = useState(false);
   const [traceEnabled, setTraceEnabled] = useState(() => isJsonScrollTraceEnabled());
