@@ -5,6 +5,7 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  readdirSync,
   renameSync,
   rmSync,
   writeFileSync,
@@ -92,7 +93,21 @@ try {
   cpSync(packageRoot, recoveryRoot, { recursive: true, verbatimSymlinks: true });
   const started = cli(packageRoot, ["start", "--relay", "diagnostic", "--json"]);
   log("SERVICE_START", started);
-  if (started.code !== 0) throw new Error("Could not start the real baseline daemon");
+  if (started.code !== 0) {
+    const logs = join(homedir(), ".dev-anywhere", "profiles", profile, "logs");
+    if (existsSync(logs)) {
+      for (const name of readdirSync(logs).filter((name) => name.endsWith(".log"))) {
+        log("STARTUP_LOG " + name, readFileSync(join(logs, name), "utf8").slice(-16000));
+      }
+    }
+    log(
+      "FOREGROUND_START",
+      run([join(packageRoot, "dist", "serve.js"), "--profile", profile, "--relay", "diagnostic"], {
+        timeout: 15000,
+      }),
+    );
+    throw new Error("Could not start the real baseline daemon");
+  }
   servicePid = JSON.parse(started.stdout).pid;
   log("LOADED_NATIVE_MODULES", nativeModules(servicePid));
   const liveUpdate = install("0.9.9");
