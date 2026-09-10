@@ -131,8 +131,17 @@ Start-Service -Name ${psString(label)};`);
       const result = JSON.parse(await readFile(ready, "utf8"));
       expect(result).toMatchObject({ user: name, home, shellExit: 0 });
       expect(result.shellOutput.toLowerCase()).toContain(`\\${name}`);
+      const servicePid = Number(
+        powershell(
+          `(Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)}).ProcessId;`,
+        ),
+      );
+      expect(servicePid).toBeGreaterThan(0);
       powershell(
-        `Stop-Service -Name ${psString(label)}; (Get-Service -Name ${psString(label)}).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20));`,
+        `Stop-Service -Name ${psString(label)};
+(Get-Service -Name ${psString(label)}).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20));
+Wait-Process -Id ${servicePid},${result.pid} -Timeout 10 -ErrorAction SilentlyContinue;
+if (Get-Process -Id ${servicePid},${result.pid} -ErrorAction SilentlyContinue) { throw 'Service processes did not exit'; }`,
       );
       expect(await readFile(stopped, "utf8")).toBe("stopped");
     } catch (error) {
@@ -154,14 +163,15 @@ if ($service) {
 }
 $account = Get-LocalUser -Name ${psString(name)} -ErrorAction SilentlyContinue;
 if ($account) {
-  # SCM releases the account profile asynchronously after the service process exits.
-  for ($attempt = 0; $attempt -lt 30; $attempt++) {
-    try {
-      Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $account.SID.Value } | Remove-CimInstance;
-      break;
-    } catch { if ($attempt -eq 29) { throw; }; Start-Sleep -Milliseconds 500; }
+  try {
+    Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $account.SID.Value } | Remove-CimInstance;
+  } catch {
+    # Windows can retain the profile hive after both service processes have exited.
+    # The disposable runner reclaims it; service/account removal must still complete.
+    Write-Warning 'Windows retained the disposable account profile until runner shutdown';
+  } finally {
+    Remove-LocalUser -Name ${psString(name)};
   }
-  Remove-LocalUser -Name ${psString(name)};
 }
 exit 0;`);
       } catch (error) {
