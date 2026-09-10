@@ -10,6 +10,7 @@ import {
   statSync,
   writeFileSync,
 } from "node:fs";
+import { rm } from "node:fs/promises";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -302,9 +303,16 @@ afterEach(async () => {
   }
   await Promise.all(commandChildren.values());
   commandChildren.clear();
-  for (const fixture of fixtures) await cleanupFixture(fixture);
+  for (const fixture of fixtures) {
+    await cleanupFixture(fixture);
+    for (const pid of new Set(fixture.observedInstances.values())) {
+      if (!(await waitForProcessToExit(pid)))
+        throw new Error(`Fixture process is still running: ${pid}`);
+    }
+  }
   for (const root of new Set([...fixtures].map((fixture) => fixture.root)))
-    rmSync(root, { recursive: true, force: true });
+    // Windows may release process/antivirus directory handles shortly after process exit.
+    await rm(root, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   fixtures.clear();
 });
 

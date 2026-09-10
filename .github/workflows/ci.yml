@@ -125,6 +125,10 @@ jobs:
       - run: pnpm build
       - name: Test native development commands and Vite reconnect handling
         run: pnpm test:dev
+      - name: Test a disposable SCM service under an ordinary user without desktop login
+        env:
+          DEV_ANYWHERE_TEST_SYSTEM_SERVICE: "1"
+        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/windows-system-service.test.ts --maxWorkers=1 --hookTimeout=30000
       - name: Test native processes, IPC, terminal handover and startup registration
         shell: pwsh
         run: |
@@ -170,7 +174,3 @@ jobs:
           )
           # Native process suites share the runner's PowerShell/CIM capacity.
           pnpm --filter @dev-anywhere/proxy exec vitest run @tests --maxWorkers=1 --testTimeout=60000 --hookTimeout=30000
-      - name: Test a disposable SCM service under an ordinary user without desktop login
-        env:
-          DEV_ANYWHERE_TEST_SYSTEM_SERVICE: "1"
-        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/windows-system-service.test.ts --maxWorkers=1 --hookTimeout=30000
