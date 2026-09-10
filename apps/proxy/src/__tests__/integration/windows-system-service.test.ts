@@ -1,4 +1,4 @@
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { createRequire } from "node:module";
 import { existsSync } from "node:fs";
@@ -8,14 +8,15 @@ import { join, win32 } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import { psString } from "#src/common/autostart-definition.js";
+import { createSystemServiceAutostart } from "#src/common/system-service-autostart.js";
 import {
   buildWindowsService,
   windowsServiceRegistration,
   WINDOWS_SERVICE_POWERSHELL_PREAMBLE,
 } from "#src/common/windows-service.js";
 
-function powershell(script: string): string {
-  return execFileSync(
+function powershell(script: string, includeDiagnostics = false): string {
+  const result = spawnSync(
     win32.join(
       process.env.SystemRoot ?? "C:\\Windows",
       "System32",
@@ -32,7 +33,13 @@ function powershell(script: string): string {
       ),
     ],
     { timeout: 45_000, windowsHide: true, encoding: "utf8" },
-  ).trim();
+  );
+  if (result.error) throw result.error;
+  if (result.status !== 0)
+    throw new Error(
+      `PowerShell failed (${result.status ?? result.signal}):\n${result.stderr}\n${result.stdout}`,
+    );
+  return (includeDiagnostics ? `${result.stdout}\n${result.stderr}` : result.stdout).trim();
 }
 
 describe.skipIf(process.platform !== "win32")("native Windows service wrapper", () => {
@@ -81,10 +88,9 @@ describe.skipIf(process.platform !== "win32")("native Windows service wrapper", 
 describe.skipIf(
   process.platform !== "win32" || process.env.DEV_ANYWHERE_TEST_SYSTEM_SERVICE !== "1",
 )("native Windows SCM registration", () => {
-  it("starts without an interactive logon under a temporary ordinary user and handles SCM stop", async () => {
+  it("activates and reconfigures a local-user service without an interactive logon or another credential prompt", async () => {
     const name = `da${randomUUID().replaceAll("-", "").slice(0, 12)}`;
     const password = `${randomUUID()}Aa9!`;
-    const label = `dev-anywhere-${name}`;
     const home = await mkdtemp(
       join(process.env.PUBLIC ?? "C:\\Users\\Public", "da-native-service-"),
     );
@@ -101,6 +107,31 @@ describe.skipIf(
       `shell.onExit(({exitCode})=>{clearTimeout(timer);require('node:fs').writeFileSync(${JSON.stringify(ready)},JSON.stringify({user:require('node:os').userInfo().username,pid:process.pid,home:process.env.HOME,shellExit:exitCode,shellOutput:output}));});`,
       `process.stdin.on('data',()=>{require('node:fs').writeFileSync(${JSON.stringify(stopped)},'stopped');process.exit(0)});`,
     ].join("");
+    let owner = { name: "", sid: "" };
+    const manager = createSystemServiceAutostart({
+      platform: "win32",
+      home,
+      profile: "test",
+      executable: process.execPath,
+      args: ["-e", script, "--"],
+      env: process.env,
+      // The disposable profile belongs to an ordinary user; the runner supplies UAC elevation.
+      run: async (command, args) => {
+        const source = Buffer.from(args.at(-1)!, "base64").toString("utf16le");
+        if (source.includes("$identity =")) return JSON.stringify(owner);
+        return execFileSync(command, args, {
+          encoding: "utf8",
+          windowsHide: true,
+          timeout: 45_000,
+        });
+      },
+      runInteractive: async (_command, args) => {
+        powershell(`function Get-Credential { throw 'Existing registration must not prompt for credentials'; }
+& ${psString(args.at(-1)!)};`);
+        return "";
+      },
+    });
+    const label = manager.label;
     const wrapper = buildWindowsService({
       home,
       profile: "test",
@@ -113,7 +144,8 @@ describe.skipIf(
     try {
       powershell(wrapper.compileScript);
       // Credentials exist only in this disposable test. Never prompt for or use a real account.
-      powershell(`$password = ConvertTo-SecureString ${psString(password)} -AsPlainText -Force;
+      const registrationOutput = powershell(
+        `$password = ConvertTo-SecureString ${psString(password)} -AsPlainText -Force;
 New-LocalUser -Name ${psString(name)} -Password $password -AccountNeverExpires -PasswordNeverExpires | Out-Null;
 $ownerName = $env:COMPUTERNAME + '\\' + ${psString(name)};
 $ownerSid = (New-Object Security.Principal.NTAccount($ownerName)).Translate([Security.Principal.SecurityIdentifier]).Value;
@@ -122,10 +154,47 @@ $identity = New-Object Security.Principal.SecurityIdentifier($ownerSid);
 $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow');
 $acl.AddAccessRule($rule);
 Set-Acl -LiteralPath ${psString(home)} -AclObject $acl;
-function Get-Credential { param($UserName, $Message); return New-Object Management.Automation.PSCredential($ownerName, $password); }
+$script:credentialAttempts = 0;
+function Get-Credential {
+  param($UserName, $Message);
+  $script:credentialAttempts++;
+  if ($script:credentialAttempts -eq 1) {
+    return New-Object Management.Automation.PSCredential($ownerName, (ConvertTo-SecureString 'incorrect-password' -AsPlainText -Force));
+  }
+  if ($script:credentialAttempts -ne 2) { throw 'Credential validation did not accept the correct password'; }
+  if (Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)}) { throw 'The rejected password left a registered service'; }
+  return New-Object Management.Automation.PSCredential($ownerName, $password);
+}
 $service = $null;
 ${windowsServiceRegistration(label, wrapper.path)}
-Start-Service -Name ${psString(label)};`);
+if ($script:credentialAttempts -ne 2) { throw 'The incorrect password was not rejected before registration'; }`,
+        true,
+      );
+      expect(registrationOutput).toContain("Windows 未接受这个账户密码");
+      expect(registrationOutput).toContain("Windows 服务账户验证通过");
+      owner = JSON.parse(
+        powershell(`$account = Get-LocalUser -Name ${psString(name)};
+@{ name = [Environment]::MachineName + '\\' + $account.Name; sid = $account.SID.Value } | ConvertTo-Json -Compress;`),
+      );
+      expect(
+        powershell(
+          `(Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)}).StartName;`,
+        ),
+      ).toBe(`.\\${name}`);
+      const ownerSid = owner.sid;
+      owner.sid = "S-1-5-18";
+      await expect(manager.activate()).rejects.toThrow(
+        /Existing service belongs to another[\s\S]*account/,
+      );
+      owner.sid = ownerSid;
+      powershell(`$service = Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)};
+$result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ StartPassword = ${psString(`${password}-incorrect`)} };
+if ($result.ReturnValue -ne 0) { throw 'Could not set the disposable wrong password'; }`);
+      await expect(manager.activate()).rejects.toThrow(/1069[\s\S]*services\.msc/);
+      powershell(`$service = Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)};
+$result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ StartPassword = ${psString(password)} };
+if ($result.ReturnValue -ne 0) { throw 'Could not restore the disposable password'; }`);
+      await manager.activate();
       const deadline = Date.now() + 20_000;
       while (!existsSync(ready) && Date.now() < deadline) await sleep(100);
       const result = JSON.parse(await readFile(ready, "utf8"));
@@ -137,6 +206,17 @@ Start-Service -Name ${psString(label)};`);
         ),
       );
       expect(servicePid).toBeGreaterThan(0);
+      await manager.disable();
+      expect(await manager.status()).toBe(false);
+      await manager.enable();
+      expect(await manager.status()).toBe(true);
+      expect(
+        Number(
+          powershell(
+            `(Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)}).ProcessId;`,
+          ),
+        ),
+      ).toBe(servicePid);
       powershell(
         `Stop-Service -Name ${psString(label)};
 (Get-Service -Name ${psString(label)}).WaitForStatus('Stopped', [TimeSpan]::FromSeconds(20));

@@ -129,6 +129,7 @@ describe("Relay-directed update execution", () => {
 
   function runtime(installedVersion = "0.6.3") {
     const release = vi.fn();
+    const backup = { restore: vi.fn(async () => undefined), dispose: vi.fn(async () => undefined) };
     const deps: RelayDirectedUpdateDeps = {
       acquireLock: vi.fn(() => ({ release })),
       resolveNpm: vi.fn(() => "/node/bin/npm"),
@@ -136,13 +137,14 @@ describe("Relay-directed update execution", () => {
       readInstalledVersion: vi.fn(() => installedVersion),
       installVersion: vi.fn(async () => undefined),
       validateInstalledCli: vi.fn(async () => undefined),
+      backupInstallation: vi.fn(async () => backup),
       restartWithRecovery: vi.fn(async () => undefined),
     };
-    return { deps, release };
+    return { deps, release, backup };
   }
 
   it("installs, validates, and only then restarts", async () => {
-    const { deps, release } = runtime();
+    const { deps, release, backup } = runtime();
     const order: string[] = [];
     vi.mocked(deps.installVersion).mockImplementation(async () => {
       order.push("install");
@@ -155,37 +157,45 @@ describe("Relay-directed update execution", () => {
     });
 
     await expect(runRelayDirectedUpdate(options, deps)).resolves.toBe(0);
-    expect(order).toEqual(["install", "validate", "restart"]);
+    expect(order).toEqual(["validate", "install", "validate", "restart"]);
     expect(deps.installVersion).toHaveBeenCalledWith("/node/bin/npm", "0.7.0");
-    expect(deps.restartWithRecovery).toHaveBeenCalledWith(options, "/node/bin/npm", "0.6.3", true);
+    expect(deps.restartWithRecovery).toHaveBeenCalledWith(
+      options,
+      "/node/bin/npm",
+      "0.6.3",
+      true,
+      backup,
+    );
+    expect(backup.dispose).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();
   });
 
-  it("keeps an intact previous package and leaves restart untouched when installation fails", async () => {
-    const { deps, release } = runtime();
+  it("restores the local package without another download when installation fails", async () => {
+    const { deps, release, backup } = runtime();
     vi.mocked(deps.installVersion).mockRejectedValueOnce(new Error("registry unavailable"));
 
-    await expect(runRelayDirectedUpdate(options, deps)).rejects.toThrow(
-      "previous package 0.6.3 remains intact",
-    );
+    await expect(runRelayDirectedUpdate(options, deps)).rejects.toThrow("restored 0.6.3");
     expect(deps.installVersion).toHaveBeenNthCalledWith(1, "/node/bin/npm", "0.7.0");
+    expect(deps.installVersion).toHaveBeenCalledOnce();
+    expect(backup.restore).toHaveBeenCalledOnce();
     expect(deps.validateInstalledCli).toHaveBeenCalledWith("0.6.3");
     expect(deps.restartWithRecovery).not.toHaveBeenCalled();
     expect(release).toHaveBeenCalledOnce();
   });
 
   it("rolls back a package that installs but fails CLI validation", async () => {
-    const { deps } = runtime();
-    vi.mocked(deps.readInstalledVersion).mockReturnValueOnce("0.6.3").mockReturnValueOnce("0.7.0");
+    const { deps, backup } = runtime();
     vi.mocked(deps.validateInstalledCli)
+      .mockResolvedValueOnce(undefined)
       .mockRejectedValueOnce(new Error("new CLI cannot load"))
       .mockResolvedValueOnce(undefined);
 
     await expect(runRelayDirectedUpdate(options, deps)).rejects.toThrow("restored 0.6.3");
     expect(deps.installVersion).toHaveBeenNthCalledWith(1, "/node/bin/npm", "0.7.0");
-    expect(deps.installVersion).toHaveBeenNthCalledWith(2, "/node/bin/npm", "0.6.3");
-    expect(deps.validateInstalledCli).toHaveBeenNthCalledWith(1, "0.7.0");
-    expect(deps.validateInstalledCli).toHaveBeenNthCalledWith(2, "0.6.3");
+    expect(deps.installVersion).toHaveBeenCalledOnce();
+    expect(backup.restore).toHaveBeenCalledOnce();
+    expect(deps.validateInstalledCli).toHaveBeenNthCalledWith(2, "0.7.0");
+    expect(deps.validateInstalledCli).toHaveBeenNthCalledWith(3, "0.6.3");
     expect(deps.restartWithRecovery).not.toHaveBeenCalled();
   });
 
@@ -195,7 +205,36 @@ describe("Relay-directed update execution", () => {
     await expect(runRelayDirectedUpdate(options, deps)).resolves.toBe(0);
     expect(deps.installVersion).not.toHaveBeenCalled();
     expect(deps.validateInstalledCli).toHaveBeenCalledWith("0.7.0");
-    expect(deps.restartWithRecovery).toHaveBeenCalledWith(options, "/node/bin/npm", "0.7.0", false);
+    expect(deps.restartWithRecovery).toHaveBeenCalledWith(
+      options,
+      "/node/bin/npm",
+      "0.7.0",
+      false,
+      null,
+    );
+    expect(deps.backupInstallation).not.toHaveBeenCalled();
+  });
+
+  it("leaves the working installation untouched if its local backup cannot be created", async () => {
+    const { deps, release } = runtime();
+    vi.mocked(deps.backupInstallation).mockRejectedValueOnce(new Error("disk full"));
+    await expect(runRelayDirectedUpdate(options, deps)).rejects.toThrow("disk full");
+    expect(deps.installVersion).not.toHaveBeenCalled();
+    expect(deps.restartWithRecovery).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("preserves both errors when an interrupted update cannot be restored", async () => {
+    const { deps, release, backup } = runtime();
+    const installError = new Error("download timed out");
+    const restoreError = new Error("cannot restore launcher");
+    vi.mocked(deps.installVersion).mockRejectedValueOnce(installError);
+    backup.restore.mockRejectedValueOnce(restoreError);
+    await expect(runRelayDirectedUpdate(options, deps)).rejects.toMatchObject({
+      errors: [installError, restoreError],
+    });
+    expect(deps.restartWithRecovery).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
   });
 
   it("returns a retryable code while another profile holds the machine lock", async () => {
@@ -337,6 +376,17 @@ describe("auto-update restart recovery", () => {
     expect(deps.installVersion).toHaveBeenCalledWith("/node/bin/npm", "0.6.3");
     expect(deps.validateInstalledCli).toHaveBeenCalledWith("0.6.3");
     expect(deps.runService).toHaveBeenNthCalledWith(1, "restart", options);
+    expect(deps.runService).toHaveBeenNthCalledWith(2, "start", options, "failed-restart-token");
+  });
+
+  it("recovers from a failed daemon startup using the local backup without npm", async () => {
+    const deps = recoveryRuntime();
+    const backup = { restore: vi.fn(async () => undefined), dispose: vi.fn(async () => undefined) };
+    await expect(
+      restartWithRecovery(options, "/node/bin/npm", "0.6.3", true, deps, backup),
+    ).rejects.toThrow("restored 0.6.3");
+    expect(backup.restore).toHaveBeenCalledOnce();
+    expect(deps.installVersion).not.toHaveBeenCalled();
     expect(deps.runService).toHaveBeenNthCalledWith(2, "start", options, "failed-restart-token");
   });
 

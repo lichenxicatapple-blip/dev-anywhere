@@ -144,8 +144,7 @@ try {
   $ownerSid = ${psString(owner.sid)};
   ${lookup}
   if ($service) {
-    $account = New-Object Security.Principal.NTAccount($service.StartName);
-    if ($account.Translate([Security.Principal.SecurityIdentifier]).Value -ne $ownerSid) { throw 'Existing service belongs to another account'; }
+    if ((Get-DevAnywhereAccountSid $service.StartName) -ne $ownerSid) { throw 'Existing service belongs to another account'; }
   }
   ${script}
 } catch {
@@ -292,7 +291,19 @@ WantedBy=multi-user.target
   async function activate(): Promise<void> {
     if (platform === "win32") {
       await windowsMutation(
-        `if (!$service) { throw 'System service is not installed'; }\nStart-Service -Name ${psString(label)};`,
+        `if (!$service) { throw 'System service is not installed'; }
+try { Start-Service -Name ${psString(label)}; }
+catch {
+  $failure = $_.Exception;
+  while ($failure.InnerException) { $failure = $failure.InnerException; }
+  if ($failure -is [ComponentModel.Win32Exception]) {
+    if ($failure.NativeErrorCode -eq 1069) {
+      throw 'Windows 服务账户登录失败（错误 1069）。请在 services.msc 中检查此服务的账户密码和登录权限；Windows Hello PIN 不能用作服务密码。';
+    }
+    throw ('Windows service could not start (error ' + $failure.NativeErrorCode + '): ' + $failure.Message);
+  }
+  throw;
+}`,
       );
     } else if (platform === "darwin") {
       requireUser();

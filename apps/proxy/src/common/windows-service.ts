@@ -8,7 +8,13 @@ import { checkAutostartText, psString } from "./autostart-definition.js";
 export const WINDOWS_SERVICE_POWERSHELL_PREAMBLE = `$ErrorActionPreference = 'Stop';
 $env:PSModulePath = $PSHOME + '\\Modules';
 $ProgressPreference = 'SilentlyContinue';
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false);`;
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false);
+function Get-DevAnywhereAccountSid([string]$Name) {
+  # SCM abbreviates the local machine as a dot; NTAccount needs the actual machine name.
+  if ($Name.StartsWith('.\\')) { $Name = [Environment]::MachineName + $Name.Substring(1); }
+  $account = New-Object Security.Principal.NTAccount($Name);
+  return $account.Translate([Security.Principal.SecurityIdentifier]).Value;
+}`;
 
 function encoded(value: string): string {
   return `Decode("${Buffer.from(checkAutostartText(value), "utf8").toString("base64")}")`;
@@ -132,35 +138,80 @@ if (!(Test-Path -LiteralPath $servicePath -PathType Leaf)) {
 export function windowsServiceRegistration(label: string, binaryPath: string): string {
   return `$binaryPath = ${psString(quoteWindowsArgument(binaryPath))};
 if ($service) {
-  $account = New-Object Security.Principal.NTAccount($service.StartName);
-  if ($account.Translate([Security.Principal.SecurityIdentifier]).Value -ne $ownerSid) { throw 'Existing service belongs to another account'; }
+  if ((Get-DevAnywhereAccountSid $service.StartName) -ne $ownerSid) { throw 'Existing service belongs to another account'; }
   $result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ PathName = $binaryPath; StartMode = 'Automatic' };
   if ($result.ReturnValue -ne 0) { throw ('Service update failed: ' + $result.ReturnValue); }
 } else {
-  $credential = Get-Credential -UserName $ownerName -Message 'DEV Anywhere: enter this Windows account password for startup before desktop login (not the Windows Hello PIN)';
-  if (!$credential) { throw 'Service installation cancelled'; }
-  $account = New-Object Security.Principal.NTAccount($credential.UserName);
-  if ($account.Translate([Security.Principal.SecurityIdentifier]).Value -ne $ownerSid) { throw 'Use the same account that owns this DEV Anywhere profile'; }
   Add-Type -AssemblyName System.ServiceProcess;
   Add-Type -AssemblyName System.Configuration.Install;
-  $processInstaller = New-Object System.ServiceProcess.ServiceProcessInstaller;
-  $processInstaller.Account = [System.ServiceProcess.ServiceAccount]::User;
-  $processInstaller.Username = $ownerName;
-  $processInstaller.Password = $credential.GetNetworkCredential().Password;
-  $installer = New-Object System.ServiceProcess.ServiceInstaller;
-  $installer.ServiceName = ${psString(label)};
-  $installer.DisplayName = ${psString(`DEV Anywhere (${label})`)};
-  $installer.Description = 'DEV Anywhere Proxy: run before desktop login as the profile owner';
-  $installer.StartType = [System.ServiceProcess.ServiceStartMode]::Automatic;
-  $processInstaller.Installers.Add($installer) | Out-Null;
-  $processInstaller.Context = New-Object System.Configuration.Install.InstallContext($null, @('/LogToConsole=false'));
-  $processInstaller.Context.Parameters['assemblypath'] = $binaryPath;
-  $state = @{};
-  try {
-    # ServiceProcessInstaller grants SeServiceLogonRight and rolls it back on failed installation.
-    $processInstaller.Install($state);
-    $processInstaller.Commit($state);
-  } catch { $processInstaller.Rollback($state); throw; }
-  finally { $processInstaller.Password = $null; $credential = $null; }
+  Add-Type -ReferencedAssemblies 'System.dll','System.Configuration.Install.dll' -TypeDefinition @'
+using System;
+using System.Collections;
+using System.ComponentModel;
+using System.Configuration.Install;
+using System.Runtime.InteropServices;
+public sealed class DevAnywhereCredentialValidator : Installer {
+  public string Username { get; set; }
+  public string Password { get; set; }
+  public int LogonError { get; private set; }
+  [DllImport("advapi32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+  private static extern bool LogonUser(string user, string domain, string password, int type, int provider, out IntPtr token);
+  [DllImport("kernel32.dll")]
+  private static extern bool CloseHandle(IntPtr handle);
+  public override void Install(IDictionary stateSaver) {
+    base.Install(stateSaver);
+    int separator = Username.IndexOf((char)92);
+    string domain = separator < 0 ? null : Username.Substring(0, separator);
+    string user = separator < 0 ? Username : Username.Substring(separator + 1);
+    IntPtr token;
+    // Validate the same service logon that SCM will use, after the parent grants its logon right.
+    if (!LogonUser(user, domain, Password, 5, 0, out token)) {
+      LogonError = Marshal.GetLastWin32Error();
+      throw new Win32Exception(LogonError);
+    }
+    CloseHandle(token);
+  }
+}
+'@;
+  while ($true) {
+    $credential = Get-Credential -UserName $ownerName -Message 'DEV Anywhere: enter this account password (Microsoft account password if applicable, not the Windows Hello PIN). Windows will verify it before installation.';
+    if (!$credential) { throw 'Service installation cancelled'; }
+    if ((Get-DevAnywhereAccountSid $credential.UserName) -ne $ownerSid) { throw 'Use the same account that owns this DEV Anywhere profile'; }
+    $processInstaller = New-Object System.ServiceProcess.ServiceProcessInstaller;
+    $processInstaller.Account = [System.ServiceProcess.ServiceAccount]::User;
+    $processInstaller.Username = $ownerName;
+    $processInstaller.Password = $credential.GetNetworkCredential().Password;
+    $validator = New-Object DevAnywhereCredentialValidator;
+    $validator.Username = $ownerName;
+    $validator.Password = $processInstaller.Password;
+    $installer = New-Object System.ServiceProcess.ServiceInstaller;
+    $installer.ServiceName = ${psString(label)};
+    $installer.DisplayName = ${psString(`DEV Anywhere (${label})`)};
+    $installer.Description = 'DEV Anywhere Proxy: run before desktop login as the profile owner';
+    $installer.StartType = [System.ServiceProcess.ServiceStartMode]::Automatic;
+    $processInstaller.Installers.Add($validator) | Out-Null;
+    $processInstaller.Installers.Add($installer) | Out-Null;
+    $processInstaller.Context = New-Object System.Configuration.Install.InstallContext($null, @('/LogToConsole=false'));
+    $processInstaller.Context.Parameters['assemblypath'] = $binaryPath;
+    $state = @{};
+    try {
+      # ServiceProcessInstaller grants SeServiceLogonRight and rolls it back on failed installation.
+      $processInstaller.Install($state);
+      $processInstaller.Commit($state);
+      Write-Host 'Windows 服务账户验证通过。';
+      break;
+    } catch {
+      $processInstaller.Rollback($state);
+      if ($validator.LogonError -eq 1326) {
+        Write-Warning 'Windows 未接受这个账户密码，请重新输入。微软账户需填写微软账户密码，不能使用 PIN；取消凭据窗口可退出。';
+        continue;
+      }
+      throw;
+    } finally {
+      $processInstaller.Password = $null;
+      $validator.Password = $null;
+      $credential = $null;
+    }
+  }
 }`;
 }
