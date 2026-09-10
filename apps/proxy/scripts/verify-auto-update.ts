@@ -18,10 +18,17 @@ import { installAcceptanceService } from "./auto-update-service.js";
 
 // Full native acceptance: packaged entrypoints, the real Relay, real npm installs, an OS
 // service (or detached daemon), and an interactive shell. No updater mocks or shorter timers.
-// Versions 0.0.1-3 belong only to this loopback registry; these artifacts are never published.
+// Start from the published 0.9.8 package. The two higher candidate versions belong only to
+// this loopback registry and are never published. The second upgrade exercises the new updater.
 if (process.env.CI !== "true") throw new Error("Run on a disposable native CI host");
 const mode = process.argv.includes("--daemon") ? "daemon" : "system";
 const source = resolve(fileURLToPath(new URL("..", import.meta.url)));
+const baselineVersion = "0.9.8";
+const sourceVersion = JSON.parse(await readFile(join(source, "package.json"), "utf8"))
+  .version as string;
+const [major, minor, patch] = sourceVersion.split(".").map(Number);
+const firstTargetVersion = `${major}.${minor}.${patch! + 1}`;
+const retryTargetVersion = `${major}.${minor}.${patch! + 2}`;
 const root = await mkdtemp(
   join(process.platform === "win32" ? (process.env.PUBLIC ?? tmpdir()) : "/tmp", "da-update-"),
 );
@@ -52,6 +59,8 @@ let client: WebSocket | undefined;
 let service: Awaited<ReturnType<typeof installAcceptanceService>> | undefined;
 let sessionId: string | undefined;
 let originalWorkerPid: number | undefined;
+let originalShellPid: number | undefined;
+const shellState = randomUUID().replaceAll("-", "");
 let proxyId: string | undefined;
 let shellOutput = "";
 let requestNumber = 0;
@@ -78,7 +87,7 @@ const registry = createServer((req, res) => {
     res.end(
       JSON.stringify({
         name: `@dev-anywhere/${kind}`,
-        "dist-tags": { latest: "0.0.3" },
+        "dist-tags": { latest: retryTargetVersion },
         versions: Object.fromEntries(
           [...artifacts]
             .filter(([key]) => key.startsWith(`${kind}-`))
@@ -99,7 +108,7 @@ const registry = createServer((req, res) => {
       res.writeHead(404).end();
       return;
     }
-    if (blockTarball && key === "proxy-0.0.3") {
+    if (blockTarball && key === `proxy-${retryTargetVersion}`) {
       blockedRequests++;
       log("tarball_download_stalled", { request: blockedRequests });
       // Send a partial body and leave it open. npm must enforce its actual fetch timeout.
@@ -226,9 +235,18 @@ let relayRoot: string;
 let relayPort: number;
 async function startRelay(version: string) {
   await stopRelay();
-  const manifestPath = join(relayRoot, "package.json");
-  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
-  await writeFile(manifestPath, JSON.stringify({ ...manifest, version }));
+  const relayPrefix = join(root, "relay-runtime");
+  await command(npm, [
+    "install",
+    "--prefix",
+    relayPrefix,
+    "--global=false",
+    `@dev-anywhere/relay@${version}`,
+    "--no-audit",
+    "--no-fund",
+    ...(version === baselineVersion ? ["--registry=https://registry.npmjs.org"] : []),
+  ]);
+  relayRoot = join(relayPrefix, "node_modules", "@dev-anywhere", "relay");
   const script = join(root, "relay.mjs");
   await writeFile(
     script,
@@ -299,28 +317,35 @@ async function checkShell(label: string) {
   const requestId = `snapshot-${++requestNumber}`;
   send({ type: "session_subscribe", sessionId, requestId });
   await response("session_snapshot", requestId);
-  const marker = `DA_OK_${randomUUID().replaceAll("-", "")}`;
+  const marker = randomUUID().replaceAll("-", "");
   shellOutput = "";
-  // Construct the marker in the shell so the echoed input cannot satisfy the assertion.
+  // Verify both the original shell PID and its in-memory variable. An echoed command,
+  // replacement shell or merely restored session record cannot satisfy this assertion.
+  const initialize = originalShellPid === undefined;
   send({
     type: "remote_input_raw",
     sessionId,
     data:
       process.platform === "win32"
-        ? `Write-Output ('DA_OK_' + '${marker.slice(6)}')\r`
-        : `printf 'DA_%s\\n' 'OK_${marker.slice(6)}'\r`,
+        ? `${initialize ? `$global:daUpdateToken = '${shellState}'; ` : ""}Write-Output ('DA_STATE_' + $global:daUpdateToken + ':' + $PID + ':${marker}')\r`
+        : `${initialize ? `DA_UPDATE_TOKEN='${shellState}'; ` : ""}printf 'DA_STATE_%s:%s:%s\\n' "$DA_UPDATE_TOKEN" "$$" '${marker}'\r`,
   });
-  await waitFor("shell command output", () => shellOutput.includes(marker));
+  const match = await waitFor("original shell state and command output", () =>
+    new RegExp(`DA_STATE_${shellState}:(\\d+):${marker}`).exec(shellOutput),
+  );
+  const shellPid = Number(match[1]);
+  originalShellPid ??= shellPid;
+  assert.equal(shellPid, originalShellPid, "Shell process was replaced");
   const sessions = JSON.parse(await readFile(paths.sessionsPath, "utf8"));
   const session = sessions.find((item: { id: string }) => item.id === sessionId);
   assert(session, "Original terminal session is missing");
   originalWorkerPid ??= session.pid;
   assert.equal(session.pid, originalWorkerPid, "Terminal worker was replaced");
-  log("original_shell_responded", { label, sessionId, workerPid: originalWorkerPid });
+  log("original_shell_responded", { label, sessionId, workerPid: originalWorkerPid, shellPid });
 }
 try {
   log("acceptance_started", { node: process.version, root });
-  for (const version of ["0.0.1", "0.0.2", "0.0.3"]) {
+  for (const version of [firstTargetVersion, retryTargetVersion]) {
     await pack("relay", version);
     await pack("proxy", version);
   }
@@ -329,14 +354,12 @@ try {
     output: await command(npm, [
       "install",
       "--global",
-      "@dev-anywhere/proxy@0.0.1",
+      `@dev-anywhere/proxy@${baselineVersion}`,
+      "--registry=https://registry.npmjs.org",
       "--no-audit",
       "--no-fund",
     ]),
   });
-  const relayCopy = join(root, "relay-runtime");
-  await cp(packageRoot, relayCopy, { recursive: true, verbatimSymlinks: true });
-  relayRoot = join(relayCopy, "node_modules", "@dev-anywhere", "relay");
   const portServer = createServer();
   await new Promise<void>((done) => portServer.listen(0, "127.0.0.1", done));
   const address = portServer.address();
@@ -353,7 +376,7 @@ try {
   config.relays[profile] = { url: `ws://127.0.0.1:${relayPort}`, proxyToken: token };
   await mkdir(dirname(paths.configPath), { recursive: true });
   await writeFile(paths.configPath, JSON.stringify(config), { mode: 0o600 });
-  await startRelay("0.0.1");
+  await startRelay(baselineVersion);
   if (mode === "system")
     service = await installAcceptanceService({
       home: runtimeHome,
@@ -377,7 +400,7 @@ try {
     const current = await status();
     return current?.state === "ready" &&
       current.info?.relay?.connected &&
-      current.version === "0.0.1"
+      current.version === baselineVersion
       ? current
       : null;
   });
@@ -403,20 +426,26 @@ try {
   assert.equal(created.success, true, JSON.stringify(created));
   sessionId = String(created.sessionId);
   await checkShell("before-upgrade");
-  await startRelay("0.0.2");
+  await startRelay(firstTargetVersion);
   const updated = await waitFor(
     "first automatic upgrade",
     async () => {
       const current = await status();
-      return current?.version === "0.0.2" && current.info?.relay?.connected ? current : null;
+      return current?.version === firstTargetVersion && current.info?.relay?.connected
+        ? current
+        : null;
     },
     6 * 60000,
   );
   assert.notEqual(updated.pid, baseline.pid);
-  assert.equal((await command(process.execPath, [entry, "--version"])).trim(), "0.0.2");
+  assert.equal((await command(process.execPath, [entry, "--version"])).trim(), firstTargetVersion);
   await connectBrowser();
   await checkShell("after-first-upgrade");
-  log("automatic_upgrade_passed", { from: "0.0.1", to: "0.0.2", daemonPid: updated.pid });
+  log("automatic_upgrade_passed", {
+    from: baselineVersion,
+    to: firstTargetVersion,
+    daemonPid: updated.pid,
+  });
   const retired = (await readdir(dirname(packageRoot))).filter((name) =>
     name.startsWith(".proxy-"),
   );
@@ -432,7 +461,7 @@ try {
       "Expected npm to retain binaries used by the original Windows terminal",
     );
   blockTarball = true;
-  await startRelay("0.0.3");
+  await startRelay(retryTargetVersion);
   const retry = await waitFor(
     "download failure and automatic retry scheduled",
     async () => (await logs("service")).find((item) => item.msg === "Proxy auto-update will retry"),
@@ -442,10 +471,10 @@ try {
   assert(blockedRequests > 0, "The updater did not attempt the real tarball download");
   const stillRunning = await status();
   assert.equal(stillRunning?.pid, updated.pid, "Download failure stopped the old daemon");
-  assert.equal(stillRunning?.version, "0.0.2");
+  assert.equal(stillRunning?.version, firstTargetVersion);
   assert.equal(
     (await command(process.execPath, [entry, "--version"])).trim(),
-    "0.0.2",
+    firstTargetVersion,
     "The npm installation was not restored",
   );
   await connectBrowser();
@@ -456,12 +485,14 @@ try {
     "default automatic retry succeeds",
     async () => {
       const current = await status();
-      return current?.version === "0.0.3" && current.info?.relay?.connected ? current : null;
+      return current?.version === retryTargetVersion && current.info?.relay?.connected
+        ? current
+        : null;
     },
     20 * 60000,
   );
   assert.notEqual(recovered.pid, updated.pid);
-  assert.equal((await command(process.execPath, [entry, "--version"])).trim(), "0.0.3");
+  assert.equal((await command(process.execPath, [entry, "--version"])).trim(), retryTargetVersion);
   client?.terminate();
   await connectBrowser();
   await checkShell("after-automatic-retry");
@@ -472,10 +503,11 @@ try {
       "System service host was replaced",
     );
   log("ACCEPTANCE_PASSED", {
-    from: "0.0.1",
-    to: "0.0.3",
+    from: baselineVersion,
+    to: retryTargetVersion,
     daemonPid: recovered.pid,
     originalWorkerPid,
+    originalShellPid,
     retryInMs: retry.retryInMs,
   });
 } catch (error) {

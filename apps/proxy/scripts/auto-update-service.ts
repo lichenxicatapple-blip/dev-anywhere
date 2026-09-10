@@ -1,8 +1,9 @@
-import { execFileSync } from "node:child_process";
+import { execFile, execFileSync } from "node:child_process";
 import assert from "node:assert/strict";
 import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { userInfo } from "node:os";
+import { promisify } from "node:util";
 import { createSystemServiceAutostart } from "../src/common/system-service-autostart.js";
 import { psString } from "../src/common/autostart-definition.js";
 import { WINDOWS_SERVICE_POWERSHELL_PREAMBLE } from "../src/common/windows-service.js";
@@ -60,7 +61,13 @@ $acl.AddAccessRule($rule); Set-Acl -LiteralPath ${psString(options.root)} -AclOb
         const source = Buffer.from(args.at(-1)!, "base64").toString("utf16le");
         if (source.includes("$identity =")) return JSON.stringify(owner);
       }
-      return execFileSync(command, args, { encoding: "utf8", timeout: 60000, windowsHide: true });
+      return (
+        await promisify(execFile)(command, args, {
+          encoding: "utf8",
+          timeout: 60000,
+          windowsHide: true,
+        })
+      ).stdout;
     },
     runInteractive: async (command, args) => {
       if (process.platform !== "win32") return sudo(args[0]!, args.slice(1));
