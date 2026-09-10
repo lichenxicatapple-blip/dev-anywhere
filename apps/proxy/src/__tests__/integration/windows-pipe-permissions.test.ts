@@ -135,24 +135,10 @@ Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $account;`);
       });
       // Reproduce the shipped default-DACL failure before applying the actual repair.
       expect(await probe("medium")).toBe("DENIED");
-      // A new CLI child must also be able to repair its still-running pre-upgrade host.
-      const module = new URL("../../common/windows-pipe-permissions.ts", import.meta.url).href;
-      await promisify(execFile)(
-        process.execPath,
-        [
-          "--import",
-          import.meta.resolve("tsx"),
-          "--input-type=module",
-          "-e",
-          `import { setWindowsPipePermissions } from ${JSON.stringify(module)}; setWindowsPipePermissions(${JSON.stringify(endpoint)}, process.ppid);`,
-        ],
-        { timeout: 40_000, windowsHide: true },
-      );
+      setLocalIpcEndpointPermissions(endpoint);
       for (let attempt = 0; attempt < 8; attempt++) {
         expect(await probe("medium")).toMatch(/^ALLOWED S-1-/);
       }
-      setLocalIpcEndpointPermissions(endpoint);
-      expect(await probe("medium")).toMatch(/^ALLOWED S-1-/);
       expect(await probe("low")).toBe("DENIED");
       expect(await probe("other")).toBe("DENIED");
     } finally {

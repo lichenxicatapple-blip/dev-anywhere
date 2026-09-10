@@ -102,8 +102,8 @@ Add-Type -TypeDefinition $source -ReferencedAssemblies 'System.dll','System.Core
   return executable;
 }
 
-export function setWindowsPipePermissions(endpoint: string, serverPid = process.pid): void {
-  execFileSync(permissionHelper(), [endpoint, String(serverPid)], {
+export function setWindowsPipePermissions(endpoint: string): void {
+  execFileSync(permissionHelper(), [endpoint, String(process.pid)], {
     timeout: 5_000,
     windowsHide: true,
     stdio: "pipe",

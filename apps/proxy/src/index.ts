@@ -20,7 +20,6 @@ import { createProfileServiceLifecycle } from "./common/profile-service.js";
 import { ServiceLifecycleError } from "./common/service-lifecycle.js";
 import type { ServiceCommandResult } from "./common/service-command-result.js";
 import { requestServiceHost } from "./common/service-host-control.js";
-import { setWindowsPipePermissions } from "./common/windows-pipe-permissions.js";
 
 async function showStatus(): Promise<number> {
   const lines: string[] = [`Profile: ${PROFILE_NAME}`];
@@ -75,11 +74,6 @@ async function runServiceCommand(
 ): Promise<void> {
   let result: ServiceCommandResult;
   try {
-    if (process.platform === "win32" && options.hostCommand && action !== "stop") {
-      // The host survives npm updates. Its freshly loaded command child also repairs the
-      // old host's pipe, so an upgrade does not need an SCM restart to admit desktop clients.
-      setWindowsPipePermissions(SERVICE_HOST_PATH, process.ppid);
-    }
     // The public command chooses a relay. Host commands also serve automatic starts,
     // which must preserve that choice when no new relay was requested.
     if (action !== "stop" && !options.hostCommand) setDesiredDaemonRelay(options.relay);
