@@ -109,7 +109,7 @@ describe.skipIf(
       args: ["-e", script],
       env: { HOME: home, USERPROFILE: home },
     });
-    let failed = false;
+    const failures: unknown[] = [];
     try {
       powershell(wrapper.compileScript);
       // Credentials exist only in this disposable test. Never prompt for or use a real account.
@@ -145,12 +145,11 @@ if (Get-Process -Id ${servicePid},${result.pid} -ErrorAction SilentlyContinue) {
       );
       expect(await readFile(stopped, "utf8")).toBe("stopped");
     } catch (error) {
-      failed = true;
+      failures.push(error);
       console.error(
         "SCM service log before failure:",
         await readFile(wrapper.logPath, "utf8").catch(() => "No service log was created"),
       );
-      throw error;
     } finally {
       try {
         powershell(`$service = Get-Service -Name ${psString(label)} -ErrorAction SilentlyContinue;
@@ -175,11 +174,15 @@ if ($account) {
 }
 exit 0;`);
       } catch (error) {
-        if (!failed) throw error;
+        failures.push(error);
         console.error("SCM fixture cleanup also failed:", error);
       } finally {
-        await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+        await rm(home, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }).catch(
+          (error: unknown) => failures.push(error),
+        );
       }
     }
+    if (failures.length === 1) throw failures[0];
+    if (failures.length > 1) throw new AggregateError(failures, "SCM service test failed");
   }, 90_000);
 });
