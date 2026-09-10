@@ -64,11 +64,19 @@ gh run watch <run-id> --exit-status
 pnpm release X.Y.Z
 ```
 
-脚本会执行完整发布检查，并同步所有 package 版本、release commit 和 tag。`--emergency` 只跳过快速 smoke，不会跳过 `release:check`、Chaos 或 Android 门禁：
+脚本会执行完整发布检查，并同步所有 package 版本、release commit 和 tag。`--emergency` 跳过所有测试、CLI 运行检查、Chaos 和 Android 门禁，只保留格式、lint、类型、脚本语法、构建与包检查；仅在明确选择紧急发布时使用：
 
 ```bash
 pnpm run release -- --emergency X.Y.Z
 ```
+
+### Releasing from Windows
+
+正常发布的进程 Chaos 和 Android 门禁依赖 Linux/POSIX 工具。目前 Windows 开发机通过 WSL Ubuntu 运行完整发布流程；本地预览仍可直接使用 PowerShell 或 CMD。
+
+在 WSL 的 Linux 文件系统中建立独立 checkout，使用 Node.js 22.22.2、pnpm 9，并安装 `build-essential`、`screen`、`lsof`、Playwright Chromium 及其依赖。不要复用 Windows checkout 的 `node_modules`，其中的原生模块与 Linux 不兼容。
+
+Android 门禁需要 Linux Android SDK、可访问的 `/dev/kvm` 和 Android 36.1 Google Play 系统镜像。x86_64 主机使用 x86_64 镜像，ARM64 主机使用 ARM64 镜像。设置 `ANDROID_HOME` 并将其 `platform-tools` 加入 `PATH` 后，仍使用同一个 `pnpm release X.Y.Z` 入口。
 
 ## First-time repo setup
 

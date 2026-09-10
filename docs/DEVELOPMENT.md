@@ -6,7 +6,7 @@
 
 需要：
 
-- Node.js 20 或更高版本；CI 使用 Node.js 20；
+- Node.js 20.3 或更高版本；发布验证和 CI 使用 Node.js 22.22.2；
 - pnpm 9，与 CI 保持一致；
 - macOS、Linux 或原生 Windows 11；
 - 可选：已经登录的 Claude Code、Codex、Kimi Code，用于验证真实 coding agent 链路；

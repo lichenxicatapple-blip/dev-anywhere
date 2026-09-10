@@ -99,6 +99,8 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
+      - name: Test native development commands and Vite reconnect handling
+        run: pnpm test:dev
       - name: Test native processes, IPC, terminal handover and startup registration
         shell: pwsh
         run: |
@@ -107,6 +109,13 @@ jobs:
             'src/__tests__/unit/command-launch.test.ts',
             'src/__tests__/unit/provider-claude.test.ts',
             'src/__tests__/unit/provider-working-directory.test.ts',
+            'src/__tests__/unit/provider-codex.test.ts',
+            'src/__tests__/unit/pty-input-compat.test.ts',
+            'src/__tests__/unit/pty-manager.test.ts',
+            'src/__tests__/unit/pty-runtime.test.ts',
+            'src/__tests__/unit/terminal-shell.test.ts',
+            'src/__tests__/unit/relay-terminal-shell.test.ts',
+            'src/__tests__/unit/remote-file-path.test.ts',
             'src/__tests__/unit/relay-resource-path.test.ts',
             'src/__tests__/unit/postinstall.test.ts',
             'src/__tests__/unit/windows-process.test.ts',

@@ -8,7 +8,7 @@ import {
   type ExecutableLookupOptions,
 } from "./executable.js";
 
-export interface ResolvedTerminalShell {
+interface ResolvedTerminalShell {
   command: string;
   label?: string;
 }

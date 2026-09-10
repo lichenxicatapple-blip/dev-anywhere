@@ -4,6 +4,15 @@ import fs from "node:fs";
 const readJson = (path) => JSON.parse(fs.readFileSync(path, "utf8"));
 
 const rootPackage = readJson("package.json");
+if (Object.keys(rootPackage.pnpm?.patchedDependencies ?? {}).length > 0) {
+  const relayDockerfile = fs.readFileSync("apps/relay/Dockerfile", "utf8");
+  const installIndex = relayDockerfile.search(/^RUN\s+pnpm\s+install\b/m);
+  const patchesIndex = relayDockerfile.search(/^COPY\s+patches\/?\s+(?:\.\/)?patches\/?\s*$/m);
+  assert.ok(
+    patchesIndex >= 0 && installIndex > patchesIndex,
+    "Relay Docker builds must copy patches before installing dependencies with patchedDependencies",
+  );
+}
 const versionFiles = [
   "apps/proxy/package.json",
   "apps/relay/package.json",

@@ -28,6 +28,12 @@ const spawnMock = vi.hoisted(() =>
 );
 vi.mock("node-pty", () => ({ spawn: spawnMock }));
 const runtimes: PtyRuntime[] = [];
+// These tests mock spawning; bare command names avoid probing a real host path
+// using another platform's path rules when process.platform is overridden.
+const platformProviderEnv = {
+  CODEX_BIN: "codex-fixture.exe",
+  CLAUDE_BIN: "claude-fixture.exe",
+};
 beforeEach(() => {
   fixture.root = mkdtempSync(join(tmpdir(), "dev-anywhere-pty-runtime-"));
 });
@@ -176,7 +182,9 @@ describe("PTY runtime", () => {
       ] as const) {
         Object.defineProperty(process, "platform", { value: platform });
         const { runtime, child } = createRuntime(
-          provider ? { kind: "agent", provider, args: [] } : { kind: "terminal" },
+          provider
+            ? { kind: "agent", provider, args: [], env: platformProviderEnv }
+            : { kind: "terminal" },
         );
         runtime.write("\n");
 
@@ -191,7 +199,12 @@ describe("PTY runtime", () => {
     const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
     try {
       Object.defineProperty(process, "platform", { value: "win32" });
-      const { runtime, child } = createRuntime({ kind: "agent", provider: "codex", args: [] });
+      const { runtime, child } = createRuntime({
+        kind: "agent",
+        provider: "codex",
+        args: [],
+        env: platformProviderEnv,
+      });
       const keyRecord = "\x1b[88;45;120;1;0;1_";
       runtime.write("\x1b");
       runtime.write(keyRecord);
@@ -226,7 +239,11 @@ describe("PTY runtime", () => {
       try {
         Object.defineProperty(process, "platform", { value: platform });
         Object.defineProperty(process, "arch", { value: arch });
-        createRuntime(kind === "agent" ? { kind, provider: "codex", args: [] } : { kind });
+        createRuntime(
+          kind === "agent"
+            ? { kind, provider: "codex", args: [], env: platformProviderEnv }
+            : { kind },
+        );
 
         const spawnOptions = spawnMock.mock.calls.at(-1)?.at(2);
         if (useConptyDll) {

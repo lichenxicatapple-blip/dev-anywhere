@@ -10,9 +10,9 @@ import {
 
 describe("rawInputForPhysicalKeyboardEvent", () => {
   it("preserves submit and newline when a hardware Enter restores PTY focus", () => {
-    expect(
-      rawInputForPhysicalKeyboardEvent(new KeyboardEvent("keydown", { key: "Enter" })),
-    ).toBe("\r");
+    expect(rawInputForPhysicalKeyboardEvent(new KeyboardEvent("keydown", { key: "Enter" }))).toBe(
+      "\r",
+    );
     expect(
       rawInputForPhysicalKeyboardEvent(
         new KeyboardEvent("keydown", { key: "Enter", shiftKey: true }),

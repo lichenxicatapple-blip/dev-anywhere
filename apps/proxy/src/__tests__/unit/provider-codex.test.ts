@@ -79,7 +79,12 @@ describe("Codex provider", () => {
         { args: [], permissionMode: "auto" },
         { CODEX_BIN: codexBin },
       );
-      expect(automatic.args).toEqual(["--ask-for-approval", "on-request", "-c", "tui.whimsy=false"]);
+      expect(automatic.args).toEqual([
+        "--ask-for-approval",
+        "on-request",
+        "-c",
+        "tui.whimsy=false",
+      ]);
 
       const bypass = CODEX_PROVIDER.buildTerminalCommand(
         { args: [], permissionMode: "bypassPermissions" },

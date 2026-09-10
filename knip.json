@@ -1,5 +1,6 @@
 {
   "$schema": "https://unpkg.com/knip@6/schema.json",
+  "entry": ["scripts/dev/validate-profile.mjs"],
   "ignoreBinaries": ["scripts/dev/restart.sh", "scripts/dev/health.sh"],
   "ignore": ["scripts/lib/resolve-dev-profile.mjs"],
   "workspaces": {

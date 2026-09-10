@@ -36,15 +36,20 @@ bash -n scripts/dev/restart.sh
 bash -n scripts/dev/health.sh
 bash -n scripts/dev/relay-restart.sh
 bash -n scripts/dev/chaos.sh
+bash -n scripts/test/mobile-emulators.sh
+bash -n scripts/test/mobile-emulators.test.sh
 node --check scripts/tools/emu-debug.mjs
 node --check scripts/quality/check-source-comment-refs.mjs
 node --check scripts/lib/resolve-dev-profile.mjs
+node --check scripts/release/cli-smoke.mjs
 if [[ "$STATIC_ONLY" != "1" ]]; then
   bash scripts/deploy/install-relay-render.test.sh
   bash scripts/deploy/install-bootstrap.test.sh
   bash scripts/deploy/install-relay-ssh.test.sh
   bash scripts/release/options.test.sh
   node scripts/release/config.test.mjs
+  node --test scripts/release/cli-smoke.test.mjs
+  bash scripts/test/mobile-emulators.test.sh
 else
   echo "=== Static-only release check: skipping test scripts and runtime smoke ==="
 fi
@@ -193,30 +198,4 @@ fi
 
 echo ""
 echo "=== Check installed command behavior with isolated HOME ==="
-# macOS TMPDIR can make the derived Unix socket path exceed the platform limit.
-TMP_HOME="$(mktemp -d /tmp/dev-anywhere-release-check.XXXXXX)"
-cleanup() {
-  rm -rf "$TMP_HOME"
-}
-trap cleanup EXIT
-
-HOME="$TMP_HOME" node apps/proxy/dist/index.js --version >/dev/null
-HOME="$TMP_HOME" node apps/proxy/dist/index.js init
-STATUS_EXIT=0
-STATUS_OUTPUT="$(HOME="$TMP_HOME" node apps/proxy/dist/index.js serve status)" || STATUS_EXIT=$?
-if [ "$STATUS_EXIT" -ne 0 ] || ! grep -Fxq "Service: not running" <<< "$STATUS_OUTPUT"; then
-  echo "Expected an unstarted service with exit 0; got exit $STATUS_EXIT: $STATUS_OUTPUT" >&2
-  exit 1
-fi
-
-test -f "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"defaultProfile": "default"' "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"autoUpdate": true' "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"profiles"' "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"relays"' "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"relay": "cloud"' "$TMP_HOME/.dev-anywhere/config.json"
-grep -q '"url": "ws://localhost:3100"' "$TMP_HOME/.dev-anywhere/config.json"
-test -f "$TMP_HOME/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css"
-grep -q "U+2022" "$TMP_HOME/.dev-anywhere/relay-data/fonts/sarasa-fixed-sc/result.css"
-
-echo "release package smoke passed"
+node scripts/release/cli-smoke.mjs

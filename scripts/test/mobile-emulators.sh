@@ -3,11 +3,32 @@
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
-SDK_ROOT="${ANDROID_HOME:-$HOME/Library/Android/sdk}"
+case "$(uname -s)" in
+  Darwin) DEFAULT_SDK_ROOT="$HOME/Library/Android/sdk" ;;
+  *) DEFAULT_SDK_ROOT="$HOME/Android/Sdk" ;;
+esac
+case "$(uname -m)" in
+  arm64 | aarch64) DEFAULT_IMAGE_ABI="arm64-v8a" ;;
+  x86_64 | amd64) DEFAULT_IMAGE_ABI="x86_64" ;;
+  *)
+    echo "ERROR: unsupported Android emulator host architecture: $(uname -m)" >&2
+    exit 2
+    ;;
+esac
+SDK_ROOT="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-$DEFAULT_SDK_ROOT}}"
 EMULATOR_BIN="${ANDROID_EMULATOR:-$SDK_ROOT/emulator/emulator}"
 AVD_ROOT="${ANDROID_AVD_HOME:-$HOME/.android/avd}"
 AVD_PREFIX="${DEV_ANYWHERE_MOBILE_AVD_PREFIX:-dev-anywhere-mobile}"
-SYSTEM_IMAGE_REL="${DEV_ANYWHERE_MOBILE_SYSTEM_IMAGE:-system-images/android-36.1/google_apis_playstore/arm64-v8a/}"
+SYSTEM_IMAGE_REL="${DEV_ANYWHERE_MOBILE_SYSTEM_IMAGE:-system-images/android-36.1/google_apis_playstore/$DEFAULT_IMAGE_ABI/}"
+IMAGE_ABI="$(basename "${SYSTEM_IMAGE_REL%/}")"
+case "$IMAGE_ABI" in
+  arm64-v8a) IMAGE_CPU_ARCH="arm64" ;;
+  x86_64) IMAGE_CPU_ARCH="x86_64" ;;
+  *)
+    echo "ERROR: unsupported Android system image ABI: $IMAGE_ABI" >&2
+    exit 2
+    ;;
+esac
 TARGET="${DEV_ANYWHERE_MOBILE_TARGET:-android-36.1}"
 COUNT_ARG="${2:-}"
 if [[ "$COUNT_ARG" == "--" ]]; then
@@ -29,7 +50,8 @@ usage() {
 Usage: $0 <create|start|stop|list> [count]
 
 Environment:
-  ANDROID_HOME                         Android SDK root. Default: $HOME/Library/Android/sdk
+  ANDROID_HOME                         Android SDK root. Falls back to ANDROID_SDK_ROOT, then $DEFAULT_SDK_ROOT
+  DEV_ANYWHERE_MOBILE_SYSTEM_IMAGE      SDK-relative image directory. Defaults to API 36.1 Google Play for the host architecture
   DEV_ANYWHERE_MOBILE_EMULATORS         Default count. Default: 1; set explicitly for parallel tests
   DEV_ANYWHERE_MOBILE_BASE_PORT         First emulator console port. Default: 5570
   DEV_ANYWHERE_MOBILE_AVD_PREFIX        AVD name prefix. Default: dev-anywhere-mobile
@@ -82,7 +104,7 @@ EOF
   cat >"$dir/config.ini" <<EOF
 AvdId=$name
 PlayStore.enabled=true
-abi.type=arm64-v8a
+abi.type=$IMAGE_ABI
 avd.ini.displayname=$display
 avd.ini.encoding=UTF-8
 disk.dataPartition.size=6G
@@ -96,7 +118,7 @@ hw.audioInput=yes
 hw.battery=yes
 hw.camera.back=virtualscene
 hw.camera.front=emulated
-hw.cpu.arch=arm64
+hw.cpu.arch=$IMAGE_CPU_ARCH
 hw.cpu.ncore=2
 hw.dPad=no
 hw.device.hash2=MD5:2016577e1656e8e7c2adb0fac972beea
