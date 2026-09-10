@@ -97,7 +97,7 @@ jobs:
       - name: Test a disposable system service under the runner account
         env:
           DEV_ANYWHERE_TEST_SYSTEM_SERVICE: "1"
-        run: pnpm --filter @dev-anywhere/proxy test src/__tests__/integration/system-service-registration.test.ts --maxWorkers=1
+        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/system-service-registration.test.ts --maxWorkers=1
 
   windows-proxy:
     name: Native Windows Proxy
