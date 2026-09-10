@@ -8,6 +8,7 @@ describe("loadProxyRuntimeEnv", () => {
       relayUrl: undefined,
       relayProxyToken: undefined,
       hookPort: undefined,
+      autoUpdateRetryInitialMs: undefined,
       claudeBin: undefined,
       codexBin: undefined,
       kimiBin: undefined,
@@ -44,6 +45,18 @@ describe("loadProxyRuntimeEnv", () => {
     expect(loadProxyRuntimeEnv({ LOG_LEVEL: "debug" }).logLevel).toBe("debug");
     expect(loadProxyRuntimeEnv({ LOG_LEVEL: "silent" }).logLevel).toBe("silent");
     expect(() => loadProxyRuntimeEnv({ LOG_LEVEL: "verbose" })).toThrow(/LOG_LEVEL/);
+  });
+
+  it("parses the update retry interval and rejects unsafe timer values", () => {
+    expect(
+      loadProxyRuntimeEnv({ DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS: "10000" })
+        .autoUpdateRetryInitialMs,
+    ).toBe(10000);
+    for (const value of ["0", "-1", "1.5", "NaN", "Infinity", "2147483648"]) {
+      expect(() =>
+        loadProxyRuntimeEnv({ DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS: value }),
+      ).toThrow(/DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS/);
+    }
   });
 
   it("flags VITEST as truthy whenever the var is set", () => {

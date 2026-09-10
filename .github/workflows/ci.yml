@@ -15,7 +15,7 @@ jobs:
   automatic-updates:
     name: Native automatic update (${{ matrix.os }}, ${{ matrix.mode }})
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
+    timeout-minutes: 20
     strategy:
       fail-fast: false
       matrix:
@@ -32,7 +32,9 @@ jobs:
           cache: pnpm
       - run: pnpm install --frozen-lockfile
       - run: pnpm build
-      - name: Verify consecutive upgrades, retained shells and the real 15-minute retry
+      - name: Verify consecutive upgrades, retained shells and automatic retry
+        env:
+          DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS: "10000"
         run: pnpm --filter @dev-anywhere/proxy exec tsx scripts/verify-auto-update.ts --${{ matrix.mode }}
       - uses: actions/upload-artifact@v4
         if: always()
@@ -158,7 +160,7 @@ jobs:
       - name: Test a disposable SCM service under an ordinary user without desktop login
         env:
           DEV_ANYWHERE_TEST_SYSTEM_SERVICE: "1"
-        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/windows-system-service.test.ts --maxWorkers=1 --hookTimeout=30000
+        run: pnpm --filter @dev-anywhere/proxy exec vitest run src/__tests__/integration/windows-system-service.test.ts src/__tests__/integration/windows-pipe-permissions.test.ts --maxWorkers=1 --hookTimeout=30000
       - name: Test native processes, IPC, terminal handover and startup registration
         shell: pwsh
         run: |

@@ -51,6 +51,7 @@ const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!
 
 afterEach(() => {
   vi.useRealTimers();
+  vi.unstubAllEnvs();
   vi.mocked(spawn).mockReset();
   vi.mocked(terminateOwnedProcessTree).mockClear();
   Object.defineProperty(process, "platform", platformDescriptor);
@@ -495,6 +496,48 @@ describe("auto-update restart recovery", () => {
 });
 
 describe("Relay auto-update coordinator", () => {
+  it.each([
+    {
+      interval: undefined,
+      delays: [900000, 1800000, 3600000, 7200000, 14400000, 21600000, 21600000],
+    },
+    { interval: "10000", delays: [10000, 20000, 40000] },
+  ])(
+    "uses the configured retry interval with exponential backoff: $interval",
+    async ({ interval, delays }) => {
+      vi.useFakeTimers();
+      vi.stubEnv("DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS", interval);
+      const child = fakeChild();
+      const spawnRunner = vi.fn(() => child);
+      const logger = fakeLogger();
+      const updater = createRelayAutoUpdater({
+        enabled: true,
+        packagedRuntime: true,
+        profileName: "default",
+        relayName: "cloud",
+        runningVersion: "0.9.9",
+        logger,
+        spawnRunner,
+      });
+      try {
+        updater.considerRelayVersion("0.9.10");
+        for (const [index, delay] of delays.entries()) {
+          child.emit("exit", 1);
+          expect(logger.warn).toHaveBeenLastCalledWith(
+            { targetVersion: "0.9.10", retryInMs: delay, attempt: index + 1 },
+            "Proxy auto-update will retry",
+          );
+          await vi.advanceTimersByTimeAsync(delay - 1);
+          expect(spawnRunner).toHaveBeenCalledTimes(index + 1);
+          await vi.advanceTimersByTimeAsync(1);
+          expect(spawnRunner).toHaveBeenCalledTimes(index + 2);
+        }
+      } finally {
+        updater.dispose();
+      }
+    },
+  );
+
   it("starts one runner for a newer Relay and retries a failed update", async () => {
     vi.useFakeTimers();
     const children: ChildProcess[] = [];
