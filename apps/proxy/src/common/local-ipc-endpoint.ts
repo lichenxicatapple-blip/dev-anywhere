@@ -13,6 +13,7 @@ export function prepareLocalIpcEndpoint(endpoint: string): void {
 
 export function setLocalIpcEndpointPermissions(endpoint: string): void {
   // Do not enable readableAll/writableAll: access must stay limited to this account.
+  // Listeners must not send data until the client writes and passes protocol admission.
   if (isNamedPipeEndpoint(endpoint)) setWindowsPipePermissions(endpoint);
   else chmodSync(endpoint, 0o600);
 }

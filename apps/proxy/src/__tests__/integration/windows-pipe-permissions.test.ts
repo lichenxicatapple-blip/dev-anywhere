@@ -9,6 +9,7 @@ import { describe, expect, it } from "vitest";
 import { psString } from "#src/common/autostart-definition.js";
 import { localIpcEndpointPath } from "#src/common/paths.js";
 import { setLocalIpcEndpointPermissions } from "#src/common/local-ipc-endpoint.js";
+import { WINDOWS_SERVICE_POWERSHELL_PREAMBLE } from "#src/common/windows-service.js";
 
 // Native access checks with real Windows tokens, including the administrator's filtered token.
 // The test never needs the password of the runner or an existing user.
@@ -109,7 +110,9 @@ describe.skipIf(
           "-NoProfile",
           "-NonInteractive",
           "-EncodedCommand",
-          Buffer.from(`$ErrorActionPreference='Stop';\n${script}`, "utf16le").toString("base64"),
+          Buffer.from(`${WINDOWS_SERVICE_POWERSHELL_PREAMBLE}\n${script}`, "utf16le").toString(
+            "base64",
+          ),
         ],
         { encoding: "utf8", timeout: 30_000, windowsHide: true },
       );
@@ -124,7 +127,8 @@ describe.skipIf(
     try {
       writeFileSync(source, CLIENT);
       powershell(`Add-Type -Path ${psString(source)} -ReferencedAssemblies 'System.dll','System.Core.dll' -OutputAssembly ${psString(program)} -OutputType ConsoleApplication;
-New-LocalUser -Name ${psString(user)} -Password (ConvertTo-SecureString ${psString(password)} -AsPlainText -Force) -AccountNeverExpires | Out-Null;`);
+$account = New-LocalUser -Name ${psString(user)} -Password (ConvertTo-SecureString ${psString(password)} -AsPlainText -Force) -AccountNeverExpires;
+Add-LocalGroupMember -SID 'S-1-5-32-545' -Member $account;`);
       await new Promise<void>((resolve, reject) => {
         server.once("error", reject);
         server.listen(endpoint, resolve);
@@ -154,7 +158,9 @@ New-LocalUser -Name ${psString(user)} -Password (ConvertTo-SecureString ${psStri
     } finally {
       for (const socket of sockets) socket.destroy();
       await new Promise<void>((resolve) => server.close(() => resolve()));
-      powershell(`Remove-LocalUser -Name ${psString(user)} -ErrorAction SilentlyContinue;`);
+      powershell(
+        `if (Get-LocalUser -Name ${psString(user)} -ErrorAction SilentlyContinue) { Remove-LocalUser -Name ${psString(user)}; }; exit 0;`,
+      );
       rmSync(root, { recursive: true, force: true });
     }
   }, 60_000);
