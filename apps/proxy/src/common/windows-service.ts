@@ -4,6 +4,12 @@ import { buildProxyProfilePaths } from "./paths.js";
 import { quoteWindowsArgument } from "./command-launch.js";
 import { checkAutostartText, psString } from "./autostart-definition.js";
 
+// A CLI launched from pwsh can inherit PowerShell 7 modules, incompatible with powershell.exe.
+export const WINDOWS_SERVICE_POWERSHELL_PREAMBLE = `$ErrorActionPreference = 'Stop';
+$env:PSModulePath = $PSHOME + '\\Modules';
+$ProgressPreference = 'SilentlyContinue';
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false);`;
+
 function encoded(value: string): string {
   return `Decode("${Buffer.from(checkAutostartText(value), "utf8").toString("base64")}")`;
 }
@@ -74,25 +80,27 @@ public sealed class DevAnywhereService : ServiceBase {
       if (!stopping) { ExitCode = child.ExitCode; Stop(); }
     });
   }
-  protected override void OnStop() {
+  private void StopChild(bool requestedStop) {
     stopping = true;
     if (child == null) return;
     if (!child.HasExited) {
-      RequestAdditionalTime(120000);
+      if (requestedStop) RequestAdditionalTime(120000);
       try { child.StandardInput.WriteLine("stop"); child.StandardInput.Flush(); }
       catch (IOException) { }
       if (!child.WaitForExit(110000)) { child.Kill(); ExitCode = 1; }
     }
   }
-  protected override void OnShutdown() { OnStop(); }
+  protected override void OnStop() { StopChild(true); }
+  protected override void OnShutdown() { StopChild(false); }
   public static int Main(string[] args) {
     using (var service = new DevAnywhereService()) {
       // Native tests exercise the compiled process/pipe contract without installing an OS service.
-      if (args.Length == 1 && args[0] == "--console-test") {
+      if (args.Length == 1 && (args[0] == "--console-test" || args[0] == "--console-shutdown-test")) {
         try {
           service.StartChild();
           ThreadPool.QueueUserWorkItem(_ => {
             Console.ReadLine();
+            if (args[0] == "--console-shutdown-test") { service.OnShutdown(); return; }
             try { service.child.StandardInput.WriteLine("stop"); service.child.StandardInput.Flush(); }
             catch (IOException) { }
           });

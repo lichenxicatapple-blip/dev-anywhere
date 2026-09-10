@@ -16,7 +16,11 @@ import {
   type AutostartOptions,
 } from "./autostart-definition.js";
 import { buildProxyProfilePaths } from "./paths.js";
-import { buildWindowsService, windowsServiceRegistration } from "./windows-service.js";
+import {
+  buildWindowsService,
+  windowsServiceRegistration,
+  WINDOWS_SERVICE_POWERSHELL_PREAMBLE,
+} from "./windows-service.js";
 
 const execFileAsync = promisify(execFile);
 async function runCommand(command: string, args: string[]): Promise<string> {
@@ -89,10 +93,9 @@ export function createSystemServiceAutostart(
       "-NoProfile",
       "-NonInteractive",
       "-EncodedCommand",
-      Buffer.from(
-        `$ErrorActionPreference = 'Stop';\n[Console]::OutputEncoding = New-Object Text.UTF8Encoding($false);\n${script}`,
-        "utf16le",
-      ).toString("base64"),
+      Buffer.from(`${WINDOWS_SERVICE_POWERSHELL_PREAMBLE}\n${script}`, "utf16le").toString(
+        "base64",
+      ),
     ]);
   const privileged = (command: string, commandArgs: string[]) =>
     interactive("/usr/bin/sudo", [command, ...commandArgs]);
@@ -129,7 +132,7 @@ export function createSystemServiceAutostart(
         ),
       );
     const source = `param([switch]$Elevated)
-$ErrorActionPreference = 'Stop';
+${WINDOWS_SERVICE_POWERSHELL_PREAMBLE}
 $principal = New-Object Security.Principal.WindowsPrincipal([Security.Principal.WindowsIdentity]::GetCurrent());
 if (!$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)) {
   if ($Elevated) { throw 'Administrator privileges are required to install a system service'; }

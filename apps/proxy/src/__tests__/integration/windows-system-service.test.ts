@@ -8,7 +8,11 @@ import { join, win32 } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { describe, expect, it } from "vitest";
 import { psString } from "#src/common/autostart-definition.js";
-import { buildWindowsService, windowsServiceRegistration } from "#src/common/windows-service.js";
+import {
+  buildWindowsService,
+  windowsServiceRegistration,
+  WINDOWS_SERVICE_POWERSHELL_PREAMBLE,
+} from "#src/common/windows-service.js";
 
 function powershell(script: string): string {
   return execFileSync(
@@ -23,49 +27,55 @@ function powershell(script: string): string {
       "-NoProfile",
       "-NonInteractive",
       "-EncodedCommand",
-      Buffer.from(`$ErrorActionPreference = 'Stop';\n${script}`, "utf16le").toString("base64"),
+      Buffer.from(`${WINDOWS_SERVICE_POWERSHELL_PREAMBLE}\n${script}`, "utf16le").toString(
+        "base64",
+      ),
     ],
     { timeout: 45_000, windowsHide: true, encoding: "utf8" },
   ).trim();
 }
 
 describe.skipIf(process.platform !== "win32")("native Windows service wrapper", () => {
-  it("compiles the SCM entrypoint and forwards its private stop pipe and user environment", async () => {
-    const home = await mkdtemp(join(tmpdir(), "da-service test-"));
-    try {
-      const wrapper = buildWindowsService({
-        home,
-        profile: "test",
-        label: "dev-anywhere-test",
-        executable: process.execPath,
-        args: [
-          "-e",
-          "console.log(JSON.stringify({home:process.env.HOME,userprofile:process.env.USERPROFILE,args:process.argv.slice(1)}));process.stdin.on('data',()=>{console.log('stopped');process.exit(7)});",
-          "--",
-          'a "b"',
-          "尾部\\",
-        ],
-        env: { HOME: home, USERPROFILE: home },
-      });
-      powershell(wrapper.compileScript);
-      const child = spawn(wrapper.path, ["--console-test"], {
-        windowsHide: true,
-        stdio: ["pipe", "ignore", "ignore"],
-      });
-      const exit = new Promise<number | null>((resolve, reject) => {
-        child.once("error", reject);
-        child.once("exit", resolve);
-      });
-      child.stdin.end("stop\n");
-      expect(await exit).toBe(7);
-      const log = await readFile(wrapper.logPath, "utf8");
-      const result = JSON.parse(log.match(/stdout: (\{.*\})/)![1]!);
-      expect(result).toEqual({ home, userprofile: home, args: ['a "b"', "尾部\\"] });
-      expect(log).toContain("stdout: stopped");
-    } finally {
-      await rm(home, { recursive: true, force: true });
-    }
-  }, 60_000);
+  it.each(["--console-test", "--console-shutdown-test"])(
+    "forwards stop/shutdown and the user environment (%s)",
+    async (mode) => {
+      const home = await mkdtemp(join(tmpdir(), "da-service test-"));
+      try {
+        const wrapper = buildWindowsService({
+          home,
+          profile: "test",
+          label: "dev-anywhere-test",
+          executable: process.execPath,
+          args: [
+            "-e",
+            "console.log(JSON.stringify({home:process.env.HOME,userprofile:process.env.USERPROFILE,args:process.argv.slice(1)}));process.stdin.on('data',()=>{console.log('stopped');process.exit(7)});",
+            "--",
+            'a "b"',
+            "尾部\\",
+          ],
+          env: { HOME: home, USERPROFILE: home },
+        });
+        powershell(wrapper.compileScript);
+        const child = spawn(wrapper.path, [mode], {
+          windowsHide: true,
+          stdio: ["pipe", "ignore", "ignore"],
+        });
+        const exit = new Promise<number | null>((resolve, reject) => {
+          child.once("error", reject);
+          child.once("exit", resolve);
+        });
+        child.stdin.end("stop\n");
+        expect(await exit).toBe(7);
+        const log = await readFile(wrapper.logPath, "utf8");
+        const result = JSON.parse(log.match(/stdout: (\{.*\})/)![1]!);
+        expect(result).toEqual({ home, userprofile: home, args: ['a "b"', "尾部\\"] });
+        expect(log).toContain("stdout: stopped");
+      } finally {
+        await rm(home, { recursive: true, force: true });
+      }
+    },
+    60_000,
+  );
 });
 
 describe.skipIf(
@@ -130,7 +140,8 @@ $account = Get-LocalUser -Name ${psString(name)} -ErrorAction SilentlyContinue;
 if ($account) {
   Get-CimInstance Win32_UserProfile | Where-Object { $_.SID -eq $account.SID.Value } | Remove-CimInstance;
   Remove-LocalUser -Name ${psString(name)};
-}`);
+}
+exit 0;`);
       } finally {
         await rm(home, { recursive: true, force: true });
       }
