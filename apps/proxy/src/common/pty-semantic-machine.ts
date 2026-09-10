@@ -73,11 +73,14 @@ export function decidePtySemanticTransition(input: PtyTransitionInput): PtyTrans
   }
 
   // 3. 审批上下文兜底：currentState=approval_wait 或 sessionState 已是 WAITING_APPROVAL 但还没收到
-  //    解除信号。此时即便有其它信号也不应让 PTY 状态偏离审批等待，仍 re-emit approval_wait。
+  //    解除信号。只在首次接纳外部审批状态时 emit；普通输出和标题刷新不能制造新的审批事件。
   //    turn_complete 不在此列：它是合法的解除终点（由 #2 处理）。
   const inApprovalContext =
     currentState === "approval_wait" || sessionStateIsWaitingApproval === true;
   if (inApprovalContext && signal?.state !== "turn_complete") {
+    if (currentState === "approval_wait") {
+      return { nextState: "approval_wait", emit: false };
+    }
     return { nextState: "approval_wait", emit: true, meta: withMeta(signal) };
   }
 

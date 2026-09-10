@@ -101,5 +101,9 @@ if (matchingProfileNames.length > 1) {
   );
 }
 
-process.stdout.write(`RESOLVED_PROFILE=${profileName}\n`);
-process.stdout.write(`RESOLVED_RELAY=${relayName}\n`);
+if (process.argv.includes("--json")) {
+  process.stdout.write(JSON.stringify({ profile: profileName, relay: relayName }) + "\n");
+} else {
+  process.stdout.write(`RESOLVED_PROFILE=${profileName}\n`);
+  process.stdout.write(`RESOLVED_RELAY=${relayName}\n`);
+}

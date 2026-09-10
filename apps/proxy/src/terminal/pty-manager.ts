@@ -3,6 +3,7 @@ import type { IPty } from "node-pty";
 import type { ProviderAdapter, ProviderHookContext } from "../providers/index.js";
 import { readTtySize, restoreHostTerminalModes } from "./tty.js";
 import { prepareCommandLaunch } from "../common/command-launch.js";
+import { createPtyInputCompat } from "../common/pty-input-compat.js";
 
 interface PtyManagerOptions {
   provider: ProviderAdapter;
@@ -22,6 +23,7 @@ export class PtyManager {
   private child: IPty | null = null;
   private resizeTimer: ReturnType<typeof setTimeout> | null = null;
   private readonly provider: ProviderAdapter;
+  private readonly inputCompat: ReturnType<typeof createPtyInputCompat>;
   private readonly providerArgs: string[];
   private readonly cwd: string;
   private readonly initialSize?: { cols: number; rows: number };
@@ -35,6 +37,7 @@ export class PtyManager {
 
   constructor(options: PtyManagerOptions) {
     this.provider = options.provider;
+    this.inputCompat = createPtyInputCompat(options.provider.id);
     this.providerArgs = options.providerArgs;
     this.cwd = options.cwd;
     this.initialSize = options.initialSize;
@@ -62,6 +65,12 @@ export class PtyManager {
       this.cwd,
     );
     const child = pty.spawn(launch.command, launch.ptyArgs ?? launch.args, {
+      // The bundled ConPTY preserves VT synchronized-output boundaries. The system
+      // backend can expose intermediate redraw cursors outside those boundaries.
+      // node-pty ships the DLL only for x64/arm64; other architectures keep the system backend.
+      ...(process.platform === "win32" && ["x64", "arm64"].includes(process.arch)
+        ? { useConptyDll: true }
+        : {}),
       name: process.env.TERM ?? "xterm-256color",
       cols,
       rows,
@@ -81,6 +90,7 @@ export class PtyManager {
     this.stdin.on("data", (data: Buffer) => {
       const input = data.toString();
       this.onInput?.(input);
+      this.inputCompat.observe(input);
       child.write(input);
     });
 
@@ -145,7 +155,7 @@ export class PtyManager {
   // 向 PTY 子进程写入数据，用于远程输入注入
   write(data: string): void {
     this.onInput?.(data);
-    this.child?.write(data);
+    this.child?.write(this.inputCompat.encodeRemote(data));
   }
 
   // 关闭 raw mode 并吞掉 stdin 已关闭场景下的异常。退出 / cleanup 两条路径共用。

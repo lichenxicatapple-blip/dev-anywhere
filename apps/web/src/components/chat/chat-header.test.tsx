@@ -168,6 +168,8 @@ describe("ChatHeader PTY upload menu", () => {
       ptyFontSize: 14,
       chatContentFontSize: 14,
       selectedProxyId: "proxy-1",
+      connected: true,
+      proxyOnline: true,
     });
   });
 
@@ -197,6 +199,22 @@ describe("ChatHeader PTY upload menu", () => {
     fireEvent.click(item);
 
     expect(useSessionStore.getState().ptyAutoYesBySessionKey[key]).toBe(enabled ? undefined : true);
+  });
+
+  it("disables unreliable automatic Enter for Codex even with an existing grant", async () => {
+    const key = ptyAutoYesSessionKey("proxy-1", "s1")!;
+    useSessionStore.setState((state) => ({
+      sessions: state.sessions.map((session) =>
+        session.kind === "agent" ? { ...session, provider: "codex" } : session,
+      ),
+      ptyAutoYesBySessionKey: { [key]: true },
+    }));
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
+    fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+    const item = await screen.findByRole("menuitemcheckbox", { name: /Always yes/ });
+    expect(item).toHaveAttribute("aria-disabled", "true");
+    expect(item).toHaveAttribute("aria-checked", "false");
+    expect(item).toHaveTextContent("Codex 终端请手动确认审批");
   });
 
   it.each(["agent", "terminal"] as const)("offers manual fit for a hosted %s PTY", async (kind) => {
@@ -394,6 +412,7 @@ describe("ChatHeader PTY upload menu", () => {
       "在会话中查找",
       "重命名",
       "发送 Ctrl+O",
+      "发送 Ctrl+R",
       "上传照片或视频",
       "上传文件",
       "恢复默认",
@@ -408,6 +427,7 @@ describe("ChatHeader PTY upload menu", () => {
     expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(screen.queryByRole("menuitemcheckbox", { name: "输入方式" })).toBeNull();
     expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
+    expect(screen.getByText("^R").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(menu?.querySelector('[data-slot="chat-menu-font-row"]')).not.toBeNull();
     expect(
       menu?.querySelector('[data-slot="chat-menu-font-row"] [data-slot="chat-menu-icon"]'),
@@ -418,6 +438,335 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.queryByText("聊天字号")).toBeNull();
     expect(screen.queryByText("显示")).toBeNull();
   });
+
+  function renderHeaderWithPtyFocus(
+    options: {
+      mode?: "pty" | "json";
+      inputSessionId?: string;
+      active?: boolean;
+    } = {},
+  ) {
+    const { mode = "pty", inputSessionId = "s1", active = true } = options;
+    render(
+      <>
+        <ChatHeader
+          sessionId="s1"
+          mode={mode}
+          onFind={() => {
+            requestAnimationFrame(() => screen.getByLabelText("测试查找").focus());
+          }}
+        />
+        <input aria-label="测试查找" />
+        <div
+          data-slot="pty-keepalive-entry"
+          data-session-id={inputSessionId}
+          data-active={String(active)}
+        >
+          <div data-slot="pty-host">
+            <textarea aria-label="Terminal input" className="xterm-helper-textarea" />
+          </div>
+        </div>
+      </>,
+    );
+    return {
+      input: screen.getByLabelText("Terminal input"),
+      trigger: screen.getByRole("button", { name: "会话操作" }),
+    };
+  }
+
+  async function openMenuWithPointer(trigger: HTMLElement) {
+    // jsdom has no native PointerEvent; a MouseEvent with the pointerdown type supplies the
+    // button/ctrlKey fields Radix uses while exercising React's real capture/bubble handlers.
+    fireEvent(trigger, new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false }));
+    return screen.findByRole("menu");
+  }
+
+  it("returns Escape dismissal to the current PTY input after opening the menu with a pointer", async () => {
+    const { input, trigger } = renderHeaderWithPtyFocus();
+    input.focus();
+    const menu = await openMenuWithPointer(trigger);
+    fireEvent.keyDown(menu, { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(input).toHaveFocus());
+    expect(sendRawSpy).not.toHaveBeenCalled();
+  });
+
+  it("keeps keyboard navigation focus on the menu trigger after Escape", async () => {
+    const { input, trigger } = renderHeaderWithPtyFocus();
+    input.focus();
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "Enter" });
+    fireEvent.keyDown(await screen.findByRole("menu"), { key: "Escape" });
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(trigger).toHaveFocus());
+  });
+
+  it.each(["json", "other-session", "inactive"] as const)(
+    "does not restore PTY focus from an unrelated %s input",
+    async (scenario) => {
+      if (scenario === "json") {
+        useSessionStore.setState({
+          sessions: [
+            {
+              sessionId: "s1",
+              kind: "agent",
+              mode: "json",
+              provider: "claude",
+              state: "idle",
+              cwd: "/tmp/project",
+              lastActive: 1,
+            },
+          ],
+        });
+      }
+      const { input, trigger } = renderHeaderWithPtyFocus({
+        mode: scenario === "json" ? "json" : "pty",
+        inputSessionId: scenario === "other-session" ? "other-session" : "s1",
+        active: scenario !== "inactive",
+      });
+      input.focus();
+      fireEvent.keyDown(await openMenuWithPointer(trigger), { key: "Escape" });
+
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      await waitFor(() => expect(trigger).toHaveFocus());
+    },
+  );
+
+  it.each(["在会话中查找", "重命名"])(
+    "does not restore PTY focus when selecting %s",
+    async (action) => {
+      const { input, trigger } = renderHeaderWithPtyFocus();
+      input.focus();
+      await openMenuWithPointer(trigger);
+      fireEvent.click(screen.getByRole("menuitem", { name: action }));
+
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      const destination = await screen.findByLabelText(
+        action === "重命名" ? "会话标题" : "测试查找",
+      );
+      await waitFor(() => expect(destination).toHaveFocus());
+      expect(input).not.toHaveFocus();
+    },
+  );
+
+  it("leaves focus on an outside control that dismisses the PTY menu", async () => {
+    const { input, trigger } = renderHeaderWithPtyFocus();
+    input.focus();
+    await openMenuWithPointer(trigger);
+    const outside = screen.getByLabelText("测试查找");
+    fireEvent(outside, new MouseEvent("pointerdown", { bubbles: true, button: 0, ctrlKey: false }));
+    outside.focus();
+
+    await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+    await waitFor(() => expect(outside).toHaveFocus());
+  });
+
+  it.each(["agent", "terminal"] as const)(
+    "sends Ctrl+R to %s PTY sessions from the shared overflow menu",
+    async (kind) => {
+      useSessionStore.setState({
+        sessions: [
+          {
+            sessionId: "s1",
+            kind,
+            mode: "pty",
+            provider: "claude",
+            state: "idle",
+            ptyOwner: "proxy-hosted",
+            cwd: "/tmp/project",
+            lastActive: 1,
+          },
+        ],
+      });
+      render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
+
+      fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      const item = await screen.findByRole("menuitem", { name: "发送 Ctrl+R" });
+      expect(item).not.toHaveAttribute("aria-disabled", "true");
+      if (kind === "terminal") {
+        item.focus();
+        fireEvent.keyDown(item, { key: "Enter" });
+      } else {
+        fireEvent.click(item);
+      }
+
+      expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", "\x12");
+      await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+
+      sendRawSpy.mockClear();
+      fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      fireEvent.click(await screen.findByRole("menuitem", { name: "发送 Ctrl+O" }));
+      expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", "\x0f");
+    },
+  );
+
+  it.each(["disconnected", "proxy-offline", "session-error"])(
+    "does not send Ctrl+R when %s",
+    async (status) => {
+      if (status === "disconnected") useAppStore.setState({ connected: false });
+      if (status === "proxy-offline") useAppStore.setState({ proxyOnline: false });
+      if (status === "session-error") {
+        useSessionStore.setState({
+          sessions: useSessionStore.getState().sessions.map((session) => ({
+            ...session,
+            state: "error",
+          })),
+        });
+      }
+      render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
+
+      fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      const item = await screen.findByRole("menuitem", { name: "发送 Ctrl+R" });
+      expect(item).toHaveAttribute("aria-disabled", "true");
+      fireEvent.click(item);
+      expect(sendRawSpy).not.toHaveBeenCalled();
+    },
+  );
+
+  it("does not offer Ctrl+R for JSON chat sessions", async () => {
+    useSessionStore.setState({
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
+    });
+    render(<ChatHeader onFind={() => {}} sessionId="s1" mode="json" />);
+
+    fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+    await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+R" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+O" })).toBeNull();
+  });
+
+  function configureCodexQuestionSession(
+    ptyOwner: "local-terminal" | "proxy-hosted" = "local-terminal",
+    state: "working" | "error" = "working",
+  ) {
+    useSessionStore.setState({
+      sessions: [
+        {
+          sessionId: "s1",
+          kind: "agent",
+          mode: "pty",
+          provider: "codex",
+          state,
+          ptyOwner,
+          cwd: "/tmp/project",
+          lastActive: 1,
+        },
+      ],
+      ptyAutoYesBySessionKey: { [ptyAutoYesSessionKey("proxy-1", "s1")!]: true },
+    });
+  }
+
+  it.each(["local-terminal", "proxy-hosted"] as const)(
+    "sends manual Codex question shortcuts while %s is working and Always yes is disabled",
+    async (ptyOwner) => {
+      configureCodexQuestionSession(ptyOwner);
+      render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
+
+      for (const [name, data] of [
+        ["发送 Alt+↑", "\x1b[1;3A"],
+        ["发送 Alt+↓", "\x1b[1;3B"],
+        ["发送 Ctrl+]", "\x1d"],
+      ]) {
+        sendRawSpy.mockClear();
+        fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+        const item = await screen.findByRole("menuitem", { name });
+        expect(item).not.toHaveAttribute("aria-disabled", "true");
+        expect(item.querySelector('[data-slot="chat-menu-icon"] .lucide-keyboard')).not.toBeNull();
+        if (ptyOwner === "local-terminal") fireEvent.click(item);
+        else {
+          item.focus();
+          fireEvent.keyDown(item, { key: "Enter" });
+        }
+        expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", data);
+        await waitFor(() => expect(screen.queryByRole("menu")).toBeNull());
+      }
+    },
+  );
+
+  it.each(["claude", "kimi", "terminal", "codex-json"] as const)(
+    "does not offer Codex question shortcuts for %s sessions",
+    async (kind) => {
+      useSessionStore.setState({
+        sessions: [
+          kind === "codex-json"
+            ? {
+                sessionId: "s1",
+                kind: "agent",
+                mode: "json",
+                provider: "codex",
+                state: "working",
+                cwd: "/tmp/project",
+                lastActive: 1,
+              }
+            : kind === "terminal"
+              ? {
+                  sessionId: "s1",
+                  kind: "terminal",
+                  mode: "pty",
+                  provider: "claude",
+                  state: "working",
+                  ptyOwner: "proxy-hosted",
+                  cwd: "/tmp/project",
+                  lastActive: 1,
+                }
+              : {
+                  sessionId: "s1",
+                  kind: "agent",
+                  mode: "pty",
+                  provider: kind,
+                  state: "working",
+                  ptyOwner: "local-terminal",
+                  cwd: "/tmp/project",
+                  lastActive: 1,
+                },
+        ],
+      });
+      render(
+        <ChatHeader
+          onFind={() => {}}
+          sessionId="s1"
+          mode={kind === "codex-json" ? "json" : "pty"}
+        />,
+      );
+      fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      await screen.findByRole("menu");
+      expect(document.querySelector('[data-slot^="chat-menu-codex-question-"]')).toBeNull();
+    },
+  );
+
+  it.each(["disconnected", "proxy-offline", "session-error"] as const)(
+    "does not send Codex question shortcuts when %s",
+    async (status) => {
+      configureCodexQuestionSession(
+        "local-terminal",
+        status === "session-error" ? "error" : "working",
+      );
+      if (status === "disconnected") useAppStore.setState({ connected: false });
+      if (status === "proxy-offline") useAppStore.setState({ proxyOnline: false });
+      render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
+      fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      await screen.findByRole("menu");
+
+      for (const name of ["发送 Alt+↑", "发送 Alt+↓", "发送 Ctrl+]"]) {
+        const item = screen.getByRole("menuitem", { name });
+        expect(item).toHaveAttribute("aria-disabled", "true");
+        fireEvent.click(item);
+      }
+      expect(sendRawSpy).not.toHaveBeenCalled();
+    },
+  );
 
   it.each([
     ["insecure-context", "屏幕常亮（需要 HTTPS）"],

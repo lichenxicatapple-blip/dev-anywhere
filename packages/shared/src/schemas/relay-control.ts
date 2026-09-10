@@ -88,6 +88,15 @@ export const AgentCliStatusSchema = z.object({
 });
 export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
 
+export const TerminalShellSchema = z.enum(["powershell", "cmd"]);
+export type TerminalShell = z.infer<typeof TerminalShellSchema>;
+
+export const TerminalShellOptionSchema = z.object({
+  id: TerminalShellSchema,
+  label: z.string().min(1),
+});
+export type TerminalShellOption = z.infer<typeof TerminalShellOptionSchema>;
+
 export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
 export type DirEntry = z.infer<typeof DirEntrySchema>;
 
@@ -357,6 +366,7 @@ const ProxyInfoResponseSchema = z.object({
   ...RequestIdShape,
   homePath: z.string(),
   agentCli: AgentCliStatusSchema,
+  terminalShells: z.array(TerminalShellOptionSchema).optional(),
 });
 const PreviewStaticInspectResponseSchema = z.discriminatedUnion("success", [
   z.object({
@@ -704,6 +714,7 @@ const TerminalSessionCreateSchema = z
     ...RequiredRequestIdShape,
     kind: z.literal("terminal"),
     name: z.string().optional(),
+    shell: TerminalShellSchema.optional(),
     mode: z.literal("pty"),
     cols: z.number().int().positive().max(PTY_INITIAL_MAX_COLS),
     rows: z.number().int().positive().max(PTY_INITIAL_MAX_ROWS),

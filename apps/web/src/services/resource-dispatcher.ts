@@ -3,6 +3,7 @@
 // 请求-响应式的 dir_list_response 由发起请求的 FilePathPicker 独占处理，避免双写缓存。
 import type { RelayControlMessage } from "@dev-anywhere/shared";
 import { useCommandStore } from "@/stores/command-store";
+import { useAppStore } from "@/stores/app-store";
 import { useFileStore } from "@/stores/file-store";
 import { registerDispatcher } from "./dispatcher-registry";
 import type { InboundMessage } from "./relay-client";
@@ -40,6 +41,13 @@ export function dispatchResourceMessage(msg: InboundMessage): void {
     case "proxy_info":
       useFileStore.getState().setHomePath(msg.homePath);
       useFileStore.getState().setAgentCli(msg.agentCli);
+      // 请求响应由带 binding scope 校验的调用方写入，避免旧开发机响应污染新绑定。
+      if (!msg.requestId) {
+        const app = useAppStore.getState();
+        if (app.selectedProxyId && app.proxyOnline && !app.proxySwitchTarget) {
+          app.setTerminalShells(msg.terminalShells);
+        }
+      }
       break;
     default:
       break;

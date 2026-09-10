@@ -103,6 +103,7 @@ export function ProxySwitcher({ layout, variant = "default" }: ProxySwitcherProp
           const fileStore = useFileStore.getState();
           fileStore.setHomePath(info.homePath);
           fileStore.setAgentCli(info.agentCli);
+          useAppStore.getState().setTerminalShells(info.terminalShells);
         })
         .catch((err: unknown) => {
           if (!previewController.isActive(relay, scope)) return;

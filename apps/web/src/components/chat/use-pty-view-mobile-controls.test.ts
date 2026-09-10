@@ -1,11 +1,35 @@
 import { describe, expect, it } from "vitest";
 import {
+  rawInputForPhysicalKeyboardEvent,
   resolvePtyContainerPaddingBottom,
   resolvePtyPhysicalKeyboardMode,
   shouldForcePtyKeyboardFollow,
   shouldShowMobilePtyControlsForState,
   shouldTreatKeydownAsPhysicalKeyboardActivity,
 } from "./use-pty-view";
+
+describe("rawInputForPhysicalKeyboardEvent", () => {
+  it("preserves submit and newline when a hardware Enter restores PTY focus", () => {
+    expect(
+      rawInputForPhysicalKeyboardEvent(new KeyboardEvent("keydown", { key: "Enter" })),
+    ).toBe("\r");
+    expect(
+      rawInputForPhysicalKeyboardEvent(
+        new KeyboardEvent("keydown", { key: "Enter", shiftKey: true }),
+      ),
+    ).toBe("\n");
+  });
+
+  it("leaves composing Enter and modified shortcuts to their existing input handlers", () => {
+    for (const modifier of ["isComposing", "altKey", "ctrlKey", "metaKey"] as const) {
+      expect(
+        rawInputForPhysicalKeyboardEvent(
+          new KeyboardEvent("keydown", { key: "Enter", shiftKey: true, [modifier]: true }),
+        ),
+      ).toBeNull();
+    }
+  });
+});
 
 describe("shouldShowMobilePtyControlsForState", () => {
   it("shows mobile PTY controls only after the soft keyboard is open", () => {

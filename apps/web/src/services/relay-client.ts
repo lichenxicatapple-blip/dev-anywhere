@@ -25,6 +25,7 @@ import type {
   PreviewScope,
   RelayClientInfo,
   RelayControlMessage,
+  TerminalShellOption,
   TunnelProvider,
   VoiceConfigUpdate,
   VoiceCapabilities,
@@ -167,6 +168,7 @@ type PreviewRequestFailure = { error: string; errorCode: ControlErrorCodeType };
 type ProxyEnvironmentInfo = {
   homePath: string;
   agentCli: AgentCliStatus;
+  terminalShells?: TerminalShellOption[];
 };
 type WebPreviewCapabilityResult =
   | { success: true; capability: WebPreviewCapability }
@@ -677,6 +679,7 @@ export class RelayClient {
     ).then((resp) => ({
       homePath: resp.homePath,
       agentCli: resp.agentCli,
+      ...(resp.terminalShells ? { terminalShells: resp.terminalShells } : {}),
     }));
   }
 

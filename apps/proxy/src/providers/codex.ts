@@ -80,6 +80,10 @@ export const CODEX_PROVIDER: ProviderAdapter = {
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     const args = withCodexTerminalPermissionArgs(options.args, options.permissionMode);
+    // Disable Codex composer sparkles for every terminal entry point. Keep this
+    // override last, but before `--` so it cannot become part of the prompt.
+    const separator = args.indexOf("--");
+    args.splice(separator === -1 ? args.length : separator, 0, "-c", "tui.whimsy=false");
     return {
       command: resolveCodexCommand(env, options.cwd),
       args,

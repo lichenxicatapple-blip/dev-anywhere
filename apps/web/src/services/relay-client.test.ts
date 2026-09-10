@@ -828,6 +828,27 @@ describe("RelayClient request handling", () => {
     });
   });
 
+  it("preserves Windows shell choices in proxy info", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestProxyInfo();
+    const terminalShells = [
+      { id: "powershell", label: "PowerShell 7" },
+      { id: "cmd", label: "CMD" },
+    ];
+    ws.emit({
+      type: "proxy_info",
+      requestId: sentRequestId(ws),
+      homePath: "C:/Users/dev",
+      agentCli: {
+        claude: { available: false },
+        codex: { available: false },
+        kimi: { available: false },
+      },
+      terminalShells,
+    });
+    await expect(promise).resolves.toMatchObject({ terminalShells });
+  });
+
   it("updates an Agent CLI path through the selected proxy", async () => {
     const { relay, ws } = createClient();
     const promise = relay.updateAgentCliPath("claude", "/home/dev/.local/bin/claude");

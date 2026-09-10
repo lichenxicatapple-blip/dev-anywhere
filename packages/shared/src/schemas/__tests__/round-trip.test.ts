@@ -100,6 +100,50 @@ describe("RelayControlSchema round-trip stability", () => {
     expect(b).toMatchObject({ name: "Release checklist", cols: 125, rows: 34 });
   });
 
+  it.each(["powershell", "cmd"])("terminal session_create preserves the %s choice", (shell) => {
+    const original = {
+      type: "session_create",
+      requestId: "terminal-shell",
+      kind: "terminal",
+      mode: "pty",
+      cols: 80,
+      rows: 24,
+      shell,
+    };
+    expect(roundTrip(RelayControlSchema, original)).toEqual(original);
+    expect(RelayControlSchema.safeParse({ ...original, shell: "bash" }).success).toBe(false);
+    expect(
+      RelayControlSchema.safeParse({
+        ...original,
+        kind: "agent",
+        cwd: "/tmp",
+        provider: "claude",
+      }).success,
+    ).toBe(false);
+  });
+
+  it("preserves Windows terminal shell capabilities in proxy_info", () => {
+    const original = {
+      type: "proxy_info",
+      requestId: "windows-shells",
+      homePath: "C:\\Users\\dev",
+      agentCli: {
+        claude: { available: false },
+        codex: { available: false },
+        kimi: { available: false },
+      },
+      terminalShells: [
+        { id: "powershell", label: "PowerShell 7" },
+        { id: "cmd", label: "CMD" },
+      ],
+    };
+    expect(roundTrip(RelayControlSchema, original)).toEqual(original);
+    expect(
+      RelayControlSchema.safeParse({ ...original, terminalShells: [{ id: "bash", label: "Bash" }] })
+        .success,
+    ).toBe(false);
+  });
+
   it("session_create_response minimum success shape", () => {
     const original = {
       type: "session_create_response",

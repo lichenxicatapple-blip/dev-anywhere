@@ -191,6 +191,10 @@ dev-anywhere --profile quick-tunnel kimi
 
 Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, Kimi Code, or Shell in a directory on that machine. Claude Code, Codex, and Kimi Code all offer terminal and chat modes; Kimi Code chat runs over ACP.
 
+For terminal compatibility, DEV Anywhere forces the sparkle effect off (`tui.whimsy=false`) for Codex terminal sessions started or resumed through its local CLI or Web interface; running `codex` directly still follows your own settings. Existing Codex processes must exit before you restart or resume the session to apply this setting; refreshing the browser does not apply it.
+
+Codex also uses the `Action Required` title for ordinary questions, so it cannot reliably identify permission approvals. Codex terminal sessions therefore do not offer `Always yes` automatic Enter. Handle permission prompts in the terminal, or choose the appropriate approval policy when starting the session.
+
 ## Upgrading
 
 ### Quick Tunnel
@@ -355,6 +359,8 @@ Repositories and coding agent processes remain on the development machine. The R
 - `~/.dev-anywhere/config.json` may contain a Proxy Token. Do not put it in a project directory or upload it to GitHub, GitLab, or another code-hosting service.
 
 ## Development
+
+Local development supports macOS, Linux, and native Windows 11. After installing dependencies and initializing local configuration, run `pnpm dev:restart` to start Relay, Web, and Proxy, then `pnpm dev:health` to check the connection. The default Web URL is `http://localhost:5173`. These commands work directly in PowerShell or CMD on Windows without Bash or WSL. To start Web only, run `pnpm dev:web -- --relay local --port 5173`.
 
 See the [development guide](./docs/DEVELOPMENT.md) for the repository layout, isolated local environment, test matrix, and release gates. That document is currently maintained in Chinese only.
 

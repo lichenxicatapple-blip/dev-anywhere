@@ -48,4 +48,20 @@ describe("remote-file-path", () => {
     expect(guessMimeType("/tmp/shot.png")).toBe("image/png");
     expect(guessMimeType("/tmp/archive.unknown")).toBe("application/octet-stream");
   });
+
+  it.skipIf(process.platform !== "win32")(
+    "expands Windows home paths independently of the session cwd",
+    () => {
+      const file = join(dir, "中文 预览.png");
+      writeFileSync(file, "png");
+
+      expect(resolveRemoteFilePath(`~\\${relative(homedir(), file)}`, dir)).toBe(
+        realpathSync(file),
+      );
+    },
+  );
+
+  it("resolves the home directory itself", () => {
+    expect(resolveRemoteFilePath("~", dir)).toBe(realpathSync(homedir()));
+  });
 });

@@ -5,6 +5,13 @@ import { PtyApprovalHint } from "./pty-approval-hint";
 describe("PtyApprovalHint", () => {
   afterEach(() => cleanup());
 
+  it("describes a generic input request without offering automatic Enter", () => {
+    render(<PtyApprovalHint kind="input" autoYesEnabled={true} onAutoYesChange={() => {}} />);
+    expect(screen.getByRole("status").getAttribute("aria-label")).toBe("等待输入");
+    expect(screen.queryByRole("button", { name: "Always yes" })).toBeNull();
+    expect(screen.queryByText("等待审批")).toBeNull();
+  });
+
   it("offers a session-local Always yes toggle", () => {
     const changes: boolean[] = [];
 

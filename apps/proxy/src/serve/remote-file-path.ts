@@ -37,8 +37,11 @@ export function guessMimeType(filePath: string): string {
 }
 
 export function resolveRemoteFilePath(rawPath: string, cwd: string): string {
-  const expandedPath =
-    rawPath === "~" || rawPath.startsWith("~/") ? resolve(homedir(), rawPath.slice(2)) : rawPath;
+  const isHomePath =
+    rawPath === "~" ||
+    rawPath.startsWith("~/") ||
+    (process.platform === "win32" && rawPath.startsWith("~\\"));
+  const expandedPath = isHomePath ? resolve(homedir(), rawPath.slice(2)) : rawPath;
   const candidate = isAbsolute(expandedPath) ? resolve(expandedPath) : resolve(cwd, expandedPath);
   return realpathSync(candidate);
 }

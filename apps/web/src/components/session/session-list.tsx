@@ -8,13 +8,22 @@
 // 只要历史非空就提供 "继续上次对话" 的入口, 空态仅在 active=0 && history=0 时出现
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import { useNavigate, useMatch } from "react-router";
-import { Bot, ChevronRight, Loader2, MonitorSmartphone, PlusCircle, Terminal } from "lucide-react";
+import {
+  ArrowLeft,
+  Bot,
+  ChevronRight,
+  Loader2,
+  MonitorSmartphone,
+  PlusCircle,
+  Terminal,
+} from "lucide-react";
 import { useSessionStore } from "@/stores/session-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useAppStore } from "@/stores/app-store";
 import { Button } from "@/components/ui/button";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@/components/ui/tooltip";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -24,7 +33,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { EmptyState } from "@/components/shell/empty-state";
 import { cn } from "@/lib/utils";
-import type { SessionInfo } from "@dev-anywhere/shared";
+import type { SessionInfo, TerminalShell, TerminalShellOption } from "@dev-anywhere/shared";
 import { compareProvider, providerLabel, type SessionProvider } from "@/lib/session-provider";
 import { SessionRow } from "./session-row";
 import { HistoryList } from "./history-list";
@@ -37,6 +46,7 @@ import { toast } from "@/components/toast";
 import { resolveSessionRowState } from "@/lib/session-row-state";
 import { CreateFrontendPreviewDialog } from "@/components/preview/create-frontend-preview-dialog";
 import { PreviewList } from "@/components/preview/preview-list";
+import { samePreviewScope } from "@/services/preview-scope";
 
 interface SessionListProps {
   layout: "page" | "sidebar";
@@ -66,10 +76,11 @@ export function SessionList({ layout }: SessionListProps) {
   const navigate = useNavigate();
   const [createOpen, setCreateOpen] = useState(false);
   const [createTypeOpen, setCreateTypeOpen] = useState(false);
+  const [createShellOpen, setCreateShellOpen] = useState(false);
   const [createPreviewOpen, setCreatePreviewOpen] = useState(false);
   const [pendingRename, setPendingRename] = useState<SessionInfo | null>(null);
   const [pendingTermination, setPendingTermination] = useState<SessionInfo | null>(null);
-  const { creatingTerminal, createTerminal } = useTerminalCreator();
+  const { creatingTerminal, creatingShell, createTerminal } = useTerminalCreator();
   const [collapsedActiveProviders, setCollapsedActiveProviders] = useState<
     Set<ActiveSessionGroupKey>
   >(new Set());
@@ -316,11 +327,30 @@ export function SessionList({ layout }: SessionListProps) {
             setCreateTypeOpen(false);
             setCreateOpen(true);
           }}
-          onCreateTerminal={() => void createTerminal(() => setCreateTypeOpen(false))}
+          onCreateTerminal={() => {
+            if (shouldChooseTerminalShell()) {
+              setCreateTypeOpen(false);
+              setCreateShellOpen(true);
+            } else {
+              void createTerminal(undefined, () => setCreateTypeOpen(false));
+            }
+          }}
           onCreatePreview={() => {
             setCreateTypeOpen(false);
             setCreatePreviewOpen(true);
           }}
+        />
+        <CreateTerminalShellDialog
+          layout="mobile"
+          open={createShellOpen}
+          creatingTerminal={creatingTerminal}
+          creatingShell={creatingShell}
+          onOpenChange={setCreateShellOpen}
+          onBack={() => {
+            setCreateShellOpen(false);
+            setCreateTypeOpen(true);
+          }}
+          onCreate={(shell) => void createTerminal(shell, () => setCreateShellOpen(false))}
         />
         <CreateSessionDialog open={createOpen} onOpenChange={setCreateOpen} />
         <CreateFrontendPreviewDialog open={createPreviewOpen} onOpenChange={setCreatePreviewOpen} />
@@ -404,13 +434,24 @@ function compareSessionGroup(a: ActiveSessionGroupKey, b: ActiveSessionGroupKey)
 
 function useTerminalCreator() {
   const navigate = useNavigate();
-  const [creatingTerminal, setCreatingTerminal] = useState(false);
+  const [creatingShell, setCreatingShell] = useState<TerminalShell | "default" | null>(null);
+  const creatingTerminal = creatingShell !== null;
 
-  async function createTerminal(onCreated?: () => void): Promise<void> {
-    if (creatingTerminal) return;
-    setCreatingTerminal(true);
+  async function createTerminal(shell?: TerminalShell, onCreated?: () => void): Promise<void> {
+    const app = useAppStore.getState();
+    if (
+      creatingTerminal ||
+      !app.connected ||
+      !app.proxyOnline ||
+      !app.selectedProxyId ||
+      app.proxySwitchTarget
+    )
+      return;
+    if (needsWindowsShellDetection(app)) return;
+    if (shell && !app.terminalShells?.some((option) => option.id === shell)) return;
+    setCreatingShell(shell ?? "default");
     try {
-      const result = await submitTerminalCreate({ relay: relayClientRef });
+      const result = await submitTerminalCreate({ relay: relayClientRef, shell });
       if (result.type !== "success") {
         toast.error(result.message);
         return;
@@ -419,15 +460,86 @@ function useTerminalCreator() {
       onCreated?.();
       navigate(result.route);
     } finally {
-      setCreatingTerminal(false);
+      setCreatingShell(null);
     }
   }
 
-  return { creatingTerminal, createTerminal };
+  return { creatingTerminal, creatingShell, createTerminal };
+}
+
+function needsWindowsShellDetection(state: ReturnType<typeof useAppStore.getState>): boolean {
+  return (
+    !state.terminalShellsLoaded &&
+    state.proxies.find((proxy) => proxy.proxyId === state.selectedProxyId)?.osName === "Windows"
+  );
+}
+
+function useTerminalShellChoices(open: boolean) {
+  const terminalShells = useAppStore((state) => state.terminalShells);
+  const needsDetection = useAppStore(needsWindowsShellDetection);
+  const proxyId = useAppStore((state) => state.selectedProxyId);
+  const [failed, setFailed] = useState(false);
+  const [retryAttempt, setRetryAttempt] = useState(0);
+
+  useEffect(() => {
+    if (!open || !needsDetection) return;
+    let cancelled = false;
+    const relay = relayClientRef;
+    const scope = relay?.getPreviewScope();
+    setFailed(false);
+    if (!relay || !scope || scope.proxyId !== proxyId) {
+      setFailed(true);
+      return;
+    }
+    void relay.requestProxyInfo().then(
+      (info) => {
+        const app = useAppStore.getState();
+        const currentScope = relay.getPreviewScope();
+        if (
+          cancelled ||
+          !app.connected ||
+          !app.proxyOnline ||
+          app.selectedProxyId !== proxyId ||
+          !currentScope ||
+          !samePreviewScope(scope, currentScope)
+        )
+          return;
+        app.setTerminalShells(info.terminalShells);
+      },
+      () => {
+        if (!cancelled) setFailed(true);
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [open, needsDetection, proxyId, retryAttempt]);
+
+  return {
+    terminalShells,
+    needsDetection,
+    failed,
+    retry: () => setRetryAttempt((attempt) => attempt + 1),
+  };
+}
+
+const DEFAULT_TERMINAL_OPTIONS: Array<{ id?: TerminalShell; label: string }> = [
+  { label: "启动 Shell" },
+];
+
+function terminalCreateOptions(shells: TerminalShellOption[] | null) {
+  return shells?.length ? shells : DEFAULT_TERMINAL_OPTIONS;
+}
+
+function shouldChooseTerminalShell(): boolean {
+  const app = useAppStore.getState();
+  return needsWindowsShellDetection(app) || !!app.terminalShells?.length;
 }
 
 // 未绑定 proxy 时: 视觉置灰 (aria-disabled + 手动 class), 但点击触发 Tooltip 解释原因
 export function CreateSessionButton({ compact = false }: { compact?: boolean }) {
+  const [typeMenuOpen, setTypeMenuOpen] = useState(false);
+  const [shellOpen, setShellOpen] = useState(false);
   const [open, setOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [tipOpen, setTipOpen] = useState(false);
@@ -435,7 +547,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
   const hasProxy = useAppStore((s) => !!s.selectedProxyId);
   const switchingProxy = useAppStore((s) => s.proxySwitchTarget !== null);
   const canCreate = hasProxy && !switchingProxy;
-  const { creatingTerminal, createTerminal } = useTerminalCreator();
+  const { creatingTerminal, creatingShell, createTerminal } = useTerminalCreator();
 
   function showBlockedTip() {
     setTipOpen(true);
@@ -457,7 +569,11 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
       return;
     }
     suppressMenuRestoreFocusRef.current = true;
-    void createTerminal();
+    if (shouldChooseTerminalShell()) {
+      setShellOpen(true);
+    } else {
+      void createTerminal();
+    }
   }
 
   function handleCreatePreview() {
@@ -494,7 +610,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
   );
 
   const menuButton = canCreate ? (
-    <DropdownMenu>
+    <DropdownMenu open={typeMenuOpen} onOpenChange={setTypeMenuOpen}>
       <DropdownMenuTrigger asChild>{triggerButton}</DropdownMenuTrigger>
       <DropdownMenuContent
         align={compact ? "end" : "start"}
@@ -521,7 +637,7 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
           onSelect={handleCreateTerminal}
         >
           <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-          {creatingTerminal ? "正在创建终端会话..." : "终端会话"}
+          {creatingTerminal ? "正在创建 Shell 会话..." : "Shell 会话"}
         </DropdownMenuItem>
         <DropdownMenuSeparator />
         <DropdownMenuItem
@@ -558,6 +674,18 @@ export function CreateSessionButton({ compact = false }: { compact?: boolean }) 
           </TooltipContent>
         </Tooltip>
       )}
+      <CreateTerminalShellDialog
+        layout="desktop"
+        open={shellOpen}
+        creatingTerminal={creatingTerminal}
+        creatingShell={creatingShell}
+        onOpenChange={setShellOpen}
+        onBack={() => {
+          setShellOpen(false);
+          setTypeMenuOpen(true);
+        }}
+        onCreate={(shell) => void createTerminal(shell, () => setShellOpen(false))}
+      />
       <CreateSessionDialog open={open} onOpenChange={setOpen} />
       <CreateFrontendPreviewDialog open={previewOpen} onOpenChange={setPreviewOpen} />
     </>
@@ -580,7 +708,6 @@ function CreateSessionTypeSheet({
   onCreatePreview: () => void;
 }) {
   const suppressRestoreFocusRef = useRef(false);
-
   function chooseSessionType(create: () => void) {
     suppressRestoreFocusRef.current = true;
     create();
@@ -623,7 +750,7 @@ function CreateSessionTypeSheet({
             onClick={() => chooseSessionType(onCreateTerminal)}
           >
             <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
-            {creatingTerminal ? "正在创建终端会话..." : "终端会话"}
+            {creatingTerminal ? "正在创建 Shell 会话..." : "Shell 会话"}
           </Button>
           <div className="mx-1 h-px bg-border" aria-hidden="true" />
           <Button
@@ -647,5 +774,117 @@ function CreateSessionTypeSheet({
         </div>
       </SheetContent>
     </Sheet>
+  );
+}
+
+function CreateTerminalShellDialog({
+  layout,
+  open,
+  creatingTerminal,
+  creatingShell,
+  onOpenChange,
+  onBack,
+  onCreate,
+}: {
+  layout: "desktop" | "mobile";
+  open: boolean;
+  creatingTerminal: boolean;
+  creatingShell: TerminalShell | "default" | null;
+  onOpenChange: (open: boolean) => void;
+  onBack: () => void;
+  onCreate: (shell?: TerminalShell) => void;
+}) {
+  const { terminalShells, needsDetection, failed, retry } = useTerminalShellChoices(open);
+  const suppressRestoreFocusRef = useRef(false);
+  const canCreate = useAppStore(
+    (state) =>
+      state.connected && state.proxyOnline && !!state.selectedProxyId && !state.proxySwitchTarget,
+  );
+  const content = (
+    <div className="grid gap-2" data-slot="terminal-shell-options">
+      {needsDetection ? (
+        <Button
+          type="button"
+          variant="ghost"
+          className="min-h-12 justify-start gap-3 rounded-md px-3 text-left"
+          data-slot="terminal-shell-detection"
+          disabled={!failed}
+          onClick={retry}
+        >
+          <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
+          {failed ? "终端检测失败，点击重试" : "正在检测终端..."}
+        </Button>
+      ) : (
+        terminalCreateOptions(terminalShells).map((option) => (
+          <Button
+            key={option.id ?? "default"}
+            type="button"
+            variant="ghost"
+            className="min-h-12 justify-start gap-3 rounded-md px-3 text-left"
+            data-slot="terminal-shell-option"
+            data-shell={option.id}
+            disabled={creatingTerminal || !canCreate}
+            onClick={() => onCreate(option.id)}
+          >
+            <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
+            {creatingShell === (option.id ?? "default") ? "正在创建 Shell 会话..." : option.label}
+          </Button>
+        ))
+      )}
+      <div className="mx-1 h-px bg-border" aria-hidden="true" />
+      <Button
+        type="button"
+        variant="ghost"
+        className="min-h-11 justify-start gap-3 px-3 text-muted-foreground"
+        disabled={creatingTerminal}
+        onClick={() => {
+          suppressRestoreFocusRef.current = true;
+          onBack();
+        }}
+      >
+        <ArrowLeft className="size-4" aria-hidden="true" />
+        返回
+      </Button>
+    </div>
+  );
+  function handleCloseAutoFocus(event: Event) {
+    if (!suppressRestoreFocusRef.current) return;
+    suppressRestoreFocusRef.current = false;
+    event.preventDefault();
+  }
+
+  if (layout === "mobile") {
+    return (
+      <Sheet open={open} onOpenChange={onOpenChange}>
+        <SheetContent
+          side="bottom"
+          overlayClassName="bg-black/10 dark:bg-black/30"
+          className="inset-x-2 w-auto rounded-t-xl border border-border/80 bg-background px-3 pb-[max(theme(spacing.4),env(safe-area-inset-bottom))] pt-3 shadow-2xl"
+          data-slot="create-terminal-shell-dialog"
+          focusSurfaceOnOpen
+          onCloseAutoFocus={handleCloseAutoFocus}
+        >
+          <SheetHeader className="px-1 pb-1 pt-0 text-left">
+            <SheetTitle>Shell 会话</SheetTitle>
+          </SheetHeader>
+          {content}
+        </SheetContent>
+      </Sheet>
+    );
+  }
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent
+        className="sm:max-w-sm"
+        data-slot="create-terminal-shell-dialog"
+        focusSurfaceOnOpen
+        onCloseAutoFocus={handleCloseAutoFocus}
+      >
+        <DialogHeader>
+          <DialogTitle>Shell 会话</DialogTitle>
+        </DialogHeader>
+        {content}
+      </DialogContent>
+    </Dialog>
   );
 }

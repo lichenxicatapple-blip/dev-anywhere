@@ -6,6 +6,7 @@ import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionManager } from "./session-manager.js";
 import { serviceLogger } from "../common/logger.js";
+import { listTerminalShells } from "../common/terminal-shell.js";
 import { saveAgentCliPath } from "../common/config.js";
 import { detectAgentCliStatus } from "../providers/index.js";
 import type { ProviderId } from "../providers/types.js";
@@ -36,12 +37,15 @@ export class RelayResourceHandlers {
   constructor(private readonly deps: RelayResourceHandlersDeps) {}
 
   async onProxyInfoRequest(msg: ControlMessage<"proxy_info_request">): Promise<void> {
+    const env = this.deps.getProviderEnv();
+    const terminalShells = listTerminalShells(env);
     this.deps.relaySend(
       serializeControl({
         type: "proxy_info",
         requestId: msg.requestId,
         homePath: homedir() || "/",
-        agentCli: detectAgentCliStatus(this.deps.getProviderEnv(), {
+        ...(terminalShells !== undefined ? { terminalShells } : {}),
+        agentCli: detectAgentCliStatus(env, {
           suggestions: this.deps.getAgentCliSuggestions(),
         }),
       }),

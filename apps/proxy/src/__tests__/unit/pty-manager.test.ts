@@ -48,6 +48,7 @@ describe("PtyManager", () => {
 
   async function createManager(
     overrides: {
+      providerId?: "claude" | "codex";
       providerArgs?: string[];
       cwd?: string;
       tap?: (data: string) => void;
@@ -67,7 +68,7 @@ describe("PtyManager", () => {
     const stdout = createTerminalStdoutFake(overrides.cols ?? 120, overrides.rows ?? 40);
     const tap = overrides.tap ?? vi.fn();
     const provider = {
-      id: "claude" as const,
+      id: overrides.providerId ?? "claude",
       displayName: "Claude Code",
       capabilities: {
         supportsHooks: true,
@@ -114,6 +115,37 @@ describe("PtyManager", () => {
       expect.objectContaining({ cols: 120, rows: 40, cwd: "/tmp/project" }),
     );
   });
+
+  it.each([
+    ["win32", "x64", true],
+    ["win32", "arm64", true],
+    ["win32", "ia32", false],
+    ["linux", "x64", false],
+    ["darwin", "arm64", false],
+  ] as const)(
+    "selects the bundled ConPTY only for supported Windows local sessions (%s, %s)",
+    async (platform, arch, useConptyDll) => {
+      const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+      const archDescriptor = Object.getOwnPropertyDescriptor(process, "arch")!;
+      const { manager, pty } = await createManager();
+      try {
+        Object.defineProperty(process, "platform", { value: platform });
+        Object.defineProperty(process, "arch", { value: arch });
+        manager.start();
+
+        const spawnOptions = vi.mocked(pty.spawn).mock.calls.at(-1)?.[2];
+        if (useConptyDll) {
+          expect(spawnOptions).toHaveProperty("useConptyDll", true);
+        } else {
+          expect(spawnOptions).not.toHaveProperty("useConptyDll");
+        }
+      } finally {
+        Object.defineProperty(process, "platform", platformDescriptor);
+        Object.defineProperty(process, "arch", archDescriptor);
+        manager.cleanup(0);
+      }
+    },
+  );
 
   it("spawns with initialSize and immediately reconciles a missed host resize", async () => {
     const onResize = vi.fn();
@@ -189,6 +221,64 @@ describe("PtyManager", () => {
     manager.write("remote\r");
 
     expect(onInput.mock.calls).toEqual([["local\r"], ["remote\r"]]);
+  });
+
+  it("adapts remote LF only for Windows Codex while preserving local stdin and input callbacks", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      for (const [platform, providerId, expectedRemote] of [
+        ["win32", "codex", "\x1b\r"],
+        ["linux", "codex", "\n"],
+        ["win32", "claude", "\n"],
+      ] as const) {
+        Object.defineProperty(process, "platform", { value: platform });
+        const onInput = vi.fn();
+        const { manager, stdin } = await createManager({ providerId, onInput });
+        try {
+          manager.start();
+          stdin.emit("data", Buffer.from("\n"));
+          manager.write("\n");
+
+          expect(mockPty.write.mock.calls, `${platform}/${providerId}`).toEqual([
+            ["\n"],
+            [expectedRemote],
+          ]);
+          expect(onInput.mock.calls).toEqual([["\n"], ["\n"]]);
+        } finally {
+          manager.cleanup(0);
+        }
+      }
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+  });
+
+  it("observes complete and split local Win32 key records before encoding remote Escape", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const keyRecord = "\x1b[88;45;120;1;0;1_";
+    const escapeRecord = "\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_";
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      for (const chunks of [[keyRecord], [keyRecord.slice(0, 8), keyRecord.slice(8)]]) {
+        const { manager, stdin } = await createManager({ providerId: "codex" });
+        try {
+          manager.start();
+          manager.write("\x1b");
+          for (const chunk of chunks) stdin.emit("data", Buffer.from(chunk));
+          manager.write("\x1b");
+
+          expect(mockPty.write.mock.calls).toEqual([
+            ["\x1b"],
+            ...chunks.map((chunk) => [chunk]),
+            [escapeRecord],
+          ]);
+        } finally {
+          manager.cleanup(0);
+        }
+      }
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
   });
 
   it("writes remote byte samples to the child PTY unchanged", async () => {

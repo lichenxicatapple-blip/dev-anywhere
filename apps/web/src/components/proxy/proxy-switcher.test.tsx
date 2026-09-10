@@ -1,5 +1,6 @@
 import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
+import type { TerminalShellOption } from "@dev-anywhere/shared";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const {
@@ -90,10 +91,11 @@ const proxies = [
   { proxyId: "proxy-offline", name: "旧 Mac", version: "0.9.0", online: false, sessions: [] },
 ];
 
-function proxyInfo(homePath: string) {
+function proxyInfo(homePath: string, terminalShells?: TerminalShellOption[]) {
   return {
     homePath,
     agentCli: {},
+    ...(terminalShells ? { terminalShells } : {}),
   };
 }
 
@@ -353,13 +355,14 @@ describe("ProxySwitcher offline removal", () => {
       bindingId: "binding-2",
     });
 
-    resolveFirstInfo(proxyInfo("/stale-binding"));
+    resolveFirstInfo(proxyInfo("/stale-binding", [{ id: "cmd", label: "CMD" }]));
     resolveFirstWeb({ epoch: "web-stale", revision: 99, previews: [] });
     resolveFirstDevice({ epoch: "device-stale", revision: 99, previews: [] });
     await Promise.resolve();
     await Promise.resolve();
     await waitFor(() => {
       expect(useFileStore.getState().homePath).toBe("/new-binding");
+      expect(useAppStore.getState().terminalShells).toBeNull();
       expect(usePreviewStore.getState().authoritative?.epoch).toBe("web-new");
       expect(useDevicePreviewStore.getState().authoritative?.epoch).toBe("device-new");
     });

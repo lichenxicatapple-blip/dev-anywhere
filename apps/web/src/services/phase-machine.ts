@@ -89,6 +89,7 @@ function requestProxyState(relay: RelayClient, scope: PreviewScope): void {
       const fileStore = useFileStore.getState();
       fileStore.setHomePath(info.homePath);
       fileStore.setAgentCli(info.agentCli);
+      useAppStore.getState().setTerminalShells(info.terminalShells);
     })
     .catch((err: unknown) => {
       if (!previewBindingIsCurrent(relay, scope)) return;

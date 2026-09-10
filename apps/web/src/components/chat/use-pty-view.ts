@@ -304,13 +304,13 @@ export function resolvePtyContainerPaddingBottom({
     : PTY_CONTAINER_BASE_PADDING_PX;
 }
 
-function rawInputForPhysicalKeyboardEvent(
+export function rawInputForPhysicalKeyboardEvent(
   event: KeyboardEvent,
   modes?: { applicationCursorKeysMode: boolean },
 ): string | null {
   if (event.isComposing || event.altKey || event.ctrlKey || event.metaKey) return null;
   if (event.key.length === 1) return event.key;
-  if (event.key === "Enter") return "\r";
+  if (event.key === "Enter") return event.shiftKey ? "\n" : "\r";
   if (event.key === "Backspace") return "\x7f";
   if (event.key === "Tab") return event.shiftKey ? "\x1b[Z" : "\t";
   if (event.key === "Escape") return "\x1b";

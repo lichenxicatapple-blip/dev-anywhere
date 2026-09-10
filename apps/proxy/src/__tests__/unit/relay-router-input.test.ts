@@ -18,16 +18,20 @@ import type { PreviewManager } from "#src/serve/preview/preview-manager.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
 import type { HookProviderId, ProviderHookContext } from "#src/providers/index.js";
+import { resolveTerminalShell } from "#src/common/terminal-shell.js";
 import { sessionPaths, tildify } from "#src/common/paths.js";
 import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
 import { WorkerStartupError } from "#src/serve/worker-registry.js";
 import type { Socket } from "node:net";
 import { existsSync, mkdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import {
   createRelayConnectionFake,
   createWorkerRegistryFake,
   createWritableSocketFake,
 } from "./test-fakes.js";
+
+const testCwd = tmpdir();
 
 function parseIpc(raw: string) {
   return IpcMessageSchema.parse(JSON.parse(raw.trim()));
@@ -105,7 +109,7 @@ function createRouter(options: {
                   state: SessionState.IDLE,
                   createdAt: 1,
                   updatedAt: 1,
-                  cwd: "/tmp",
+                  cwd: testCwd,
                   pid: 1,
                 }
               : {
@@ -116,7 +120,7 @@ function createRouter(options: {
                   state: SessionState.IDLE,
                   createdAt: 1,
                   updatedAt: 1,
-                  cwd: "/tmp",
+                  cwd: testCwd,
                   pid: 1,
                 }
             : undefined,
@@ -624,7 +628,7 @@ describe("RelayRouter input routing", () => {
                 mode: "json",
                 provider: "claude",
                 state: SessionState.IDLE,
-                cwd: "/tmp",
+                cwd: testCwd,
                 pid: 1,
               }
             : undefined,
@@ -675,7 +679,7 @@ describe("RelayRouter input routing", () => {
                 mode: "json",
                 provider: "claude",
                 state: SessionState.IDLE,
-                cwd: "/tmp",
+                cwd: testCwd,
                 pid: 1,
               }
             : undefined,
@@ -852,7 +856,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "json-timeout",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "claude",
       mode: "json",
     });
@@ -892,7 +896,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-json-spawn-failed",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "claude",
       mode: "json",
     });
@@ -924,7 +928,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-json-exited-before-connect",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "claude",
       mode: "json",
     });
@@ -951,7 +955,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "json-permission-mode",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "claude",
       mode: "json",
       permissionMode: "plan",
@@ -959,7 +963,7 @@ describe("RelayRouter input routing", () => {
 
     expect(workerSpawn).toHaveBeenCalledTimes(1);
     expect(workerSpawn.mock.calls[0][1]).toMatchObject({
-      cwd: "/tmp",
+      cwd: testCwd,
       permissionMode: "plan",
     });
     router.destroy();
@@ -976,7 +980,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "codex-auto-permission",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
       permissionMode: "auto",
@@ -984,7 +988,7 @@ describe("RelayRouter input routing", () => {
 
     expect(workerSpawn).toHaveBeenCalledTimes(1);
     expect(workerSpawn.mock.calls[0][1]).toMatchObject({
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       permissionMode: "auto",
     });
@@ -1000,7 +1004,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "codex-strict",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
       permissionMode: "default",
@@ -1030,7 +1034,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "codex-active-writer",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
       permissionMode: "auto",
@@ -1059,7 +1063,7 @@ describe("RelayRouter input routing", () => {
       provider: "codex" as const,
       ptyOwner: "local-terminal" as const,
       state: SessionState.IDLE,
-      cwd: "/tmp",
+      cwd: testCwd,
       pid: 1234,
       createdAt: 1,
       updatedAt: 1,
@@ -1078,7 +1082,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "codex-managed",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
       permissionMode: "auto",
@@ -1109,7 +1113,7 @@ describe("RelayRouter input routing", () => {
       provider: "codex" as const,
       ptyOwner: "local-terminal" as const,
       state: SessionState.IDLE,
-      cwd: "/tmp",
+      cwd: testCwd,
       pid: 46546,
       createdAt: 1,
       updatedAt: 1,
@@ -1130,7 +1134,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "codex-managed-by-process-tree",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
       permissionMode: "auto",
@@ -1159,7 +1163,7 @@ describe("RelayRouter input routing", () => {
       mode: "json",
       provider: "codex",
       state: SessionState.IDLE,
-      cwd: "/tmp",
+      cwd: testCwd,
       pid: 1234,
       createdAt: 1,
       updatedAt: 1,
@@ -1192,7 +1196,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-json-ready",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
     });
@@ -1243,7 +1247,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-json-fail-ready",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
     });
@@ -1285,7 +1289,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-json-active-writer-race",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "json",
       permissionMode: "auto",
@@ -1320,7 +1324,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-json-exited-after-ready",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "claude",
       mode: "json",
     });
@@ -1347,7 +1351,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "hosted-pty-permission",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "pty",
       cols: 80,
@@ -1358,7 +1362,7 @@ describe("RelayRouter input routing", () => {
     expect(hostedStart).toHaveBeenCalledTimes(1);
     expect(hostedStart.mock.calls[0][0]).toMatchObject({
       provider: "codex",
-      cwd: "/tmp",
+      cwd: testCwd,
       permissionMode: "bypassPermissions",
     });
   });
@@ -1406,7 +1410,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-kimi-pty",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "kimi",
       mode: "pty",
       cols: 80,
@@ -1493,7 +1497,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-kimi-json",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "kimi",
       mode: "json",
       resumeSessionId: "session_kimi_native",
@@ -1531,7 +1535,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-kimi-invalid-permission",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "kimi",
       mode: "pty",
       cols: 80,
@@ -1631,7 +1635,7 @@ describe("RelayRouter input routing", () => {
       cwd: string;
       name: string;
     };
-    const terminalName = tildify(terminalOptions.cwd);
+    const terminalName = resolveTerminalShell(undefined, {}).label ?? tildify(terminalOptions.cwd);
     expect(terminalOptions).toEqual(
       expect.objectContaining({
         sessionId: expect.any(String),
@@ -1670,7 +1674,7 @@ describe("RelayRouter input routing", () => {
       provider: "codex",
       ptyOwner: "proxy-hosted",
       state: SessionState.IDLE,
-      cwd: "/tmp",
+      cwd: testCwd,
       pid: 1234,
       createdAt: 1,
       updatedAt: 1,
@@ -1689,7 +1693,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-codex-pty-resume",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "pty",
       cols: 80,
@@ -1722,7 +1726,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-fail-1",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "claude",
       mode: "pty",
       cols: 80,
@@ -1767,7 +1771,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-fail-after-spawn",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "claude",
       mode: "pty",
       cols: 80,
@@ -1795,7 +1799,7 @@ describe("RelayRouter input routing", () => {
       provider: "codex",
       ptyOwner: "proxy-hosted",
       state: SessionState.IDLE,
-      cwd: "/tmp",
+      cwd: testCwd,
       pid: 1234,
       createdAt: 1,
       updatedAt: 1,
@@ -1816,7 +1820,7 @@ describe("RelayRouter input routing", () => {
       type: "session_create",
       requestId: "create-1",
       kind: "agent",
-      cwd: "/tmp",
+      cwd: testCwd,
       provider: "codex",
       mode: "pty",
       cols: 80,
@@ -1828,7 +1832,7 @@ describe("RelayRouter input routing", () => {
       "agent",
       "pty",
       "codex",
-      "/tmp",
+      testCwd,
       1234,
       "Release checklist",
       expect.any(String),
@@ -1862,7 +1866,7 @@ describe("RelayRouter input routing", () => {
                 mode: "json",
                 provider: "claude",
                 state: SessionState.IDLE,
-                cwd: "/tmp",
+                cwd: testCwd,
                 pid: 1,
               }
             : undefined,
@@ -1909,7 +1913,7 @@ describe("RelayRouter input routing", () => {
 
     await vi.waitFor(() => expect(relaySend).toHaveBeenCalledTimes(1));
     expect(voiceSummaryRunner).toHaveBeenCalledWith(
-      expect.objectContaining({ cwd: "/tmp", timeoutMs: 12_000 }),
+      expect.objectContaining({ cwd: testCwd, timeoutMs: 12_000 }),
     );
     const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
     expect(msg).toMatchObject({

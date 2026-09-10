@@ -7,6 +7,7 @@ WORKDIR /app
 
 # Dep manifests first for layer caching
 COPY pnpm-workspace.yaml pnpm-lock.yaml package.json tsconfig.base.json ./
+COPY patches/ patches/
 COPY packages/shared/package.json packages/shared/
 COPY apps/relay/package.json apps/relay/
 COPY apps/web/package.json apps/web/

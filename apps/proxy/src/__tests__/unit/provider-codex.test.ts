@@ -7,8 +7,8 @@ import { CODEX_PROVIDER, resolveCodexCommand } from "#src/providers/codex.js";
 function withExecutable(name: string, test: (path: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-codex-provider-"));
   try {
-    const path = join(dir, name);
-    writeFileSync(path, "#!/bin/sh\n");
+    const path = join(dir, process.platform === "win32" ? `${name}.cmd` : name);
+    writeFileSync(path, process.platform === "win32" ? "@echo off\r\n" : "#!/bin/sh\n");
     chmodSync(path, 0o755);
     test(path);
   } finally {
@@ -32,7 +32,7 @@ describe("Codex provider", () => {
 
       expect(command).toEqual({
         command: codexBin,
-        args,
+        args: [...args, "-c", "tui.whimsy=false"],
         env,
       });
       expect(args).toEqual(["exec", "--json", "Say OK"]);
@@ -55,7 +55,7 @@ describe("Codex provider", () => {
       );
 
       expect(command.command).toBe(codexBin);
-      expect(command.args).toEqual(["exec", "--json", "Say OK"]);
+      expect(command.args).toEqual(["exec", "--json", "Say OK", "-c", "tui.whimsy=false"]);
       expect(command.env).toEqual({ CODEX_BIN: codexBin });
       expect(command.args.join(" ")).not.toContain("features.hooks");
       expect(command.args.join(" ")).not.toContain("hooks=");
@@ -66,7 +66,7 @@ describe("Codex provider", () => {
   it("maps terminal permission modes to Codex approval flags", () => {
     withExecutable("codex", (codexBin) => {
       const omitted = CODEX_PROVIDER.buildTerminalCommand({ args: [] }, { CODEX_BIN: codexBin });
-      expect(omitted.args).toEqual([]);
+      expect(omitted.args).toEqual(["-c", "tui.whimsy=false"]);
 
       expect(() =>
         CODEX_PROVIDER.buildTerminalCommand(
@@ -79,13 +79,17 @@ describe("Codex provider", () => {
         { args: [], permissionMode: "auto" },
         { CODEX_BIN: codexBin },
       );
-      expect(automatic.args).toEqual(["--ask-for-approval", "on-request"]);
+      expect(automatic.args).toEqual(["--ask-for-approval", "on-request", "-c", "tui.whimsy=false"]);
 
       const bypass = CODEX_PROVIDER.buildTerminalCommand(
         { args: [], permissionMode: "bypassPermissions" },
         { CODEX_BIN: codexBin },
       );
-      expect(bypass.args).toEqual(["--dangerously-bypass-approvals-and-sandbox"]);
+      expect(bypass.args).toEqual([
+        "--dangerously-bypass-approvals-and-sandbox",
+        "-c",
+        "tui.whimsy=false",
+      ]);
     });
   });
 
@@ -104,7 +108,46 @@ describe("Codex provider", () => {
         { CODEX_BIN: codexBin },
       );
 
-      expect(command.args).toEqual(["--ask-for-approval", "on-request", "resume", "codex-session"]);
+      expect(command.args).toEqual([
+        "--ask-for-approval",
+        "on-request",
+        "resume",
+        "codex-session",
+        "-c",
+        "tui.whimsy=false",
+      ]);
+    });
+  });
+
+  it.each([
+    ["-c", "tui.whimsy=true"],
+    ["resume", "codex-session", "--config=tui.whimsy=true"],
+    ["fork", "codex-session", "-ctui.whimsy=true"],
+  ])("disables sparkles after user config overrides (%s)", (...args) => {
+    withExecutable("codex", (codexBin) => {
+      const originalArgs = [...args];
+      const command = CODEX_PROVIDER.buildTerminalCommand({ args }, { CODEX_BIN: codexBin });
+
+      expect(command.args).toEqual([...originalArgs, "-c", "tui.whimsy=false"]);
+      expect(args).toEqual(originalArgs);
+    });
+  });
+
+  it("keeps the sparkle override before the literal prompt separator", () => {
+    withExecutable("codex", (codexBin) => {
+      const command = CODEX_PROVIDER.buildTerminalCommand(
+        { args: ["-c", "tui.whimsy=true", "--", "explain -c tui.whimsy=true"] },
+        { CODEX_BIN: codexBin },
+      );
+
+      expect(command.args).toEqual([
+        "-c",
+        "tui.whimsy=true",
+        "-c",
+        "tui.whimsy=false",
+        "--",
+        "explain -c tui.whimsy=true",
+      ]);
     });
   });
 

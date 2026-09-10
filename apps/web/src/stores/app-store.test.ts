@@ -162,3 +162,37 @@ describe("app-store proxy list lifecycle", () => {
     expect(observed).toEqual([{ proxiesLength: 0, proxyListLoaded: false }]);
   });
 });
+
+describe("app-store terminal shell capabilities", () => {
+  beforeEach(() => {
+    vi.resetModules();
+  });
+
+  it("clears Windows shell options when selecting another proxy or an older proxy replies", async () => {
+    const { useAppStore } = await import("./app-store");
+    const store = useAppStore.getState();
+    store.setProxy("windows", "Windows");
+    store.setTerminalShells([{ id: "cmd", label: "CMD" }]);
+    expect(useAppStore.getState().terminalShellsLoaded).toBe(true);
+    store.setProxy("linux", "Linux");
+    expect(useAppStore.getState().terminalShells).toBeNull();
+    expect(useAppStore.getState().terminalShellsLoaded).toBe(false);
+    store.setTerminalShells([{ id: "powershell", label: "PowerShell 7" }]);
+    store.setTerminalShells(undefined);
+    expect(useAppStore.getState().terminalShells).toBeNull();
+    expect(useAppStore.getState().terminalShellsLoaded).toBe(true);
+  });
+
+  it.each(["relay", "proxy"] as const)(
+    "clears shell options when the %s disconnects",
+    async (connection) => {
+      const { useAppStore } = await import("./app-store");
+      const store = useAppStore.getState();
+      store.setTerminalShells([{ id: "cmd", label: "CMD" }]);
+      if (connection === "relay") store.setConnected(false);
+      else store.setProxyOnline(false);
+      expect(useAppStore.getState().terminalShells).toBeNull();
+      expect(useAppStore.getState().terminalShellsLoaded).toBe(false);
+    },
+  );
+});

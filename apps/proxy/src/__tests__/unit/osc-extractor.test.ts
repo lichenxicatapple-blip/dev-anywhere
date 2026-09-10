@@ -62,10 +62,25 @@ describe("extractOscSignals", () => {
     expect(result).toEqual({ state: null, title: "claude - working..." });
   });
 
-  it("returns approval_wait for Codex action-required OSC title", () => {
-    const data = "\x1b]0;[ ! ] Action Required | sample-app\x07";
-    const result = extractOscSignals(data, "codex");
-    expect(result).toEqual({ state: "approval_wait", title: "[ ! ] Action Required | sample-app" });
+  it.each(["[ ! ]", "[ . ]"])(
+    "keeps Codex %s Action Required titles as metadata for unanswered questions",
+    (indicator) => {
+      const title = `${indicator} Action Required | sample-app`;
+      expect(extractOscSignals(`\x1b]0;${title}\x07`, "codex")).toEqual({
+        state: null,
+        title,
+      });
+    },
+  );
+
+  it("still recognizes explicit permission notifications alongside Codex titles", () => {
+    const title = "[ ! ] Action Required | sample-app";
+    const data = `\x1b]0;${title}\x07\x1b]9;needs your permission: Bash\x07`;
+    expect(extractOscSignals(data, "codex")).toEqual({
+      state: "approval_wait",
+      title,
+      tool: "Bash",
+    });
   });
 
   it("does not treat Codex action-required words as state without an OSC title", () => {

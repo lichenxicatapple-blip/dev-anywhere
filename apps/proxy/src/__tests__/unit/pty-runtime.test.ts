@@ -115,7 +115,7 @@ describe("PTY runtime", () => {
     [
       "codex",
       "bypassPermissions",
-      ["--dangerously-bypass-approvals-and-sandbox", "resume", "native"],
+      ["--dangerously-bypass-approvals-and-sandbox", "resume", "native", "-c", "tui.whimsy=false"],
     ],
     ["kimi", "auto", ["--yolo", "--session", "native"]],
   ] as const)(
@@ -164,6 +164,82 @@ describe("PTY runtime", () => {
       expect.objectContaining({ cols: 125, rows: 34, cwd: fixture.root }),
     );
   });
+
+  it("adapts hosted Codex LF on Windows without changing other providers or platforms", () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      for (const [platform, provider, expected] of [
+        ["win32", "codex", "\x1b\r"],
+        ["linux", "codex", "\n"],
+        ["win32", "claude", "\n"],
+        ["win32", undefined, "\n"],
+      ] as const) {
+        Object.defineProperty(process, "platform", { value: platform });
+        const { runtime, child } = createRuntime(
+          provider ? { kind: "agent", provider, args: [] } : { kind: "terminal" },
+        );
+        runtime.write("\n");
+
+        expect(child.write.mock.calls, `${platform}/${provider ?? "shell"}`).toEqual([[expected]]);
+      }
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+  });
+
+  it("encodes hosted Windows Escape after receiving a Win32 input record", () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    try {
+      Object.defineProperty(process, "platform", { value: "win32" });
+      const { runtime, child } = createRuntime({ kind: "agent", provider: "codex", args: [] });
+      const keyRecord = "\x1b[88;45;120;1;0;1_";
+      runtime.write("\x1b");
+      runtime.write(keyRecord);
+      runtime.write("\x1b");
+
+      expect(child.write.mock.calls).toEqual([
+        ["\x1b"],
+        [keyRecord],
+        ["\x1b[27;1;27;1;0;1_\x1b[27;1;27;0;0;1_"],
+      ]);
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+    }
+  });
+
+  it.each([
+    ["win32", "x64", "terminal", true],
+    ["win32", "x64", "agent", true],
+    ["win32", "arm64", "terminal", true],
+    ["win32", "arm64", "agent", true],
+    ["win32", "ia32", "terminal", false],
+    ["win32", "ia32", "agent", false],
+    ["linux", "x64", "terminal", false],
+    ["linux", "x64", "agent", false],
+    ["darwin", "arm64", "terminal", false],
+    ["darwin", "arm64", "agent", false],
+  ] as const)(
+    "selects the bundled ConPTY only for supported Windows hosted sessions (%s, %s, %s)",
+    (platform, arch, kind, useConptyDll) => {
+      const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+      const archDescriptor = Object.getOwnPropertyDescriptor(process, "arch")!;
+      try {
+        Object.defineProperty(process, "platform", { value: platform });
+        Object.defineProperty(process, "arch", { value: arch });
+        createRuntime(kind === "agent" ? { kind, provider: "codex", args: [] } : { kind });
+
+        const spawnOptions = spawnMock.mock.calls.at(-1)?.at(2);
+        if (useConptyDll) {
+          expect(spawnOptions).toHaveProperty("useConptyDll", true);
+        } else {
+          expect(spawnOptions).not.toHaveProperty("useConptyDll");
+        }
+      } finally {
+        Object.defineProperty(process, "platform", platformDescriptor);
+        Object.defineProperty(process, "arch", archDescriptor);
+      }
+    },
+  );
 
   it("disposes immediately but waits for public PTY exit after killing the owned child once", async () => {
     const { runtime, child, events, data, exit } = createRuntime();
@@ -391,15 +467,26 @@ describe("PTY runtime", () => {
     expect(child.write.mock.calls).toEqual([["next prompt"], ["\r"]]);
   });
 
-  it("preserves approval state through action-required spinner frames", () => {
+  it("preserves an explicit hook approval through title redraws without repeating it", () => {
     const { runtime, data, events } = createRuntime({ kind: "agent", provider: "codex", args: [] });
     runtime.setApprovalWaiting(true);
     data("\x1b]0;[ ! ] Action Required | sample-app\x07");
     data("\x1b]0;[ . ] Action Required | sample-app\x07");
-    expect(events.semantic.mock.calls.map(([state]) => state)).toEqual([
-      "approval_wait",
-      "approval_wait",
-    ]);
+    data("ordinary redraw");
+    expect(events.semantic.mock.calls.map(([state]) => state)).toEqual(["approval_wait"]);
+    runtime.setApprovalWaiting(false);
+    data("\x1b]0;sample-app\x07");
+    expect(events.semantic.mock.calls.at(-1)?.[0]).toBe("turn_complete");
+  });
+
+  it("does not interpret pending Codex questions during output as an approval", () => {
+    const { runtime, data, events } = createRuntime({ kind: "agent", provider: "codex", args: [] });
+    runtime.write("\r");
+    data("\x1b]0;[ ! ] Action Required | sample-app\x07");
+    data("agent response continues");
+    data("\x1b]0;[ . ] Action Required | sample-app\x07");
+    expect(events.semantic.mock.calls.map(([state]) => state)).toEqual(["working"]);
+    expect(events.title).toHaveBeenCalledWith("[ . ] Action Required | sample-app");
   });
 
   it("recognizes chunked text approval and releases it only on an answer", () => {

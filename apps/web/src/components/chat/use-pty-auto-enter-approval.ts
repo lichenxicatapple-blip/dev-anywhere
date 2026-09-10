@@ -1,13 +1,23 @@
 import { useEffect, useRef } from "react";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
 
-const WAITING_STATE_FALLBACK_SEQ = -1;
+interface ApprovalWindow {
+  sent: boolean;
+  confirmedRequestId?: string;
+  confirmedRequestIds: Set<string>;
+}
+
+export type PtyAutoEnterApprovalHistory = Map<string, ApprovalWindow>;
 
 interface PtyAutoEnterApprovalOptions {
   sessionId: string;
   enabled: boolean;
   waiting: boolean;
+  // PTY sequence numbers count observations/output, not distinct permission requests.
   approvalSeq?: number;
+  approvalRequestId?: string;
+  approvalScopeKey?: string;
+  history?: PtyAutoEnterApprovalHistory;
   sendRawInput?: (sessionId: string, data: string) => void;
 }
 
@@ -15,40 +25,63 @@ export function usePtyAutoEnterApproval({
   sessionId,
   enabled,
   waiting,
-  approvalSeq,
+  approvalRequestId,
+  approvalScopeKey = sessionId,
+  history,
   sendRawInput = sendRemoteInputRaw,
 }: PtyAutoEnterApprovalOptions): void {
-  const sentSeqRef = useRef<number | undefined>(undefined);
-  const previousSessionIdRef = useRef(sessionId);
+  const localHistoryRef = useRef<PtyAutoEnterApprovalHistory>(new Map());
+  const approvalHistory = history ?? localHistoryRef.current;
 
   useEffect(() => {
-    if (previousSessionIdRef.current !== sessionId) {
-      previousSessionIdRef.current = sessionId;
-      sentSeqRef.current = undefined;
+    let approvalWindow = approvalHistory.get(approvalScopeKey);
+    if (!approvalWindow) {
+      approvalWindow = { sent: false, confirmedRequestIds: new Set() };
+      approvalHistory.set(approvalScopeKey, approvalWindow);
     }
 
     if (!waiting) {
-      sentSeqRef.current = undefined;
+      approvalWindow.sent = false;
+      approvalWindow.confirmedRequestId = undefined;
       return;
     }
 
+    if (approvalRequestId && approvalWindow.confirmedRequestIds.has(approvalRequestId)) {
+      approvalWindow.sent = true;
+      approvalWindow.confirmedRequestId = approvalRequestId;
+      return;
+    }
+
+    // session_status can precede the matching request identity. Associate it with the
+    // fallback Enter already sent in this waiting window instead of sending another.
+    if (
+      approvalWindow.sent &&
+      approvalRequestId &&
+      approvalWindow.confirmedRequestId === undefined
+    ) {
+      approvalWindow.confirmedRequestId = approvalRequestId;
+      approvalWindow.confirmedRequestIds.add(approvalRequestId);
+      return;
+    }
+    if (
+      approvalWindow.sent &&
+      (!approvalRequestId || approvalWindow.confirmedRequestId === approvalRequestId)
+    ) {
+      return;
+    }
     if (!enabled) return;
 
-    if (approvalSeq === undefined) {
-      if (sentSeqRef.current !== undefined) return;
-      sentSeqRef.current = WAITING_STATE_FALLBACK_SEQ;
-      sendRawInput(sessionId, "\r");
-      return;
-    }
-
-    // Some paths publish session_status before the matching pty_state. Treat the
-    // first concrete seq after that fallback as the same approval window.
-    if (sentSeqRef.current === WAITING_STATE_FALLBACK_SEQ) {
-      sentSeqRef.current = approvalSeq;
-      return;
-    }
-    if (sentSeqRef.current === approvalSeq) return;
-    sentSeqRef.current = approvalSeq;
+    approvalWindow.sent = true;
+    approvalWindow.confirmedRequestId = approvalRequestId;
+    if (approvalRequestId) approvalWindow.confirmedRequestIds.add(approvalRequestId);
     sendRawInput(sessionId, "\r");
-  }, [approvalSeq, enabled, sendRawInput, sessionId, waiting]);
+  }, [
+    approvalHistory,
+    approvalRequestId,
+    approvalScopeKey,
+    enabled,
+    sendRawInput,
+    sessionId,
+    waiting,
+  ]);
 }

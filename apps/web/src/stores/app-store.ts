@@ -1,7 +1,7 @@
 // 应用级状态管理：连接状态、选中代理、客户端标识、AppPhase 状态机
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { ProxyInfo } from "@dev-anywhere/shared";
+import type { ProxyInfo, TerminalShellOption } from "@dev-anywhere/shared";
 import {
   DEFAULT_CHAT_CONTENT_FONT_SIZE,
   DEFAULT_TERMINAL_FONT_SIZE,
@@ -52,6 +52,8 @@ interface AppStoreState {
   proxyOnline: boolean;
   selectedProxyId: string | null;
   selectedProxyName: string | null;
+  terminalShells: TerminalShellOption[] | null;
+  terminalShellsLoaded: boolean;
   // 用户主动切换开发机时的临时目标；重连不使用此状态，避免把两种流程混在一起。
   proxySwitchTarget: ProxySwitchTarget | null;
   proxies: ProxyInfo[];
@@ -75,6 +77,7 @@ interface AppStoreState {
 
   setConnected: (connected: boolean) => void;
   setProxy: (proxyId: string | null, proxyName: string | null) => void;
+  setTerminalShells: (shells: TerminalShellOption[] | undefined) => void;
   setProxySwitchTarget: (target: ProxySwitchTarget | null) => void;
   setProxyOnline: (online: boolean) => void;
   setRelayUrl: (url: string) => void;
@@ -175,6 +178,8 @@ export const useAppStore = create<AppStoreState>()(
       proxyOnline: false,
       selectedProxyId: null,
       selectedProxyName: null,
+      terminalShells: null,
+      terminalShellsLoaded: false,
       proxySwitchTarget: null,
       proxies: [],
       proxyListLoaded: false,
@@ -193,12 +198,28 @@ export const useAppStore = create<AppStoreState>()(
       ptyScrollTraceEnabled: loadPtyScrollTraceEnabled(),
       pendingToast: null,
 
-      setConnected: (connected) => set({ connected }),
+      setConnected: (connected) =>
+        set({
+          connected,
+          ...(!connected ? { terminalShells: null, terminalShellsLoaded: false } : {}),
+        }),
       setPendingToast: (toast) => set({ pendingToast: toast }),
       setProxy: (proxyId, proxyName) =>
-        set({ selectedProxyId: proxyId, selectedProxyName: proxyName }),
+        set((state) => ({
+          selectedProxyId: proxyId,
+          selectedProxyName: proxyName,
+          ...(proxyId !== state.selectedProxyId || !proxyId
+            ? { terminalShells: null, terminalShellsLoaded: false }
+            : {}),
+        })),
+      setTerminalShells: (shells) =>
+        set({ terminalShells: shells?.length ? shells : null, terminalShellsLoaded: true }),
       setProxySwitchTarget: (proxySwitchTarget) => set({ proxySwitchTarget }),
-      setProxyOnline: (online) => set({ proxyOnline: online }),
+      setProxyOnline: (online) =>
+        set({
+          proxyOnline: online,
+          ...(!online ? { terminalShells: null, terminalShellsLoaded: false } : {}),
+        }),
       setRelayUrl: (url) => set({ relayUrl: url }),
       setRelayClientAuthIssue: (issue) => set({ relayClientAuthIssue: issue }),
       setRelayConnectionIssue: (issue) => set({ relayConnectionIssue: issue }),

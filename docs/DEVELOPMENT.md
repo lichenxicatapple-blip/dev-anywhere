@@ -8,7 +8,7 @@
 
 - Node.js 20 或更高版本；CI 使用 Node.js 20；
 - pnpm 9，与 CI 保持一致；
-- macOS 或 Linux；
+- macOS、Linux 或原生 Windows 11；
 - 可选：已经登录的 Claude Code、Codex、Kimi Code，用于验证真实 coding agent 链路；
 - 可选：`cloudflared`，用于验证 Quick Tunnel。
 
@@ -33,7 +33,15 @@ pnpm dev:restart -- --profile local --relay local
 pnpm dev:health -- --profile local
 ```
 
-脚本会打印 Web 地址和本轮日志位置。开发环境使用独立的 `local` profile，不会重启正在使用的 `default` profile。
+脚本会打印 Web 地址和本轮日志位置。默认 Web 地址为 `http://localhost:5173`，Relay 地址为 `http://localhost:3100`。开发环境使用独立的 `local` profile，不会重启正在使用的 `default` profile。
+
+`dev:restart`、`dev:web` 和 `dev:health` 支持直接在 Windows PowerShell 或 CMD 中运行，无需 Bash、WSL 或额外启动脚本。Windows 入口会直接使用项目已安装的 Node.js 工具；安装好依赖后，也可以使用 `npm run dev:restart`、`npm run dev:health` 和 `npm run dev:web -- --relay local --port 5173`。
+
+省略 `--profile` 时，`dev:restart` 和 `dev:health` 会从配置中查找指向 `ws://localhost:<relay-port>` 的 Relay 和 profile，不依赖它们叫做 `local`。可用 `--relay-port`、`--web-port`、`--log-dir` 调整端口和日志位置；`dev:restart` 还支持 `--log-retention`（默认保留 50 轮，`0` 表示不清理）。显式指定 `--profile` 后，可通过 `RELAY_URL` 连接隔离 Relay；PowerShell 中设置环境变量使用 `$env:RELAY_URL = "ws://localhost:3101"`，恢复时使用 `Remove-Item Env:RELAY_URL`。
+
+Windows 的 Relay 和 Web 在后台启动，不弹出控制台窗口。重启命令只会结束当前仓库由该入口记录并确认身份的进程；其他程序占用端口时会报错，可先停止占用程序或指定其他端口。进程记录位于 `.tmp/dev-services/`，每个仓库的日志使用独立文件名，避免清理其他仓库的日志。`dev:web` 保持前台运行，按 `Ctrl+C` 停止；指定端口被占用时会向后寻找可用端口。
+
+其他仍调用 `.sh` 的测试、发布和故障注入命令依赖 Bash 及其平台工具；以上 Windows 支持覆盖本地预览和健康检查。
 
 如果已有配置中没有 `local` profile，先在 `~/.dev-anywhere/config.json` 中增加一个指向 `ws://localhost:3100` 的 Relay，并让 `local` profile 使用它。
 
@@ -139,6 +147,14 @@ docs/       长期维护的中文文档和 README 媒体资源
 配置由 Zod schema 校验。新增字段时应同时修改 schema、默认配置、相关测试和用户文档。
 
 ## 测试
+
+开发启动工具和 Vite 连接容错回归可直接在 Windows、macOS 或 Linux 运行：
+
+```bash
+pnpm test:dev
+```
+
+Vite 6.4.2 的重连探测缺少 WebSocket 错误处理；`patches/vite@6.4.2.patch` 通过 pnpm 自动应用，避免异常关闭帧使开发服务器退出。升级 Vite 时，应重新检查补丁并运行这项回归。
 
 ### 静态检查与单元测试
 

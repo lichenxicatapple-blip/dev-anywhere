@@ -62,10 +62,6 @@ export function extractOscWorkingDirectory(rawData: string): string | null {
   }
 }
 
-function isCodexActionRequiredTitle(title: string): boolean {
-  return /\bAction Required\b/i.test(title);
-}
-
 export function normalizePtySemanticText(rawData: string): string {
   return rawData
     .replace(OSC_SEQUENCE_PATTERN, " ")
@@ -130,7 +126,7 @@ export function extractTextSignals(
 // 仅 OSC 0（spinner/标题）返回 { state: null, title }，让调用方推 title 但不动 FSM。
 export function extractOscSignals(
   rawData: string,
-  provider?: PtySignalProvider,
+  _provider?: PtySignalProvider,
 ): PtyStateEvent | null {
   const matches = extractOscSequences(rawData);
 
@@ -154,10 +150,8 @@ export function extractOscSignals(
     }
   }
 
-  if (provider === "codex" && osc0 && isCodexActionRequiredTitle(osc0.text)) {
-    return { state: "approval_wait", title: osc0.text };
-  }
-
+  // Codex also uses "Action Required" for unanswered questions. A window title
+  // alone cannot identify an approval request; keep it as display metadata.
   // 仅 OSC 0：标题/spinner 更新，没有明确语义信号。state=null 让上层只推 title。
   if (osc0 && !osc9) {
     return { state: null, title: osc0.text };

@@ -12,6 +12,7 @@ import {
   serializeControl,
   type ControlMessage,
 } from "@dev-anywhere/shared";
+import { resolveTerminalShell } from "../common/terminal-shell.js";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import { findCodexActiveWriter, type CodexActiveWriter } from "../common/codex-active-writer.js";
@@ -638,15 +639,17 @@ export class RelaySessionCreateHandler {
     const pendingId = nanoid();
     const cwd = resolveTerminalCwd();
     const requestedName = normalizeSessionName(msg.name);
-    const name = requestedName ?? tildify(cwd);
     const nameLocked = requestedName !== undefined;
     const { cols, rows } = msg;
     const geometry = resolveInitialPtyGeometry({ cols, rows });
     let startup: ReturnType<TerminalWorkerSpawner["start"]> | undefined;
     try {
+      const shell = resolveTerminalShell(msg.shell, this.deps.getProviderEnv());
+      const name = requestedName ?? shell.label ?? tildify(cwd);
       startup = this.deps.terminalWorkerSpawner.start({
         sessionId: pendingId,
         kind: "terminal",
+        shell: shell.command,
         provider: "claude",
         cwd,
         name,

@@ -1,0 +1,16 @@
+diff --git a/dist/node/chunks/dep-Dq2t6Dq0.js b/dist/node/chunks/dep-Dq2t6Dq0.js
+--- a/dist/node/chunks/dep-Dq2t6Dq0.js
++++ b/dist/node/chunks/dep-Dq2t6Dq0.js
+@@ -32322,6 +32322,12 @@ function createWebSocketServer(server, config, httpsOptions) {
+   const handleUpgrade = (req, socket, head, isPing) => {
+     wss.handleUpgrade(req, socket, head, (ws) => {
+       if (isPing) {
++        // Ping connections skip the normal connection error handler.
++        ws.on("error", (err) => {
++          config.logger.warn(`WebSocket ping error: ${err.message}`, {
++            timestamp: true
++          });
++        });
+         ws.close(
+           /* Normal Closure */
+           1e3

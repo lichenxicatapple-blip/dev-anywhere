@@ -1,4 +1,6 @@
 import { describe, it, expect } from "vitest";
+import type { PtySemanticState } from "@dev-anywhere/shared";
+import { extractOscSignals } from "#src/common/osc-extractor.js";
 import {
   decidePtySemanticTransition,
   shouldStartPtyTurnOnInput,
@@ -8,7 +10,7 @@ import {
 // 规则 1: signal=approval_wait → approval_wait, emit=true
 // 规则 2: currentState=approval_wait + signal.state!=approval_wait → stateAfterApprovalRelease, emit=true
 //          signal.state===null（title-only）也走这条 → turn_complete（codex cancel 语义）
-// 规则 3: 审批上下文 + signal.state!=turn_complete → 维持 approval_wait, emit=true
+// 规则 3: 审批上下文 + signal.state!=turn_complete → 维持 approval_wait，仅首次接纳外部审批时 emit
 // 规则 4: 纯 title-only signal（非审批上下文）→ 维持 currentState, emit=false
 // 规则 5: signal.state ∈ {turn_complete} → signal.state, emit=true
 // 规则 6: currentState!=working + 显式 working signal → 推到 working, emit=true
@@ -77,8 +79,7 @@ describe("decidePtySemanticTransition", () => {
       });
 
       expect(r.nextState).toBe("approval_wait");
-      expect(r.emit).toBe(true);
-      expect(r.meta?.title).toBe("⠂ Claude Code");
+      expect(r.emit).toBe(false);
     });
   });
 
@@ -89,7 +90,24 @@ describe("decidePtySemanticTransition", () => {
         signal: null,
       });
       expect(r.nextState).toBe("approval_wait");
-      expect(r.emit).toBe(true);
+      expect(r.emit).toBe(false);
+    });
+
+    it("adopts external approval once without emitting again for each output chunk", () => {
+      let currentState: PtySemanticState = "working";
+      const emittedStates: string[] = [];
+      for (const data of ["approval prompt", "draft", "\x1b[?25h", "more output"]) {
+        const result = decidePtySemanticTransition({
+          currentState,
+          signal: extractOscSignals(data, "codex"),
+          sessionStateIsWaitingApproval: true,
+        });
+        expect(result.nextState).toBe("approval_wait");
+        currentState = result.nextState;
+        if (result.emit) emittedStates.push(result.nextState);
+      }
+
+      expect(emittedStates).toEqual(["approval_wait"]);
     });
 
     it("hosted-pty 场景：local working 但 sessionState=WAITING_APPROVAL → approval_wait", () => {
@@ -113,6 +131,22 @@ describe("decidePtySemanticTransition", () => {
   });
 
   describe("规则 4: title-only signal（非审批上下文）", () => {
+    it.each(["working", "turn_complete"] as const)(
+      "does not turn Codex unanswered-question title animation into approvals while %s",
+      (currentState) => {
+        for (const indicator of ["[ ! ]", "[ . ]", "[ ! ]"]) {
+          const title = `${indicator} Action Required | sample-app`;
+          const signal = extractOscSignals(`\x1b]0;${title}\x07draft redraw`, "codex");
+
+          expect(signal?.title).toBe(title);
+          expect(decidePtySemanticTransition({ currentState, signal })).toEqual({
+            nextState: currentState,
+            emit: false,
+          });
+        }
+      },
+    );
+
     it("working + title-only signal → 维持 working, emit=false", () => {
       const r = decidePtySemanticTransition({
         currentState: "working",

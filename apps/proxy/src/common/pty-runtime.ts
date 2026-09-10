@@ -22,6 +22,7 @@ import {
   type CodexXtermHistoryCompat,
 } from "./codex-xterm-history-compat.js";
 import { PtySynchronizedOutputCoalescer } from "./pty-synchronized-output-coalescer.js";
+import { createPtyInputCompat } from "./pty-input-compat.js";
 import { createIdleChecker, type IdleChecker } from "./pty-idle-checker.js";
 import {
   CLAUDE_PROVIDER,
@@ -109,6 +110,7 @@ export class PtyRuntime {
   private readonly synchronizedOutput: PtySynchronizedOutputCoalescer;
   private readonly xtermHistoryCompat: CodexXtermHistoryCompat | null;
   private readonly idleChecker: IdleChecker;
+  private readonly inputCompat: ReturnType<typeof createPtyInputCompat>;
   private closed = false;
   private started = false;
   private lastOutputTime = 0;
@@ -124,6 +126,9 @@ export class PtyRuntime {
     private readonly options: PtyRuntimeOptions,
     private readonly events: PtyRuntimeEvents,
   ) {
+    this.inputCompat = createPtyInputCompat(
+      options.kind === "agent" ? options.provider : undefined,
+    );
     this.renderSequencer = new PtyRenderSequencer(options);
     this.xtermHistoryCompat = createCodexXtermHistoryCompat(
       options.kind === "agent" ? options.provider : null,
@@ -184,6 +189,10 @@ export class PtyRuntime {
     let child: IPty;
     try {
       child = pty.spawn(launch.command, launch.ptyArgs ?? launch.args, {
+        // Keep synchronized VT redraws intact; node-pty ships the DLL for x64/arm64.
+        ...(process.platform === "win32" && ["x64", "arm64"].includes(process.arch)
+          ? { useConptyDll: true }
+          : {}),
         name: "xterm-256color",
         cols: options.cols,
         rows: options.rows,
@@ -265,7 +274,7 @@ export class PtyRuntime {
         this.emitSemantic();
       }
     }
-    this.child.write(data);
+    this.child.write(this.inputCompat.encodeRemote(data));
   }
 
   resize(cols: number, rows: number): void {
@@ -335,7 +344,7 @@ export class PtyRuntime {
       currentState: this.currentState,
       signal: oscSignal ?? textSignal,
       sessionStateIsWaitingApproval: this.approvalWaiting,
-      allowTitleOnlyApprovalRelease: !this.textApprovalWaitActive,
+      allowTitleOnlyApprovalRelease: !this.textApprovalWaitActive && !this.approvalWaiting,
     });
     this.currentState = decision.nextState;
     if (decision.nextState !== "approval_wait") this.textApprovalWaitActive = false;

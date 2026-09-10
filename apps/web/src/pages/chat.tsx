@@ -68,12 +68,13 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === id));
   const isTerminalSession = session?.kind === "terminal";
+  const isCodexPty = mode === "pty" && session?.provider === "codex";
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
   const agentStatus = useSessionStore((s) => s.agentStatusBySessionId[id]);
   const ptyState = useSessionStore((s) => s.ptyStateBySessionId[id]);
   const ptyAutoYesKey = ptyAutoYesSessionKey(selectedProxyId, id);
   const ptyAutoYesEnabled = useSessionStore((s) =>
-    ptyAutoYesKey ? Boolean(s.ptyAutoYesBySessionKey[ptyAutoYesKey]) : false,
+    !isCodexPty && ptyAutoYesKey ? Boolean(s.ptyAutoYesBySessionKey[ptyAutoYesKey]) : false,
   );
   const setPtyAutoYes = useSessionStore((s) => s.setPtyAutoYes);
   const pendingApprovals = useChatStore(
@@ -268,6 +269,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           {!isTerminalSession && !showPtyApprovalHint && <StatusLine state={statusState} />}
           {showPtyApprovalHint && (
             <PtyApprovalHint
+              kind={isCodexPty ? "input" : "approval"}
               autoYesEnabled={ptyAutoYesEnabled}
               onAutoYesChange={(enabled) => {
                 if (ptyAutoYesKey) setPtyAutoYes(ptyAutoYesKey, enabled);

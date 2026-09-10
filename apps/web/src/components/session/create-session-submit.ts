@@ -5,6 +5,7 @@ import {
   type ControlErrorCodeType,
   type RelayControlMessage,
   type SessionInfo,
+  type TerminalShell,
 } from "@dev-anywhere/shared";
 
 export type SessionMode = "pty" | "json";
@@ -60,6 +61,7 @@ interface CreateTerminalRelay {
     request: {
       kind: "terminal";
       mode: "pty";
+      shell?: TerminalShell;
       name?: string;
     },
     timeoutMs?: number,
@@ -213,9 +215,11 @@ export async function submitSessionCreate({
 
 export async function submitTerminalCreate({
   relay,
+  shell,
   timeoutMs = SESSION_CREATE_CLIENT_TIMEOUT_MS,
 }: {
   relay: CreateTerminalRelay | null | undefined;
+  shell?: TerminalShell;
   timeoutMs?: number;
 }): Promise<CreateTerminalSubmitResult> {
   if (!relay) {
@@ -227,6 +231,7 @@ export async function submitTerminalCreate({
       {
         kind: "terminal",
         mode: "pty",
+        ...(shell ? { shell } : {}),
       },
       timeoutMs,
     );

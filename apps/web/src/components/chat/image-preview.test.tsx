@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
 
 const { requestRemoteFileUrl, toastLoading, toastSuccess, toastError } = vi.hoisted(() => ({
   requestRemoteFileUrl: vi.fn(),
@@ -60,6 +61,57 @@ describe("ImagePreviewProvider", () => {
     toastLoading.mockReturnValue("loading-id");
     toastSuccess.mockReset();
     toastError.mockReset();
+  });
+
+  it("sends a wrapped Windows home image link unchanged to the remote file API", async () => {
+    const path = String.raw`~\AppData\Local\Temp\dev-anywhere\paste-HCPesk.png`;
+    const prefix = "Viewed Image ";
+    const lines = [prefix + path.slice(0, 30), path.slice(30)];
+    let openPreview: (path: string) => void = () => undefined;
+    function TerminalPreviewProbe() {
+      openPreview = useImagePreview().openImagePreview;
+      return null;
+    }
+    requestRemoteFileUrl.mockResolvedValueOnce({
+      success: true,
+      url: "https://example.test/paste-HCPesk.png",
+      path: String.raw`C:\Users\liche\AppData\Local\Temp\dev-anywhere\paste-HCPesk.png`,
+    });
+    render(
+      <ImagePreviewProvider sessionId="s1">
+        <TerminalPreviewProbe />
+      </ImagePreviewProvider>,
+    );
+    const terminal = {
+      buffer: {
+        active: {
+          getLine: (index: number) =>
+            lines[index] === undefined
+              ? undefined
+              : { isWrapped: index === 1, translateToString: () => lines[index] },
+        },
+      },
+      registerLinkProvider: vi.fn(() => ({ dispose: vi.fn() })),
+    };
+    const { provider } = registerImagePreviewLinkProvider(terminal as never, (value) =>
+      openPreview(value),
+    );
+
+    act(() => {
+      provider.provideLinks(2, (links) => {
+        expect(links).toHaveLength(1);
+        const link = links![0];
+        expect(link.text).toBe(path);
+        link.activate(new MouseEvent("click", { ctrlKey: true }), link.text);
+      });
+    });
+
+    await waitFor(() => expect(requestRemoteFileUrl).toHaveBeenCalledWith("s1", path, "inline"));
+    expect(requestRemoteFileUrl).toHaveBeenCalledTimes(1);
+    expect(await screen.findByRole("img")).toHaveAttribute(
+      "src",
+      "https://example.test/paste-HCPesk.png",
+    );
   });
 
   it("focuses the preview surface instead of highlighting an action on open", async () => {

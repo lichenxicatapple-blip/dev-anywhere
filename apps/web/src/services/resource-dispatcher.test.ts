@@ -1,8 +1,15 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import type { CommandEntry } from "@dev-anywhere/shared";
 import { useCommandStore } from "@/stores/command-store";
+import { useAppStore } from "@/stores/app-store";
 import { useFileStore } from "@/stores/file-store";
 import { dispatchResourceMessage } from "./resource-dispatcher";
+
+const unavailableAgentCli = {
+  claude: { available: false },
+  codex: { available: false },
+  kimi: { available: false },
+};
 
 function command(name: string): CommandEntry {
   return { name, description: name, source: "test" };
@@ -12,6 +19,36 @@ describe("resource-dispatcher", () => {
   beforeEach(() => {
     useCommandStore.setState(useCommandStore.getInitialState(), true);
     useFileStore.setState(useFileStore.getInitialState(), true);
+    useAppStore.setState(useAppStore.getInitialState(), true);
+  });
+
+  it("updates shell capabilities from a current proxy push and clears omitted capabilities", () => {
+    useAppStore.setState({ selectedProxyId: "windows", proxyOnline: true });
+    dispatchResourceMessage({
+      type: "proxy_info",
+      homePath: "C:/Users/dev",
+      agentCli: unavailableAgentCli,
+      terminalShells: [{ id: "cmd", label: "CMD" }],
+    });
+    expect(useAppStore.getState().terminalShells).toEqual([{ id: "cmd", label: "CMD" }]);
+    dispatchResourceMessage({
+      type: "proxy_info",
+      homePath: "/home/dev",
+      agentCli: unavailableAgentCli,
+    });
+    expect(useAppStore.getState().terminalShells).toBeNull();
+  });
+
+  it("leaves requested shell snapshots to binding-scoped callers", () => {
+    useAppStore.setState({ selectedProxyId: "linux", proxyOnline: true });
+    dispatchResourceMessage({
+      type: "proxy_info",
+      requestId: "old-windows-request",
+      homePath: "C:/Users/dev",
+      agentCli: unavailableAgentCli,
+      terminalShells: [{ id: "cmd", label: "CMD" }],
+    });
+    expect(useAppStore.getState().terminalShells).toBeNull();
   });
 
   it("caches a scoped push without exposing it in another active session", () => {

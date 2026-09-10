@@ -191,6 +191,10 @@ dev-anywhere --profile quick-tunnel kimi
 
 打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex、Kimi Code 或 Shell。Claude Code、Codex 和 Kimi Code 都可以选择终端或聊天模式；Kimi Code 的聊天模式通过 ACP 工作。
 
+作为终端兼容处理，DEV Anywhere 会为通过本地命令或网页新建、恢复的 Codex 终端会话强制关闭星芒特效（`tui.whimsy=false`），直接运行 `codex` 时仍遵循用户自己的设置。已有 Codex 进程需要退出并重新启动或恢复会话后才会应用此设置，刷新网页不会生效。
+
+Codex 的 `Action Required` 标题也用于普通提问，不能可靠识别权限审批。因此 Codex 终端会话不提供 `Always yes` 自动回车；请在终端中处理权限提示，或在启动会话时选择所需的审批策略。
+
 ## 升级
 
 ### Quick Tunnel
@@ -357,6 +361,8 @@ flowchart LR
 - `~/.dev-anywhere/config.json` 可能保存着 Proxy Token。不要把它放进项目文件夹，也不要上传到 GitHub、GitLab 等代码托管平台。
 
 ## 开发
+
+本地开发支持 macOS、Linux 和原生 Windows 11。在安装项目依赖、完成本地配置初始化后，运行 `pnpm dev:restart` 启动 Relay、Web 和 Proxy，再运行 `pnpm dev:health` 检查连接。默认 Web 地址是 `http://localhost:5173`；Windows 可直接在 PowerShell 或 CMD 中运行，无需 Bash 或 WSL。只启动 Web 可用 `pnpm dev:web -- --relay local --port 5173`。
 
 仓库结构、本地隔离环境、测试矩阵和发布门禁见 [开发指南](./docs/DEVELOPMENT.md)。
 

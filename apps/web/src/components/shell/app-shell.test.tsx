@@ -40,12 +40,12 @@ import { AppShell } from "./app-shell";
 import { useAppStore } from "@/stores/app-store";
 import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 
-function makePtySession(sessionId: string): SessionInfo {
+function makePtySession(sessionId: string, provider: "claude" | "codex" = "claude"): SessionInfo {
   return {
     sessionId,
     kind: "agent",
     mode: "pty",
-    provider: "codex",
+    provider,
     state: "idle",
     ptyOwner: "local-terminal",
     cwd: "/tmp/project",
@@ -111,7 +111,7 @@ describe("AppShell PTY Always yes controller", () => {
     });
   });
 
-  it("continues auto-entering enabled PTY approvals after navigating away from that session", async () => {
+  it("continues auto-entering enabled non-Codex PTY approvals after navigating away", async () => {
     const router = renderAppShell("/chat/s1?mode=pty");
 
     await router.navigate("/chat/s2?mode=pty");
@@ -123,6 +123,21 @@ describe("AppShell PTY Always yes controller", () => {
     });
 
     await waitFor(() => expect(sendRawSpy).toHaveBeenCalledWith("s1", "\r"));
+  });
+
+  it("does not auto-enter background Codex PTYs even with a persisted Always yes preference", async () => {
+    useSessionStore.setState({ sessions: [makePtySession("s1", "codex"), makePtySession("s2")] });
+    renderAppShell("/chat/s2?mode=pty");
+    act(() => {
+      setSessionState("s1", "waiting_approval");
+      useSessionStore.getState().setPtyState("s1", {
+        state: "approval_wait",
+        seq: 1,
+        title: "Action Required",
+      });
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(sendRawSpy).not.toHaveBeenCalled();
   });
 
   it("does not inherit PTY auto-enter in another session", async () => {

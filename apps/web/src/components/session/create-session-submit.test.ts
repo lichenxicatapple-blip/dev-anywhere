@@ -261,6 +261,34 @@ describe("create-session submit model", () => {
     );
   });
 
+  it.each(["powershell", "cmd"] as const)(
+    "passes the selected %s shell to the proxy",
+    async (shell) => {
+      const relay = {
+        createSession: vi.fn().mockResolvedValue({
+          success: true,
+          sessionId: "term-windows",
+          cwd: "C:/Users/dev",
+          lastActive: 1,
+          kind: "terminal",
+          mode: "pty",
+          provider: "claude",
+          ptyOwner: "local-terminal",
+          name: shell === "cmd" ? "CMD" : "PowerShell 7",
+        }),
+      };
+      const result = await submitTerminalCreate({ relay, shell });
+      expect(relay.createSession).toHaveBeenCalledWith(
+        { kind: "terminal", mode: "pty", shell },
+        SESSION_CREATE_CLIENT_TIMEOUT_MS,
+      );
+      expect(result).toMatchObject({
+        type: "success",
+        session: { name: shell === "cmd" ? "CMD" : "PowerShell 7" },
+      });
+    },
+  );
+
   it("creates a pure terminal without cwd or provider availability", async () => {
     const relay = {
       createSession: vi.fn().mockResolvedValue({

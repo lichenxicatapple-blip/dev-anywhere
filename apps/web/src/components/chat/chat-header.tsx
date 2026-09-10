@@ -126,6 +126,11 @@ async function ensureMicrophoneReady(): Promise<void> {
 
 const menuItemClass = "min-h-9 gap-2.5";
 const menuLabelClass = "px-2 pb-1 pt-2 text-xs font-semibold text-muted-foreground";
+const codexQuestionShortcuts = [
+  { slot: "answer-next", icon: "⌥↑", label: "发送 Alt+↑", data: "\x1b[1;3A" },
+  { slot: "main-prompt", icon: "⌥↓", label: "发送 Alt+↓", data: "\x1b[1;3B" },
+  { slot: "skip", icon: "^]", label: "发送 Ctrl+]", data: "\x1d" },
+] as const;
 
 function ChatMenuIcon({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -174,13 +179,17 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
   const forceHardwareInput = useAppStore((s) => s.inputModePreference === "hardware");
   const renameSession = useSessionStore((s) => s.renameSession);
   const ptyAutoYesKey = ptyAutoYesSessionKey(selectedProxyId, sessionId);
+  const ptyAutoYesSupported = session?.provider !== "codex";
   const ptyAutoYesEnabled = useSessionStore((s) =>
-    ptyAutoYesKey ? Boolean(s.ptyAutoYesBySessionKey[ptyAutoYesKey]) : false,
+    ptyAutoYesSupported && ptyAutoYesKey ? Boolean(s.ptyAutoYesBySessionKey[ptyAutoYesKey]) : false,
   );
   const setPtyAutoYes = useSessionStore((s) => s.setPtyAutoYes);
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const touchEditingSurface = nativeTouchEditingSurface && !forceHardwareInput;
   const isPty = mode === "pty" || session?.mode === "pty";
+  const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuPtyFocusRef = useRef<HTMLTextAreaElement | null>(null);
+  const menuClosedByEscapeRef = useRef(false);
   const isTerminalSession = session?.kind === "terminal";
   const screenWakeLock = useScreenWakeLockScope(sessionId);
   const voicePilot = useVoicePilotStore(
@@ -385,14 +394,38 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
           >
             <ChatSessionTitle title={title} isPtyTitle={isLivePtyTitle} />
           </span>
-          <DropdownMenu modal={false}>
+          <DropdownMenu
+            modal={false}
+            onOpenChange={(open) => {
+              if (open) menuClosedByEscapeRef.current = false;
+            }}
+          >
             <DropdownMenuTrigger asChild>
               <Button
+                ref={menuTriggerRef}
                 variant="ghost"
                 size="icon-sm"
                 className="justify-self-end"
                 aria-label="会话操作"
                 data-slot="chat-overflow-trigger"
+                onPointerDownCapture={(event) => {
+                  if (event.currentTarget.getAttribute("data-state") === "open") return;
+                  const focused = document.activeElement;
+                  const entry = focused?.closest('[data-slot="pty-keepalive-entry"]');
+                  menuPtyFocusRef.current =
+                    isPty &&
+                    focused instanceof HTMLTextAreaElement &&
+                    focused.matches('[data-slot="pty-host"] .xterm-helper-textarea') &&
+                    entry?.getAttribute("data-session-id") === sessionId &&
+                    entry.getAttribute("data-active") === "true"
+                      ? focused
+                      : null;
+                }}
+                onKeyDownCapture={(event) => {
+                  if (["Enter", " ", "ArrowDown"].includes(event.key)) {
+                    menuPtyFocusRef.current = null;
+                  }
+                }}
               >
                 <MoreVertical aria-hidden="true" />
               </Button>
@@ -401,6 +434,37 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
               align="end"
               className="w-max min-w-44 max-w-[calc(100vw-1rem)]"
               data-slot="chat-overflow-menu"
+              onEscapeKeyDown={() => {
+                menuClosedByEscapeRef.current = true;
+              }}
+              onCloseAutoFocus={(event) => {
+                const previousInput = menuPtyFocusRef.current;
+                const closedByEscape = menuClosedByEscapeRef.current;
+                menuPtyFocusRef.current = null;
+                menuClosedByEscapeRef.current = false;
+                const entry = previousInput?.closest('[data-slot="pty-keepalive-entry"]');
+                const focused = document.activeElement;
+                // Only an Escape dismissal resumes the PTY that owned focus before a pointer
+                // opened this menu. Other menu actions and keyboard navigation retain Radix's
+                // focus behavior, including handing focus to search, dialogs, or outside controls.
+                if (
+                  event.defaultPrevented ||
+                  !closedByEscape ||
+                  !isPty ||
+                  !previousInput?.isConnected ||
+                  entry?.getAttribute("data-session-id") !== sessionId ||
+                  entry.getAttribute("data-active") !== "true" ||
+                  (focused !== document.body &&
+                    focused !== document.documentElement &&
+                    focused !== menuTriggerRef.current &&
+                    focused !== previousInput &&
+                    !focused?.closest('[data-slot="chat-overflow-menu"]'))
+                ) {
+                  return;
+                }
+                event.preventDefault();
+                previousInput.focus({ preventScroll: true });
+              }}
             >
               <DropdownMenuLabel className={menuLabelClass}>会话</DropdownMenuLabel>
               <DropdownMenuItem
@@ -460,16 +524,23 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
                 <DropdownMenuCheckboxItem
                   checked={ptyAutoYesEnabled}
                   className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
-                  disabled={!ptyAutoYesKey}
+                  disabled={!ptyAutoYesKey || !ptyAutoYesSupported}
                   data-slot="chat-menu-pty-auto-yes-item"
                   onCheckedChange={(checked) => {
-                    if (ptyAutoYesKey) setPtyAutoYes(ptyAutoYesKey, checked === true);
+                    if (ptyAutoYesKey && ptyAutoYesSupported) {
+                      setPtyAutoYes(ptyAutoYesKey, checked === true);
+                    }
                   }}
                 >
                   <ChatMenuIcon>
                     <Zap aria-hidden="true" />
                   </ChatMenuIcon>
-                  <span className="min-w-0 flex-1">Always yes</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="block">Always yes</span>
+                    {!ptyAutoYesSupported && (
+                      <span className="block text-xs">Codex 终端请手动确认审批</span>
+                    )}
+                  </span>
                 </DropdownMenuCheckboxItem>
               )}
               {!isPty && !isTerminalSession && (
@@ -486,10 +557,9 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
                 </DropdownMenuCheckboxItem>
               )}
               <DropdownMenuSeparator />
-              {isPty && !isTerminalSession ? (
+              {isPty && (
                 <>
-                  {/* Tab / ⇧Tab / ^T / ^C / ^B / 清空 已挪到移动端控制条; 这里只留
-                  低频且不适合常驻浮层的 Ctrl+O。 */}
+                  {/* 常驻辅助键放在移动端控制条，低频快捷键保留在会话菜单。 */}
                   <DropdownMenuLabel className={menuLabelClass}>快捷键</DropdownMenuLabel>
                   <DropdownMenuItem
                     className={menuItemClass}
@@ -499,7 +569,40 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
                     <ShortcutKeyIcon label="^O" />
                     发送 Ctrl+O
                   </DropdownMenuItem>
+                  <DropdownMenuItem
+                    className={menuItemClass}
+                    data-slot="chat-menu-send-ctrl-r"
+                    disabled={
+                      !connected ||
+                      !proxyOnline ||
+                      session?.mode !== "pty" ||
+                      session.state === "error"
+                    }
+                    onSelect={() => sendRemoteInputRaw(sessionId, "\x12")}
+                  >
+                    <ShortcutKeyIcon label="^R" />
+                    发送 Ctrl+R
+                  </DropdownMenuItem>
+                  {session?.kind === "agent" &&
+                    session.mode === "pty" &&
+                    session.provider === "codex" &&
+                    codexQuestionShortcuts.map((shortcut) => (
+                      <DropdownMenuItem
+                        key={shortcut.slot}
+                        className={menuItemClass}
+                        data-slot={`chat-menu-codex-question-${shortcut.slot}`}
+                        disabled={!connected || !proxyOnline || session.state === "error"}
+                        onSelect={() => sendRemoteInputRaw(sessionId, shortcut.data)}
+                      >
+                        <ShortcutKeyIcon label={shortcut.icon} />
+                        {shortcut.label}
+                      </DropdownMenuItem>
+                    ))}
                   <DropdownMenuSeparator />
+                </>
+              )}
+              {isPty && !isTerminalSession ? (
+                <>
                   <DropdownMenuLabel className={menuLabelClass}>文件</DropdownMenuLabel>
                   <DropdownMenuItem
                     className={menuItemClass}
