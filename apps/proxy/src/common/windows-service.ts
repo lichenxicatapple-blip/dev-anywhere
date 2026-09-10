@@ -8,7 +8,13 @@ import { checkAutostartText, psString } from "./autostart-definition.js";
 export const WINDOWS_SERVICE_POWERSHELL_PREAMBLE = `$ErrorActionPreference = 'Stop';
 $env:PSModulePath = $PSHOME + '\\Modules';
 $ProgressPreference = 'SilentlyContinue';
-[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false);`;
+[Console]::OutputEncoding = [Text.UTF8Encoding]::new($false);
+function Get-DevAnywhereAccountSid([string]$Name) {
+  # SCM abbreviates the local machine as a dot; NTAccount needs the actual machine name.
+  if ($Name.StartsWith('.\\')) { $Name = [Environment]::MachineName + $Name.Substring(1); }
+  $account = New-Object Security.Principal.NTAccount($Name);
+  return $account.Translate([Security.Principal.SecurityIdentifier]).Value;
+}`;
 
 function encoded(value: string): string {
   return `Decode("${Buffer.from(checkAutostartText(value), "utf8").toString("base64")}")`;
@@ -132,15 +138,13 @@ if (!(Test-Path -LiteralPath $servicePath -PathType Leaf)) {
 export function windowsServiceRegistration(label: string, binaryPath: string): string {
   return `$binaryPath = ${psString(quoteWindowsArgument(binaryPath))};
 if ($service) {
-  $account = New-Object Security.Principal.NTAccount($service.StartName);
-  if ($account.Translate([Security.Principal.SecurityIdentifier]).Value -ne $ownerSid) { throw 'Existing service belongs to another account'; }
+  if ((Get-DevAnywhereAccountSid $service.StartName) -ne $ownerSid) { throw 'Existing service belongs to another account'; }
   $result = Invoke-CimMethod -InputObject $service -MethodName Change -Arguments @{ PathName = $binaryPath; StartMode = 'Automatic' };
   if ($result.ReturnValue -ne 0) { throw ('Service update failed: ' + $result.ReturnValue); }
 } else {
   $credential = Get-Credential -UserName $ownerName -Message 'DEV Anywhere: enter this Windows account password for startup before desktop login (not the Windows Hello PIN)';
   if (!$credential) { throw 'Service installation cancelled'; }
-  $account = New-Object Security.Principal.NTAccount($credential.UserName);
-  if ($account.Translate([Security.Principal.SecurityIdentifier]).Value -ne $ownerSid) { throw 'Use the same account that owns this DEV Anywhere profile'; }
+  if ((Get-DevAnywhereAccountSid $credential.UserName) -ne $ownerSid) { throw 'Use the same account that owns this DEV Anywhere profile'; }
   Add-Type -AssemblyName System.ServiceProcess;
   Add-Type -AssemblyName System.Configuration.Install;
   $processInstaller = New-Object System.ServiceProcess.ServiceProcessInstaller;

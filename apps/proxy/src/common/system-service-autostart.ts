@@ -144,8 +144,7 @@ try {
   $ownerSid = ${psString(owner.sid)};
   ${lookup}
   if ($service) {
-    $account = New-Object Security.Principal.NTAccount($service.StartName);
-    if ($account.Translate([Security.Principal.SecurityIdentifier]).Value -ne $ownerSid) { throw 'Existing service belongs to another account'; }
+    if ((Get-DevAnywhereAccountSid $service.StartName) -ne $ownerSid) { throw 'Existing service belongs to another account'; }
   }
   ${script}
 } catch {
