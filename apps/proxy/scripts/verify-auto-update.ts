@@ -14,14 +14,17 @@ import { spawnCommand } from "../src/common/command-launch.js";
 import { buildProxyProfilePaths } from "../src/common/paths.js";
 import { requestServiceControl } from "../src/common/service-control.js";
 import { requestServiceHost } from "../src/common/service-host-control.js";
+import { loadProxyRuntimeEnv } from "../src/common/runtime-env.js";
 import { installAcceptanceService } from "./auto-update-service.js";
 
 // Full native acceptance: packaged entrypoints, the real Relay, real npm installs, an OS
-// service (or detached daemon), and an interactive shell. No updater mocks or shorter timers.
+// service (or detached daemon), and an interactive shell. Only the retry interval is shortened;
+// the packaged updater, npm, OS services and clock all run normally.
 // Start from the published 0.9.8 package. The two higher candidate versions belong only to
 // this loopback registry and are never published. The second upgrade exercises the new updater.
 if (process.env.CI !== "true") throw new Error("Run on a disposable native CI host");
 const mode = process.argv.includes("--daemon") ? "daemon" : "system";
+const retryInitialMs = loadProxyRuntimeEnv().autoUpdateRetryInitialMs ?? 10_000;
 const source = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const baselineVersion = "0.9.8";
 const sourceVersion = JSON.parse(await readFile(join(source, "package.json"), "utf8"))
@@ -129,17 +132,15 @@ await new Promise<void>((done) => registry.listen(0, "127.0.0.1", done));
 const registryAddress = registry.address();
 assert(registryAddress && typeof registryAddress === "object");
 const registryUrl = `http://127.0.0.1:${registryAddress.port}`;
-const env = {
-  ...process.env,
+const runtimeEnv = {
   npm_config_prefix: prefix,
   npm_config_cache: join(root, "npm-cache"),
   npm_config_registry: registryUrl,
+  DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS: String(retryInitialMs),
 };
+const env = { ...process.env, ...runtimeEnv };
 const environmentModule = join(root, "environment.mjs");
-await writeFile(
-  environmentModule,
-  `Object.assign(process.env, ${JSON.stringify({ npm_config_prefix: prefix, npm_config_cache: env.npm_config_cache, npm_config_registry: registryUrl })});`,
-);
+await writeFile(environmentModule, `Object.assign(process.env, ${JSON.stringify(runtimeEnv)});`);
 
 async function command(command: string, args: string[], cwd = root) {
   return new Promise<string>((done, reject) => {
@@ -352,7 +353,7 @@ async function checkShell(label: string) {
   log("original_shell_responded", { label, sessionId, workerPid: originalWorkerPid, shellPid });
 }
 try {
-  log("acceptance_started", { node: process.version, root });
+  log("acceptance_started", { node: process.version, root, retryInitialMs });
   for (const version of [firstTargetVersion, retryTargetVersion]) {
     await pack("relay", version);
     await pack("proxy", version);
@@ -475,7 +476,7 @@ try {
     async () => (await logs("service")).find((item) => item.msg === "Proxy auto-update will retry"),
     7 * 60000,
   );
-  assert.equal(retry.retryInMs, 900000, "The production retry timer must remain 15 minutes");
+  assert.equal(retry.retryInMs, retryInitialMs, "The packaged updater ignored its retry interval");
   assert(blockedRequests > 0, "The updater did not attempt the real tarball download");
   const stillRunning = await status();
   assert.equal(stillRunning?.pid, updated.pid, "Download failure stopped the old daemon");
@@ -488,17 +489,26 @@ try {
   await connectBrowser();
   await checkShell("after-download-failure");
   blockTarball = false;
-  log("failure_recovered_waiting_for_real_retry", { retry, blockedRequests });
+  log("failure_recovered_waiting_for_retry", { retry, blockedRequests });
   const recovered = await waitFor(
-    "default automatic retry succeeds",
+    "automatic retry succeeds",
     async () => {
       const current = await status();
       return current?.version === retryTargetVersion && current.info?.relay?.connected
         ? current
         : null;
     },
-    20 * 60000,
+    retryInitialMs + 6 * 60000,
   );
+  const retryStarted = (await logs("service")).find(
+    (item) =>
+      item.msg === "Starting Relay-directed Proxy auto-update" &&
+      item.targetVersion === retryTargetVersion &&
+      Number(item.time) > Number(retry.time),
+  );
+  assert(retryStarted, "The failed update did not start another runner automatically");
+  const retryWaitMs = Number(retryStarted.time) - Number(retry.time);
+  assert(retryWaitMs >= retryInitialMs, "The retry ran before its configured interval");
   assert.notEqual(recovered.pid, updated.pid);
   assert.equal((await command(process.execPath, [entry, "--version"])).trim(), retryTargetVersion);
   client?.terminate();
@@ -517,6 +527,7 @@ try {
     originalWorkerPid,
     originalShellPid,
     retryInMs: retry.retryInMs,
+    retryWaitMs,
   });
 } catch (error) {
   for (const kind of ["service", "auto-update", "terminal"])

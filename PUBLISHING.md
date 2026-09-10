@@ -134,9 +134,16 @@ services and shells. Each job checks:
 
 - Two consecutive Relay-directed upgrades with the original terminal still usable.
 - A stalled package download, local package recovery and the old daemon staying available.
-- Success after the real 15-minute retry interval, without manually installing the
+- Success after the configured retry interval, without manually installing the
   target version or restarting Proxy.
 - The system service host and terminal worker keeping their original process identities.
+
+CI sets `DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS=10000` so failure recovery waits
+10 seconds before retrying. The acceptance script uses the same default; set the
+variable to override it. This changes only the waiting interval: the real timer,
+npm download, package recovery and service restart still run. Production defaults
+to 15 minutes, with exponential backoff capped at six hours; unit tests verify
+those defaults without waiting in real time.
 
 Windows system service acceptance uses a disposable ordinary account without a
 desktop login. Workflow artifacts retain service and updater logs. A failed,

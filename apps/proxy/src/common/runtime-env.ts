@@ -24,6 +24,8 @@ interface ProxyRuntimeEnv {
   relayProxyToken: string | undefined;
   // DEV_ANYWHERE_HOOK_PORT —— 覆盖按 profile 推导的 hook server 端口。
   hookPort: number | undefined;
+  // DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS —— 自动更新失败后的首次重试间隔。
+  autoUpdateRetryInitialMs: number | undefined;
   // CLAUDE_BIN / CODEX_BIN / KIMI_BIN —— 覆盖 config.agentCli 里的 CLI 可执行文件路径。
   claudeBin: string | undefined;
   codexBin: string | undefined;
@@ -57,11 +59,23 @@ function nonEmpty(value: string | undefined): string | undefined {
   return value && value.length > 0 ? value : undefined;
 }
 
+function parseRetryInterval(value: string | undefined): number | undefined {
+  if (!value) return undefined;
+  const interval = Number(value);
+  if (!Number.isInteger(interval) || interval < 1 || interval > 2_147_483_647) {
+    throw new Error(
+      `Invalid DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS=${JSON.stringify(value)}: expected integer milliseconds 1-2147483647`,
+    );
+  }
+  return interval;
+}
+
 export function loadProxyRuntimeEnv(env: NodeJS.ProcessEnv = process.env): ProxyRuntimeEnv {
   return {
     relayUrl: nonEmpty(env.RELAY_URL),
     relayProxyToken: nonEmpty(env.RELAY_PROXY_TOKEN),
     hookPort: parsePort(env.DEV_ANYWHERE_HOOK_PORT, "DEV_ANYWHERE_HOOK_PORT"),
+    autoUpdateRetryInitialMs: parseRetryInterval(env.DEV_ANYWHERE_AUTO_UPDATE_RETRY_INITIAL_MS),
     claudeBin: nonEmpty(env.CLAUDE_BIN),
     codexBin: nonEmpty(env.CODEX_BIN),
     kimiBin: nonEmpty(env.KIMI_BIN),

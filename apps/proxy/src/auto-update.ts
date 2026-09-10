@@ -1,6 +1,7 @@
 import type { ChildProcess } from "node:child_process";
 import type { Logger } from "pino";
 import { IS_DEV, spawnScript } from "./common/env.js";
+import { loadProxyRuntimeEnv } from "./common/runtime-env.js";
 import { compareStableVersions } from "./common/stable-version.js";
 
 const UPDATE_RETRY_INITIAL_MS = 15 * 60_000;
@@ -29,7 +30,10 @@ export function createRelayAutoUpdater(options: RelayAutoUpdaterOptions): RelayA
   const packagedRuntime = options.packagedRuntime ?? !IS_DEV;
   const available =
     options.enabled && packagedRuntime && options.profileName !== QUICK_TUNNEL_PROFILE;
-  const retryInitialMs = options.retryInitialMs ?? UPDATE_RETRY_INITIAL_MS;
+  const retryInitialMs =
+    options.retryInitialMs ??
+    loadProxyRuntimeEnv().autoUpdateRetryInitialMs ??
+    UPDATE_RETRY_INITIAL_MS;
   const retryMaxMs = options.retryMaxMs ?? UPDATE_RETRY_MAX_MS;
   const spawnRunner =
     options.spawnRunner ??
