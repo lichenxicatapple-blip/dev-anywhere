@@ -160,7 +160,9 @@ function Get-Credential {
   return New-Object Management.Automation.PSCredential($ownerName, $password);
 }
 $service = $null;
+& {
 ${windowsServiceRegistration(label, wrapper.path)}
+} 3>&1;
 if ($script:credentialAttempts -ne 2) { throw 'The incorrect password was not rejected before registration'; }`);
       expect(registrationOutput).toContain("Windows 未接受这个账户密码");
       expect(registrationOutput).toContain("Windows 服务账户验证通过");
