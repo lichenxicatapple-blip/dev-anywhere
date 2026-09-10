@@ -114,6 +114,18 @@ try {
   log("LIVE_NPM_UPDATE", liveUpdate);
   log("STATUS_AFTER_LIVE_UPDATE", cli(recoveryRoot, ["status"]));
   log("LOADED_NATIVE_MODULES_AFTER_UPDATE", nativeModules(servicePid));
+  log("SECOND_LIVE_NPM_UPDATE", install("0.9.9"));
+  for (const name of readdirSync(dirname(packageRoot)).filter((name) => /^\.proxy-/.test(name))) {
+    const retired = join(dirname(packageRoot), name);
+    log("RETIRED_PACKAGE", { name, manifest: existsSync(join(retired, "package.json")) });
+    try {
+      renameSync(retired, join(root, name));
+      log("QUARANTINE_RETIRED_PACKAGE", { name, result: "succeeded" });
+    } catch (error) {
+      log("QUARANTINE_RETIRED_PACKAGE", { name, code: error.code, message: error.message });
+    }
+  }
+  log("LIVE_NPM_UPDATE_AFTER_QUARANTINE", install("0.9.9"));
   try {
     cpSync(packageRoot, join(root, "live-copy"), { recursive: true, verbatimSymlinks: true });
     log("COPY_RUNNING_PACKAGE", "succeeded");
