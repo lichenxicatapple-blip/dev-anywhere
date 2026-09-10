@@ -508,7 +508,12 @@ try {
   );
   assert(retryStarted, "The failed update did not start another runner automatically");
   const retryWaitMs = Number(retryStarted.time) - Number(retry.time);
-  assert(retryWaitMs >= retryInitialMs, "The retry ran before its configured interval");
+  // Log timestamps use wall time; timer scheduling has millisecond-level clock granularity.
+  // Keep the real-delay check without rejecting a 9,999 ms observation of a 10-second timer.
+  assert(
+    retryWaitMs >= retryInitialMs - 50,
+    `Retry waited ${retryWaitMs} ms; expected ${retryInitialMs} ms with 50 ms clock tolerance`,
+  );
   assert.notEqual(recovered.pid, updated.pid);
   assert.equal((await command(process.execPath, [entry, "--version"])).trim(), retryTargetVersion);
   client?.terminate();
