@@ -115,6 +115,22 @@ describe("npm installation recovery", () => {
     });
   });
 
+  it("quarantines npm's partially cleaned retired package after its manifest was deleted", async () => {
+    const f = await fixture();
+    const retired = join(dirname(f.packageRoot), ".proxy-6BH2bq16");
+    const nativeDirectory = join(retired, "node_modules", "fixture-dep");
+    await mkdir(nativeDirectory, { recursive: true });
+    await writeFile(join(nativeDirectory, "locked.node"), "loaded native module");
+    const unknown = join(dirname(f.packageRoot), ".proxy-personal-backup");
+    await mkdir(unknown);
+
+    const backup = await createNpmInstallBackup(f);
+    await expect(stat(retired)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await stat(unknown)).isDirectory()).toBe(true);
+    await f.validate("0.9.8");
+    await backup.dispose();
+  });
+
   it("keeps recovery files if restoring an npm launcher fails", async () => {
     const f = await fixture();
     const backup = await createNpmInstallBackup(f);

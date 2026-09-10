@@ -35,19 +35,27 @@ export async function createNpmInstallBackup(options: {
       savedBins.push({ path, backup });
     }
 
-    // Interrupted npm installs leave retired packages at a deterministic sibling path.
-    // Move only real directories whose manifest identifies this package; leave other files alone.
+    // npm reuses a hashed sibling path when retiring this package. On Windows cleanup can
+    // delete package.json but leave mapped DLLs behind. A second install then tries to copy
+    // over those DLLs and fails with EBUSY. Quarantine the retired directory before npm runs,
+    // including that partially cleaned state; loaded modules continue using their open files.
     const prefix = `.${basename(packageRoot)}-`;
     for (const entry of await readdir(dirname(packageRoot), { withFileTypes: true })) {
-      if (!entry.isDirectory() || !entry.name.startsWith(prefix)) continue;
-      const retired = join(dirname(packageRoot), entry.name);
-      let manifest: { name?: unknown } | null;
-      try {
-        manifest = JSON.parse(await readFile(join(retired, "package.json"), "utf8"));
-      } catch {
+      if (
+        !entry.isDirectory() ||
+        !entry.name.startsWith(prefix) ||
+        !/^[a-zA-Z0-9]{8}$/.test(entry.name.slice(prefix.length))
+      )
         continue;
+      const retired = join(dirname(packageRoot), entry.name);
+      try {
+        const manifest = JSON.parse(await readFile(join(retired, "package.json"), "utf8")) as {
+          name?: unknown;
+        } | null;
+        if (manifest?.name !== packageName) continue;
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") continue;
       }
-      if (manifest?.name !== packageName) continue;
       await rename(retired, join(directory, entry.name));
     }
   } catch (error) {
