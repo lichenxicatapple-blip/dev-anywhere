@@ -1,4 +1,5 @@
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import {
   mkdtemp,
   mkdir,
@@ -113,6 +114,27 @@ describe("npm installation recovery", () => {
     expect(JSON.parse(await readFile(join(other, "package.json"), "utf8"))).toEqual({
       name: "other-package",
     });
+  });
+
+  it("quarantines npm's partially cleaned retired package after its manifest was deleted", async () => {
+    const f = await fixture();
+    const hash = createHash("sha1")
+      .update(f.packageRoot)
+      .digest("base64")
+      .replace(/[^a-zA-Z0-9]+/g, "")
+      .slice(0, 8);
+    const retired = join(dirname(f.packageRoot), `.proxy-${hash}`);
+    const nativeDirectory = join(retired, "node_modules", "fixture-dep");
+    await mkdir(nativeDirectory, { recursive: true });
+    await writeFile(join(nativeDirectory, "locked.node"), "loaded native module");
+    const unknown = join(dirname(f.packageRoot), ".proxy-personal");
+    await mkdir(unknown);
+
+    const backup = await createNpmInstallBackup(f);
+    await expect(stat(retired)).rejects.toMatchObject({ code: "ENOENT" });
+    expect((await stat(unknown)).isDirectory()).toBe(true);
+    await f.validate("0.9.8");
+    await backup.dispose();
   });
 
   it("keeps recovery files if restoring an npm launcher fails", async () => {

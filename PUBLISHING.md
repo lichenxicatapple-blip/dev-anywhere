@@ -17,7 +17,7 @@ A single `vX.Y.Z` git tag produces three public artifacts:
 本地 `pnpm release X.Y.Z` 是唯一创建版本的入口。脚本会：
 
 1. 确认当前分支是与 `origin/main` 一致的 `main`，并校验目标版本和 CHANGELOG。
-2. 运行发布检查、快速 smoke、进程/网络 Chaos 和完整 Android Chrome 门禁。
+2. 确认当前 main 提交通过三平台自动升级验收，再运行发布检查、快速 smoke、进程/网络 Chaos 和完整 Android Chrome 门禁。
 3. 同步根目录和四个 workspace package 的版本号。
 4. 创建 release commit 和 `vX.Y.Z` tag，再推送 commit 与 tag。
 
@@ -120,15 +120,69 @@ The installer prints two credentials:
 - `RELAY_PROXY_TOKEN`: put this in each developer machine's `~/.dev-anywhere/config.json` as `relays.cloud.proxyToken`.
 - `RELAY_CLIENT_TOKEN`: open `https://dev-anywhere.example.com/`, then paste this value in Settings -> Relay Token.
 
-## Local proxy update
+## Automatic update acceptance
 
-After npm publish succeeds, update the local CLI and reconnect the local runtime to cloud:
+Normal releases require all six `Native automatic update` CI jobs for the current
+main commit to pass: macOS, Linux and Windows, each in daemon and system service
+mode. `pnpm release` checks these results before creating a version or tag.
+
+The jobs install the published `0.9.8` baseline, then build the candidate Proxy and
+Relay into two higher versions served only by a registry bound to localhost.
+Nothing is published. The first upgrade verifies migration from the old release;
+the second exercises the new updater. Both use real npm, native modules, OS
+services and shells. Each job checks:
+
+- Two consecutive Relay-directed upgrades with the original terminal still usable.
+- A stalled package download, local package recovery and the old daemon staying available.
+- Success after the real 15-minute retry interval, without manually installing the
+  target version or restarting Proxy.
+- The system service host and terminal worker keeping their original process identities.
+
+Windows system service acceptance uses a disposable ordinary account without a
+desktop login. Workflow artifacts retain service and updater logs. A failed,
+cancelled or missing platform result does not satisfy the release gate.
+
+## Verify the published update
+
+For a regular release, publish both npm packages and the Docker image, deploy the
+new version to the VPS, then let the running local Proxy update to the Relay's
+version. Keep the local installation on its previous version until this happens.
+
+1. Before deploying the VPS, run `dev-anywhere serve status` and confirm the local
+   Proxy is connected to `cloud` with `Updates: automatic (follows Relay)`.
+2. Deploy the published VPS image and confirm `/health` reports the target version.
+3. Wait for the local Proxy to install and restart itself. Check
+   `dev-anywhere serve status` and `dev-anywhere --version`: both must report the
+   target version, the Relay must be connected, and existing sessions must remain.
+4. If it does not update, inspect the newest nonempty `auto-update-*.log` and
+   `service-*.log` files in the profile's log directory. For the default profile,
+   this is `~/.dev-anywhere/logs` (`%USERPROFILE%\.dev-anywhere\logs` on Windows).
+   Record the failure and observe the scheduled retry; the first retry is after
+   15 minutes.
+
+Do not manually install the target version or restart the local service before
+observing the automatic update. Manual installation bypasses this release check.
+
+When verifying changes to the updater, the starting Proxy must already contain
+the new updater code. A successful upgrade into that version only verifies the
+previous updater. To verify failure recovery in a real environment, observe a
+failed download, the old version remaining usable, and a later automatic retry
+reaching the Relay version after downloads work again. Record which of these
+outcomes were actually observed.
+
+### Manual recovery
+
+Use manual installation when automatic updates are disabled or unsupported, or
+when a diagnosed failure requires restoring service. Preserve the update logs
+and record this as manual recovery, not a successful automatic update:
 
 ```bash
 npm install -g @dev-anywhere/proxy@X.Y.Z
 dev-anywhere serve restart --relay cloud
 dev-anywhere serve status
 ```
+
+### First-time local setup
 
 For first-time local setup:
 

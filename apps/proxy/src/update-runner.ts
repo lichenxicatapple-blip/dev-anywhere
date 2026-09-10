@@ -185,7 +185,9 @@ function canonicalPath(path: string): string {
   return process.platform === "win32" ? canonical.toLowerCase() : canonical;
 }
 
-async function verifyNpmManagedGlobalInstall(npm: string): Promise<string[]> {
+async function verifyNpmManagedGlobalInstall(
+  npm: string,
+): Promise<{ binPaths: string[]; packageRoot: string }> {
   const result = await runCommand(
     npm,
     ["root", "--global", "--loglevel=error"],
@@ -212,11 +214,13 @@ async function verifyNpmManagedGlobalInstall(npm: string): Promise<string[]> {
   }
   const binDirectory =
     process.platform === "win32" ? dirname(npmRoot) : join(dirname(dirname(npmRoot)), "bin");
-  return (
-    process.platform === "win32"
+  return {
+    packageRoot: expectedPackageRoot,
+    binPaths: (process.platform === "win32"
       ? ["dev-anywhere", "dev-anywhere.cmd", "dev-anywhere.ps1"]
       : ["dev-anywhere"]
-  ).map((name) => join(binDirectory, name));
+    ).map((name) => join(binDirectory, name)),
+  };
 }
 
 function readInstalledVersion(): string {
@@ -461,11 +465,14 @@ export async function runRelayDirectedUpdate(
   deps?: RelayDirectedUpdateDeps,
 ): Promise<number> {
   let binPaths: string[] = [];
+  let npmPackageRoot = PROXY_PACKAGE_ROOT;
   const runtime: RelayDirectedUpdateDeps = deps ?? {
     acquireLock: () => acquireUpdateLock(),
     resolveNpm: adjacentNpmExecutable,
     verifyNpm: async (npm) => {
-      binPaths = await verifyNpmManagedGlobalInstall(npm);
+      const installation = await verifyNpmManagedGlobalInstall(npm);
+      binPaths = installation.binPaths;
+      npmPackageRoot = installation.packageRoot;
     },
     readInstalledVersion,
     installVersion,
@@ -475,6 +482,7 @@ export async function runRelayDirectedUpdate(
         packageRoot: PROXY_PACKAGE_ROOT,
         packageName: PROXY_PACKAGE_NAME,
         binPaths,
+        npmPackageRoot,
       }),
     restartWithRecovery: (options, npm, previous, installed, backup) =>
       restartWithRecovery(options, npm, previous, installed, undefined, backup),

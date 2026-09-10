@@ -42,6 +42,7 @@ node --check scripts/tools/emu-debug.mjs
 node --check scripts/quality/check-source-comment-refs.mjs
 node --check scripts/lib/resolve-dev-profile.mjs
 node --check scripts/release/cli-smoke.mjs
+node --check scripts/release/check-auto-update.mjs
 if [[ "$STATIC_ONLY" != "1" ]]; then
   bash scripts/deploy/install-relay-render.test.sh
   bash scripts/deploy/install-bootstrap.test.sh

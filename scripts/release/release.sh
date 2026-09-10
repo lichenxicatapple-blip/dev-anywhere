@@ -151,6 +151,9 @@ if [[ "$EMERGENCY" == "1" ]]; then
   echo "=== Typecheck against built workspace packages ==="
   pnpm typecheck
 else
+  echo "=== Verify native automatic update acceptance for this main commit ==="
+  node scripts/release/check-auto-update.mjs "$LOCAL_MAIN"
+
   echo "=== Run release:check ==="
   pnpm release:check
 
