@@ -138,7 +138,8 @@ describe.skipIf(
     try {
       powershell(wrapper.compileScript);
       // Credentials exist only in this disposable test. Never prompt for or use a real account.
-      powershell(`$password = ConvertTo-SecureString ${psString(password)} -AsPlainText -Force;
+      const registrationOutput =
+        powershell(`$password = ConvertTo-SecureString ${psString(password)} -AsPlainText -Force;
 New-LocalUser -Name ${psString(name)} -Password $password -AccountNeverExpires -PasswordNeverExpires | Out-Null;
 $ownerName = $env:COMPUTERNAME + '\\' + ${psString(name)};
 $ownerSid = (New-Object Security.Principal.NTAccount($ownerName)).Translate([Security.Principal.SecurityIdentifier]).Value;
@@ -147,9 +148,22 @@ $identity = New-Object Security.Principal.SecurityIdentifier($ownerSid);
 $rule = New-Object Security.AccessControl.FileSystemAccessRule($identity, 'Modify', 'ContainerInherit,ObjectInherit', 'None', 'Allow');
 $acl.AddAccessRule($rule);
 Set-Acl -LiteralPath ${psString(home)} -AclObject $acl;
-function Get-Credential { param($UserName, $Message); return New-Object Management.Automation.PSCredential($ownerName, $password); }
+$script:credentialAttempts = 0;
+function Get-Credential {
+  param($UserName, $Message);
+  $script:credentialAttempts++;
+  if ($script:credentialAttempts -eq 1) {
+    return New-Object Management.Automation.PSCredential($ownerName, (ConvertTo-SecureString 'incorrect-password' -AsPlainText -Force));
+  }
+  if ($script:credentialAttempts -ne 2) { throw 'Credential validation did not accept the correct password'; }
+  if (Get-CimInstance Win32_Service -Filter ${psString(`Name='${label}'`)}) { throw 'The rejected password left a registered service'; }
+  return New-Object Management.Automation.PSCredential($ownerName, $password);
+}
 $service = $null;
-${windowsServiceRegistration(label, wrapper.path)}`);
+${windowsServiceRegistration(label, wrapper.path)}
+if ($script:credentialAttempts -ne 2) { throw 'The incorrect password was not rejected before registration'; }`);
+      expect(registrationOutput).toContain("Windows 未接受这个账户密码");
+      expect(registrationOutput).toContain("Windows 服务账户验证通过");
       owner = JSON.parse(
         powershell(`$account = Get-LocalUser -Name ${psString(name)};
 @{ name = [Environment]::MachineName + '\\' + $account.Name; sid = $account.SID.Value } | ConvertTo-Json -Compress;`),

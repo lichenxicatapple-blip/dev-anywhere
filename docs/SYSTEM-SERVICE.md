@@ -40,6 +40,8 @@ dev-anywhere --profile work serve autostart enable --system --now
 
 按提示允许管理员授权。首次安装还需要输入当前账户的密码；使用微软账户登录 Windows 时，填写微软账户密码。Windows Hello PIN、指纹和人脸识别不能代替这个密码，账户需支持密码登录。后续启用无需重复输入。
 
+输入后会验证账户能否登录服务。密码错误时会提示重新输入；看到“Windows 服务账户验证通过”后继续完成配置。取消凭据窗口可退出安装。
+
 若首次填写的密码不正确，或之后更改过账户密码，运行 `services.msc` 打开 Windows“服务”，找到 `serve autostart status --system` 输出的服务名称，在“登录”页更新密码后启动服务。
 
 ## 平时如何启停
