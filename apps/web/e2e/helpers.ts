@@ -1446,6 +1446,14 @@ export async function selectFakeProxy(page: Page): Promise<void> {
   await page.locator('[data-slot="proxy-item"][data-proxy-id="proxy-1"]:visible').last().click();
   if (desktop) {
     await expect(desktopTrigger).toHaveAttribute("aria-expanded", "false");
+    // aria-expanded changes before the closing popover restores focus. Finish that interaction
+    // before navigating, otherwise its late focus restoration can steal the first terminal input.
+    await expect(
+      page.locator('[data-slot="popover-content"]').filter({
+        has: page.locator('[data-slot="proxy-item"]'),
+      }),
+    ).toHaveCount(0);
+    await expect(desktopTrigger).toBeFocused();
   }
   await expect(
     page

@@ -269,6 +269,10 @@ test.describe("WebSocket reconnect chaos", () => {
     await selectFakeProxy(page);
     await page.goto(`${BASE_URL}/#/chat/claude-pty?mode=pty`);
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+      "data-connection-ready",
+      "true",
+    );
     await expect(
       page.locator('[data-slot="pty-host"] textarea[aria-label="Terminal input"]'),
     ).toBeVisible();
@@ -323,6 +327,10 @@ test.describe("WebSocket reconnect chaos", () => {
           window.__ccTestPtyTerminals?.get("claude-pty"),
       ),
     ).toBe(true);
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+      "data-connection-ready",
+      "true",
+    );
     await terminalInput.focus();
     await page.keyboard.type("restored-input");
     await expect
