@@ -151,9 +151,6 @@ if [[ "$EMERGENCY" == "1" ]]; then
   echo "=== Typecheck against built workspace packages ==="
   pnpm typecheck
 else
-  echo "=== Verify native automatic update acceptance for this main commit ==="
-  node scripts/release/check-auto-update.mjs "$LOCAL_MAIN"
-
   echo "=== Run release:check ==="
   pnpm release:check
 
@@ -165,6 +162,11 @@ else
 
   echo "=== Run mandatory Android Chrome release gate ==="
   RELEASE_DEEP_SCOPE=mobile RELEASE_DEEP_SKIP_FAST=1 pnpm release:deep
+
+  # Let main CI run alongside the local gates; every native mode must still pass
+  # for this exact source commit before any version bump, release commit or tag.
+  echo "=== Verify native automatic update acceptance for this main commit ==="
+  node scripts/release/check-auto-update.mjs "$LOCAL_MAIN"
 fi
 
 echo "=== Bump package versions to ${TARGET_VERSION} ==="

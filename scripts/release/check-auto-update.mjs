@@ -8,7 +8,15 @@ if (!/^[a-f0-9]{40}$/.test(sha ?? "")) {
 }
 const gh = (args) =>
   execFileSync("gh", args, { encoding: "utf8", timeout: 30000, maxBuffer: 4 * 1024 * 1024 });
-const repository = gh(["repo", "view", "--json", "nameWithOwner", "--jq", ".nameWithOwner"]).trim();
+// The origin already identifies the repository. Avoid a GraphQL identity query,
+// which requires login even when checking a public repository's Actions results.
+const origin = execFileSync("git", ["remote", "get-url", "origin"], { encoding: "utf8" }).trim();
+const originMatch =
+  /^(?:git@github\.com:|https:\/\/github\.com\/|ssh:\/\/git@github\.com\/)([\w.-]+\/[\w.-]+?)(?:\.git)?$/.exec(
+    origin,
+  );
+if (!originMatch) throw new Error("origin must be a GitHub SSH or HTTPS repository URL");
+const repository = originMatch[1];
 const api = (path) => JSON.parse(gh(["api", `repos/${repository}/${path}`]));
 const runs = api(`actions/workflows/main.yml/runs?head_sha=${sha}&per_page=20`).workflow_runs;
 const run = runs.find(
