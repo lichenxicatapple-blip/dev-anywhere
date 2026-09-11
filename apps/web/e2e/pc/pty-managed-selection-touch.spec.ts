@@ -584,6 +584,17 @@ test("touch selection survives real vertical and horizontal pans and copies the 
         onTouchEnd: () => setHandleGeometryPhase(page, "inertia"),
       },
     );
+    // Keep observing after release until enough painted frames exist, including on slow renderers.
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (window as HandleGeometryProbeWindow).__ptyHandleGeometrySamples?.filter(
+              (sample) => sample.phase === "inertia",
+            ).length ?? 0,
+        ),
+      )
+      .toBeGreaterThanOrEqual(10);
     const geometrySamples = await stopHandleGeometryProbe(page);
     geometryProbeInstalled = false;
     expectHandleGeometryAttached(geometrySamples, "active");

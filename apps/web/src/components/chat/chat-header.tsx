@@ -459,7 +459,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
             </DropdownMenuTrigger>
             <DropdownMenuContent
               align="end"
-              className="w-max min-w-44 max-w-[calc(100vw-1rem)]"
+              className="w-max min-w-44 max-w-[calc(100vw-1rem)] data-[state=open]:animate-none"
               data-slot="chat-overflow-menu"
               onEscapeKeyDown={() => {
                 menuClosedByEscapeRef.current = true;
