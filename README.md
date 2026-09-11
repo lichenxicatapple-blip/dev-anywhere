@@ -161,7 +161,9 @@ dev-anywhere serve autostart status
 
 需要开机后无需桌面登录即可运行时，使用 `dev-anywhere serve autostart enable --system --now`。支持 macOS、systemd Linux 和 Windows；安装时请求管理员权限，运行时使用原用户账户。`--now` 会重启 Proxy 并立即切换，新建会话可在退出桌面后继续使用。配置、验证和切回步骤见[系统服务指南](./docs/SYSTEM-SERVICE.md)。
 
-> **macOS 开机解锁**：开启 FileVault（文件保险箱）时，重启后需先解锁磁盘，DEV Anywhere 才能读取配置和项目文件并上线。“完全磁盘访问权限”不能代替磁盘解锁。参见 [Apple 的 FileVault 说明](https://support.apple.com/zh-cn/guide/deployment/dep82064ec40/web)。
+> **macOS 开机解锁**：开启 FileVault（文件保险箱）时，重启后需先解锁磁盘，开发机才能上线。“完全磁盘访问权限”不能代替磁盘解锁。
+>
+> 如需重启后无人操作自动上线，可以在 **系统设置 → 隐私与安全性 → 文件保险箱** 中关闭 FileVault，并启用上述 `--system` 模式，无需开启桌面自动登录。这会移除“必须通过登录密码才能解锁磁盘”的额外保护。关闭完成后，保持网络可用，重启并停在登录界面，从另一台设备确认开发机自动上线。参见 [Apple 的关闭 FileVault 说明](https://support.apple.com/zh-cn/guide/mac-help/mchlp2560/mac)。
 
 > **macOS 文件夹访问提醒**：选择“桌面”“文稿”“下载”等受保护目录时，macOS 可能弹出“node 想访问……”的提示，需要在开发机上确认。需要无人值守访问这些目录时，请提前在 **系统设置 → 隐私与安全性 → 完全磁盘访问权限** 中添加并允许运行 DEV Anywhere 的 `node`。
 >

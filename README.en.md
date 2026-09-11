@@ -161,7 +161,9 @@ Use `dev-anywhere serve autostart disable` to turn it off. Enabling or disabling
 
 For startup before desktop login, use `dev-anywhere serve autostart enable --system --now` on macOS, systemd Linux, or Windows. Installation requires administrator authorization, and the service runs as your user account. `--now` restarts Proxy immediately; sessions created afterward can continue after desktop logout. See the [system service guide](./docs/SYSTEM-SERVICE.md) (Chinese) for setup, verification, and switching back.
 
-> **macOS startup unlock:** With FileVault enabled, the disk must be unlocked after a restart before DEV Anywhere can read its configuration and project files and come online. Full Disk Access does not unlock the disk. See [Apple’s FileVault guide](https://support.apple.com/en-ie/guide/deployment/dep82064ec40/web).
+> **macOS startup unlock:** With FileVault enabled, the disk must be unlocked after a restart before the development machine can come online. Full Disk Access does not unlock the disk.
+>
+> For unattended startup after a restart, you can turn off FileVault under **System Settings → Privacy & Security → FileVault** and enable the `--system` mode above. Desktop automatic login is not required. Turning off FileVault removes the additional protection that requires your login password to unlock the disk. Once FileVault is off, keep the network available, restart, stay at the login screen, and check from another device that the development machine comes online automatically. See [Apple’s FileVault guide](https://support.apple.com/en-ie/guide/deployment/dep82064ec40/web).
 
 > **macOS folder access:** Selecting protected locations such as Desktop, Documents, or Downloads may trigger a “node would like to access…” prompt that needs approval on the development machine. For unattended access to these folders, add the `node` executable running DEV Anywhere under **System Settings → Privacy & Security → Full Disk Access** and enable it beforehand.
 >
