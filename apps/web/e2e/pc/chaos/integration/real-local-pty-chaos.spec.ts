@@ -1,5 +1,6 @@
 import { spawn } from "node:child_process";
 import { mkdirSync } from "node:fs";
+import { createRequire } from "node:module";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
@@ -17,7 +18,7 @@ const chaosBin = process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN;
 const chaosRoot =
   process.env.DEV_ANYWHERE_LOCAL_PTY_CHAOS_CWD ?? "/tmp/dev-anywhere-chaos/local-pty";
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../../../../..");
-const tsxBin = resolve(repoRoot, "node_modules/.bin/tsx");
+const requireProxy = createRequire(resolve(repoRoot, "apps/proxy/package.json"));
 const proxyEntry = resolve(repoRoot, "apps/proxy/src/index.ts");
 
 test.setTimeout(120_000);
@@ -64,34 +65,48 @@ async function runProcess(file: string, args: string[], timeout: number): Promis
   });
 }
 
-async function startLocalRuntime(
-  cwd: string,
-  screenName: string,
-  config: E2EBackendConfig,
-): Promise<void> {
+function startLocalRuntime(cwd: string, config: E2EBackendConfig) {
   if (!chaosBin) throw new Error("DEV_ANYWHERE_LOCAL_PTY_CHAOS_BIN is required");
-  const providerBinEnv = provider === "codex" ? `CODEX_BIN=${chaosBin}` : `CLAUDE_BIN=${chaosBin}`;
-  await runProcess(
-    "screen",
-    [
-      "-dmS",
-      screenName,
-      "env",
-      `DEV_ANYWHERE_CWD=${cwd}`,
-      "TERM=xterm-256color",
-      providerBinEnv,
-      tsxBin,
-      proxyEntry,
-      "--profile",
-      config.profile,
-      provider,
-    ],
-    10_000,
+  // Own the actual terminal in the test worker. macOS screen can return success
+  // without creating a session when the test runs under a background service.
+  const terminal = requireProxy("node-pty").spawn(
+    process.execPath,
+    [requireProxy.resolve("tsx/cli"), proxyEntry, "--profile", config.profile, provider],
+    {
+      cwd: repoRoot,
+      name: "xterm-256color",
+      cols: 100,
+      rows: 30,
+      env: {
+        ...process.env,
+        DEV_ANYWHERE_CWD: cwd,
+        [provider === "codex" ? "CODEX_BIN" : "CLAUDE_BIN"]: chaosBin,
+      },
+    },
   );
-}
-
-async function stopLocalRuntime(screenName: string): Promise<void> {
-  await runProcess("screen", ["-S", screenName, "-X", "quit"], 5_000).catch(() => undefined);
+  let output = "";
+  let exited = false;
+  const data = terminal.onData((chunk: string) => {
+    output = (output + chunk).slice(-32_768);
+  });
+  const exit = terminal.onExit(() => {
+    exited = true;
+  });
+  return {
+    output: () => output,
+    stop: async () => {
+      try {
+        if (!exited) terminal.kill();
+        await expect.poll(() => exited, { timeout: 5000 }).toBe(true);
+      } catch (error) {
+        if (!exited) terminal.kill("SIGKILL");
+        throw error;
+      } finally {
+        data.dispose();
+        exit.dispose();
+      }
+    },
+  };
 }
 
 async function restartServeOnly(config: E2EBackendConfig): Promise<void> {
@@ -239,10 +254,9 @@ test.describe("real local runtime PTY chaos", () => {
 
     const uniqueName = `dev-anywhere-local-pty-${provider}-${Date.now()}`;
     const cwd = `${chaosRoot.replace(/\/$/, "")}/${uniqueName}`;
-    const screenName = `dev-anywhere-local-pty-${backendConfig.profile}-${provider}-${Date.now()}`;
     mkdirSync(cwd, { recursive: true });
-    await test.step("start local terminal runtime", () =>
-      startLocalRuntime(cwd, screenName, backendConfig));
+    const runtime = await test.step("start local terminal runtime", () =>
+      startLocalRuntime(cwd, backendConfig));
 
     try {
       const sessionId = await test.step("open local terminal session", async () => {
@@ -301,7 +315,14 @@ test.describe("real local runtime PTY chaos", () => {
       }
       throw error;
     } finally {
-      await stopLocalRuntime(screenName);
+      try {
+        await runtime.stop();
+      } finally {
+        await testInfo.attach("local-terminal-output", {
+          contentType: "text/plain",
+          body: Buffer.from(runtime.output()),
+        });
+      }
     }
   });
 });

@@ -328,45 +328,11 @@ proxy_serve_action() {
     --profile "$DEV_PROFILE" serve "$action" ${PROXY_RELAY_ARGS[@]+"${PROXY_RELAY_ARGS[@]}"}
 }
 
-ephemeral_pty_screens() {
-  local screen_session screen_name
-  if ! command -v screen >/dev/null 2>&1; then
-    return 0
-  fi
-  while IFS= read -r screen_session; do
-    screen_name="${screen_session#*.}"
-    case "$screen_name" in
-      "dev-anywhere-local-pty-${DEV_PROFILE}-"*) printf '%s\n' "$screen_session" ;;
-    esac
-  done < <(screen -ls 2>/dev/null | awk '$1 ~ /^[0-9]+\./ { print $1 }' || true)
-}
-
-stop_ephemeral_pty_screens() {
-  local screen_session remaining=""
-  while IFS= read -r screen_session; do
-    [[ -n "$screen_session" ]] || continue
-    screen -S "$screen_session" -X quit >/dev/null 2>&1 || true
-  done < <(ephemeral_pty_screens)
-  for _ in $(seq 1 20); do
-    remaining="$(ephemeral_pty_screens)"
-    [[ -z "$remaining" ]] && return
-    sleep 0.1
-  done
-  echo "ERROR: isolated local PTY screen did not stop: $remaining" >&2
-  return 1
-}
-
 cleanup_ephemeral_profile() {
   [[ -n "$EPHEMERAL_PROFILE_DIR" ]] || return 0
   local source_name source_path
 
   local stop_output stop_ok=1 pid="" profile_root_real profile_dir_real owner_token
-
-  # The real-local-PTY spec owns these detached screens. End them before stopping
-  # the daemon so no surviving test terminal can race to auto-start it again.
-  if ! stop_ephemeral_pty_screens; then
-    stop_ok=0
-  fi
 
   if ! stop_output="$(INIT_CWD="$ROOT" pnpm --filter @dev-anywhere/proxy run dev -- \
     --profile "$DEV_PROFILE" serve stop 2>&1)"; then

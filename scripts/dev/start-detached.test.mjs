@@ -84,7 +84,7 @@ setTimeout(() => process.exit(1), 15000).unref();
     }
   });
   assert.match(stdout, new RegExp(`PID: ${info.pid}\\b`));
-  assert.equal(info.cwd, await realpath(cwd));
+  assert.equal(await realpath(info.cwd), await realpath(cwd));
   assert.equal(info.argument, argument);
   assert.equal(info.inherited, "inherited");
   assert.equal(info.stdinTTY, false);
