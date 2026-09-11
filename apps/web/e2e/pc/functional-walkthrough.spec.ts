@@ -242,14 +242,28 @@ test.describe("functional browser walkthrough", () => {
       )
       .toBe("dev-pty-approval-breathe");
 
-    const headerBox = await page.locator('[data-slot="chat-header"]').boundingBox();
-    const hintBox = await approvalHint.boundingBox();
-    const ptyBox = await page.locator('[data-slot="chat-pty-view"]').boundingBox();
-    expect(headerBox).not.toBeNull();
-    expect(hintBox).not.toBeNull();
-    expect(ptyBox).not.toBeNull();
-    expect(hintBox!.y).toBeGreaterThanOrEqual(headerBox!.y + headerBox!.height - 1);
-    expect(ptyBox!.y).toBeGreaterThanOrEqual(hintBox!.y + hintBox!.height - 1);
+    // The banner and terminal layout settle in separate React commits. Read one frame's
+    // geometry atomically and wait for the terminal to make room for the visible banner.
+    await expect
+      .poll(() =>
+        page.evaluate(() => {
+          const header = document
+            .querySelector('[data-slot="chat-header"]')
+            ?.getBoundingClientRect();
+          const hint = document
+            .querySelector('[data-slot="pty-approval-hint"]')
+            ?.getBoundingClientRect();
+          const pty = document
+            .querySelector('[data-slot="chat-pty-view"]')
+            ?.getBoundingClientRect();
+          if (!header || !hint || !pty) return null;
+          return {
+            hintBelowHeader: hint.top >= header.bottom - 1,
+            terminalBelowHint: pty.top >= hint.bottom - 1,
+          };
+        }),
+      )
+      .toEqual({ hintBelowHeader: true, terminalBelowHint: true });
     await expect(
       page.locator('[data-slot="session-row"][data-session-id="claude-pty"]'),
     ).toContainText("等待审批");
