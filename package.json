@@ -10,7 +10,7 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "bash scripts/test/vitest.sh",
-    "test:dev": "node --test scripts/dev/windows.test.mjs scripts/dev/vite.test.mjs",
+    "test:dev": "node --test scripts/dev/windows.test.mjs scripts/dev/vite.test.mjs scripts/dev/start-detached.test.mjs",
     "test:integration": "TEST_SCOPE=integration vitest run",
     "typecheck": "tsc -b",
     "knip": "knip",

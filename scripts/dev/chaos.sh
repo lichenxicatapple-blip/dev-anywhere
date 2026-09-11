@@ -483,23 +483,7 @@ prepare_run_log() {
 }
 
 start_detached() {
-  local cwd="$1"
-  local log_file="$2"
-  shift 2
-  # CI must keep the child owned by the job shell. GitHub runners include
-  # screen, but their detached sessions can disappear before launching Relay.
-  if [[ -z "${CI:-}" ]] && command -v screen >/dev/null 2>&1; then
-    local session_name
-    session_name="dev-anywhere-chaos-$(basename "$cwd")-$(date +%s)-$RANDOM"
-    screen -dmS "$session_name" bash -lc \
-      'cd "$1" && log_file="$2" && shift 2 && exec "$@" >"$log_file" 2>&1 </dev/null' \
-      _ "$cwd" "$log_file" "$@"
-    return
-  fi
-
-  nohup bash -c 'cd "$1" && shift && exec "$@"' _ "$cwd" "$@" >"$log_file" 2>&1 </dev/null &
-  local pid=$!
-  disown "$pid" 2>/dev/null || true
+  node "$ROOT/scripts/lib/start-detached.mjs" "$@"
 }
 
 relay_http_ok() {
