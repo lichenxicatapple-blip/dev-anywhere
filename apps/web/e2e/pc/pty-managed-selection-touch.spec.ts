@@ -101,14 +101,27 @@ async function touchPan(
     steps?: number;
     stepDelayMs?: number;
     settleMs?: number;
+    afterTouchMove?: () => Promise<void>;
     onTouchEnd?: () => Promise<void>;
   } = {},
 ): Promise<void> {
   const steps = options.steps ?? 14;
   const touchId = nextTouchId++;
   await dispatchTouch(client, "touchStart", start, touchId);
+  // Cross the touch slop immediately. Tiny initial steps can take longer than the long-press
+  // delay on a slow CDP renderer and turn an intended pan into a new text selection.
+  const initialProgress = Math.min(1, 32 / Math.hypot(end.x - start.x, end.y - start.y));
+  await dispatchTouch(
+    client,
+    "touchMove",
+    {
+      x: start.x + (end.x - start.x) * initialProgress,
+      y: start.y + (end.y - start.y) * initialProgress,
+    },
+    touchId,
+  );
   for (let step = 1; step <= steps; step += 1) {
-    const progress = step / steps;
+    const progress = initialProgress + (1 - initialProgress) * (step / steps);
     await dispatchTouch(
       client,
       "touchMove",
@@ -118,6 +131,7 @@ async function touchPan(
       },
       touchId,
     );
+    await options.afterTouchMove?.();
     await new Promise((resolve) => setTimeout(resolve, options.stepDelayMs ?? 18));
   }
   await dispatchTouch(client, "touchEnd");
@@ -547,10 +561,9 @@ test("touch selection survives real vertical and horizontal pans and copies the 
     await installHandleGeometryProbe(page);
     geometryProbeInstalled = true;
     await setHandleGeometryPhase(page, "active");
-    const verticalStart = {
-      x: rect.left + rect.width * 0.76,
-      y: rect.top + rect.height * 0.36,
-    };
+    // A fixed point can land on a selection handle as font/layout geometry changes.
+    // Start this scroll gesture on terminal content, clear of both handles and the toolbar.
+    const verticalStart = await tapPointAwayFromControls(page);
     await touchPan(
       client,
       verticalStart,
@@ -562,6 +575,12 @@ test("touch selection survives real vertical and horizontal pans and copies the 
         steps: 24,
         stepDelayMs: 12,
         settleMs: 900,
+        // Pace this geometry probe by painted frames, so slow headless rendering cannot
+        // collapse the entire gesture into fewer frames than the assertions inspect.
+        afterTouchMove: () =>
+          page.evaluate(
+            () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+          ),
         onTouchEnd: () => setHandleGeometryPhase(page, "inertia"),
       },
     );

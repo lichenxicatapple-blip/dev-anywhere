@@ -86,6 +86,10 @@ test.describe("Mobile foreground WebSocket recovery", () => {
       '[data-slot="pty-host"] textarea[aria-label="Terminal input"]',
     );
     await expect(terminalInput).toBeVisible();
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+      "data-connection-ready",
+      "true",
+    );
 
     await page.evaluate(() => {
       const recoveryWindow = window as typeof window & { __socketBeforeSignalLoss?: unknown };
@@ -124,6 +128,10 @@ test.describe("Mobile foreground WebSocket recovery", () => {
       timeout: 5_000,
     });
 
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+      "data-connection-ready",
+      "true",
+    );
     await terminalInput.focus();
     await page.keyboard.type("input-after-signal-recovery");
     await expect
@@ -168,6 +176,10 @@ test.describe("Mobile foreground WebSocket recovery", () => {
 
     await page.evaluate(() => window.__devAnywhereE2E?.setRelayLivenessPongEnabled(true));
     await expect(page.locator('[data-slot="status-line"]')).toHaveAttribute("data-state", "idle");
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+      "data-connection-ready",
+      "true",
+    );
     await terminalInput.focus();
     await page.keyboard.type("input-after-online-event");
     await expect

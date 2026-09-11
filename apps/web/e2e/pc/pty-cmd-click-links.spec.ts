@@ -12,7 +12,7 @@ import {
   sentFakeRelayMessages,
   type FakeRelayMessage,
 } from "../helpers";
-import { expectPtyRendered, ptyTerminal } from "../pty-scroll-helpers";
+import { expectPtyCursorAwareBottom, expectPtyRendered, ptyTerminal } from "../pty-scroll-helpers";
 
 test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
 
@@ -37,9 +37,16 @@ async function gotoPty(page: Page): Promise<void> {
   await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
   await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
   await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+  await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+    "data-connection-ready",
+    "true",
+  );
 }
 
 async function scrollHistoricalPtyLineIntoView(page: Page, lineIndex: number): Promise<void> {
+  // Parsing the history precedes the outer viewport's layout. Start the wheel gesture only
+  // after that output has reached the live bottom, so a pending layout cannot undo the scroll.
+  await expectPtyCursorAwareBottom(page);
   await ptyTerminal(page).evaluate((element, targetLine) => {
     const term = window.__ccTestPtyTerminals?.get("claude-pty");
     const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");

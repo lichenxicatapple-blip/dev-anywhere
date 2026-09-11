@@ -443,7 +443,9 @@ async function dragSelectionAcrossVerticalViewport(
             ? edgeStart.scrollTop - current.scrollTop
             : current.scrollTop - edgeStart.scrollTop;
         },
-        { timeout: 6_000 },
+        // Native headless rendering can run below 10 fps; the gesture still has to travel
+        // the full viewport and preserve its anchor, within the normal assertion budget.
+        { timeout: 10_000 },
       )
       .toBeGreaterThan(minimumDistance);
     const autoscrolledRange = await requireOverlayRange(page);

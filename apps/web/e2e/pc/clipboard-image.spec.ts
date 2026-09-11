@@ -110,6 +110,10 @@ test.describe("clipboard image paste", () => {
     await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
     await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+      "data-connection-ready",
+      "true",
+    );
 
     await dispatchImagePaste(page.locator('[data-slot="pty-terminal"]'));
 

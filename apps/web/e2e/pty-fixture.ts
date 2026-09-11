@@ -429,6 +429,13 @@ export async function expectPtyTerminalMounted(
       { timeout },
     )
     .toBe(true);
+  // Mounting and sending the subscription precede snapshot replay. Inputs are accepted only
+  // after the replay has painted, so callers must not interact with a merely mounted xterm.
+  await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+    "data-connection-ready",
+    "true",
+    { timeout },
+  );
 }
 
 export async function readRawPtyInput(page: Page): Promise<string> {
