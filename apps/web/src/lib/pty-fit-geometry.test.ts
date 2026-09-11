@@ -1,6 +1,6 @@
 import type { Terminal } from "@xterm/xterm";
 import { afterEach, describe, expect, it } from "vitest";
-import { measurePtyFitGeometry } from "./pty-fit-geometry";
+import { adjustPtyGeometry, measurePtyFitGeometry } from "./pty-fit-geometry";
 
 function fixture(width = 1024, height = 716, cellWidth = 8, cellHeight = 20) {
   const container = document.createElement("div");
@@ -24,6 +24,43 @@ function fixture(width = 1024, height = 716, cellWidth = 8, cellHeight = 20) {
 }
 
 afterEach(() => document.body.replaceChildren());
+
+describe("manual PTY adjustments", () => {
+  it("changes only the requested dimension", () => {
+    expect(adjustPtyGeometry({ cols: 80, rows: 24 }, "increase-cols")).toEqual({
+      cols: 81,
+      rows: 24,
+    });
+    expect(adjustPtyGeometry({ cols: 80, rows: 24 }, "increase-rows")).toEqual({
+      cols: 80,
+      rows: 25,
+    });
+    expect(adjustPtyGeometry({ cols: 80, rows: 24 }, "decrease-cols")).toEqual({
+      cols: 79,
+      rows: 24,
+    });
+    expect(adjustPtyGeometry({ cols: 80, rows: 24 }, "decrease-rows")).toEqual({
+      cols: 80,
+      rows: 23,
+    });
+  });
+
+  it("stops at the minimum dimensions", () => {
+    const size = { cols: 2, rows: 1 };
+    expect(adjustPtyGeometry(size, "decrease-cols")).toEqual(size);
+    expect(adjustPtyGeometry(size, "decrease-rows")).toEqual(size);
+  });
+
+  it("does not grow past the limits or shrink an already larger terminal", () => {
+    for (const size of [
+      { cols: 500, rows: 200 },
+      { cols: 600, rows: 300 },
+    ]) {
+      expect(adjustPtyGeometry(size, "increase-cols")).toEqual(size);
+      expect(adjustPtyGeometry(size, "increase-rows")).toEqual(size);
+    }
+  });
+});
 
 describe("manual PTY fit geometry", () => {
   it("grows a phone-created terminal to the current desktop content area", () => {

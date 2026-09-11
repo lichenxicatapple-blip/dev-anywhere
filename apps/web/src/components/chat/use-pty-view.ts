@@ -19,7 +19,12 @@ import { SearchAddon, type ISearchOptions } from "@xterm/addon-search";
 import { createXtermTerminal } from "@/lib/create-xterm";
 import { xtermFixedDarkSearchDecorations } from "@/lib/xterm-theme";
 import { applyPtyFontSize } from "@/lib/pty-font-size-controller";
-import { measurePtyFitGeometry } from "@/lib/pty-fit-geometry";
+import {
+  adjustPtyGeometry,
+  measurePtyFitGeometry,
+  type PtyGeometry,
+  type PtyResizeAction,
+} from "@/lib/pty-fit-geometry";
 import { attachPtyBufferRowIdentityTracker } from "@/lib/pty-buffer-row-identity";
 import {
   attachPtyHistoryProjection,
@@ -126,7 +131,7 @@ interface UsePtyViewResult {
   findNext: (query: string, incremental?: boolean) => boolean;
   findPrevious: (query: string) => boolean;
   clearFind: () => void;
-  fitToWindow: () => void;
+  resizeTerminal: (action: PtyResizeAction) => void;
   scrollToBottom: (reason?: string, opts?: { force?: boolean }) => void;
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
@@ -344,6 +349,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
 
   // === 私有 ref（仅供 hook 内部使用，不暴露给 JSX）===
   const terminalRef = useRef<Terminal | null>(null);
+  const pendingResizeRef = useRef<PtyGeometry[]>([]);
   const searchAddonRef = useRef<SearchAddon | null>(null);
   const projectedSearchOverlayRef = useRef<PtyManagedSelectionOverlayController | null>(null);
   const projectedSearchActiveRef = useRef(false);
@@ -423,29 +429,55 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     return activeRef.current && readyRef.current && transportAvailableRef.current;
   }, []);
 
-  const fitToWindow = useCallback((): void => {
-    const session = useSessionStore
+  const resizeTerminal = useCallback(
+    (action: PtyResizeAction): void => {
+      const session = useSessionStore
+        .getState()
+        .sessions.find((entry) => entry.sessionId === sessionId);
+      if (session?.mode !== "pty" || session.ptyOwner !== "proxy-hosted") return;
+      const terminal = terminalRef.current;
+      const host = xtermHostRef.current;
+      const relay = relayClientRef;
+      if (!canAcceptInput() || !terminal || !host || !containerEl || !relay) {
+        toast.error("终端尚未就绪");
+        return;
+      }
+      // Count every click even while earlier resize events are still in transit.
+      const current = pendingResizeRef.current.at(-1) ?? terminal;
+      const geometry =
+        action === "fit"
+          ? measurePtyFitGeometry(containerEl, host, terminal)
+          : adjustPtyGeometry(current, action);
+      if (!geometry) {
+        toast.error("无法获取终端显示区域的尺寸");
+        return;
+      }
+      if (geometry.cols === current.cols && geometry.rows === current.rows) {
+        return;
+      }
+      // The worker owns the resize; its ordered event updates every attached browser.
+      if (!relay.sendControl({ type: "terminal_resize_request", sessionId, ...geometry })) {
+        toast.error("终端尺寸调整失败，请检查连接");
+      } else {
+        pendingResizeRef.current.push(geometry);
+        useSessionStore.getState().setPtyGeometry(sessionId, geometry);
+      }
+    },
+    [canAcceptInput, containerEl, sessionId, xtermHostRef],
+  );
+
+  useEffect(() => {
+    if (!active || !connection.ready || !connected || !proxyOnline) pendingResizeRef.current = [];
+    const current = pendingResizeRef.current.at(-1) ?? terminalRef.current;
+    useSessionStore
       .getState()
-      .sessions.find((entry) => entry.sessionId === sessionId);
-    if (session?.mode !== "pty" || session.ptyOwner !== "proxy-hosted") return;
-    const terminal = terminalRef.current;
-    const host = xtermHostRef.current;
-    const relay = relayClientRef;
-    if (!canAcceptInput() || !terminal || !host || !containerEl || !relay) {
-      toast.error("终端尚未就绪");
-      return;
-    }
-    const geometry = measurePtyFitGeometry(containerEl, host, terminal);
-    if (!geometry) {
-      toast.error("无法获取终端显示区域的尺寸");
-      return;
-    }
-    if (geometry.cols === terminal.cols && geometry.rows === terminal.rows) return;
-    // The worker owns the resize; its ordered event updates every attached browser.
-    if (!relay.sendControl({ type: "terminal_resize_request", sessionId, ...geometry })) {
-      toast.error("终端尺寸调整失败，请检查连接");
-    }
-  }, [canAcceptInput, containerEl, sessionId, xtermHostRef]);
+      .setPtyGeometry(
+        sessionId,
+        connection.ready && connected && proxyOnline && current
+          ? { cols: current.cols, rows: current.rows }
+          : null,
+      );
+  }, [active, connection.ready, connected, proxyOnline, sessionId]);
 
   // First connection boots the expensive xterm/view graph. Transient relay/proxy outages only
   // detach its transport; keeping this latch true avoids destroying and rebuilding every cached
@@ -828,6 +860,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     let historyProjectionDispose: (() => void) | null = null;
     let searchResultsRegistration: { dispose(): void } | null = null;
     let searchSelectionRegistration: { dispose(): void } | null = null;
+    let resizeRegistration: { dispose(): void } | null = null;
     let projectedSearchOverlay: PtyManagedSelectionOverlayController | null = null;
     let terminalSerializeAddon:
       | Awaited<ReturnType<typeof createXtermTerminal>>["serializeAddon"]
@@ -890,6 +923,18 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         clearPtySelection();
         const xterm = term as Terminal;
         terminalRef.current = xterm;
+        pendingResizeRef.current = [];
+        resizeRegistration = xterm.onResize(({ cols, rows }) => {
+          const pending = pendingResizeRef.current;
+          const index = pending.findIndex((size) => size.cols === cols && size.rows === rows);
+          // Retire acknowledged requests; a different size came from another viewer or a snapshot.
+          pendingResizeRef.current = index >= 0 ? pending.slice(index + 1) : [];
+          if (readyRef.current && transportAvailableRef.current) {
+            useSessionStore
+              .getState()
+              .setPtyGeometry(sessionId, pendingResizeRef.current.at(-1) ?? { cols, rows });
+          }
+        });
         const searchAddon = new SearchAddon({ highlightLimit: 1000 });
         xterm.loadAddon(searchAddon);
         searchAddonRef.current = searchAddon;
@@ -1082,12 +1127,26 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       },
       connectTransportInitially: connected && proxyOnline,
       ...connection.transport,
+      onReady: () => {
+        pendingResizeRef.current = [];
+        const terminal = terminalRef.current;
+        if (terminal) {
+          useSessionStore.getState().setPtyGeometry(sessionId, {
+            cols: terminal.cols,
+            rows: terminal.rows,
+          });
+        }
+        connection.transport.onReady();
+      },
     });
     terminalControllerRef.current = termCtrl;
 
     return () => {
       projectedSearchActiveRef.current = false;
       searchSelectionRegistration?.dispose();
+      resizeRegistration?.dispose();
+      pendingResizeRef.current = [];
+      useSessionStore.getState().setPtyGeometry(sessionId, null);
       projectedSearchOverlay?.dispose();
       if (projectedSearchOverlayRef.current === projectedSearchOverlay) {
         projectedSearchOverlayRef.current = null;
@@ -1375,7 +1434,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     findNext,
     findPrevious,
     clearFind,
-    fitToWindow,
+    resizeTerminal,
     scrollToBottom,
     scrollToRatio,
     scrollToXRatio,

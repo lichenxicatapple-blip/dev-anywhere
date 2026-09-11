@@ -4,6 +4,7 @@
 //
 // 编排（4 个 controller 的生命周期 + 调度器 + debug 注册）全部下沉到 usePtyView，
 // 本组件仅负责 DOM 结构与 JSX 接线。
+import type { PtyResizeRequest } from "@/lib/pty-fit-geometry";
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from "react";
 import { createPortal } from "react-dom";
@@ -24,7 +25,7 @@ interface ChatPtyViewProps {
   provider?: SessionProvider;
   active?: boolean;
   findRequest?: number;
-  fitRequest?: string;
+  resizeRequest?: PtyResizeRequest;
 }
 
 export function ChatPtyView({
@@ -33,7 +34,7 @@ export function ChatPtyView({
   provider,
   active = true,
   findRequest,
-  fitRequest,
+  resizeRequest,
 }: ChatPtyViewProps) {
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
@@ -55,14 +56,15 @@ export function ChatPtyView({
   });
   const handleMetrics = view.ptySelectionHandleMetrics;
   const { clearFind, findNext, findPrevious, findReady, findResultCount, findResultIndex } = view;
-  const lastFitRequestRef = useRef(fitRequest);
-  const { fitToWindow } = view;
+  const lastResizeRequestRef = useRef(resizeRequest?.requestId);
+  const { resizeTerminal } = view;
 
   useEffect(() => {
-    if (fitRequest === undefined || fitRequest === lastFitRequestRef.current) return;
-    lastFitRequestRef.current = fitRequest;
-    if (active) fitToWindow();
-  }, [active, fitRequest, fitToWindow]);
+    if (resizeRequest === undefined || resizeRequest.requestId === lastResizeRequestRef.current)
+      return;
+    lastResizeRequestRef.current = resizeRequest.requestId;
+    if (active) resizeTerminal(resizeRequest.action);
+  }, [active, resizeRequest, resizeTerminal]);
 
   const previousFindResult = useCallback(() => {
     findPrevious(findQuery);

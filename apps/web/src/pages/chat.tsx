@@ -1,6 +1,7 @@
 // ChatPage: ChatHeader + StatusLine (4px 色带) + content(JSON/PTY) + JSON QuotePreviewBar/InputBar
 // statusState 按优先级聚合 connection/terminated/approval/working/idle，StatusLine 放 Header 正下方
 // PTY 模式由 xterm 自己承载逐键输入，不再保留下方聊天式命令输入框。
+import type { PtyResizeRequest } from "@/lib/pty-fit-geometry";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { useLocation, useNavigate, useParams, useSearchParams } from "react-router";
 import { clearLastChatRoute, consumeRestoredTarget } from "@/lib/route-restore";
@@ -61,9 +62,9 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     sessionId: string;
     sequence: number;
   } | null>(null);
-  const [fitRequest, setFitRequest] = useState<{ sessionId: string; requestId: string } | null>(
-    null,
-  );
+  const [resizeRequest, setResizeRequest] = useState<
+    (PtyResizeRequest & { sessionId: string }) | null
+  >(null);
   const connected = useAppStore((s) => s.connected);
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
@@ -265,10 +266,11 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
             sessionId={id}
             mode={mode}
             onFind={requestFind}
-            onFitTerminal={() =>
-              setFitRequest({
+            onResizeTerminal={(action) =>
+              setResizeRequest({
                 sessionId: id,
-                requestId: createClientOperationId("pty-fit"),
+                requestId: createClientOperationId("pty-resize"),
+                action,
               })
             }
           />
@@ -297,7 +299,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
                 sessionKind={session?.kind}
                 provider={session?.provider}
                 findRequest={activeFindRequest}
-                fitRequest={fitRequest?.sessionId === id ? fitRequest.requestId : undefined}
+                resizeRequest={resizeRequest?.sessionId === id ? resizeRequest : undefined}
               />
             ) : (
               <ChatJsonView

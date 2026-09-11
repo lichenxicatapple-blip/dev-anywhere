@@ -13,6 +13,7 @@ describe("session-store agent status", () => {
       historyLoadStatus: "idle",
       historyLoadGeneration: 0,
       ptyTitles: {},
+      ptyGeometryBySessionId: {},
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
       ptyAutoYesBySessionKey: {},
@@ -102,7 +103,7 @@ describe("session-store agent status", () => {
     });
   });
 
-  it("prunes PTY titles when replacing or removing sessions", () => {
+  it("prunes PTY titles and dimensions when replacing or removing sessions", () => {
     useSessionStore.setState({
       sessions: [
         {
@@ -127,6 +128,7 @@ describe("session-store agent status", () => {
         },
       ],
       ptyTitles: { s1: "old title", s2: "live title" },
+      ptyGeometryBySessionId: { s1: { cols: 80, rows: 24 }, s2: { cols: 100, rows: 30 } },
     });
 
     useSessionStore.getState().setSessions([
@@ -143,10 +145,16 @@ describe("session-store agent status", () => {
     ]);
 
     expect(useSessionStore.getState().ptyTitles).toEqual({ s2: "live title" });
+    expect(useSessionStore.getState().ptyGeometryBySessionId).toEqual({
+      s2: { cols: 100, rows: 30 },
+    });
 
     useSessionStore.getState().removeSession("s2");
 
     expect(useSessionStore.getState().ptyTitles).toEqual({});
+    expect(useSessionStore.getState().ptyGeometryBySessionId).toEqual({});
+    useSessionStore.getState().setPtyGeometry("s2", { cols: 90, rows: 20 });
+    expect(useSessionStore.getState().ptyGeometryBySessionId).toEqual({});
   });
 
   it("marks renamed sessions as user locked without deleting OSC title diagnostics", () => {
@@ -253,6 +261,7 @@ describe("session-store agent status", () => {
       historySessions: [],
       historyLoadStatus: "idle",
       ptyTitles: {},
+      ptyGeometryBySessionId: {},
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
       ptyAutoYesBySessionKey: { [sessionKey]: true },

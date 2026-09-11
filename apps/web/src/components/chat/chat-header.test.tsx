@@ -162,6 +162,7 @@ describe("ChatHeader PTY upload menu", () => {
         },
       ],
       ptyTitles: {},
+      ptyGeometryBySessionId: { s1: { cols: 80, rows: 24 } },
       ptyAutoYesBySessionKey: {},
     });
     useAppStore.setState({
@@ -201,7 +202,7 @@ describe("ChatHeader PTY upload menu", () => {
     expect(useSessionStore.getState().ptyAutoYesBySessionKey[key]).toBe(enabled ? undefined : true);
   });
 
-  it("disables unreliable automatic Enter for Codex even with an existing grant", async () => {
+  it("hides Always yes for Codex even with an existing grant", async () => {
     const key = ptyAutoYesSessionKey("proxy-1", "s1")!;
     useSessionStore.setState((state) => ({
       sessions: state.sessions.map((session) =>
@@ -211,10 +212,8 @@ describe("ChatHeader PTY upload menu", () => {
     }));
     render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
     fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
-    const item = await screen.findByRole("menuitemcheckbox", { name: /Always yes/ });
-    expect(item).toHaveAttribute("aria-disabled", "true");
-    expect(item).toHaveAttribute("aria-checked", "false");
-    expect(item).toHaveTextContent("Codex 终端请手动确认审批");
+    await screen.findByRole("menuitem", { name: "重命名" });
+    expect(screen.queryByRole("menuitemcheckbox", { name: /Always yes/ })).toBeNull();
   });
 
   it.each(["agent", "terminal"] as const)("offers manual fit for a hosted %s PTY", async (kind) => {
@@ -234,17 +233,34 @@ describe("ChatHeader PTY upload menu", () => {
     });
     useAppStore.setState({ connected: true, proxyOnline: true });
     const fit = vi.fn();
-    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onFitTerminal={fit} />);
+    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onResizeTerminal={fit} />);
     fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+    fireEvent.click(await screen.findByRole("button", { name: "增加列" }));
+    fireEvent.click(screen.getByRole("button", { name: "增加列" }));
+    fireEvent.click(screen.getByRole("button", { name: "增加行" }));
+    fireEvent.click(screen.getByRole("button", { name: "减少列" }));
+    fireEvent.click(screen.getByRole("button", { name: "减少行" }));
+    expect(fit.mock.calls).toEqual([
+      ["increase-cols"],
+      ["increase-cols"],
+      ["increase-rows"],
+      ["decrease-cols"],
+      ["decrease-rows"],
+    ]);
+    expect(screen.getByRole("group", { name: "列数" })).toHaveTextContent("80");
+    expect(screen.getByRole("group", { name: "行数" })).toHaveTextContent("24");
+    fit.mockClear();
     fireEvent.click(await screen.findByRole("menuitem", { name: "按窗口调整终端尺寸" }));
-    expect(fit).toHaveBeenCalledTimes(1);
+    expect(fit).toHaveBeenCalledExactlyOnceWith("fit");
   });
 
   it("does not offer manual fit for a locally owned PTY", async () => {
-    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onFitTerminal={vi.fn()} />);
+    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onResizeTerminal={vi.fn()} />);
     fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
     await screen.findByRole("menuitem", { name: "重命名" });
     expect(screen.queryByRole("menuitem", { name: "按窗口调整终端尺寸" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "列数" })).toBeNull();
+    expect(screen.queryByRole("group", { name: "行数" })).toBeNull();
   });
 
   it("prevents a fit command while the developer machine is offline", async () => {
@@ -255,13 +271,40 @@ describe("ChatHeader PTY upload menu", () => {
     });
     useAppStore.setState({ connected: true, proxyOnline: false });
     const fit = vi.fn();
-    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onFitTerminal={fit} />);
+    render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onResizeTerminal={fit} />);
     fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
     const item = await screen.findByRole("menuitem", { name: "按窗口调整终端尺寸" });
     expect(item.getAttribute("aria-disabled")).toBe("true");
     fireEvent.click(item);
+    for (const name of ["增加列", "增加行", "减少列", "减少行"]) {
+      const button = screen.getByRole("button", { name });
+      expect(button).toBeDisabled();
+      fireEvent.click(button);
+    }
     expect(fit).not.toHaveBeenCalled();
   });
+
+  it.each([
+    [{ cols: 2, rows: 1 }, ["减少列", "减少行"], ["增加列", "增加行"]],
+    [{ cols: 500, rows: 200 }, ["增加列", "增加行"], ["减少列", "减少行"]],
+    [undefined, ["增加列", "增加行", "减少列", "减少行"], []],
+  ] as const)(
+    "disables unavailable size adjustments for %s",
+    async (geometry, disabled, enabled) => {
+      useSessionStore.setState({
+        sessions: [
+          { ...useSessionStore.getState().sessions[0]!, mode: "pty", ptyOwner: "proxy-hosted" },
+        ],
+        ptyGeometryBySessionId: geometry ? { s1: geometry } : {},
+      });
+      useAppStore.setState({ connected: true, proxyOnline: true });
+      render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onResizeTerminal={vi.fn()} />);
+      fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      await screen.findByRole("group", { name: "列数" });
+      for (const name of disabled) expect(screen.getByRole("button", { name })).toBeDisabled();
+      for (const name of enabled) expect(screen.getByRole("button", { name })).toBeEnabled();
+    },
+  );
 
   it("uploads picked file and writes the @<path> token into the terminal", async () => {
     const { container } = render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
@@ -411,8 +454,7 @@ describe("ChatHeader PTY upload menu", () => {
     const menuItemNames = [
       "在会话中查找",
       "重命名",
-      "发送 Ctrl+O",
-      "发送 Ctrl+R",
+      "快捷键",
       "上传照片或视频",
       "上传文件",
       "恢复默认",
@@ -426,8 +468,8 @@ describe("ChatHeader PTY upload menu", () => {
     const wakeLockItem = screen.getByRole("menuitemcheckbox", { name: "屏幕常亮" });
     expect(wakeLockItem.querySelector('[data-slot="chat-menu-icon"]')).not.toBeNull();
     expect(screen.queryByRole("menuitemcheckbox", { name: "输入方式" })).toBeNull();
-    expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
-    expect(screen.getByText("^R").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+O" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+R" })).toBeNull();
     expect(menu?.querySelector('[data-slot="chat-menu-font-row"]')).not.toBeNull();
     expect(
       menu?.querySelector('[data-slot="chat-menu-font-row"] [data-slot="chat-menu-icon"]'),
@@ -437,7 +479,18 @@ describe("ChatHeader PTY upload menu", () => {
     expect(screen.queryByText("终端字号")).toBeNull();
     expect(screen.queryByText("聊天字号")).toBeNull();
     expect(screen.queryByText("显示")).toBeNull();
+
+    await openShortcutsMenu();
+    expect(screen.getByText("^O").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
+    expect(screen.getByText("^R").closest('[data-slot="chat-menu-icon"]')).not.toBeNull();
   });
+
+  async function openShortcutsMenu() {
+    const trigger = await screen.findByRole("menuitem", { name: "快捷键" });
+    trigger.focus();
+    fireEvent.keyDown(trigger, { key: "ArrowRight" });
+    await screen.findByRole("menuitem", { name: "发送 Ctrl+O" });
+  }
 
   function renderHeaderWithPtyFocus(
     options: {
@@ -583,6 +636,7 @@ describe("ChatHeader PTY upload menu", () => {
       render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      await openShortcutsMenu();
       const item = await screen.findByRole("menuitem", { name: "发送 Ctrl+R" });
       expect(item).not.toHaveAttribute("aria-disabled", "true");
       if (kind === "terminal") {
@@ -597,6 +651,7 @@ describe("ChatHeader PTY upload menu", () => {
 
       sendRawSpy.mockClear();
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      await openShortcutsMenu();
       fireEvent.click(await screen.findByRole("menuitem", { name: "发送 Ctrl+O" }));
       expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", "\x0f");
     },
@@ -618,6 +673,7 @@ describe("ChatHeader PTY upload menu", () => {
       render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+      await openShortcutsMenu();
       const item = await screen.findByRole("menuitem", { name: "发送 Ctrl+R" });
       expect(item).toHaveAttribute("aria-disabled", "true");
       fireEvent.click(item);
@@ -643,6 +699,7 @@ describe("ChatHeader PTY upload menu", () => {
 
     fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
     await screen.findByRole("menu");
+    expect(screen.queryByRole("menuitem", { name: "快捷键" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+R" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+O" })).toBeNull();
   });
@@ -669,7 +726,7 @@ describe("ChatHeader PTY upload menu", () => {
   }
 
   it.each(["local-terminal", "proxy-hosted"] as const)(
-    "sends manual Codex question shortcuts while %s is working and Always yes is disabled",
+    "sends manual Codex question shortcuts while %s is working and Always yes is hidden",
     async (ptyOwner) => {
       configureCodexQuestionSession(ptyOwner);
       render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
@@ -681,6 +738,7 @@ describe("ChatHeader PTY upload menu", () => {
       ]) {
         sendRawSpy.mockClear();
         fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
+        await openShortcutsMenu();
         const item = await screen.findByRole("menuitem", { name });
         expect(item).not.toHaveAttribute("aria-disabled", "true");
         expect(item.querySelector('[data-slot="chat-menu-icon"] .lucide-keyboard')).not.toBeNull();
@@ -742,6 +800,7 @@ describe("ChatHeader PTY upload menu", () => {
       );
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
       await screen.findByRole("menu");
+      if (kind !== "codex-json") await openShortcutsMenu();
       expect(document.querySelector('[data-slot^="chat-menu-codex-question-"]')).toBeNull();
     },
   );
@@ -757,7 +816,7 @@ describe("ChatHeader PTY upload menu", () => {
       if (status === "proxy-offline") useAppStore.setState({ proxyOnline: false });
       render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
-      await screen.findByRole("menu");
+      await openShortcutsMenu();
 
       for (const name of ["发送 Alt+↑", "发送 Alt+↓", "发送 Ctrl+]"]) {
         const item = screen.getByRole("menuitem", { name });

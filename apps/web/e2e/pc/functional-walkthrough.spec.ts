@@ -86,6 +86,10 @@ test.describe("functional browser walkthrough", () => {
 
     await expect(page).toHaveURL(/\/chat\/created-codex-pty-1\?mode=pty/);
     await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible();
+    await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+      "data-connection-ready",
+      "true",
+    );
     await expect(page.locator('[data-slot="input-bar-region"]')).toHaveCount(0);
     await expect(page.locator('[data-slot="chat-session-title"]')).toHaveText("Claude Code");
     await expect(page.locator('[data-slot="pty-host"] .xterm')).toBeVisible();
@@ -115,7 +119,7 @@ test.describe("functional browser walkthrough", () => {
       page.locator('[data-slot="chat-overflow-menu"]').getByText("快捷键"),
     ).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
-    // 头部菜单只留 Ctrl+O (其余热键挪到移动端控制条)。这里覆盖 dropdown → raw input 这条路径。
+    await page.getByRole("menuitem", { name: "快捷键" }).click();
     await page.getByRole("menuitem", { name: "发送 Ctrl+O" }).click();
     await expect(page.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
     const rawInput = (await sentFakeRelayMessages(page))

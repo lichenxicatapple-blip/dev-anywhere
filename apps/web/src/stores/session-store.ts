@@ -2,6 +2,7 @@
 // 选中态不在这里存, 由 URL (/chat/:id) 作为单一事实来源
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
+import type { PtyGeometry } from "@/lib/pty-fit-geometry";
 import type {
   AgentStatusPayload,
   SessionInfo,
@@ -70,6 +71,8 @@ interface SessionStoreState {
   // PTY 终端标题: Claude CLI 运行时会通过 OSC 0 改终端标题, proxy 抽取后转发 terminal_title
   // chat-header 为 PTY 模式优先展示这个字段, 空则回退到 cwd / sessionId
   ptyTitles: Record<string, string>;
+  // 当前终端尺寸；手动调整等待回执时展示最后请求的尺寸，不持久化。
+  ptyGeometryBySessionId: Record<string, PtyGeometry>;
   // PTY 语义元信息: terminal/proxy 从 OSC 等信号抽取。会话生命周期以 sessions[].state 为准。
   ptyStateBySessionId: Record<string, PtyStatePayload>;
   agentStatusBySessionId: Record<string, AgentStatusPayload>;
@@ -87,6 +90,7 @@ interface SessionStoreState {
   updateSessionName: (sessionId: string, name: string) => void;
   renameSession: (sessionId: string, name: string) => void;
   setPtyTitle: (sessionId: string, title: string) => void;
+  setPtyGeometry: (sessionId: string, geometry: PtyGeometry | null) => void;
   setPtyAutoYes: (sessionKey: string, enabled: boolean) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
   beginHistoryLoad: () => number;
@@ -109,6 +113,7 @@ export const useSessionStore = create<SessionStoreState>()(
       historyLoadStatus: "idle",
       historyLoadGeneration: 0,
       ptyTitles: {},
+      ptyGeometryBySessionId: {},
       ptyStateBySessionId: {},
       agentStatusBySessionId: {},
       ptyAutoYesBySessionKey: readPtyAutoYesBySessionKey(),
@@ -133,6 +138,11 @@ export const useSessionStore = create<SessionStoreState>()(
             ),
             ptyTitles: Object.fromEntries(
               Object.entries(state.ptyTitles).filter(([sid]) => activeSessionIds.has(sid)),
+            ),
+            ptyGeometryBySessionId: Object.fromEntries(
+              Object.entries(state.ptyGeometryBySessionId).filter(([sid]) =>
+                activeSessionIds.has(sid),
+              ),
             ),
           };
         }),
@@ -160,6 +170,9 @@ export const useSessionStore = create<SessionStoreState>()(
             ),
             ptyTitles: Object.fromEntries(
               Object.entries(state.ptyTitles).filter(([sid]) => sid !== sessionId),
+            ),
+            ptyGeometryBySessionId: Object.fromEntries(
+              Object.entries(state.ptyGeometryBySessionId).filter(([sid]) => sid !== sessionId),
             ),
             ptyAutoYesBySessionKey,
           };
@@ -214,6 +227,21 @@ export const useSessionStore = create<SessionStoreState>()(
         set((state) => ({
           ptyTitles: { ...state.ptyTitles, [sessionId]: title },
         })),
+      setPtyGeometry: (sessionId, geometry) =>
+        set((state) => {
+          const current = state.ptyGeometryBySessionId[sessionId];
+          if (geometry) {
+            if (!state.sessions.some((session) => session.sessionId === sessionId)) return state;
+            if (current?.cols === geometry.cols && current.rows === geometry.rows) return state;
+            return {
+              ptyGeometryBySessionId: { ...state.ptyGeometryBySessionId, [sessionId]: geometry },
+            };
+          }
+          if (!current) return state;
+          const next = { ...state.ptyGeometryBySessionId };
+          delete next[sessionId];
+          return { ptyGeometryBySessionId: next };
+        }),
       setPtyAutoYes: (sessionKey, enabled) =>
         set((state) => {
           const ptyAutoYesBySessionKey = { ...state.ptyAutoYesBySessionKey };
@@ -257,6 +285,7 @@ export const useSessionStore = create<SessionStoreState>()(
           historyLoadStatus: "idle",
           historyLoadGeneration: state.historyLoadGeneration + 1,
           ptyTitles: {},
+          ptyGeometryBySessionId: {},
           ptyStateBySessionId: {},
           agentStatusBySessionId: {},
           codexActiveWriterConflict: null,
@@ -285,6 +314,7 @@ export const useSessionStore = create<SessionStoreState>()(
             historyLoadStatus: "idle",
             historyLoadGeneration: state.historyLoadGeneration + 1,
             ptyTitles: {},
+            ptyGeometryBySessionId: {},
             ptyStateBySessionId: {},
             agentStatusBySessionId: {},
             ptyAutoYesBySessionKey,

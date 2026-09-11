@@ -1,3 +1,4 @@
+import type { PtyResizeRequest } from "@/lib/pty-fit-geometry";
 import {
   createContext,
   useCallback,
@@ -20,7 +21,7 @@ interface CachedPtyEntry extends PtyKeepAliveEntry {
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   findRequest?: number;
-  fitRequest?: string;
+  resizeRequest?: PtyResizeRequest;
 }
 
 interface ViewportRect {
@@ -41,7 +42,7 @@ interface PtyKeepAliveContextValue {
   deactivate: (sessionId: string) => void;
   updateViewportRect: (sessionId: string, rect: ViewportRect | null) => void;
   updateFindRequest: (sessionId: string, request: number | undefined) => void;
-  updateFitRequest: (sessionId: string, request: string | undefined) => void;
+  updateResizeRequest: (sessionId: string, request: PtyResizeRequest | undefined) => void;
 }
 
 const HIDDEN_WIDTH = 1024;
@@ -111,14 +112,17 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
-  const updateFitRequest = useCallback((sessionId: string, request: string | undefined): void => {
-    if (request === undefined || activeSessionIdRef.current !== sessionId) return;
-    setEntries((current) =>
-      current.map((entry) =>
-        entry.sessionId === sessionId ? { ...entry, fitRequest: request } : entry,
-      ),
-    );
-  }, []);
+  const updateResizeRequest = useCallback(
+    (sessionId: string, request: PtyResizeRequest | undefined): void => {
+      if (request === undefined || activeSessionIdRef.current !== sessionId) return;
+      setEntries((current) =>
+        current.map((entry) =>
+          entry.sessionId === sessionId ? { ...entry, resizeRequest: request } : entry,
+        ),
+      );
+    },
+    [],
+  );
 
   useEffect(() => {
     if (!sessionListLoaded) return;
@@ -142,8 +146,8 @@ export function PtyKeepAliveProvider({ children }: { children: ReactNode }) {
   }, [selectedProxyId]);
 
   const contextValue = useMemo<PtyKeepAliveContextValue>(
-    () => ({ activate, deactivate, updateFindRequest, updateFitRequest, updateViewportRect }),
-    [activate, deactivate, updateFindRequest, updateFitRequest, updateViewportRect],
+    () => ({ activate, deactivate, updateFindRequest, updateResizeRequest, updateViewportRect }),
+    [activate, deactivate, updateFindRequest, updateResizeRequest, updateViewportRect],
   );
 
   return (
@@ -159,13 +163,13 @@ export function PtyKeepAliveViewport({
   sessionKind,
   provider,
   findRequest,
-  fitRequest,
+  resizeRequest,
 }: {
   sessionId: string;
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
   findRequest?: number;
-  fitRequest?: string;
+  resizeRequest?: PtyResizeRequest;
 }) {
   const context = useContext(PtyKeepAliveContext);
   const ref = useRef<HTMLDivElement>(null);
@@ -174,7 +178,8 @@ export function PtyKeepAliveViewport({
     throw new Error("PtyKeepAliveViewport must be used within PtyKeepAliveProvider");
   }
 
-  const { activate, deactivate, updateFindRequest, updateFitRequest, updateViewportRect } = context;
+  const { activate, deactivate, updateFindRequest, updateResizeRequest, updateViewportRect } =
+    context;
 
   useLayoutEffect(() => {
     activate({ sessionId, sessionKind, provider });
@@ -186,8 +191,8 @@ export function PtyKeepAliveViewport({
   }, [findRequest, sessionId, updateFindRequest]);
 
   useLayoutEffect(() => {
-    updateFitRequest(sessionId, fitRequest);
-  }, [fitRequest, sessionId, updateFitRequest]);
+    updateResizeRequest(sessionId, resizeRequest);
+  }, [resizeRequest, sessionId, updateResizeRequest]);
 
   useLayoutEffect(() => {
     const node = ref.current;
@@ -270,7 +275,7 @@ function PtyKeepAliveLayer({
                 provider={entry.provider}
                 active={active}
                 findRequest={entry.findRequest}
-                fitRequest={entry.fitRequest}
+                resizeRequest={entry.resizeRequest}
               />
             </ImagePreviewProvider>
           </div>

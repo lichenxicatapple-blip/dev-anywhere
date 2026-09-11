@@ -1,3 +1,4 @@
+import type { PtyResizeRequest } from "@/lib/pty-fit-geometry";
 import { cleanup, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { useSessionStore } from "@/stores/session-store";
@@ -9,13 +10,13 @@ vi.mock("./chat-pty-view", () => ({
     provider,
     active,
     findRequest,
-    fitRequest,
+    resizeRequest,
   }: {
     sessionId: string;
     provider?: "claude" | "codex";
     active?: boolean;
     findRequest?: number;
-    fitRequest?: string;
+    resizeRequest?: PtyResizeRequest;
   }) => (
     <div
       data-slot="mock-chat-pty-view"
@@ -23,7 +24,8 @@ vi.mock("./chat-pty-view", () => ({
       data-provider={provider}
       data-active={String(active)}
       data-find-request={findRequest}
-      data-fit-request={fitRequest}
+      data-resize-request={resizeRequest?.requestId}
+      data-resize-action={resizeRequest?.action}
     />
   ),
 }));
@@ -121,35 +123,36 @@ describe("PtyKeepAliveProvider", () => {
     });
   });
 
-  it("forwards fit commands only to the requested active entry without remounting it", async () => {
+  it("forwards resize commands only to the requested active entry without remounting it", async () => {
     const original = useSessionStore.getState().sessions[0]!;
     useSessionStore.setState({
       sessions: [original, { ...original, sessionId: "pty-2" }],
     });
-    const view = (sessionId: string, fitRequest?: string) => (
+    const view = (sessionId: string, resizeRequest?: PtyResizeRequest) => (
       <PtyKeepAliveProvider>
-        <PtyKeepAliveViewport sessionId={sessionId} fitRequest={fitRequest} />
+        <PtyKeepAliveViewport sessionId={sessionId} resizeRequest={resizeRequest} />
       </PtyKeepAliveProvider>
     );
     const { container, rerender } = render(view("pty-1"));
     const first = container.querySelector(
       '[data-slot="mock-chat-pty-view"][data-session-id="pty-1"]',
     );
-    rerender(view("pty-1", "fit-1"));
-    await waitFor(() => expect(first?.getAttribute("data-fit-request")).toBe("fit-1"));
+    rerender(view("pty-1", { requestId: "fit-1", action: "fit" }));
+    await waitFor(() => expect(first?.getAttribute("data-resize-request")).toBe("fit-1"));
     rerender(view("pty-2"));
-    rerender(view("pty-2", "fit-2"));
+    rerender(view("pty-2", { requestId: "resize-2", action: "increase-cols" }));
     await waitFor(() => {
       const second = container.querySelector(
         '[data-slot="mock-chat-pty-view"][data-session-id="pty-2"]',
       );
-      expect(second?.getAttribute("data-fit-request")).toBe("fit-2");
+      expect(second?.getAttribute("data-resize-request")).toBe("resize-2");
+      expect(second?.getAttribute("data-resize-action")).toBe("increase-cols");
       expect(second?.getAttribute("data-active")).toBe("true");
     });
     expect(
       container.querySelector('[data-slot="mock-chat-pty-view"][data-session-id="pty-1"]'),
     ).toBe(first);
-    expect(first?.getAttribute("data-fit-request")).toBe("fit-1");
+    expect(first?.getAttribute("data-resize-request")).toBe("fit-1");
     expect(first?.getAttribute("data-active")).toBe("false");
   });
 

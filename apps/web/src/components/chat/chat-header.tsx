@@ -1,6 +1,7 @@
 // 桌面端有常驻侧栏，返回入口只在移动端显示。
 import {
   ArrowLeft,
+  Columns3,
   ImageIcon,
   Keyboard,
   Lightbulb,
@@ -11,12 +12,14 @@ import {
   Pencil,
   Plus,
   RotateCcw,
+  Rows3,
   Search,
   Type,
   Upload,
   Zap,
 } from "lucide-react";
 import { useRef, useState, type ChangeEvent, type ReactNode } from "react";
+import { PTY_INITIAL_MAX_COLS, PTY_INITIAL_MAX_ROWS } from "@dev-anywhere/shared";
 import { useNavigate } from "react-router";
 import { Button } from "@/components/ui/button";
 import {
@@ -27,6 +30,10 @@ import {
   DropdownMenuLabel,
   DropdownMenuItem,
   DropdownMenuSeparator,
+  DropdownMenuSub,
+  DropdownMenuSubTrigger,
+  DropdownMenuSubContent,
+  DropdownMenuPortal,
 } from "@/components/ui/dropdown-menu";
 import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
 import {
@@ -37,6 +44,7 @@ import {
 } from "@/lib/chat-font-size";
 import { useAppStore } from "@/stores/app-store";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
+import { PTY_MIN_COLS, PTY_MIN_ROWS, type PtyResizeAction } from "@/lib/pty-fit-geometry";
 import { formatUnlockedTerminalPathName } from "@/lib/format-session-name";
 import { useFileStore } from "@/stores/file-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
@@ -67,7 +75,7 @@ interface ChatHeaderProps {
   sessionId: string;
   mode?: "json" | "pty";
   onFind: () => void;
-  onFitTerminal?: () => void;
+  onResizeTerminal?: (action: PtyResizeAction) => void;
 }
 
 function splitPtyTitle(title: string): { indicator?: string; label: string } {
@@ -126,6 +134,24 @@ async function ensureMicrophoneReady(): Promise<void> {
 
 const menuItemClass = "min-h-9 gap-2.5";
 const menuLabelClass = "px-2 pb-1 pt-2 text-xs font-semibold text-muted-foreground";
+const terminalSizeControls = [
+  {
+    axis: "cols",
+    label: "列数",
+    unit: "列",
+    Icon: Columns3,
+    min: PTY_MIN_COLS,
+    max: PTY_INITIAL_MAX_COLS,
+  },
+  {
+    axis: "rows",
+    label: "行数",
+    unit: "行",
+    Icon: Rows3,
+    min: PTY_MIN_ROWS,
+    max: PTY_INITIAL_MAX_ROWS,
+  },
+] as const;
 const codexQuestionShortcuts = [
   { slot: "answer-next", icon: "⌥↑", label: "发送 Alt+↑", data: "\x1b[1;3A" },
   { slot: "main-prompt", icon: "⌥↓", label: "发送 Alt+↓", data: "\x1b[1;3B" },
@@ -158,7 +184,7 @@ function ShortcutKeyIcon({ label }: { label: string }) {
   );
 }
 
-export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeaderProps) {
+export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHeaderProps) {
   const homePath = useFileStore((s) => s.homePath);
   const uploadPickerPolicy = getUploadPickerPolicy();
   const navigate = useNavigate();
@@ -166,6 +192,7 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
   // PTY 模式 Claude CLI 运行时会通过 OSC 0 改终端标题 (Working/带工具名等),
   // proxy 转发为 terminal_title, dispatcher 写到 ptyTitles, 这里优先展示
   const ptyTitle = useSessionStore((s) => s.ptyTitles[sessionId]);
+  const ptyGeometry = useSessionStore((s) => s.ptyGeometryBySessionId[sessionId]);
   const ptyFontSize = useAppStore((s) => s.ptyFontSize);
   const chatContentFontSize = useAppStore((s) => s.chatContentFontSize);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
@@ -487,22 +514,12 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
                 </ChatMenuIcon>
                 重命名
               </DropdownMenuItem>
-              {session?.mode === "pty" && session.ptyOwner === "proxy-hosted" && onFitTerminal && (
-                <DropdownMenuItem
-                  className={menuItemClass}
-                  data-slot="chat-menu-fit-terminal"
-                  disabled={!connected || !proxyOnline || session.state === "error"}
-                  onSelect={onFitTerminal}
-                >
-                  <ChatMenuIcon>
-                    <Maximize aria-hidden="true" />
-                  </ChatMenuIcon>
-                  按窗口调整终端尺寸
-                </DropdownMenuItem>
-              )}
               <DropdownMenuCheckboxItem
                 checked={screenWakeLockChecked}
-                className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
+                className={cn(
+                  "min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2",
+                  !screenWakeLock.supported && !screenWakeLockChecked && "pr-2",
+                )}
                 disabled={screenWakeLockDisabled}
                 data-slot="chat-menu-screen-wake-lock-item"
                 onCheckedChange={toggleScreenWakeLock}
@@ -520,14 +537,14 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
                       : "屏幕常亮"}
                 </span>
               </DropdownMenuCheckboxItem>
-              {isPty && !isTerminalSession && (
+              {isPty && !isTerminalSession && ptyAutoYesSupported && (
                 <DropdownMenuCheckboxItem
                   checked={ptyAutoYesEnabled}
                   className="min-h-9 justify-start gap-2.5 pl-2 pr-8 [&>span:first-child]:left-auto [&>span:first-child]:right-2"
-                  disabled={!ptyAutoYesKey || !ptyAutoYesSupported}
+                  disabled={!ptyAutoYesKey}
                   data-slot="chat-menu-pty-auto-yes-item"
                   onCheckedChange={(checked) => {
-                    if (ptyAutoYesKey && ptyAutoYesSupported) {
+                    if (ptyAutoYesKey) {
                       setPtyAutoYes(ptyAutoYesKey, checked === true);
                     }
                   }}
@@ -535,12 +552,7 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
                   <ChatMenuIcon>
                     <Zap aria-hidden="true" />
                   </ChatMenuIcon>
-                  <span className="min-w-0 flex-1">
-                    <span className="block">Always yes</span>
-                    {!ptyAutoYesSupported && (
-                      <span className="block text-xs">Codex 终端请手动确认审批</span>
-                    )}
-                  </span>
+                  <span className="min-w-0 flex-1">Always yes</span>
                 </DropdownMenuCheckboxItem>
               )}
               {!isPty && !isTerminalSession && (
@@ -557,47 +569,149 @@ export function ChatHeader({ sessionId, mode, onFind, onFitTerminal }: ChatHeade
                 </DropdownMenuCheckboxItem>
               )}
               <DropdownMenuSeparator />
+              {session?.mode === "pty" &&
+                session.ptyOwner === "proxy-hosted" &&
+                onResizeTerminal && (
+                  <>
+                    <DropdownMenuLabel className={menuLabelClass}>终端尺寸</DropdownMenuLabel>
+                    <DropdownMenuItem
+                      className={menuItemClass}
+                      data-slot="chat-menu-fit-terminal"
+                      disabled={!connected || !proxyOnline || session.state === "error"}
+                      onSelect={() => onResizeTerminal("fit")}
+                    >
+                      <ChatMenuIcon>
+                        <Maximize aria-hidden="true" />
+                      </ChatMenuIcon>
+                      按窗口调整终端尺寸
+                    </DropdownMenuItem>
+                    {terminalSizeControls.map(({ axis, label, unit, Icon, min, max }) => {
+                      const value = ptyGeometry?.[axis];
+                      const disabled =
+                        !connected ||
+                        !proxyOnline ||
+                        session.state === "error" ||
+                        value === undefined;
+                      return (
+                        <div
+                          key={axis}
+                          role="group"
+                          aria-label={label}
+                          className="flex min-h-9 items-center gap-2.5 px-2 text-sm"
+                          data-slot={`chat-menu-${axis}-control`}
+                        >
+                          <ChatMenuIcon>
+                            <Icon aria-hidden="true" />
+                          </ChatMenuIcon>
+                          <span>{label}</span>
+                          <div className="inline-flex shrink-0 items-center gap-2">
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="size-[22px] rounded-[5px] bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                              disabled={disabled || (value !== undefined && value <= min)}
+                              aria-label={`减少${unit}`}
+                              data-slot={`chat-menu-decrease-${axis}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onResizeTerminal(`decrease-${axis}`);
+                              }}
+                            >
+                              <Minus aria-hidden="true" />
+                            </Button>
+                            <span
+                              className="flex h-[22px] min-w-8 items-center justify-center px-1 text-sm font-medium leading-none tabular-nums text-foreground"
+                              data-slot={`chat-menu-${axis}-value`}
+                              aria-live="polite"
+                            >
+                              {value ?? "—"}
+                            </span>
+                            <Button
+                              variant="ghost"
+                              size="icon-sm"
+                              className="size-[22px] rounded-[5px] bg-muted/45 text-muted-foreground hover:bg-accent hover:text-accent-foreground"
+                              disabled={disabled || (value !== undefined && value >= max)}
+                              aria-label={`增加${unit}`}
+                              data-slot={`chat-menu-increase-${axis}`}
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                onResizeTerminal(`increase-${axis}`);
+                              }}
+                            >
+                              <Plus aria-hidden="true" />
+                            </Button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    <DropdownMenuSeparator />
+                  </>
+                )}
               {isPty && (
                 <>
-                  {/* 常驻辅助键放在移动端控制条，低频快捷键保留在会话菜单。 */}
-                  <DropdownMenuLabel className={menuLabelClass}>快捷键</DropdownMenuLabel>
-                  <DropdownMenuItem
-                    className={menuItemClass}
-                    data-slot="chat-menu-send-ctrl-o"
-                    onClick={() => sendRemoteInputRaw(sessionId, "\x0f")}
-                  >
-                    <ShortcutKeyIcon label="^O" />
-                    发送 Ctrl+O
-                  </DropdownMenuItem>
-                  <DropdownMenuItem
-                    className={menuItemClass}
-                    data-slot="chat-menu-send-ctrl-r"
-                    disabled={
-                      !connected ||
-                      !proxyOnline ||
-                      session?.mode !== "pty" ||
-                      session.state === "error"
-                    }
-                    onSelect={() => sendRemoteInputRaw(sessionId, "\x12")}
-                  >
-                    <ShortcutKeyIcon label="^R" />
-                    发送 Ctrl+R
-                  </DropdownMenuItem>
-                  {session?.kind === "agent" &&
-                    session.mode === "pty" &&
-                    session.provider === "codex" &&
-                    codexQuestionShortcuts.map((shortcut) => (
-                      <DropdownMenuItem
-                        key={shortcut.slot}
-                        className={menuItemClass}
-                        data-slot={`chat-menu-codex-question-${shortcut.slot}`}
-                        disabled={!connected || !proxyOnline || session.state === "error"}
-                        onSelect={() => sendRemoteInputRaw(sessionId, shortcut.data)}
+                  <DropdownMenuSub>
+                    <DropdownMenuSubTrigger
+                      className={cn(menuItemClass, "[&>svg:last-child]:ml-0")}
+                      data-slot="chat-menu-shortcuts-trigger"
+                    >
+                      <ChatMenuIcon>
+                        <Keyboard aria-hidden="true" />
+                      </ChatMenuIcon>
+                      快捷键
+                    </DropdownMenuSubTrigger>
+                    <DropdownMenuPortal>
+                      <DropdownMenuSubContent
+                        // Radix flips side menus but does not shift them horizontally.
+                        // Move only the overflowing width back inside the viewport.
+                        className={cn(
+                          "min-w-44 max-w-[calc(100vw-1rem)] max-h-(--radix-dropdown-menu-content-available-height) overflow-y-auto",
+                          "data-[side=left]:translate-x-[max(0px,calc(100%-var(--radix-dropdown-menu-content-available-width)))]",
+                          "data-[side=right]:-translate-x-[max(0px,calc(100%-var(--radix-dropdown-menu-content-available-width)))]",
+                        )}
+                        sideOffset={4}
+                        collisionPadding={8}
+                        data-slot="chat-menu-shortcuts"
                       >
-                        <ShortcutKeyIcon label={shortcut.icon} />
-                        {shortcut.label}
-                      </DropdownMenuItem>
-                    ))}
+                        <DropdownMenuItem
+                          className={menuItemClass}
+                          data-slot="chat-menu-send-ctrl-o"
+                          onSelect={() => sendRemoteInputRaw(sessionId, "\x0f")}
+                        >
+                          <ShortcutKeyIcon label="^O" />
+                          发送 Ctrl+O
+                        </DropdownMenuItem>
+                        <DropdownMenuItem
+                          className={menuItemClass}
+                          data-slot="chat-menu-send-ctrl-r"
+                          disabled={
+                            !connected ||
+                            !proxyOnline ||
+                            session?.mode !== "pty" ||
+                            session.state === "error"
+                          }
+                          onSelect={() => sendRemoteInputRaw(sessionId, "\x12")}
+                        >
+                          <ShortcutKeyIcon label="^R" />
+                          发送 Ctrl+R
+                        </DropdownMenuItem>
+                        {session?.kind === "agent" &&
+                          session.mode === "pty" &&
+                          session.provider === "codex" &&
+                          codexQuestionShortcuts.map((shortcut) => (
+                            <DropdownMenuItem
+                              key={shortcut.slot}
+                              className={menuItemClass}
+                              data-slot={`chat-menu-codex-question-${shortcut.slot}`}
+                              disabled={!connected || !proxyOnline || session.state === "error"}
+                              onSelect={() => sendRemoteInputRaw(sessionId, shortcut.data)}
+                            >
+                              <ShortcutKeyIcon label={shortcut.icon} />
+                              {shortcut.label}
+                            </DropdownMenuItem>
+                          ))}
+                      </DropdownMenuSubContent>
+                    </DropdownMenuPortal>
+                  </DropdownMenuSub>
                   <DropdownMenuSeparator />
                 </>
               )}

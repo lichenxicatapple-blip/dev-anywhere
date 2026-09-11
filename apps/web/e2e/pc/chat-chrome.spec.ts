@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { BASE_URL, gotoWithFakeProxy, installFakeRelay } from "../helpers";
+import { BASE_URL, gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 import { installWakeLockMock, wakeLockTestCount } from "../wake-lock-test-helper";
 
 test.describe("ChatHeader compact navigation controls", () => {
@@ -124,35 +124,90 @@ test.describe("ChatHeader compact navigation controls", () => {
     expect(resetBox.y).toBeGreaterThan(rowBox.y + rowBox.height - 1);
   });
 
-  test("PTY overflow menu exposes terminal shortcuts", async ({ page }) => {
-    await gotoWithFakeProxy(page, "/#/chat/claude-pty?mode=pty");
+  for (const width of [1280, 390, 320]) {
+    test.describe(`shortcut menu at ${width}px`, () => {
+      test.use({ viewport: { width, height: 844 }, hasTouch: width < 768 });
+      test("PTY shortcut submenu stays within desktop and phone viewports", async ({
+        page,
+      }, testInfo) => {
+        // Match the wider disabled wake-lock label shown on a phone over LAN HTTP.
+        await page.addInitScript(() => {
+          Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+        });
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.reload();
+        await gotoWithFakeProxy(page, "/#/chat/codex-pty?mode=pty");
 
-    await page.locator('[data-slot="chat-overflow-trigger"]').click();
-    const menu = page.locator('[data-slot="chat-overflow-menu"]');
-    await expect(menu).toBeVisible();
-    await expect(menu.getByText("快捷键")).toBeVisible();
-    await expect(menu.getByText("切换权限模式")).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
-    // Tab / ⇧Tab / ^T / ^C / ^B 已挪到移动端控制条 (PtyMobileControls), header dropdown 这里
-    // 仅留低频的 Ctrl+O。PC 桌面物理键盘可以直接发这些组合键, 不再依赖菜单按钮。
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-o"]')).toBeVisible();
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-send-ctrl-b"]')).toHaveCount(0);
-    await expect(menu.getByText("会话", { exact: true })).toBeVisible();
-    await expect(menu.getByText("显示")).toHaveCount(0);
-    await expect(page.locator('[data-slot="chat-menu-screen-wake-lock-item"]')).toBeVisible();
-    await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
+        await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+          "data-connection-ready",
+          "true",
+        );
+        await page.locator('[data-slot="chat-overflow-trigger"]').click();
+        const menu = page.locator('[data-slot="chat-overflow-menu"]');
+        const trigger = menu.getByRole("menuitem", { name: "快捷键" });
+        await expect(menu).toBeVisible();
+        await expect(trigger).toBeVisible();
+        await expect(page.getByRole("menuitemcheckbox", { name: /Always yes/ })).toHaveCount(0);
+        await expect(page.locator('[data-slot="chat-menu-send-ctrl-o"]')).toHaveCount(0);
+        await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
+        await expect(page.locator('[data-slot="chat-menu-send-ctrl-t"]')).toHaveCount(0);
+        await expect(page.locator('[data-slot="chat-menu-send-ctrl-c"]')).toHaveCount(0);
+        await expect(page.locator('[data-slot="chat-menu-send-shift-tab"]')).toHaveCount(0);
+        await expect(page.locator('[data-slot="chat-menu-send-ctrl-b"]')).toHaveCount(0);
+        await expect(menu.getByText("会话", { exact: true })).toBeVisible();
+        await expect(page.locator('[data-slot="chat-menu-font-control"]')).toBeVisible();
+        await expect(
+          menu.getByRole("menuitemcheckbox", { name: "屏幕常亮（需要 HTTPS）" }),
+        ).toBeVisible();
 
-    const wakePaddingLeft = await page
-      .locator('[data-slot="chat-menu-screen-wake-lock-item"]')
-      .evaluate((node) => getComputedStyle(node).paddingLeft);
-    const shortcutPaddingLeft = await page
-      .locator('[data-slot="chat-menu-send-ctrl-o"]')
-      .evaluate((node) => getComputedStyle(node).paddingLeft);
-    expect(wakePaddingLeft).toBe(shortcutPaddingLeft);
-  });
+        if (width >= 768) await trigger.hover();
+        else await trigger.tap();
+        const shortcuts = page.locator('[data-slot="chat-menu-shortcuts"]');
+        await expect(shortcuts).toBeVisible();
+        await expect(shortcuts).toHaveCSS("opacity", "1");
+        await expect(shortcuts.getByRole("menuitem")).toHaveCount(5);
+        await expect(menu).toBeVisible();
+        await expect(menu.getByRole("menuitem", { name: "重命名" })).toBeVisible();
+        await expect
+          .poll(async () => {
+            const box = await shortcuts.boundingBox();
+            return (
+              box !== null &&
+              box.x >= 0 &&
+              box.y >= 0 &&
+              box.x + box.width <= width &&
+              box.y + box.height <= 844
+            );
+          })
+          .toBe(true);
+
+        const wakePaddingLeft = await page
+          .locator('[data-slot="chat-menu-screen-wake-lock-item"]')
+          .evaluate((node) => getComputedStyle(node).paddingLeft);
+        const shortcutPaddingLeft = await page
+          .locator('[data-slot="chat-menu-send-ctrl-o"]')
+          .evaluate((node) => getComputedStyle(node).paddingLeft);
+        expect(wakePaddingLeft).toBe(shortcutPaddingLeft);
+        await page.screenshot({
+          path: testInfo.outputPath(`shortcuts-${width}.png`),
+          animations: "disabled",
+        });
+
+        const inputCount = (await sentFakeRelayMessages(page)).filter(
+          (message) => message.type === "remote_input_raw",
+        ).length;
+        const ctrlR = shortcuts.getByRole("menuitem", { name: "发送 Ctrl+R" });
+        if (width >= 768) await ctrlR.click();
+        else await ctrlR.tap();
+        await expect(page.getByRole("menu")).toHaveCount(0);
+        const inputs = (await sentFakeRelayMessages(page)).filter(
+          (message) => message.type === "remote_input_raw",
+        );
+        expect(inputs).toHaveLength(inputCount + 1);
+        expect(inputs.at(-1)).toMatchObject({ sessionId: "codex-pty", data: "\x12" });
+      });
+    });
+  }
 });
 
 test.describe("ChatHeader screen wake lock", () => {

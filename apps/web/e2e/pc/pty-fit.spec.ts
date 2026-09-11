@@ -173,3 +173,92 @@ test("fits on the first click after leaving and returning to a cached PTY", asyn
   await expectFittedViewport(page);
   expect(await readResizeRequests(page)).toHaveLength(2);
 });
+
+test("adjusts rows and columns without losing clicks while resize events are delayed", async ({
+  page,
+}) => {
+  const sessionId = "hosted-pty-adjustments";
+  await setupPtyChat(page, {
+    sessionId,
+    sessionKind: "terminal",
+    provider: "claude",
+    ptyOwner: "proxy-hosted",
+    cols: 80,
+    rows: 24,
+  });
+  await expectPtyTerminalMounted(page);
+  await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+    "data-connection-ready",
+    "true",
+  );
+  await page.locator('[data-slot="chat-overflow-trigger"]').click();
+  const columnValue = page.locator('[data-slot="chat-menu-cols-value"]');
+  const rowValue = page.locator('[data-slot="chat-menu-rows-value"]');
+  const moreColumns = page.getByRole("button", { name: "增加列", exact: true });
+  const fewerColumns = page.getByRole("button", { name: "减少列", exact: true });
+  const moreRows = page.getByRole("button", { name: "增加行", exact: true });
+  const fewerRows = page.getByRole("button", { name: "减少行", exact: true });
+  await expect(columnValue).toHaveText("80");
+  await expect(rowValue).toHaveText("24");
+  await moreColumns.click();
+  await moreColumns.click();
+  await moreRows.click();
+  await expect
+    .poll(async () => (await readResizeRequests(page)).map(({ cols, rows }) => ({ cols, rows })))
+    .toEqual([
+      { cols: 81, rows: 24 },
+      { cols: 82, rows: 24 },
+      { cols: 82, rows: 25 },
+    ]);
+  await expect(columnValue).toHaveText("82");
+  await expect(rowValue).toHaveText("25");
+  expect(await page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.cols, sessionId)).toBe(
+    80,
+  );
+
+  // Older acknowledgements must not discard adjustments that are still in flight.
+  await page.evaluate(() => window.__ptySmoke.resize(81, 24));
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.cols, sessionId))
+    .toBe(81);
+  await expect(columnValue).toHaveText("82");
+  await fewerRows.click();
+  await fewerColumns.click();
+  await fewerRows.click();
+  await expect
+    .poll(async () =>
+      (await readResizeRequests(page)).slice(-3).map(({ cols, rows }) => ({ cols, rows })),
+    )
+    .toEqual([
+      { cols: 82, rows: 24 },
+      { cols: 81, rows: 24 },
+      { cols: 81, rows: 23 },
+    ]);
+  await page.evaluate(() => window.__ptySmoke.resize(82, 24));
+  await expect(columnValue).toHaveText("81");
+  await expect(rowValue).toHaveText("23");
+  await page.evaluate(() => window.__ptySmoke.resize(81, 23));
+  await expect
+    .poll(() => page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.rows, sessionId))
+    .toBe(23);
+
+  // Another viewer's dimensions become both the displayed value and the next adjustment's base.
+  await page.evaluate(() => window.__ptySmoke.resize(100, 30));
+  await expect(columnValue).toHaveText("100");
+  await expect(rowValue).toHaveText("30");
+  await fewerColumns.click();
+  await fewerRows.click();
+  await expect
+    .poll(async () => (await readResizeRequests(page)).at(-1))
+    .toMatchObject({ cols: 99, rows: 29 });
+
+  await page.evaluate(() => window.__ptySmoke.resize(500, 200));
+  await expect(moreColumns).toBeDisabled();
+  await expect(moreRows).toBeDisabled();
+  await expect(fewerColumns).toBeEnabled();
+  await page.evaluate(() => window.__ptySmoke.resize(2, 1));
+  await expect(fewerColumns).toBeDisabled();
+  await expect(fewerRows).toBeDisabled();
+  await expect(moreColumns).toBeEnabled();
+  await expect(page.locator('[data-slot="chat-overflow-menu"]')).toBeVisible();
+});

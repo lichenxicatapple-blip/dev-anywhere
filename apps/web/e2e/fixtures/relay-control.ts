@@ -129,7 +129,7 @@ export type SpawnSessionOptions =
     };
 
 export async function spawnSessionViaRelay(
-  runtime: LocalRuntime,
+  runtime: Pick<LocalRuntime, "relayUrl">,
   options: SpawnSessionOptions,
 ): Promise<SessionViaRelay> {
   const ws = new ClientWs(`${runtime.relayUrl}/client`);
