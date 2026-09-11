@@ -475,7 +475,7 @@ async function dragSelectionHorizontally(
     const edgeStart = geometry;
     const availableDistance =
       direction === "left" ? edgeStart.scrollLeft : edgeStart.maxScrollLeft - edgeStart.scrollLeft;
-    expect(availableDistance).toBeGreaterThan(100);
+    expect(availableDistance).toBeGreaterThan(120);
     await page.mouse.move(
       direction === "left" ? geometry.container.left + 2 : geometry.container.right - 2,
       y,
@@ -491,7 +491,8 @@ async function dragSelectionHorizontally(
         },
         { timeout: 4_000 },
       )
-      .toBeGreaterThan(60);
+      // Leave enough distance for the subsequent drag back to the left as well.
+      .toBeGreaterThan(120);
     const autoscrolledRange = await requireOverlayRange(page);
     expectSameAnchor(initialRange, autoscrolledRange);
     expectChangedFocus(initialRange, autoscrolledRange);

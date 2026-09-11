@@ -22,7 +22,9 @@ run_timed_stage "vite-start" smoke_start_vite_if_needed "$ROOT" "$ARTIFACT_DIR" 
 run_timed_stage "layout-e2e" env WEB_BASE_URL="$BASE_URL" pnpm test:layout
 # Full fake-relay desktop coverage is fast and deterministic enough to remain blocking.
 # Do not list a second subset here: that previously reran six specs already covered by test:pc.
-run_timed_stage "desktop-e2e" env WEB_BASE_URL="$BASE_URL" pnpm test:pc
+# Native input, focus and animation checks share the machine's compositor. Match CI's serial
+# default instead of deriving concurrency from CPU count; faster hosts can opt into more workers.
+run_timed_stage "desktop-e2e" env WEB_BASE_URL="$BASE_URL" pnpm test:pc --workers="${RELEASE_PC_WORKERS:-1}"
 
 print_stage_timing_summary
 echo "release smoke passed"

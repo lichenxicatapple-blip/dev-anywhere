@@ -188,6 +188,13 @@ export async function waitForStableVisiblePtyRow(
   let settled: PtyVisibleRow | null = null;
   await expect
     .poll(async () => {
+      // Compare painted frames, not two timer polls that can both precede a slow native render.
+      await page.evaluate(
+        () =>
+          new Promise<void>((resolve) =>
+            requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+          ),
+      );
       const current = await readVisiblePtyRow(page, needle);
       const stable =
         current !== null &&

@@ -172,6 +172,14 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
 
     const input = page.locator('[data-slot="pty-host"] .xterm-helper-textarea');
     await input.focus();
+    // Focus changes xterm's rendered cursor spans and can remap the viewport. Capture the
+    // cursor only after that paint, rather than retaining a span from the unfocused row.
+    await page.evaluate(
+      () =>
+        new Promise<void>((resolve) =>
+          requestAnimationFrame(() => requestAnimationFrame(() => resolve())),
+        ),
+    );
 
     const offsets = await input.evaluate(async (textarea) => {
       const renderedRows = document.querySelector<HTMLElement>(
