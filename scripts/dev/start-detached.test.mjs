@@ -49,7 +49,8 @@ test("background service survives its launcher with no terminal and preserves ar
         }
       });
     }
-    await rm(cwd, { recursive: true, force: true });
+    // Windows may release the child's working-directory handle just after process exit.
+    await rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
   });
   await writeFile(
     fixture,
@@ -100,7 +101,7 @@ setTimeout(() => process.exit(1), 15000).unref();
 
 test("background launch reports a missing executable immediately", async (t) => {
   const cwd = await mkdtemp(join(tmpdir(), "dev-anywhere-detached-error-"));
-  t.after(() => rm(cwd, { recursive: true, force: true }));
+  t.after(() => rm(cwd, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 }));
   await assert.rejects(
     exec(process.execPath, [launcher, cwd, join(cwd, "output.log"), join(cwd, "missing")], {
       timeout: 3000,
