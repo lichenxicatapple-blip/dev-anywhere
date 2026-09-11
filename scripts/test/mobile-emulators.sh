@@ -81,10 +81,6 @@ avd_serial() {
   echo "emulator-$(avd_port "$1")"
 }
 
-launch_label() {
-  echo "dev.anywhere.mobile.$1"
-}
-
 create_one() {
   local index="$1"
   local name dir ini display
@@ -172,9 +168,11 @@ wait_boot() {
   local serial="$1"
   local deadline booted
   deadline=$((SECONDS + 180))
-  adb -s "$serial" wait-for-device >/dev/null
   while [[ "$SECONDS" -lt "$deadline" ]]; do
-    booted="$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+    booted=""
+    if adb_device_online "$serial"; then
+      booted="$(adb -s "$serial" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r' || true)"
+    fi
     if [[ "$booted" == "1" ]]; then
       adb -s "$serial" shell input keyevent 82 >/dev/null 2>&1 || true
       adb -s "$serial" shell settings put secure show_ime_with_hard_keyboard 1 >/dev/null 2>&1 || true
@@ -218,13 +216,11 @@ start_pool() {
   mkdir -p "$ARTIFACT_DIR"
 
   for i in $(seq 1 "$COUNT"); do
-    local name port serial label log err_log no_window_arg
+    local name port serial log no_window_arg
     name="$(avd_name "$i")"
     port="$(avd_port "$i")"
     serial="$(avd_serial "$i")"
-    label="$(launch_label "$serial")"
     log="$ARTIFACT_DIR/$serial.log"
-    err_log="$ARTIFACT_DIR/$serial.err.log"
     no_window_arg=()
 
     if adb_device_online "$serial"; then
@@ -238,43 +234,16 @@ start_pool() {
     fi
 
     echo "[mobile-emulators] starting $name as $serial log=$log"
-    if [[ "$(uname -s)" == "Darwin" ]] && command -v launchctl >/dev/null 2>&1; then
-      launchctl remove "$label" >/dev/null 2>&1 || true
-      launchctl submit \
-        -l "$label" \
-        -o "$log" \
-        -e "$err_log" \
-        -- "$EMULATOR_BIN" \
-        -avd "$name" \
-        -port "$port" \
-        -wipe-data \
-        -no-snapshot-load \
-        -no-snapshot-save \
-        -no-boot-anim \
-        -no-audio \
-        -gpu "$GPU_MODE" \
-        ${no_window_arg[@]+"${no_window_arg[@]}"}
-    else
-      bash -lc '
-        emulator_bin="$1"
-        log="$2"
-        shift 2
-        nohup "$emulator_bin" "$@" >"$log" 2>&1 </dev/null &
-        echo $!
-      ' _ \
-        "$EMULATOR_BIN" \
-        "$log" \
-        -avd "$name" \
-        -port "$port" \
-        -wipe-data \
-        -no-snapshot-load \
-        -no-snapshot-save \
-        -no-boot-anim \
-        -no-audio \
-        -gpu "$GPU_MODE" \
-        ${no_window_arg[@]+"${no_window_arg[@]}"} \
-        >"$ARTIFACT_DIR/$serial.pid"
-    fi
+    node "$ROOT/scripts/lib/start-detached.mjs" "$ROOT" "$log" "$EMULATOR_BIN" \
+      -avd "$name" \
+      -port "$port" \
+      -wipe-data \
+      -no-snapshot-load \
+      -no-snapshot-save \
+      -no-boot-anim \
+      -no-audio \
+      -gpu "$GPU_MODE" \
+      ${no_window_arg[@]+"${no_window_arg[@]}"}
 
     wait_boot "$serial"
     if [[ "$i" -lt "$COUNT" ]]; then
@@ -285,14 +254,10 @@ start_pool() {
 
 stop_pool() {
   for i in $(seq 1 "$COUNT"); do
-    local serial label
+    local serial
     serial="$(avd_serial "$i")"
-    label="$(launch_label "$serial")"
-    launchctl remove "$label" >/dev/null 2>&1 || true
-    if adb_device_online "$serial"; then
-      echo "[mobile-emulators] stopping $serial"
-      adb -s "$serial" emu kill >/dev/null 2>&1 || true
-    fi
+    echo "[mobile-emulators] stopping $serial"
+    adb -s "$serial" emu kill >/dev/null 2>&1 || true
     wait_stopped "$serial" || true
   done
 }
