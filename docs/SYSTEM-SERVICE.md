@@ -2,6 +2,8 @@
 
 本指南适用于已安装并配置 DEV Anywhere 的开发机。启用后，Proxy 会在开机时以你的用户账户运行，新建的 Shell 和 Agent 会话可以在退出桌面登录后继续使用。支持 macOS、使用 systemd 的 Linux，以及 Windows。
 
+> **macOS 开机解锁**：开启 FileVault（文件保险箱）时，重启后需先解锁磁盘，DEV Anywhere 才能读取配置和项目文件并上线。启用系统服务或授予“完全磁盘访问权限”都不能代替这一步。参见 [Apple 的 FileVault 说明](https://support.apple.com/zh-cn/guide/deployment/dep82064ec40/web)。
+
 ## 启用系统服务
 
 先按[开发机配置步骤](./DEPLOYMENT.md#连接开发机)配置 Relay，确认 `dev-anywhere serve start` 能正常连接。Relay 地址、Token 和 Agent CLI 路径应写入配置文件；仅在当前终端生效的配置无法用于开机启动。
@@ -65,7 +67,7 @@ dev-anywhere serve restart --relay cloud
 4. 在远端继续操作刚创建的 Shell，并新建另一个会话，确认原会话和新会话都可用。
 5. 重启开发机，在不登录桌面的情况下再次验证连接。
 
-开发机需保持开机、联网且不进入睡眠。启用了 FileVault 等磁盘加密时，重启后可能需要先解锁磁盘。依赖桌面窗口、登录钥匙串或桌面 SSH agent 的工具，可能仍需要登录或额外配置。
+开发机需保持开机、联网且不进入睡眠。使用其他磁盘加密时，也应确认启动是否需要人工解锁。依赖桌面窗口、登录钥匙串或桌面 SSH agent 的工具，可能仍需要登录或额外配置。
 
 ## 取消或切回登录自启动
 

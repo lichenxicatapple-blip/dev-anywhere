@@ -161,6 +161,8 @@ Use `dev-anywhere serve autostart disable` to turn it off. Enabling or disabling
 
 For startup before desktop login, use `dev-anywhere serve autostart enable --system --now` on macOS, systemd Linux, or Windows. Installation requires administrator authorization, and the service runs as your user account. `--now` restarts Proxy immediately; sessions created afterward can continue after desktop logout. See the [system service guide](./docs/SYSTEM-SERVICE.md) (Chinese) for setup, verification, and switching back.
 
+> **macOS startup unlock:** With FileVault enabled, the disk must be unlocked after a restart before DEV Anywhere can read its configuration and project files and come online. Full Disk Access does not unlock the disk. See [Apple’s FileVault guide](https://support.apple.com/en-ie/guide/deployment/dep82064ec40/web).
+
 > **macOS folder access:** Selecting protected locations such as Desktop, Documents, or Downloads may trigger a “node would like to access…” prompt that needs approval on the development machine. For unattended access to these folders, add the `node` executable running DEV Anywhere under **System Settings → Privacy & Security → Full Disk Access** and enable it beforehand.
 >
 > Run `node -p 'process.execPath'` in the Node environment used to install DEV Anywhere to find its path. Click **+**, then press `⌘⇧G` and paste that path. The permission applies to this Node executable, so other scripts running through it may also gain access. If the Node path changes, you may need to grant access again. See [Apple’s privacy settings guide](https://support.apple.com/guide/mac-help/change-privacy-security-settings-on-mac-mchl211c911f/mac).
