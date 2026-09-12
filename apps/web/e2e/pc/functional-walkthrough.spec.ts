@@ -120,7 +120,7 @@ test.describe("functional browser walkthrough", () => {
     ).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
     await page.getByRole("menuitem", { name: "发送快捷键" }).click();
-    await page.getByRole("menuitem", { name: "发送 Ctrl+O" }).click();
+    await page.getByRole("menuitem", { name: "发送 Ctrl+T" }).click();
     await expect(page.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
     const rawInput = (await sentFakeRelayMessages(page))
       .filter((msg) => msg.type === "remote_input_raw")
@@ -129,7 +129,7 @@ test.describe("functional browser walkthrough", () => {
     expect(rawInput).toContain("hello");
     expect(rawInput).toContain("\n");
     expect(rawInput).toContain("\r");
-    expect(rawInput).toContain("\x0f");
+    expect(rawInput).toContain("\x14");
 
     await page.goto(`${page.url().split("#")[0]}#/chat/json-sess?mode=json`);
     await expect(page.locator('[data-slot="input-bar"][data-mode="json"]')).toBeVisible();
