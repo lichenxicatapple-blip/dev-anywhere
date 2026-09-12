@@ -52,15 +52,22 @@ test("resizes a real hosted shell and synchronizes desktop and touch viewers", a
   const phone = await mobile.newPage();
   const observedSizes: Array<{ phase: string; cols: number; rows: number }> = [];
 
-  async function verifyShell(phase: string, expected: { cols: number; rows: number }) {
+  async function verifyShell(
+    phase: string,
+    expected: { cols: number; rows: number },
+    checkDisplayedValues = true,
+  ) {
     await expect.poll(() => dimensions(page, session.sessionId)).toEqual(expected);
     await expect.poll(() => dimensions(phone, session.sessionId)).toEqual(expected);
     for (const viewer of [page, phone]) {
-      if (await viewer.locator('[data-slot="chat-overflow-menu"]').isVisible()) {
-        await expect(viewer.locator('[data-slot="chat-menu-cols-value"]')).toHaveText(
+      if (
+        checkDisplayedValues &&
+        (await viewer.locator('[data-slot="chat-overflow-menu"]').isVisible())
+      ) {
+        await expect(viewer.locator('[data-slot="chat-menu-cols-value"]')).toHaveValue(
           String(expected.cols),
         );
-        await expect(viewer.locator('[data-slot="chat-menu-rows-value"]')).toHaveText(
+        await expect(viewer.locator('[data-slot="chat-menu-rows-value"]')).toHaveValue(
           String(expected.rows),
         );
       }
@@ -100,6 +107,32 @@ test("resizes a real hosted shell and synchronizes desktop and touch viewers", a
     await phone.getByRole("button", { name: "减少行", exact: true }).tap();
     await phone.getByRole("button", { name: "减少行", exact: true }).tap();
     await verifyShell("phone_decrease", { cols: 81, rows: 23 });
+
+    const phoneColumns = phone.getByRole("textbox", { name: "设置列数" });
+    const phoneRows = phone.getByRole("textbox", { name: "设置行数" });
+    await phoneColumns.tap();
+    await phoneColumns.fill("160");
+    await phoneColumns.press("Enter");
+    await verifyShell("phone_direct_columns", { cols: 160, rows: 23 });
+    await phoneRows.tap();
+    await phoneRows.fill("60");
+    await phoneColumns.tap();
+    await verifyShell("phone_direct_rows_blur", { cols: 160, rows: 60 });
+
+    await phoneRows.fill("1.5");
+    await phoneRows.press("Enter");
+    await expect(phoneRows).toHaveAttribute("aria-invalid", "true");
+    await verifyShell("invalid_size_ignored", { cols: 160, rows: 60 }, false);
+    await phoneRows.fill("70");
+    await phoneRows.press("Escape");
+    await expect(phoneRows).toHaveValue("60");
+    await expect(phone.locator('[data-slot="chat-overflow-menu"]')).toBeVisible();
+
+    await phoneColumns.fill("150");
+    await phone.locator('[data-slot="chat-session-title"]').tap();
+    await expect(phone.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
+    await verifyShell("outside_click_commits", { cols: 150, rows: 60 });
+    await phone.locator('[data-slot="chat-overflow-trigger"]').tap();
     await phone.setViewportSize({ width: 320, height: 844 });
     const menu = phone.locator('[data-slot="chat-overflow-menu"]');
     await expect(menu).toBeVisible();
@@ -130,6 +163,18 @@ test("resizes a real hosted shell and synchronizes desktop and touch viewers", a
     await page.getByRole("button", { name: "减少行", exact: true }).click();
     await page.getByRole("button", { name: "减少列", exact: true }).click();
     await verifyShell("desktop_decrease", { cols: fitted.cols - 1, rows: fitted.rows });
+
+    const desktopColumns = page.getByRole("textbox", { name: "设置列数" });
+    await desktopColumns.fill("140");
+    await phone.getByRole("button", { name: "增加行", exact: true }).tap();
+    await expect
+      .poll(() => dimensions(page, session.sessionId))
+      .toEqual({
+        cols: fitted.cols - 1,
+        rows: fitted.rows + 1,
+      });
+    await desktopColumns.press("Enter");
+    await verifyShell("direct_size_keeps_latest_other_axis", { cols: 140, rows: fitted.rows + 1 });
     await testInfo.attach("real-shell-sizes", {
       body: JSON.stringify(observedSizes, null, 2),
       contentType: "application/json",

@@ -10,7 +10,8 @@ export type PtyResizeAction =
   | "increase-cols"
   | "decrease-cols"
   | "increase-rows"
-  | "decrease-rows";
+  | "decrease-rows"
+  | { axis: "cols" | "rows"; value: number };
 
 export interface PtyResizeRequest {
   requestId: string;
@@ -26,6 +27,17 @@ export function adjustPtyGeometry(
   current: PtyGeometry,
   action: Exclude<PtyResizeAction, "fit">,
 ): PtyGeometry {
+  if (typeof action === "object") {
+    const min = action.axis === "cols" ? PTY_MIN_COLS : PTY_MIN_ROWS;
+    const max = action.axis === "cols" ? PTY_INITIAL_MAX_COLS : PTY_INITIAL_MAX_ROWS;
+    if (!Number.isInteger(action.value) || action.value < min || action.value > max) {
+      return current;
+    }
+    return {
+      cols: action.axis === "cols" ? action.value : current.cols,
+      rows: action.axis === "rows" ? action.value : current.rows,
+    };
+  }
   return {
     cols:
       action === "increase-cols" && current.cols < PTY_INITIAL_MAX_COLS

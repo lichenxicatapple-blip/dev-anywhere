@@ -53,6 +53,7 @@ import { toast } from "@/components/toast";
 import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { SessionRenameDialog } from "@/components/session/session-rename-dialog";
+import { TerminalDimensionInput } from "./terminal-dimension-input";
 import { screenWakeLockManager } from "@/lib/screen-wake-lock-manager";
 import { cn } from "@/lib/utils";
 import { DEFAULT_VOICE_PILOT_STATE, useVoicePilotStore } from "@/voice/voice-pilot-store";
@@ -217,6 +218,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const menuPtyFocusRef = useRef<HTMLTextAreaElement | null>(null);
   const menuClosedByEscapeRef = useRef(false);
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const isTerminalSession = session?.kind === "terminal";
   const screenWakeLock = useScreenWakeLockScope(sessionId);
   const voicePilot = useVoicePilotStore(
@@ -425,6 +427,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
             modal={false}
             onOpenChange={(open) => {
               if (open) menuClosedByEscapeRef.current = false;
+              else setShortcutsOpen(false);
             }}
           >
             <DropdownMenuTrigger asChild>
@@ -461,8 +464,25 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
               align="end"
               className="w-max min-w-44 max-w-[calc(100vw-1rem)] data-[state=open]:animate-none"
               data-slot="chat-overflow-menu"
-              onEscapeKeyDown={() => {
+              onEscapeKeyDown={(event) => {
+                if (
+                  event.target instanceof HTMLElement &&
+                  event.target.matches('[data-terminal-dimension-input][data-editing="true"]')
+                ) {
+                  event.preventDefault();
+                  return;
+                }
                 menuClosedByEscapeRef.current = true;
+              }}
+              onInteractOutside={() => {
+                // Radix can unmount the menu before the browser blurs its input.
+                const focused = document.activeElement;
+                if (
+                  focused instanceof HTMLInputElement &&
+                  focused.hasAttribute("data-terminal-dimension-input")
+                ) {
+                  focused.blur();
+                }
               }}
               onCloseAutoFocus={(event) => {
                 const previousInput = menuPtyFocusRef.current;
@@ -619,13 +639,16 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
                             >
                               <Minus aria-hidden="true" />
                             </Button>
-                            <span
-                              className="flex h-[22px] min-w-8 items-center justify-center px-1 text-sm font-medium leading-none tabular-nums text-foreground"
-                              data-slot={`chat-menu-${axis}-value`}
-                              aria-live="polite"
-                            >
-                              {value ?? "—"}
-                            </span>
+                            <TerminalDimensionInput
+                              key={`${sessionId}-${axis}`}
+                              axis={axis}
+                              label={label}
+                              value={value}
+                              min={min}
+                              max={max}
+                              disabled={disabled}
+                              onCommit={(next) => onResizeTerminal({ axis, value: next })}
+                            />
                             <Button
                               variant="ghost"
                               size="icon-sm"
@@ -649,15 +672,21 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
                 )}
               {isPty && (
                 <>
-                  <DropdownMenuSub>
+                  <DropdownMenuSub open={shortcutsOpen} onOpenChange={setShortcutsOpen}>
                     <DropdownMenuSubTrigger
                       className={cn(menuItemClass, "[&>svg:last-child]:ml-0")}
                       data-slot="chat-menu-shortcuts-trigger"
+                      onClick={(event) => {
+                        if (shortcutsOpen) {
+                          event.preventDefault();
+                          setShortcutsOpen(false);
+                        }
+                      }}
                     >
                       <ChatMenuIcon>
                         <Keyboard aria-hidden="true" />
                       </ChatMenuIcon>
-                      快捷键
+                      发送快捷键
                     </DropdownMenuSubTrigger>
                     <DropdownMenuPortal>
                       <DropdownMenuSubContent

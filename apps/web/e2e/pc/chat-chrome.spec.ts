@@ -144,7 +144,7 @@ test.describe("ChatHeader compact navigation controls", () => {
         );
         await page.locator('[data-slot="chat-overflow-trigger"]').click();
         const menu = page.locator('[data-slot="chat-overflow-menu"]');
-        const trigger = menu.getByRole("menuitem", { name: "快捷键" });
+        const trigger = menu.getByRole("menuitem", { name: "发送快捷键" });
         await expect(menu).toBeVisible();
         await expect(trigger).toBeVisible();
         await expect(page.getByRole("menuitemcheckbox", { name: /Always yes/ })).toHaveCount(0);
@@ -192,6 +192,18 @@ test.describe("ChatHeader compact navigation controls", () => {
           path: testInfo.outputPath(`shortcuts-${width}.png`),
           animations: "disabled",
         });
+
+        if (width >= 768) await trigger.click();
+        else await trigger.tap();
+        await expect(shortcuts).toHaveCount(0);
+        await expect(menu).toBeVisible();
+        await trigger.press("ArrowRight");
+        await expect(shortcuts).toBeVisible();
+        await shortcuts.getByRole("menuitem").first().press("ArrowLeft");
+        await expect(shortcuts).toHaveCount(0);
+        await expect(menu).toBeVisible();
+        await trigger.press("ArrowRight");
+        await expect(shortcuts).toBeVisible();
 
         const inputCount = (await sentFakeRelayMessages(page)).filter(
           (message) => message.type === "remote_input_raw",

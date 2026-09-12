@@ -198,8 +198,8 @@ test("adjusts rows and columns without losing clicks while resize events are del
   const fewerColumns = page.getByRole("button", { name: "减少列", exact: true });
   const moreRows = page.getByRole("button", { name: "增加行", exact: true });
   const fewerRows = page.getByRole("button", { name: "减少行", exact: true });
-  await expect(columnValue).toHaveText("80");
-  await expect(rowValue).toHaveText("24");
+  await expect(columnValue).toHaveValue("80");
+  await expect(rowValue).toHaveValue("24");
   await moreColumns.click();
   await moreColumns.click();
   await moreRows.click();
@@ -210,8 +210,8 @@ test("adjusts rows and columns without losing clicks while resize events are del
       { cols: 82, rows: 24 },
       { cols: 82, rows: 25 },
     ]);
-  await expect(columnValue).toHaveText("82");
-  await expect(rowValue).toHaveText("25");
+  await expect(columnValue).toHaveValue("82");
+  await expect(rowValue).toHaveValue("25");
   expect(await page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.cols, sessionId)).toBe(
     80,
   );
@@ -221,7 +221,7 @@ test("adjusts rows and columns without losing clicks while resize events are del
   await expect
     .poll(() => page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.cols, sessionId))
     .toBe(81);
-  await expect(columnValue).toHaveText("82");
+  await expect(columnValue).toHaveValue("82");
   await fewerRows.click();
   await fewerColumns.click();
   await fewerRows.click();
@@ -235,8 +235,8 @@ test("adjusts rows and columns without losing clicks while resize events are del
       { cols: 81, rows: 23 },
     ]);
   await page.evaluate(() => window.__ptySmoke.resize(82, 24));
-  await expect(columnValue).toHaveText("81");
-  await expect(rowValue).toHaveText("23");
+  await expect(columnValue).toHaveValue("81");
+  await expect(rowValue).toHaveValue("23");
   await page.evaluate(() => window.__ptySmoke.resize(81, 23));
   await expect
     .poll(() => page.evaluate((sid) => window.__ccTestPtyTerminals?.get(sid)?.rows, sessionId))
@@ -244,8 +244,8 @@ test("adjusts rows and columns without losing clicks while resize events are del
 
   // Another viewer's dimensions become both the displayed value and the next adjustment's base.
   await page.evaluate(() => window.__ptySmoke.resize(100, 30));
-  await expect(columnValue).toHaveText("100");
-  await expect(rowValue).toHaveText("30");
+  await expect(columnValue).toHaveValue("100");
+  await expect(rowValue).toHaveValue("30");
   await fewerColumns.click();
   await fewerRows.click();
   await expect

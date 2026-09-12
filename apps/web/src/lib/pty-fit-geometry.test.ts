@@ -26,6 +26,27 @@ function fixture(width = 1024, height = 716, cellWidth = 8, cellHeight = 20) {
 afterEach(() => document.body.replaceChildren());
 
 describe("manual PTY adjustments", () => {
+  it("sets one dimension while retaining the latest other dimension", () => {
+    const current = { cols: 82, rows: 25, buffer: { lines: [] } };
+    expect(adjustPtyGeometry(current, { axis: "cols", value: 160 })).toEqual({
+      cols: 160,
+      rows: 25,
+    });
+    expect(adjustPtyGeometry({ cols: 160, rows: 25 }, { axis: "rows", value: 60 })).toEqual({
+      cols: 160,
+      rows: 60,
+    });
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY, 501])(
+    "rejects an invalid explicit dimension (%s)",
+    (value) => {
+      const current = { cols: 80, rows: 24 };
+      expect(adjustPtyGeometry(current, { axis: "cols", value })).toEqual(current);
+      expect(adjustPtyGeometry(current, { axis: "rows", value })).toEqual(current);
+    },
+  );
+
   it("changes only the requested dimension", () => {
     expect(adjustPtyGeometry({ cols: 80, rows: 24 }, "increase-cols")).toEqual({
       cols: 81,

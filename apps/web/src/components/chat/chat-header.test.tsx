@@ -247,8 +247,8 @@ describe("ChatHeader PTY upload menu", () => {
       ["decrease-cols"],
       ["decrease-rows"],
     ]);
-    expect(screen.getByRole("group", { name: "列数" })).toHaveTextContent("80");
-    expect(screen.getByRole("group", { name: "行数" })).toHaveTextContent("24");
+    expect(screen.getByRole("textbox", { name: "设置列数" })).toHaveValue("80");
+    expect(screen.getByRole("textbox", { name: "设置行数" })).toHaveValue("24");
     fit.mockClear();
     fireEvent.click(await screen.findByRole("menuitem", { name: "按窗口调整终端尺寸" }));
     expect(fit).toHaveBeenCalledExactlyOnceWith("fit");
@@ -281,6 +281,8 @@ describe("ChatHeader PTY upload menu", () => {
       expect(button).toBeDisabled();
       fireEvent.click(button);
     }
+    expect(screen.getByRole("textbox", { name: "设置列数" })).toBeDisabled();
+    expect(screen.getByRole("textbox", { name: "设置行数" })).toBeDisabled();
     expect(fit).not.toHaveBeenCalled();
   });
 
@@ -454,7 +456,7 @@ describe("ChatHeader PTY upload menu", () => {
     const menuItemNames = [
       "在会话中查找",
       "重命名",
-      "快捷键",
+      "发送快捷键",
       "上传照片或视频",
       "上传文件",
       "恢复默认",
@@ -486,7 +488,7 @@ describe("ChatHeader PTY upload menu", () => {
   });
 
   async function openShortcutsMenu() {
-    const trigger = await screen.findByRole("menuitem", { name: "快捷键" });
+    const trigger = await screen.findByRole("menuitem", { name: "发送快捷键" });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowRight" });
     await screen.findByRole("menuitem", { name: "发送 Ctrl+O" });
@@ -699,7 +701,7 @@ describe("ChatHeader PTY upload menu", () => {
 
     fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
     await screen.findByRole("menu");
-    expect(screen.queryByRole("menuitem", { name: "快捷键" })).toBeNull();
+    expect(screen.queryByRole("menuitem", { name: "发送快捷键" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+R" })).toBeNull();
     expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+O" })).toBeNull();
   });

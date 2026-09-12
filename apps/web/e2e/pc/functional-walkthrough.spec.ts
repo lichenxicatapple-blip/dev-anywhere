@@ -116,10 +116,10 @@ test.describe("functional browser walkthrough", () => {
     await page.keyboard.press("Enter");
     await page.locator('[data-slot="chat-overflow-trigger"]').click();
     await expect(
-      page.locator('[data-slot="chat-overflow-menu"]').getByText("快捷键"),
+      page.locator('[data-slot="chat-overflow-menu"]').getByText("发送快捷键"),
     ).toBeVisible();
     await expect(page.locator('[data-slot="chat-menu-permission-mode"]')).toHaveCount(0);
-    await page.getByRole("menuitem", { name: "快捷键" }).click();
+    await page.getByRole("menuitem", { name: "发送快捷键" }).click();
     await page.getByRole("menuitem", { name: "发送 Ctrl+O" }).click();
     await expect(page.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
     const rawInput = (await sentFakeRelayMessages(page))
