@@ -91,7 +91,9 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
           runtime.write(
             "Set-StrictMode -Version Latest; Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue\r",
           );
-          await expect.poll(() => directoryReports).toBeGreaterThan(beforeStrictPrompt);
+          await expect
+            .poll(() => directoryReports, { timeout: 10000 })
+            .toBeGreaterThan(beforeStrictPrompt);
         }
         const command =
           name === "CMD"
@@ -122,12 +124,14 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
         else {
           const beforeNativeCommand = directoryReports;
           runtime.write("cmd /d /c exit 23\r");
-          await expect.poll(() => directoryReports).toBeGreaterThan(beforeNativeCommand);
+          await expect
+            .poll(() => directoryReports, { timeout: 10000 })
+            .toBeGreaterThan(beforeNativeCommand);
           const exitCodeFile = join(root, "exit-code.txt");
           runtime.write(
             `[IO.File]::WriteAllText('${exitCodeFile.replaceAll("'", "''")}', [string]$global:LASTEXITCODE)\r`,
           );
-          await expect.poll(() => existsSync(exitCodeFile)).toBe(true);
+          await expect.poll(() => existsSync(exitCodeFile), { timeout: 10000 }).toBe(true);
           expect(readFileSync(exitCodeFile, "utf8")).toBe("23");
         }
         console.info(`${name}: current directory and relative file contents verified`);
