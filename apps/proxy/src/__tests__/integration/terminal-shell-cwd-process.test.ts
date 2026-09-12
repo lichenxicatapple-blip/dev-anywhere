@@ -3,8 +3,8 @@ import {
   mkdtempSync,
   mkdirSync,
   readFileSync,
-  realpathSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { join, win32 } from "node:path";
@@ -37,11 +37,17 @@ const nativeShells =
       )
     : [];
 
+function directoryIdentity(path: string): string | undefined {
+  if (!path) return undefined;
+  const { dev, ino } = statSync(path, { bigint: true });
+  return `${dev}:${ino}`;
+}
+
 describe.skipIf(process.platform !== "win32")("native Windows Shell working directory", () => {
   it.each(nativeShells)(
     "follows cd in $name and resolves the file from the new directory",
     async ({ name, path }) => {
-      const root = realpathSync(mkdtempSync(join(tmpdir(), "dev-anywhere-shell-cwd-")));
+      const root = mkdtempSync(join(tmpdir(), "dev-anywhere-shell-cwd-"));
       const destination = join(root, "项目 space");
       mkdirSync(destination);
       writeFileSync(join(root, "result.txt"), "OLD_DIRECTORY");
@@ -76,7 +82,10 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
       );
       try {
         runtime.start();
-        await expect.poll(() => cwd, { timeout: 15000 }).toBe(root);
+        // PowerShell expands 8.3 aliases such as RUNNER~1; compare directory identity.
+        await expect
+          .poll(() => directoryIdentity(cwd), { timeout: 15000 })
+          .toBe(directoryIdentity(root));
         if (name !== "CMD") {
           const beforeStrictPrompt = directoryReports;
           runtime.write(
@@ -89,7 +98,9 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
             ? `cd /d "${destination}"`
             : `Set-Location -LiteralPath '${destination.replaceAll("'", "''")}'`;
         runtime.write(`${command}\r`);
-        await expect.poll(() => cwd, { timeout: 10000 }).toBe(destination);
+        await expect
+          .poll(() => directoryIdentity(cwd), { timeout: 10000 })
+          .toBe(directoryIdentity(destination));
         for (const relative of ["result.txt", ".\\result.txt", "./result.txt"]) {
           expect(readFileSync(resolveRemoteFilePath(relative, cwd), "utf8")).toBe(
             "CURRENT_DIRECTORY",
