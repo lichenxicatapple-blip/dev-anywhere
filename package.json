@@ -58,7 +58,8 @@
   },
   "pnpm": {
     "patchedDependencies": {
-      "vite@6.4.2": "patches/vite@6.4.2.patch"
+      "vite@6.4.2": "patches/vite@6.4.2.patch",
+      "@xterm/addon-unicode-graphemes@0.4.0": "patches/@xterm__addon-unicode-graphemes@0.4.0.patch"
     },
     "onlyBuiltDependencies": [
       "esbuild",

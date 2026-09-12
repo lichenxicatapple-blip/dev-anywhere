@@ -1,5 +1,13 @@
 # Third-Party Notices
 
+`@dev-anywhere/proxy` bundles `@xterm/addon-unicode-graphemes` 0.4.0 with a
+correction to Unicode data reads from Node buffers.
+
+- Project: [xterm.js](https://github.com/xtermjs/xterm.js)
+- Copyright (c) 2023, The xterm.js authors
+- License: MIT; see [`licenses/xterm-unicode-graphemes-MIT.txt`](./licenses/xterm-unicode-graphemes-MIT.txt)
+- Upstream fix: [xterm.js #6080](https://github.com/xtermjs/xterm.js/pull/6080)
+
 `@dev-anywhere/proxy` includes an unmodified copy of `scrcpy-server` 4.1.
 
 - Project: [Genymobile/scrcpy](https://github.com/Genymobile/scrcpy)

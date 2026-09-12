@@ -55,7 +55,6 @@
   "dependencies": {
     "@dev-anywhere/relay": "workspace:*",
     "@xterm/addon-serialize": "^0.14.0",
-    "@xterm/addon-unicode-graphemes": "^0.4.0",
     "@xterm/headless": "^6.0.0",
     "commander": "^14.0.3",
     "cross-spawn": "7.0.6",
@@ -69,6 +68,7 @@
   },
   "devDependencies": {
     "@dev-anywhere/shared": "workspace:*",
+    "@xterm/addon-unicode-graphemes": "0.4.0",
     "@types/node": "^25.5.2",
     "@types/ws": "^8.18.1",
     "https-proxy-agent": "^7.0.6",

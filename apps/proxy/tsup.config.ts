@@ -17,7 +17,8 @@ export default defineConfig({
   clean: true,
   sourcemap: true,
   target: "node20",
-  noExternal: ["@dev-anywhere/shared"],
+  // Bundle the patched grapheme addon so npm installations receive the fix too.
+  noExternal: ["@dev-anywhere/shared", "@xterm/addon-unicode-graphemes"],
   // 构建期将 process.env.NODE_ENV 替换为 "production"，
   // 让 src/common/env.ts 里的 IS_DEV 静态折叠为 false，dev 分支被 DCE 删除。
   define: {
