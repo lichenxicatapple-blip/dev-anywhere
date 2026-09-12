@@ -2,6 +2,22 @@ import { describe, expect, it } from "vitest";
 import { extractFileDownloadPaths, isFileDownloadPath } from "./file-download-path";
 
 describe("file-download-path extraction", () => {
+  it.each([
+    String.raw`.\report.txt`,
+    String.raw`..\设计稿\说明.md`,
+    String.raw`C:\Users\dev\report.txt`,
+    String.raw`\\server\share\report.txt`,
+    String.raw`~\Downloads\archive.zip`,
+    String.raw`C:\报告\说明.txt`,
+    "C:/Users/dev/report.txt",
+  ])("recognizes Windows path %s without changing its separators", (path) => {
+    expect(extractFileDownloadPaths(`download ${path} next`)).toEqual([path]);
+  });
+
+  it("rejects Windows paths with display-truncated directory segments", () => {
+    expect(extractFileDownloadPaths(String.raw`C:\src\...\report.txt`)).toEqual([]);
+  });
+
   it("matches absolute / relative / .dev-anywhere paths with extensions", () => {
     expect(extractFileDownloadPaths("see /tmp/build.log")).toEqual(["/tmp/build.log"]);
     expect(extractFileDownloadPaths("./reports/2026.csv")).toEqual(["./reports/2026.csv"]);

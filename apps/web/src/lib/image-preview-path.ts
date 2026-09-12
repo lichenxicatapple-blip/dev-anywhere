@@ -28,9 +28,9 @@ function trimPathToken(value: string): string {
 
 // 同 file-download-path: 显式前缀绕过 stem 校验, 避免误伤 /tmp/a.jpg 这种单字母 stem。
 function isPlausibleFileNameStem(path: string): boolean {
-  if (path.includes("/")) return true;
+  if (/[\\/]/.test(path)) return true;
   const stem = path.replace(/\.(?:png|jpe?g|webp|gif)$/i, "");
-  const finalSegment = stem.split("/").pop() ?? stem;
+  const finalSegment = stem.split(/[\\/]/).pop() ?? stem;
   if (finalSegment.length < 2) return false;
   return /[\p{L}_-]/u.test(finalSegment);
 }

@@ -1,4 +1,6 @@
 import type { PtySemanticState } from "@dev-anywhere/shared";
+import { posix, win32 } from "node:path";
+import { fileURLToPath } from "node:url";
 
 // OSC 0: 窗口标题 -- ESC ] 0 ; <title> BEL/ST
 // OSC 9: 通知 -- ESC ] 9 ; <text> BEL/ST
@@ -48,17 +50,53 @@ function lastSequence(matches: OscSequence[], code: number): OscSequence | undef
   return undefined;
 }
 
-export function extractOscWorkingDirectory(rawData: string): string | null {
-  const osc7 = lastSequence(extractOscSequences(rawData), 7);
-  if (!osc7) return null;
+export function extractOscWorkingDirectory(
+  rawData: string,
+  platform: NodeJS.Platform = process.platform,
+): string | null {
+  const sequences = extractOscSequences(rawData);
+  for (let index = sequences.length - 1; index >= 0; index--) {
+    const sequence = sequences[index];
+    if (sequence.code === 9 && sequence.text.startsWith("9;")) {
+      const path = sequence.text.slice(2).replace(/^"(.*)"$/, "$1");
+      if (/[\0\r\n]/.test(path)) return null;
+      return (platform === "win32" ? win32 : posix).isAbsolute(path) ? path : null;
+    }
+    if (sequence.code !== 7) continue;
+    try {
+      const uri = new URL(sequence.text);
+      if (uri.protocol !== "file:") return null;
+      // POSIX shells include their host in OSC 7. A Windows drive URL may also
+      // include it; retain an authority only when it identifies a UNC share.
+      if (platform !== "win32" || /^\/[a-z]:\//i.test(uri.pathname)) uri.hostname = "";
+      const path = fileURLToPath(uri, { windows: platform === "win32" });
+      return /[\0\r\n]/.test(path) ? null : path;
+    } catch {
+      return null;
+    }
+  }
+  return null;
+}
 
-  try {
-    const uri = new URL(osc7.text);
-    if (uri.protocol !== "file:") return null;
-    const pathname = decodeURIComponent(uri.pathname);
-    return pathname.startsWith("/") ? pathname : null;
-  } catch {
-    return null;
+export class OscWorkingDirectoryTracker {
+  private pending = "";
+
+  constructor(private readonly platform: NodeJS.Platform = process.platform) {}
+
+  push(data: string): string | null {
+    const combined = this.pending + data;
+    const cwd = extractOscWorkingDirectory(combined, this.platform);
+    const start = combined.lastIndexOf("\x1b]");
+    const tail = start < 0 ? "" : combined.slice(start);
+    // A shell's directory report can be split anywhere, including ESC ] or ST.
+    // Bound malformed/unterminated output without keeping terminal history.
+    this.pending =
+      tail && !tail.includes("\x07") && !tail.includes("\x1b\\") && tail.length <= 64 * 1024
+        ? tail
+        : combined.endsWith("\x1b")
+          ? "\x1b"
+          : "";
+    return cwd;
   }
 }
 

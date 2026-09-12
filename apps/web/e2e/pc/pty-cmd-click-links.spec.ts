@@ -224,6 +224,26 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
       .toBe(true);
   });
 
+  for (const path of [String.raw`.\build\result.txt`, String.raw`C:\Users\dev\result.txt`]) {
+    test(`downloads Windows path ${path} with its original path and file name`, async ({
+      page,
+    }) => {
+      await gotoPty(page);
+      await emitPtyLine(page, `created ${path}\r\n`);
+      await waitForBufferContains(page, path);
+      const downloadPromise = page.waitForEvent("download");
+      expect((await activate(page, "file-download", path, "ctrl"))?.triggered).toBe(true);
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toBe("result.txt");
+      const chunks: Buffer[] = [];
+      for await (const chunk of await download.createReadStream()) chunks.push(chunk as Buffer);
+      expect(Buffer.concat(chunks).toString("utf8")).toBe("ABC");
+      expect(await sentFakeRelayMessages(page)).toContainEqual(
+        expect.objectContaining({ type: "remote_file_url_request", path, disposition: "download" }),
+      );
+    });
+  }
+
   test("plain click does not trigger file downloads or image previews", async ({ page }) => {
     await gotoPty(page);
     const filePath = "./README.md";

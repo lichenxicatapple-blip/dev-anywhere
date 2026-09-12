@@ -2,6 +2,18 @@ import { describe, expect, it } from "vitest";
 import { resolvePtySelectionPathAction } from "./pty-selection-path-action";
 
 describe("resolvePtySelectionPathAction", () => {
+  it("keeps complete Windows paths available for selected downloads and previews", () => {
+    expect(resolvePtySelectionPathAction(String.raw`C:\项目 文档\发布 说明.md`)).toEqual({
+      kind: "file-download",
+      path: String.raw`C:\项目 文档\发布 说明.md`,
+    });
+    expect(resolvePtySelectionPathAction(String.raw`.\1.png`)).toEqual({
+      kind: "image-preview",
+      path: String.raw`.\1.png`,
+    });
+    expect(resolvePtySelectionPathAction(String.raw`C:\项目\...\说明.md`)).toBeNull();
+  });
+
   it("resolves a selected image path as preview action", () => {
     expect(resolvePtySelectionPathAction("b.jpg")).toEqual({
       kind: "image-preview",

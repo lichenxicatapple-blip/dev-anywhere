@@ -3,6 +3,7 @@ import type { IPty } from "node-pty";
 import { ControlErrorCode, type PtySemanticState } from "@dev-anywhere/shared";
 import { defaultShell, normalizeProcessEnvironment } from "./executable.js";
 import { prepareCommandLaunch } from "./command-launch.js";
+import { buildTerminalShellCommand } from "./terminal-shell-integration.js";
 import { terminalLogger as log } from "./logger.js";
 import {
   classifyCodexActiveWriterError,
@@ -11,7 +12,7 @@ import {
 import {
   appendPtySemanticTextTail,
   extractOscSignals,
-  extractOscWorkingDirectory,
+  OscWorkingDirectoryTracker,
   extractTextSignals,
 } from "./osc-extractor.js";
 import { shouldReleaseTextApprovalOnInput } from "./pty-approval-state.js";
@@ -121,6 +122,7 @@ export class PtyRuntime {
   private textApprovalWaitActive = false;
   private approvalWaiting = false;
   private compatReported = false;
+  private readonly workingDirectoryTracker = new OscWorkingDirectoryTracker();
 
   constructor(
     private readonly options: PtyRuntimeOptions,
@@ -169,7 +171,7 @@ export class PtyRuntime {
     const options = this.options;
     const command =
       options.kind === "terminal"
-        ? { command: options.shell ?? defaultShell(options.env), args: [], env: options.env }
+        ? buildTerminalShellCommand(options.shell ?? defaultShell(options.env), options.env)
         : PROVIDERS[options.provider].buildTerminalCommand(
             {
               args: options.args,
@@ -329,7 +331,7 @@ export class PtyRuntime {
     const oscSignal = extractOscSignals(data, provider);
     if (oscSignal?.title) this.events.title(oscSignal.title);
     if (this.options.kind === "terminal") {
-      const cwd = extractOscWorkingDirectory(data);
+      const cwd = this.workingDirectoryTracker.push(data);
       if (cwd) this.events.cwd(cwd);
       return;
     }

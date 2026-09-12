@@ -2,6 +2,13 @@ import { describe, expect, it } from "vitest";
 import { extractImagePreviewPaths, isImagePreviewPath } from "./image-preview-path";
 
 describe("image preview path detection", () => {
+  it.each([String.raw`.\1.png`, String.raw`C:\图片\1.png`, String.raw`\\server\share\a.jpg`])(
+    "recognizes Windows image path %s",
+    (path) => {
+      expect(extractImagePreviewPaths(`open ${path} next`)).toEqual([path]);
+    },
+  );
+
   it("detects project, temp, and pasted image path tokens", () => {
     expect(
       extractImagePreviewPaths(

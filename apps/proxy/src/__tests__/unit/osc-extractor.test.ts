@@ -6,6 +6,7 @@ import {
   extractOscSignals,
   extractTextSignals,
   normalizePtySemanticText,
+  OscWorkingDirectoryTracker,
 } from "#src/common/osc-extractor.js";
 
 describe("extractOscSignals", () => {
@@ -14,12 +15,67 @@ describe("extractOscSignals", () => {
       "\x1b]7;file://host/Users/dev/old\x1b\\" +
       "\x1b]7;file://192.168.1.2/Users/dev/My%20Project\x1b\\";
 
-    expect(extractOscWorkingDirectory(data)).toBe("/Users/dev/My Project");
+    expect(extractOscWorkingDirectory(data, "darwin")).toBe("/Users/dev/My Project");
   });
 
   it("rejects malformed or non-file OSC 7 values", () => {
     expect(extractOscWorkingDirectory("\x1b]7;https://example.test/tmp\x07")).toBeNull();
     expect(extractOscWorkingDirectory("\x1b]7;not-a-uri\x07")).toBeNull();
+  });
+
+  it("converts Windows OSC 7 drive and UNC URLs to native paths", () => {
+    expect(
+      extractOscWorkingDirectory("\x1b]7;file:///C:/Users/dev/My%20Project\x07", "win32"),
+    ).toBe("C:\\Users\\dev\\My Project");
+    expect(extractOscWorkingDirectory("\x1b]7;file://my-pc/D:/项目\x07", "win32")).toBe("D:\\项目");
+    expect(extractOscWorkingDirectory("\x1b]7;file://server/share/My%20Project\x07", "win32")).toBe(
+      "\\\\server\\share\\My Project",
+    );
+  });
+
+  it("accepts PowerShell and CMD reports without confusing notifications with paths", () => {
+    expect(extractOscWorkingDirectory('\x1b]9;9;"D:\\项目 空格"\x1b\\', "win32")).toBe(
+      "D:\\项目 空格",
+    );
+    expect(extractOscWorkingDirectory("\x1b]9;9;C:\\Users\\dev\x07", "win32")).toBe(
+      "C:\\Users\\dev",
+    );
+    expect(extractOscWorkingDirectory("\x1b]9;waiting for your input\x07", "win32")).toBeNull();
+    expect(extractOscWorkingDirectory("\x1b]9;9;relative\\path\x07", "win32")).toBeNull();
+    expect(extractOscWorkingDirectory("\x1b]9;9;C:\\bad\npath\x07", "win32")).toBeNull();
+    expect(extractOscWorkingDirectory("\x1b]9;9;/home/dev/project\x07", "linux")).toBe(
+      "/home/dev/project",
+    );
+  });
+
+  it("uses the latest directory when both report formats occur", () => {
+    expect(
+      extractOscWorkingDirectory("\x1b]7;file:///C:/old\x07\x1b]9;9;D:\\new\x07", "win32"),
+    ).toBe("D:\\new");
+    expect(
+      extractOscWorkingDirectory("\x1b]9;9;D:\\old\x07\x1b]7;file:///C:/new\x07", "win32"),
+    ).toBe("C:\\new");
+  });
+
+  it.each([
+    ["\x1b]7;file:///D:/My%20Project\x1b\\", "D:\\My Project"],
+    ["\x1b]9;9;D:\\项目 空格\x07", "D:\\项目 空格"],
+  ])("retains a directory report across every possible chunk boundary", (report, expected) => {
+    for (let split = 1; split < report.length; split++) {
+      const tracker = new OscWorkingDirectoryTracker("win32");
+      expect(tracker.push(`ordinary output${report.slice(0, split)}`)).toBeNull();
+      expect(tracker.push(report.slice(split) + "prompt")).toBe(expected);
+      expect(tracker.push("more output")).toBeNull();
+    }
+    const tracker = new OscWorkingDirectoryTracker("win32");
+    const results = [...report].map((char) => tracker.push(char)).filter(Boolean);
+    expect(results).toEqual([expected]);
+  });
+
+  it("recovers after oversized unfinished reports", () => {
+    const tracker = new OscWorkingDirectoryTracker("win32");
+    expect(tracker.push("\x1b]9;9;" + "x".repeat(100_000))).toBeNull();
+    expect(tracker.push("\x1b]9;9;C:\\valid\x07")).toBe("C:\\valid");
   });
 
   it("extracts OSC sequences in frame order", () => {

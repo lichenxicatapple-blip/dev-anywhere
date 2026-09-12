@@ -448,11 +448,16 @@ describe("PTY runtime", () => {
 
   it("reports shell OSC title and cwd without inferring Agent activity", () => {
     const { runtime, data, events } = createRuntime();
-    data("\x1b]7;file://host/Users/dev/My%20Project\x1b\\");
+    const windows = process.platform === "win32";
+    data(windows ? "\x1b]7;file:///C:/Users/dev/My%20" : "\x1b]7;file://host/Users/dev/My%20");
+    data("Project\x1b");
+    data("\\");
     data("\x1b]0;shell title\x07$ echo hi\r\n");
     runtime.write("\r");
     runtime.replaySemanticState();
-    expect(events.cwd).toHaveBeenCalledWith("/Users/dev/My Project");
+    expect(events.cwd).toHaveBeenCalledWith(
+      windows ? "C:\\Users\\dev\\My Project" : "/Users/dev/My Project",
+    );
     expect(events.title).toHaveBeenCalledWith("shell title");
     expect(events.semantic).not.toHaveBeenCalled();
   });

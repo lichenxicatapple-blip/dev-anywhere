@@ -1,6 +1,6 @@
 import { realpathSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, isAbsolute, resolve } from "node:path";
+import { extname, resolve } from "node:path";
 
 const EXT_MIME_MAP: Record<string, string> = {
   ".png": "image/png",
@@ -42,6 +42,8 @@ export function resolveRemoteFilePath(rawPath: string, cwd: string): string {
     rawPath.startsWith("~/") ||
     (process.platform === "win32" && rawPath.startsWith("~\\"));
   const expandedPath = isHomePath ? resolve(homedir(), rawPath.slice(2)) : rawPath;
-  const candidate = isAbsolute(expandedPath) ? resolve(expandedPath) : resolve(cwd, expandedPath);
+  // Passing cwd also supplies the drive for Windows root-relative paths (\file).
+  // Fully qualified paths still replace it according to the native path rules.
+  const candidate = resolve(cwd, expandedPath);
   return realpathSync(candidate);
 }

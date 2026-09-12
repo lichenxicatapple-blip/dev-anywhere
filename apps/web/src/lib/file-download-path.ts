@@ -54,22 +54,22 @@ function trimPathToken(value: string): string {
 // 目录分隔符是强路径信号, 直接通过, 不再做 stem 噪音过滤
 // (避免误伤 /a.log / ./tmp/a.jpg 这类合法但单字母 stem 的路径)。
 function isPlausibleFileNameStem(path: string): boolean {
-  const finalPathSegment = path.split("/").pop() ?? path;
+  const finalPathSegment = path.split(/[\\/]/).pop() ?? path;
   if (/^\d+(?:\.\d+)+$/.test(finalPathSegment)) return false;
-  if (path.includes("/")) return true;
+  if (/[\\/]/.test(path)) return true;
   const stem = path.replace(/\.[\p{L}\p{N}]{1,16}$/u, "");
-  const finalSegment = stem.split("/").pop() ?? stem;
+  const finalSegment = stem.split(/[\\/]/).pop() ?? stem;
   if (finalSegment.length < 2) return false;
   return /[\p{L}_-]/u.test(finalSegment);
 }
 
 function isBareDomainLike(path: string): boolean {
-  if (path.includes("/")) return false;
+  if (/[\\/]/.test(path)) return false;
   return isRecognizedBareDomain(path);
 }
 
 function hasExplicitPathSignal(path: string): boolean {
-  return path.includes("/");
+  return /[\\/]/.test(path);
 }
 
 function hasPathSignal(path: string, allowBare: boolean): boolean {
@@ -86,7 +86,7 @@ export function isFileDownloadPath(value: string, options: { allowBare?: boolean
   if (IMAGE_EXT_RE.test(path)) return false;
   if (!FILE_EXT_RE.test(path)) return false;
   if (!hasPathSignal(path, options.allowBare === true)) return false;
-  if (path.split("/").includes("...")) return false;
+  if (path.split(/[\\/]/).includes("...")) return false;
   return isPlausibleFileNameStem(path);
 }
 

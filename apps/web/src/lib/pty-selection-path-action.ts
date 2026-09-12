@@ -23,21 +23,21 @@ function getSingleSelectedPath(text: string): string | null {
   if (!path) return null;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return null;
   if (isScpLikeRemotePath(path)) return null;
-  if (path.split("/").includes("...")) return null;
+  if (path.split(/[\\/]/).includes("...")) return null;
   return path;
 }
 
 function isBareDomainLike(path: string): boolean {
-  if (path.includes("/")) return false;
+  if (/[\\/]/.test(path)) return false;
   return isRecognizedBareDomain(path);
 }
 
 function hasPlausibleStem(path: string): boolean {
-  const finalPathSegment = path.split("/").pop() ?? path;
+  const finalPathSegment = path.split(/[\\/]/).pop() ?? path;
   if (/^\d+(?:\.\d+)+$/.test(finalPathSegment)) return false;
-  if (path.includes("/")) return true;
+  if (/[\\/]/.test(path)) return true;
   const stem = path.replace(FILE_EXT_RE, "");
-  const finalSegment = stem.split("/").pop() ?? stem;
+  const finalSegment = stem.split(/[\\/]/).pop() ?? stem;
   return /[A-Za-z_-]/.test(finalSegment);
 }
 
