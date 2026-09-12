@@ -295,7 +295,8 @@ export async function verifyVerticalCursorRedraw(
     .poll(() => readPtyScrollMetrics(page).then((m) => m.scrollTop))
     .toBeLessThan(before.scrollTop - 100);
   await sendPtyOutput(page, `\x1b[${inputRow};6H`);
+  // Allow the same one-pixel browser rounding as the redraw samples above.
   await expect
-    .poll(() => readPtyScrollMetrics(page).then((m) => m.scrollTop))
-    .toBeCloseTo(before.scrollTop, 0);
+    .poll(() => readPtyScrollMetrics(page).then((m) => Math.abs(m.scrollTop - before.scrollTop)))
+    .toBeLessThanOrEqual(1);
 }
