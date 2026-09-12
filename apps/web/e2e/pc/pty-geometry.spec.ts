@@ -172,15 +172,17 @@ test.describe("PTY geometry edges", () => {
           const term = window.__ccTestPtyTerminals?.get(sid);
           const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
           const debug = window.__devAnywherePtyDebug?.();
-          if (!term || !host || !debug?.anchor.atBottom) return null;
+          if (!term || !host || !debug) return null;
+          // Bottom proximity can become true before the initial resize has positioned the host.
+          // Capture the typing baseline only after the host and spacer match the current layout.
           return {
-            baseY: term.buffer.active.baseY,
-            viewportY: term.buffer.active.viewportY,
-            hostTop: host.style.top,
+            atBottom: debug.anchor.atBottom,
+            topDrift: debug.host.topDrift,
+            spacerDrift: debug.spacerDrift,
           };
         }, sessionId),
       )
-      .not.toBeNull();
+      .toEqual({ atBottom: true, topDrift: 0, spacerDrift: 0 });
     const initial = await page.evaluate((sid) => {
       const term = window.__ccTestPtyTerminals?.get(sid);
       const host = document.querySelector<HTMLElement>('[data-slot="pty-host"]');
