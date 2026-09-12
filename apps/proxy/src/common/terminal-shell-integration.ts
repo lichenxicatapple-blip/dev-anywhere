@@ -10,7 +10,7 @@ function global:prompt {
   $originalPrompt = & $global:DevAnywhereOriginalPrompt
   $location = $executionContext.SessionState.Path.CurrentLocation
   if ($location.Provider.Name -eq 'FileSystem') {
-    [Console]::Write("$([char]27)]9;9;$($location.ProviderPath)$([char]27)\")
+    $host.ui.Write("$([char]27)]9;9;$($location.ProviderPath)$([char]27)\")
   }
   $originalPrompt
 }
