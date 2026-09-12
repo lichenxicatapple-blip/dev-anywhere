@@ -1,6 +1,12 @@
 import { expect, type Page, type TestInfo } from "@playwright/test";
 import { expectPtyTerminalMounted, setupPtyChat } from "./pty-fixture";
-import { ptyTerminal, readPtyHorizontalScrollMetrics, sendPtyOutput } from "./pty-scroll-helpers";
+import {
+  ptyInput,
+  ptyTerminal,
+  readPtyHorizontalScrollMetrics,
+  readPtyScrollMetrics,
+  sendPtyOutput,
+} from "./pty-scroll-helpers";
 
 export async function verifyManualHorizontalReview(
   page: Page,
@@ -179,4 +185,117 @@ export async function verifyHiddenCursorRedraw(page: Page, testInfo: TestInfo, b
       .poll(() => readPtyHorizontalScrollMetrics(page).then((m) => m.scrollLeft))
       .toBeLessThanOrEqual(1);
   }
+}
+
+export async function verifyVerticalCursorRedraw(
+  page: Page,
+  testInfo: TestInfo,
+  options: { baseUrl?: string; rows?: number; openKeyboard?: () => Promise<void> } = {},
+) {
+  const sessionId = "pty-vertical-paint-cursor";
+  const rows = options.rows ?? 32;
+  const inputRow = rows - 3;
+  await setupPtyChat(page, {
+    sessionId,
+    sessionKind: "agent",
+    provider: "kimi",
+    ptyOwner: "proxy-hosted",
+    cols: 113,
+    rows,
+    withVisualViewportMock: options.openKeyboard === undefined,
+    ...(options.baseUrl ? { baseUrl: options.baseUrl } : {}),
+    snapshotData:
+      "\r\n".repeat(2860) +
+      Array.from({ length: rows }, (_, row) => `\x1b[${row + 1};1Hscreen row ${row}`).join("") +
+      `\x1b[?25l\x1b[${inputRow};6H`,
+  });
+  await expectPtyTerminalMounted(page);
+  if (options.openKeyboard) await options.openKeyboard();
+  else {
+    await ptyTerminal(page).click();
+    await ptyInput(page).focus();
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({ height: 436.6, offsetTop: 0 }),
+    );
+  }
+  await expect(page.locator('[data-slot="pty-mobile-controls"]')).toBeVisible();
+  // Android may pan visualViewport instead of shrinking the DOM container. In either layout,
+  // require the same relevant geometry: the paint row is above the viewport's live bottom.
+  await expect
+    .poll(() =>
+      page.evaluate(() => {
+        const snapshot = window.__devAnywherePtyDebug!()!;
+        return (
+          snapshot.term.rows * snapshot.cell.h -
+          snapshot.visibleContentHeight -
+          12 * snapshot.cell.h
+        );
+      }),
+    )
+    .toBeGreaterThan(100);
+  const settlePaints = () =>
+    page.evaluate(async () => {
+      for (let frame = 0; frame < 20; frame += 1) {
+        await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+      }
+    });
+  await settlePaints();
+  const before = await readPtyScrollMetrics(page);
+
+  // A shrinking spacer makes the browser clamp scrollTop without a controller assignment.
+  // Sample actual paints and native scroll events, not just writes to scrollTop.
+  await page.evaluate((id) => {
+    const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]')!;
+    const samples: Array<{ top: number; height: number; cursorY: number }> = [];
+    const term = window.__ccTestPtyTerminals!.get(id)!;
+    const record = () =>
+      samples.push({
+        top: container.scrollTop,
+        height: container.scrollHeight,
+        cursorY: term.buffer.active.cursorY,
+      });
+    container.addEventListener("scroll", record);
+    term.onRender(record);
+    const paint = () => {
+      if (!container.isConnected) return;
+      record();
+      requestAnimationFrame(paint);
+    };
+    requestAnimationFrame(paint);
+    Object.assign(window, { __verticalRedrawSamples: samples });
+  }, sessionId);
+
+  for (let redraw = 0; redraw < 3; redraw += 1) {
+    // At 32 rows this reproduces the reported row 28 -> 12 -> 28 sequence, with packets after
+    // synchronized output ends. Holding each state across paints exposes transient clamping.
+    await sendPtyOutput(page, "\x1b[?2026h\x1b[13;1Hpainting....\x1b[?2026l");
+    await settlePaints();
+    await sendPtyOutput(page, `\x1b[${inputRow - 13}B\x1b[6G\x1b[?25l`);
+    await settlePaints();
+  }
+  const samples = await page.evaluate(
+    () =>
+      (
+        window as unknown as {
+          __verticalRedrawSamples: Array<{ top: number; height: number; cursorY: number }>;
+        }
+      ).__verticalRedrawSamples,
+  );
+  await testInfo.attach("vertical-redraw-geometry", {
+    body: JSON.stringify({ before, samples }),
+    contentType: "application/json",
+  });
+  expect(samples.some((sample) => sample.cursorY === 12)).toBe(true);
+  expect(samples.every((sample) => Math.abs(sample.top - before.scrollTop) <= 1)).toBe(true);
+  expect(samples.every((sample) => sample.height === before.scrollHeight)).toBe(true);
+
+  // A real caret move to the upper input row must still make that row visible.
+  await sendPtyOutput(page, "\x1b[13;6H");
+  await expect
+    .poll(() => readPtyScrollMetrics(page).then((m) => m.scrollTop))
+    .toBeLessThan(before.scrollTop - 100);
+  await sendPtyOutput(page, `\x1b[${inputRow};6H`);
+  await expect
+    .poll(() => readPtyScrollMetrics(page).then((m) => m.scrollTop))
+    .toBeCloseTo(before.scrollTop, 0);
 }

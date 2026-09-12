@@ -23,7 +23,7 @@ interface PtyScrollTraceAdapterOptions {
   atBottomThreshold: number;
   getDims: () => { cellH: number; cellW: number };
   getVerticalInsets: () => { paddingTop: number; paddingBottom: number };
-  getLiveLastY: () => number;
+  getLiveScreen: () => { cursorY: number; liveLastY: number };
   getPrevCursorBufferRow: () => number | null;
   getPendingProgrammaticScrollTop: () => number | null;
   getPendingFollowCursorScrollTop: () => number | null;
@@ -46,7 +46,7 @@ export function createPtyScrollTraceAdapter({
   atBottomThreshold,
   getDims,
   getVerticalInsets,
-  getLiveLastY,
+  getLiveScreen,
   getPrevCursorBufferRow,
   getPendingProgrammaticScrollTop,
   getPendingFollowCursorScrollTop,
@@ -88,14 +88,15 @@ export function createPtyScrollTraceAdapter({
     const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
     const buffer = term.buffer.active;
     const cursorBufferRow = buffer.baseY + buffer.cursorY;
+    const liveScreen = getLiveScreen();
     const anchor = computeScrollAnchor({
       rows: term.rows,
       cellH,
       bufferLength: buffer.length,
       baseY: buffer.baseY,
       viewportY: buffer.viewportY,
-      cursorBufferRow,
-      liveLastY: getLiveLastY(),
+      cursorBufferRow: buffer.baseY + liveScreen.cursorY,
+      liveLastY: liveScreen.liveLastY,
       visibleContentHeight,
       paddingTop,
       paddingBottom,

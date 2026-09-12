@@ -17,6 +17,7 @@ import { touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
 import {
   verifyHiddenCursorRedraw,
   verifyManualHorizontalReview,
+  verifyVerticalCursorRedraw,
 } from "../pty-cursor-redraw-helpers";
 
 const SESSION_ID = "mobile-pty-horizontal-scroll";
@@ -75,6 +76,16 @@ async function touchDrag(
 
 test.describe("L4 mobile / PTY input scroll", () => {
   test.setTimeout(60_000);
+
+  test("keeps vertical redraw geometry stable with the Android soft keyboard open", async ({
+    emuPage,
+  }, testInfo) => {
+    await verifyVerticalCursorRedraw(emuPage, testInfo, {
+      baseUrl: mobileBaseUrl,
+      rows: 60,
+      openKeyboard: () => touchPtyTerminalAndWaitForSoftKeyboard(emuPage),
+    });
+  });
 
   test("keeps split software-cursor redraws stable and still follows long input", async ({
     emuPage,

@@ -16,6 +16,7 @@ export interface PtyScrollDebugProbe {
   cellW: number;
   paddingTop: number;
   paddingBottom: number;
+  liveCursorY: number;
   liveLastY: number;
   userHasVerticalScrollIntent: boolean;
   verticalIntentMode: PtyVerticalIntentMode;
@@ -50,7 +51,7 @@ export function buildPtyScrollDebugSnapshot(
 ): Omit<PtyDebugSnapshot, "frame"> {
   const probe = getProbe();
   const { container, spacer, host, term } = refs;
-  const { cellH, cellW, paddingTop, paddingBottom, liveLastY } = probe;
+  const { cellH, cellW, paddingTop, paddingBottom, liveCursorY, liveLastY } = probe;
   const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
   const buffer = term.buffer.active;
 
@@ -63,7 +64,7 @@ export function buildPtyScrollDebugSnapshot(
         rows: term.rows,
         cols: term.cols,
         viewportY: buffer.viewportY,
-        cursorY: buffer.cursorY,
+        cursorY: liveCursorY,
         cellH,
         cellW,
         visibleContentHeight,
@@ -109,7 +110,7 @@ export function buildPtyScrollDebugSnapshot(
     Math.min(viewportBottom, hostBottom) - Math.max(viewportTop, currentHostTop),
   );
   const viewportHostCoverage = container.clientHeight > 0 ? overlap / container.clientHeight : 0;
-  const cursorBufferRow = buffer.baseY + buffer.cursorY;
+  const cursorBufferRow = buffer.baseY + liveCursorY;
   const anchor = computeScrollAnchor({
     rows: term.rows,
     cellH,

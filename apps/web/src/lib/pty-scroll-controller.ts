@@ -247,7 +247,7 @@ export function attachPtyScrollController(
     atBottomThreshold,
     getDims,
     getVerticalInsets,
-    getLiveLastY: () => getCachedLiveLastY(),
+    getLiveScreen: () => readLiveScreen(),
     getPrevCursorBufferRow: () => prevCursorBufferRow,
     getPendingProgrammaticScrollTop: () => pendingProgrammaticScrollTop,
     getPendingFollowCursorScrollTop: () => pendingFollowCursorScrollTop,
@@ -349,7 +349,8 @@ export function attachPtyScrollController(
     const { paddingTop, paddingBottom } = getVerticalInsets();
     const buffer = term.buffer.active;
     const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
-    const cursorBufferRow = buffer.baseY + buffer.cursorY;
+    const liveScreen = readLiveScreen();
+    const cursorBufferRow = buffer.baseY + liveScreen.cursorY;
     const anchor = computeScrollAnchor({
       rows: term.rows,
       cellH,
@@ -357,7 +358,7 @@ export function attachPtyScrollController(
       baseY: buffer.baseY,
       viewportY: buffer.viewportY,
       cursorBufferRow,
-      liveLastY: getCachedLiveLastY(),
+      liveLastY: liveScreen.liveLastY,
       visibleContentHeight,
       paddingTop,
       paddingBottom,
@@ -1089,13 +1090,30 @@ export function attachPtyScrollController(
     return cachedLiveLastY;
   };
 
+  let lastInputScreen: { cursorY: number; liveLastY: number } | null = null;
+  const readLiveScreen = (): { cursorY: number; liveLastY: number } => {
+    if (cursorFollowTarget.canFollow()) {
+      lastInputScreen = { cursorY: term.buffer.active.cursorY, liveLastY: getCachedLiveLastY() };
+    }
+    // A TUI can finish painting before restoring its input cursor in a later packet. Both the
+    // spacer and the semantic bottom must keep using the last input frame in that interval:
+    // merely skipping followCursorY is too late once a smaller spacer has clamped native scroll.
+    // Keep screen-relative rows so genuine scrollback growth still advances the live frame.
+    // With no input frame yet, use the visible tail instead of treating a paint row as a caret.
+    const tail = lastInputScreen?.liveLastY ?? getCachedLiveLastY();
+    return {
+      cursorY: Math.max(0, Math.min(term.rows - 1, lastInputScreen?.cursorY ?? tail)),
+      liveLastY: Math.min(term.rows - 1, tail),
+    };
+  };
+
   const updateSpacer = (options: { commitDeferredPaint?: boolean } = {}): void => {
     const { cellH, cellW } = getDims();
     if (cellH === 0 || cellW === 0) return;
     const { paddingTop, paddingBottom } = getVerticalInsets();
     const visibleContentHeight = Math.max(0, container.clientHeight - paddingTop - paddingBottom);
     const buffer = term.buffer.active;
-    const liveLastY = getCachedLiveLastY();
+    const liveScreen = readLiveScreen();
     const layout = computePtyHostLayout(
       {
         bufferLength: buffer.length,
@@ -1103,12 +1121,12 @@ export function attachPtyScrollController(
         rows: term.rows,
         cols: term.cols,
         viewportY: buffer.viewportY,
-        cursorY: buffer.cursorY,
+        cursorY: liveScreen.cursorY,
         cellH,
         cellW,
         visibleContentHeight,
       },
-      liveLastY,
+      liveScreen.liveLastY,
     );
     if (!layout) return;
     // Keep an in-flight compositor position reachable while a touch is active. Outside that
@@ -1891,6 +1909,7 @@ export function attachPtyScrollController(
   });
   const bufferChangeDisposable = term.buffer.onBufferChange(() => {
     cursorFollowTarget.reset();
+    lastInputScreen = null;
     // Direct Terminal.reset does not necessarily produce a later onWriteParsed callback. Invalidate
     // every buffer-derived cache synchronously at the identity boundary itself.
     bufferRevision += 1;
@@ -1923,12 +1942,14 @@ export function attachPtyScrollController(
   const getDebugProbe = (): PtyScrollDebugProbe => {
     const { cellH, cellW } = getDims();
     const { paddingTop, paddingBottom } = getVerticalInsets();
+    const liveScreen = readLiveScreen();
     return {
       cellH,
       cellW,
       paddingTop,
       paddingBottom,
-      liveLastY: cellH > 0 && cellW > 0 ? getCachedLiveLastY() : -1,
+      liveCursorY: liveScreen.cursorY,
+      liveLastY: liveScreen.liveLastY,
       userHasVerticalScrollIntent: userHasVerticalScrollIntent(),
       verticalIntentMode: verticalIntent.mode,
       verticalIntentSource: verticalIntent.source,
