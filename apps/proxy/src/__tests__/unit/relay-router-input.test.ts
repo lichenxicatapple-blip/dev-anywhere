@@ -18,7 +18,7 @@ import type { PreviewManager } from "#src/serve/preview/preview-manager.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 import type { VoiceSummaryRunner } from "#src/serve/voice-summary-handler.js";
 import type { HookProviderId, ProviderHookContext } from "#src/providers/index.js";
-import { resolveTerminalShell } from "#src/common/terminal-shell.js";
+import { getTerminalShellFamily, resolveTerminalShell } from "#src/common/terminal-shell.js";
 import { sessionPaths, tildify } from "#src/common/paths.js";
 import { TerminalSubscriptionBacklog } from "#src/serve/terminal-subscription-backlog.js";
 import { WorkerStartupError } from "#src/serve/worker-registry.js";
@@ -1634,6 +1634,7 @@ describe("RelayRouter input routing", () => {
       sessionId: string;
       cwd: string;
       name: string;
+      shell: string;
     };
     const terminalName = resolveTerminalShell(undefined, {}).label ?? tildify(terminalOptions.cwd);
     expect(terminalOptions).toEqual(
@@ -1652,6 +1653,7 @@ describe("RelayRouter input routing", () => {
       expect.any(String),
       "proxy-hosted",
       false,
+      getTerminalShellFamily(terminalOptions.shell),
     );
     const msg = RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]));
     expect(msg).toMatchObject({
