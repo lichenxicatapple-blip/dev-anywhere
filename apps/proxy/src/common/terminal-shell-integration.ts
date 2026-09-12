@@ -7,13 +7,11 @@ import { environmentValue, normalizeProcessEnvironment } from "./executable.js";
 const POWERSHELL_CWD_PROMPT = String.raw`
 $global:DevAnywhereOriginalPrompt = $function:prompt
 function global:prompt {
-  $savedExitCode = $global:LASTEXITCODE
   $originalPrompt = & $global:DevAnywhereOriginalPrompt
   $location = $executionContext.SessionState.Path.CurrentLocation
   if ($location.Provider.Name -eq 'FileSystem') {
     [Console]::Write("$([char]27)]9;9;$($location.ProviderPath)$([char]27)\")
   }
-  $global:LASTEXITCODE = $savedExitCode
   $originalPrompt
 }
 `;

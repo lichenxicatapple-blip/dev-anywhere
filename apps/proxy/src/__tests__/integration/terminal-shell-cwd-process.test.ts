@@ -1,4 +1,12 @@
-import { existsSync, mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  writeFileSync,
+} from "node:fs";
 import { join, win32 } from "node:path";
 import { tmpdir } from "node:os";
 import { describe, expect, it } from "vitest";
@@ -33,13 +41,14 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
   it.each(nativeShells)(
     "follows cd in $name and resolves the file from the new directory",
     async ({ name, path }) => {
-      const root = mkdtempSync(join(tmpdir(), "dev-anywhere-shell-cwd-"));
+      const root = realpathSync(mkdtempSync(join(tmpdir(), "dev-anywhere-shell-cwd-")));
       const destination = join(root, "项目 space");
       mkdirSync(destination);
       writeFileSync(join(root, "result.txt"), "OLD_DIRECTORY");
       writeFileSync(join(destination, "result.txt"), "CURRENT_DIRECTORY");
       writeFileSync(join(destination, "only-current.txt"), "NEW_FILE");
       let cwd = "";
+      let directoryReports = 0;
       let output = "";
       const runtime = new PtyRuntime(
         {
@@ -54,6 +63,7 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
         {
           cwd: (value) => {
             cwd = value;
+            directoryReports++;
           },
           output: (value) => {
             output += value;
@@ -67,6 +77,13 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
       try {
         runtime.start();
         await expect.poll(() => cwd, { timeout: 15000 }).toBe(root);
+        if (name !== "CMD") {
+          const beforeStrictPrompt = directoryReports;
+          runtime.write(
+            "Set-StrictMode -Version Latest; Remove-Variable LASTEXITCODE -Scope Global -ErrorAction SilentlyContinue\r",
+          );
+          await expect.poll(() => directoryReports).toBeGreaterThan(beforeStrictPrompt);
+        }
         const command =
           name === "CMD"
             ? `cd /d "${destination}"`
@@ -91,6 +108,17 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
           ),
         ).toBe("CURRENT_DIRECTORY");
         if (name === "CMD") expect(output).toContain("custom ");
+        else {
+          const beforeNativeCommand = directoryReports;
+          runtime.write("cmd /d /c exit 23\r");
+          await expect.poll(() => directoryReports).toBeGreaterThan(beforeNativeCommand);
+          const exitCodeFile = join(root, "exit-code.txt");
+          runtime.write(
+            `[IO.File]::WriteAllText('${exitCodeFile.replaceAll("'", "''")}', [string]$global:LASTEXITCODE)\r`,
+          );
+          await expect.poll(() => existsSync(exitCodeFile)).toBe(true);
+          expect(readFileSync(exitCodeFile, "utf8")).toBe("23");
+        }
         console.info(`${name}: current directory and relative file contents verified`);
       } finally {
         await runtime.terminate();
