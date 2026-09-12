@@ -203,7 +203,28 @@ export async function spawnSessionViaRelay(
     disconnect: () => ws.close(),
     terminate: async () => {
       try {
-        await ws.request("session_terminate", { sessionId }).catch(() => {});
+        // This fire-and-forget command has no requestId/response pair. Confirm removal through
+        // the session inventory, otherwise strict protocol validation rejects cleanup silently.
+        await new Promise<void>((resolveFn, reject) => {
+          const timer = setTimeout(() => {
+            unsubscribe();
+            reject(new Error(`relay-control: session ${sessionId} was not removed`));
+          }, REQ_TIMEOUT_MS);
+          const unsubscribe = ws.onJson((msg) => {
+            if (msg.type !== "session_list") return;
+            const payload = msg.payload as { sessions?: Array<{ sessionId: string }> } | undefined;
+            if (
+              !payload?.sessions ||
+              payload.sessions.some((session) => session.sessionId === sessionId)
+            )
+              return;
+            clearTimeout(timer);
+            unsubscribe();
+            resolveFn();
+          });
+          ws.send({ type: "session_terminate", sessionId });
+          ws.send({ type: "session_list_request" });
+        });
       } finally {
         ws.close();
       }

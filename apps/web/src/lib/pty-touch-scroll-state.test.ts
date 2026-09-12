@@ -4,7 +4,6 @@ import {
   createInitialPtyTouchScrollState,
   ensurePtyTouchPendingMode,
   lockPtyTouchVerticalGesture,
-  markPtyTouchHorizontalGesture,
   markPtyTouchGesture,
   resetPtyTouchScrollSession,
   setPtyTouchGestureMode,
@@ -27,7 +26,6 @@ describe("pty touch scroll state", () => {
       startScrollLeft: 8,
       lastClientY: 120,
       lastGestureAt: 1000,
-      lastHorizontalGestureAt: null,
       gestureMode: "pending",
       verticalDirection: null,
     });
@@ -65,7 +63,6 @@ describe("pty touch scroll state", () => {
     });
 
     state = setPtyTouchGestureMode(state, "horizontal");
-    state = markPtyTouchHorizontalGesture(state, 1400);
     state = markPtyTouchGesture(state, 1500);
     state = resetPtyTouchScrollSession(state);
 
@@ -75,7 +72,6 @@ describe("pty touch scroll state", () => {
       startScrollLeft: null,
       lastClientY: null,
       lastGestureAt: 1500,
-      lastHorizontalGestureAt: 1400,
       gestureMode: null,
       verticalDirection: null,
     });

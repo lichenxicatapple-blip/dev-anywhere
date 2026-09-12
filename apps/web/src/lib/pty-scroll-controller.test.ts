@@ -1931,6 +1931,65 @@ describe("attachPtyScrollController", () => {
     expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
   });
 
+  it.each(["wheel", "touch", "scrollbar"])(
+    "preserves a partial %s pan while background output keeps the cursor visible",
+    (input) => {
+      const { container, spacer, host } = createDom();
+      defineSize(container, { clientHeight: 400, clientWidth: 360 });
+      defineScrollWidth(container, 1200);
+      const { terminal, emitRender } = createTerminal({ 99: "prompt" });
+      const controller = attachPtyScrollController({
+        container,
+        spacer,
+        host,
+        term: terminal,
+        hasNewFrame: () => false,
+        consumeNewFrame: vi.fn(),
+        hasNewFramesWhileAway: () => false,
+        setNewFramesWhileAway: vi.fn(),
+      });
+      terminal.buffer.active.cursorX = 70;
+      emitRender();
+      expect(container.scrollLeft).toBe(520);
+      container.dispatchEvent(new Event("scroll"));
+
+      if (input === "wheel") {
+        container.dispatchEvent(new WheelEvent("wheel", { deltaX: -120 }));
+        container.scrollLeft = 400;
+      } else if (input === "touch") {
+        container.dispatchEvent(touchEvent("touchstart", 300, 100));
+        container.dispatchEvent(touchEvent("touchmove", 300, 220));
+        container.dispatchEvent(touchEvent("touchend", 300, 220));
+      } else {
+        controller.scrollToXRatio(400 / 840);
+      }
+      container.dispatchEvent(new Event("scroll"));
+      expect(container.scrollLeft).toBe(400);
+
+      // Advancing time proves review is not a short grace period. A visible cursor, including
+      // one moved by remote output, is not evidence that the reader resumed local input.
+      const now = vi.spyOn(performance, "now").mockReturnValue(performance.now() + 60_000);
+      try {
+        for (const column of [70, 71, 69, 70]) {
+          terminal.buffer.active.cursorX = column;
+          controller.markHorizontalLiveFramePending();
+          emitRender();
+          expect(container.scrollLeft).toBe(400);
+        }
+        expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(true);
+        controller.resumeHorizontalCursorFollow("keyboard");
+        terminal.buffer.active.cursorX = 72;
+        controller.markHorizontalLiveFramePending();
+        emitRender();
+        expect(container.scrollLeft).toBe(540);
+        expect(controller.getDebugProbe().userHasHorizontalScrollIntent).toBe(false);
+      } finally {
+        now.mockRestore();
+        controller.dispose();
+      }
+    },
+  );
+
   it("locks horizontal touch pan on a small mostly-horizontal move", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 400, clientWidth: 360 });

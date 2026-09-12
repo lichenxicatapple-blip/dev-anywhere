@@ -491,7 +491,9 @@ describe("ChatHeader PTY upload menu", () => {
     const trigger = await screen.findByRole("menuitem", { name: "发送快捷键" });
     trigger.focus();
     fireEvent.keyDown(trigger, { key: "ArrowRight" });
-    await screen.findByRole("menuitem", { name: "发送 Ctrl+O" });
+    await waitFor(() =>
+      expect(document.querySelector('[data-slot="chat-menu-shortcuts"]')).not.toBeNull(),
+    );
   }
 
   function renderHeaderWithPtyFocus(
@@ -618,9 +620,13 @@ describe("ChatHeader PTY upload menu", () => {
     await waitFor(() => expect(outside).toHaveFocus());
   });
 
-  it.each(["agent", "terminal"] as const)(
-    "sends Ctrl+R to %s PTY sessions from the shared overflow menu",
-    async (kind) => {
+  it.each([
+    { label: "agent", kind: "agent" as const },
+    { label: "Bash", kind: "terminal" as const, shellFamily: "bash" as const },
+    { label: "unidentified Shell", kind: "terminal" as const },
+  ])(
+    "sends Ctrl+R to $label PTY sessions from the shared overflow menu",
+    async ({ kind, ...context }) => {
       useSessionStore.setState({
         sessions: [
           {
@@ -632,6 +638,7 @@ describe("ChatHeader PTY upload menu", () => {
             ptyOwner: "proxy-hosted",
             cwd: "/tmp/project",
             lastActive: 1,
+            ...("shellFamily" in context ? { shellFamily: context.shellFamily } : {}),
           },
         ],
       });
@@ -654,8 +661,12 @@ describe("ChatHeader PTY upload menu", () => {
       sendRawSpy.mockClear();
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
       await openShortcutsMenu();
-      fireEvent.click(await screen.findByRole("menuitem", { name: "发送 Ctrl+O" }));
-      expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", "\x0f");
+      if (kind === "terminal") {
+        expect(screen.queryByRole("menuitem", { name: "发送 Ctrl+O" })).toBeNull();
+      } else {
+        fireEvent.click(await screen.findByRole("menuitem", { name: "发送 Ctrl+O" }));
+        expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", "\x0f");
+      }
     },
   );
 
@@ -803,7 +814,9 @@ describe("ChatHeader PTY upload menu", () => {
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
       await screen.findByRole("menu");
       if (kind !== "codex-json") await openShortcutsMenu();
-      expect(document.querySelector('[data-slot^="chat-menu-codex-question-"]')).toBeNull();
+      for (const name of ["发送 Alt+↑", "发送 Alt+↓", "发送 Ctrl+]"]) {
+        expect(screen.queryByRole("menuitem", { name })).toBeNull();
+      }
     },
   );
 

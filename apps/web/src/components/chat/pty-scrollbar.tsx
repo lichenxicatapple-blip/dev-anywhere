@@ -5,6 +5,7 @@ import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 
 interface PtyScrollbarProps {
   state: PtyScrollState;
+  scrollContainer: HTMLElement | null;
   onScrollRatio: (ratio: number) => void;
 }
 
@@ -15,44 +16,61 @@ interface PtyHorizontalScrollbarProps {
 
 const MIN_THUMB_HEIGHT = 32;
 const MIN_THUMB_WIDTH = 40;
-// 滚动停止后保持滚动条可见的时间, 给用户 0.9s 时间识别位置后渐隐 (macOS overlay 节奏)。
+// 用户结束操作后短暂保留滚动条，再渐隐。
 const SCROLL_ACTIVITY_HIDE_DELAY_MS = 900;
 
-// 滚动活动状态: 任意维度 scroll* 数值变化即视为活跃, 停止后 SCROLL_ACTIVITY_HIDE_DELAY_MS 内仍可见。
-function useScrollActivity(scrollTop: number, scrollHeight: number, clientHeight: number): boolean {
+// 自动滚底、输出重绘和布局变化都可能改变 scroll*，不能据此判断用户在滚动。
+function useScrollActivity(scrollContainer: HTMLElement | null): boolean {
   const [active, setActive] = useState(false);
-  const timerRef = useRef<number | null>(null);
-  const isFirstRunRef = useRef(true);
   useEffect(() => {
-    // 首次挂载或初始 deps 不算用户滚动行为, 否则会让滚动条莫名闪一下
-    if (isFirstRunRef.current) {
-      isFirstRunRef.current = false;
-      return;
-    }
-    setActive(true);
-    if (timerRef.current !== null) window.clearTimeout(timerRef.current);
-    timerRef.current = window.setTimeout(() => {
-      timerRef.current = null;
-      setActive(false);
-    }, SCROLL_ACTIVITY_HIDE_DELAY_MS);
-    return () => {
-      if (timerRef.current !== null) {
-        window.clearTimeout(timerRef.current);
-        timerRef.current = null;
+    if (!scrollContainer) return;
+    let timer: number | null = null;
+    let touching = false;
+    const cancelHide = () => {
+      if (timer !== null) {
+        window.clearTimeout(timer);
+        timer = null;
       }
     };
-  }, [scrollTop, scrollHeight, clientHeight]);
+    const reveal = () => {
+      setActive(true);
+      cancelHide();
+      if (!touching) {
+        timer = window.setTimeout(() => {
+          timer = null;
+          setActive(false);
+        }, SCROLL_ACTIVITY_HIDE_DELAY_MS);
+      }
+    };
+    const onTouch = (event: TouchEvent) => {
+      touching = event.touches.length > 0;
+      reveal();
+    };
+    const onWheel = (event: WheelEvent) => {
+      if (event.deltaY !== 0) reveal();
+    };
+    const touchEvents = ["touchstart", "touchmove", "touchend", "touchcancel"] as const;
+    for (const type of touchEvents) {
+      scrollContainer.addEventListener(type, onTouch, { passive: true, capture: true });
+    }
+    scrollContainer.addEventListener("wheel", onWheel, { passive: true, capture: true });
+    return () => {
+      cancelHide();
+      for (const type of touchEvents) scrollContainer.removeEventListener(type, onTouch, true);
+      scrollContainer.removeEventListener("wheel", onWheel, true);
+    };
+  }, [scrollContainer]);
   return active;
 }
 
-export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
+export function PtyScrollbar({ state, scrollContainer, onScrollRatio }: PtyScrollbarProps) {
   const trackRef = useRef<HTMLDivElement>(null);
   const thumbRef = useRef<HTMLDivElement>(null);
   const draggingRef = useRef(false);
   const dragThumbOffsetRef = useRef<number | null>(null);
   const [dragging, setDragging] = useState(false);
   const [hovering, setHovering] = useState(false);
-  const scrolling = useScrollActivity(state.scrollTop, state.scrollHeight, state.clientHeight);
+  const scrolling = useScrollActivity(scrollContainer);
   const reveal = scrolling || hovering || dragging;
   const geometry = useMemo(() => {
     if (!state.scrollable || state.scrollHeight <= 0 || state.clientHeight <= 0) {
@@ -95,8 +113,11 @@ export function PtyScrollbar({ state, onScrollRatio }: PtyScrollbarProps) {
       className={cn(
         "group absolute right-0 top-2 bottom-2 z-10 w-8 touch-none transition-opacity duration-200",
         geometry.visible && reveal ? "opacity-100" : "opacity-0 pointer-events-none",
+        geometry.visible && "[@media(hover:hover)]:pointer-events-auto",
       )}
-      onPointerEnter={() => setHovering(true)}
+      onPointerEnter={(event) => {
+        if (event.pointerType !== "touch") setHovering(true);
+      }}
       onPointerLeave={() => setHovering(false)}
       onPointerDown={(event) => {
         draggingRef.current = true;

@@ -30,6 +30,7 @@ export function toSessionListPayload(s: SessionInfo): SessionListEntry {
       mode: "pty",
       provider: "claude",
       ptyOwner: "proxy-hosted",
+      ...(s.shellFamily !== undefined ? { shellFamily: s.shellFamily } : {}),
     };
   }
   if (s.mode === "pty") {
@@ -59,6 +60,7 @@ export function toSessionSyncEntry(s: SessionInfo): SessionSyncEntry {
       mode: "pty",
       provider: "claude",
       ptyOwner: "proxy-hosted",
+      ...(s.shellFamily !== undefined ? { shellFamily: s.shellFamily } : {}),
     };
   }
   if (s.mode === "pty") {

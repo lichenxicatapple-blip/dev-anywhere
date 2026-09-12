@@ -247,6 +247,7 @@ export async function submitTerminalCreate({
       sessionId: response.sessionId,
       kind: "terminal",
       name: response.name?.trim() || undefined,
+      ...(response.shellFamily !== undefined ? { shellFamily: response.shellFamily } : {}),
       ...(response.nameLocked !== undefined ? { nameLocked: response.nameLocked } : {}),
       state: "idle",
       cwd: response.cwd,

@@ -11,7 +11,6 @@ import {
   createInitialPtyTouchScrollState,
   ensurePtyTouchPendingMode,
   lockPtyTouchVerticalGesture,
-  markPtyTouchHorizontalGesture,
   markPtyTouchGesture,
   resetPtyTouchScrollSession,
   setPtyTouchGestureMode,
@@ -54,7 +53,6 @@ interface PtyTouchScrollHandler {
   onTouchEnd: (event?: TouchEvent) => void;
   onTouchCancel: (event?: TouchEvent) => void;
   isRecentNativeScroll: () => boolean;
-  isRecentHorizontalGesture: () => boolean;
   getScrollExpectation: (
     currentYOverride?: number | null,
   ) => ReturnType<typeof computeTouchScrollExpectation>;
@@ -255,7 +253,6 @@ export function createPtyTouchScrollHandler({
           movement.absDy > movement.absDx * PTY_SCROLL_CONFIG.touch.verticalLockRatio);
       if (horizontalDominates) {
         state = setPtyTouchGestureMode(state, "horizontal");
-        state = markPtyTouchHorizontalGesture(state, now);
         trace("touchmove:horizontal-lock", {
           details: `dx=${Math.round(movement.dx)} dy=${Math.round(movement.dy)} distance=${Math.round(movement.distance)}`,
         });
@@ -300,7 +297,6 @@ export function createPtyTouchScrollHandler({
         return;
       }
       if (movement) {
-        state = markPtyTouchHorizontalGesture(state, now);
         markHorizontalUserInput(
           `site=touchmove-horizontal dx=${Math.round(movement.absDx)} dy=${Math.round(movement.absDy)}`,
         );
@@ -420,10 +416,6 @@ export function createPtyTouchScrollHandler({
     onTouchEnd,
     onTouchCancel,
     isRecentNativeScroll: isWithinNativeInertiaWindow,
-    isRecentHorizontalGesture: () =>
-      state.lastHorizontalGestureAt !== null &&
-      performance.now() - state.lastHorizontalGestureAt <=
-        PTY_SCROLL_CONFIG.touch.nativeScrollRecentMs,
     getScrollExpectation,
     describeScrollExpectation: describeTouchScrollExpectation,
     getState: () => state,

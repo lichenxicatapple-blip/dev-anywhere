@@ -5,6 +5,7 @@ import {
   createSessionIdentitySchema,
   PtyStatePayloadSchema,
   sessionStateValues,
+  TerminalShellFamilySchema,
 } from "./session.js";
 import { ApprovalOptionSchema, ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
 import {
@@ -761,6 +762,7 @@ const SessionCreateSuccessResponseSchema = z.discriminatedUnion("mode", [
       mode: z.literal("pty"),
       provider: z.literal("claude"),
       ptyOwner: z.literal("proxy-hosted"),
+      shellFamily: TerminalShellFamilySchema.optional(),
     }),
   ]),
 ]);

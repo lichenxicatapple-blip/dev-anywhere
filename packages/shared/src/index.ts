@@ -26,6 +26,7 @@ export type {
   ToolResultPayload,
 } from "./schemas/tool.js";
 export {
+  TerminalShellFamilySchema,
   SessionInfoSchema,
   SessionListPayloadSchema,
   SessionStatusPayloadSchema,
@@ -33,6 +34,7 @@ export {
   AgentStatusPayloadSchema,
 } from "./schemas/session.js";
 export type {
+  TerminalShellFamily,
   SessionInfo,
   SessionListPayload,
   SessionStatusPayload,

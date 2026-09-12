@@ -1,5 +1,22 @@
 import { describe, expect, it, vi } from "vitest";
-import { listTerminalShells, resolveTerminalShell } from "#src/common/terminal-shell.js";
+import {
+  getTerminalShellFamily,
+  listTerminalShells,
+  resolveTerminalShell,
+} from "#src/common/terminal-shell.js";
+
+it.each([
+  ["/bin/zsh", "zsh"],
+  ["/usr/bin/bash", "bash"],
+  ["/opt/homebrew/bin/fish", "fish"],
+  ["C:\\Program Files\\PowerShell\\7\\PWSH.EXE", "powershell"],
+  ["powershell.exe", "powershell"],
+  ["C:\\Windows\\System32\\cmd.exe", "cmd"],
+  ["/bin/sh", undefined],
+  ["/usr/local/bin/bash-wrapper", undefined],
+])("identifies the executable %s without guessing unknown shells", (command, family) => {
+  expect(getTerminalShellFamily(command!)).toBe(family);
+});
 
 const pwsh = "D:\\Tools\\PowerShell\\pwsh.exe";
 const installedPwsh = "D:\\Program Files\\PowerShell\\7\\pwsh.exe";

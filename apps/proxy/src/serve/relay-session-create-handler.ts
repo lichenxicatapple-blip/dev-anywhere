@@ -12,7 +12,7 @@ import {
   serializeControl,
   type ControlMessage,
 } from "@dev-anywhere/shared";
-import { resolveTerminalShell } from "../common/terminal-shell.js";
+import { getTerminalShellFamily, resolveTerminalShell } from "../common/terminal-shell.js";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import { findCodexActiveWriter, type CodexActiveWriter } from "../common/codex-active-writer.js";
@@ -645,6 +645,7 @@ export class RelaySessionCreateHandler {
     let startup: ReturnType<TerminalWorkerSpawner["start"]> | undefined;
     try {
       const shell = resolveTerminalShell(msg.shell, this.deps.getProviderEnv());
+      const shellFamily = getTerminalShellFamily(shell.command);
       const name = requestedName ?? shell.label ?? tildify(cwd);
       startup = this.deps.terminalWorkerSpawner.start({
         sessionId: pendingId,
@@ -665,6 +666,7 @@ export class RelaySessionCreateHandler {
         pendingId,
         "proxy-hosted",
         nameLocked,
+        shellFamily,
       );
       this.deps.relaySend(
         serializeControl({
@@ -680,6 +682,7 @@ export class RelaySessionCreateHandler {
           mode: "pty",
           provider: "claude",
           ptyOwner: "proxy-hosted",
+          ...(shellFamily !== undefined ? { shellFamily } : {}),
         }),
       );
       this.deps.broadcastSessionSync();

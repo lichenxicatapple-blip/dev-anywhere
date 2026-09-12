@@ -11,7 +11,8 @@ import { RelaySessionCreateHandler } from "#src/serve/relay-session-create-handl
 import { RelayResourceHandlers } from "#src/serve/relay-resource-handlers.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
 
-vi.mock("#src/common/terminal-shell.js", () => ({
+vi.mock("#src/common/terminal-shell.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("#src/common/terminal-shell.js")>()),
   listTerminalShells: vi.fn(),
   resolveTerminalShell: vi.fn(),
 }));
@@ -96,6 +97,7 @@ describe("terminal session shell selection", () => {
         expect.any(String),
         "proxy-hosted",
         false,
+        shell,
       );
       expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0]![0]))).toMatchObject({
         type: "session_create_response",
@@ -104,6 +106,7 @@ describe("terminal session shell selection", () => {
         kind: "terminal",
         name: label,
         nameLocked: false,
+        shellFamily: shell,
       });
     },
   );

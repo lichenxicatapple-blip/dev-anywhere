@@ -185,7 +185,7 @@ test.describe("ChatHeader compact navigation controls", () => {
           .locator('[data-slot="chat-menu-screen-wake-lock-item"]')
           .evaluate((node) => getComputedStyle(node).paddingLeft);
         const shortcutPaddingLeft = await page
-          .locator('[data-slot="chat-menu-send-ctrl-o"]')
+          .locator('[data-slot="chat-menu-send-ctrl-t"]')
           .evaluate((node) => getComputedStyle(node).paddingLeft);
         expect(wakePaddingLeft).toBe(shortcutPaddingLeft);
         await page.screenshot({

@@ -1,7 +1,7 @@
 import { readFileSync, existsSync } from "node:fs";
 import { isAbsolute, normalize } from "node:path";
 import { nanoid } from "nanoid";
-import { defineFSM, SessionState } from "@dev-anywhere/shared";
+import { defineFSM, SessionState, type TerminalShellFamily } from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import { serviceLogger } from "../common/logger.js";
 import {
@@ -51,6 +51,7 @@ export type SessionInfo =
       mode: "pty";
       provider: "claude";
       ptyOwner: "proxy-hosted";
+      shellFamily?: TerminalShellFamily;
     });
 
 type PtySessionClaimCommon = {
@@ -262,6 +263,7 @@ export class SessionManager {
     id: string | undefined,
     ptyOwner: "proxy-hosted",
     nameLocked?: boolean,
+    shellFamily?: TerminalShellFamily,
   ): SessionInfo;
   createSession(
     kind: "agent" | "terminal",
@@ -273,6 +275,7 @@ export class SessionManager {
     id?: string,
     ptyOwner?: "local-terminal" | "proxy-hosted",
     nameLocked?: boolean,
+    shellFamily?: TerminalShellFamily,
   ): SessionInfo {
     if (mode === "pty" && ptyOwner === undefined) {
       throw new TypeError("PTY session owner is required");
@@ -326,12 +329,16 @@ export class SessionManager {
     };
     let info: SessionInfo;
     if (kind === "terminal") {
+      const resolvedShellFamily =
+        shellFamily ??
+        (pendingPtyMetadata?.kind === "terminal" ? pendingPtyMetadata.shellFamily : undefined);
       info = {
         ...common,
         kind: "terminal",
         mode: "pty",
         provider: "claude",
         ptyOwner: "proxy-hosted",
+        ...(resolvedShellFamily !== undefined ? { shellFamily: resolvedShellFamily } : {}),
       };
     } else if (mode === "json") {
       info = { ...common, kind: "agent", mode: "json", provider };
@@ -676,6 +683,7 @@ export class SessionManager {
         mode: "pty",
         provider: "claude",
         ptyOwner: "proxy-hosted",
+        ...(s.shellFamily !== undefined ? { shellFamily: s.shellFamily } : {}),
       });
     }
     if (s.mode === "pty") {

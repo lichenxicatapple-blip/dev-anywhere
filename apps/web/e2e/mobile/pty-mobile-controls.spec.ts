@@ -1,4 +1,4 @@
-// PTY 移动端软控制按键全流程在真 emu 上: esc / clear / 上下左右 / enter 都正确发出 raw input.
+// PTY 移动端软控制按键全流程在真 emu 上: esc / 清空 / 上下左右 / enter 都正确发出 raw input.
 // L2 mobile-contract pty test 只验证 terminal visible, L4 钉死全部按键的 raw 序列.
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted, readRawPtyInput } from "../pty-fixture";
@@ -11,7 +11,7 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
   // verifies real native hit testing. Cold uiautomator dumps can exceed 60s.
   test.setTimeout(120_000);
 
-  test("esc / clear / arrows / enter buttons emit correct raw escape sequences", async ({
+  test("esc / 清空 / arrows / enter buttons emit correct raw escape sequences", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, {
@@ -37,7 +37,7 @@ test.describe("L4 mobile / PTY soft controls full key sequence", () => {
     await expect(controls).toBeVisible();
     await expect.poll(() => readRawPtyInput(emuPage)).toBe("");
 
-    // esc (\x1b) + clear input area (\x1b\x1b) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + ^S (\x13) + enter (\r).
+    // esc (\x1b) + 清空 (\x1b\x1b) + 左 (\x1b[D) + 右 (\x1b[C) + 上 (\x1b[A) + 下 (\x1b[B) + ^S (\x13) + enter (\r).
     let expectedRawInput = "";
     for (const [slot, input] of [
       ["pty-mobile-key-esc", "\x1b"],

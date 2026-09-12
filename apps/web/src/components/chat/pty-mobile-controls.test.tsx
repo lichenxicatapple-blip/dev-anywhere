@@ -43,42 +43,65 @@ describe("PtyMobileControls", () => {
     expect(onInput).toHaveBeenCalledWith("\r");
   });
 
-  it("clears Claude's whole agent input area with the TUI clear sequence", () => {
+  it("retains Claude's one-tap clear action in the original editing position", () => {
     const onInput = vi.fn();
-    const onPaste = vi.fn();
-
-    render(<PtyMobileControls provider="claude" onInput={onInput} onPaste={onPaste} />);
-
-    fireEvent.click(document.querySelector('[data-slot="pty-mobile-key-clear"]')!);
-
-    expect(onInput).toHaveBeenCalledWith("\x1b\x1b");
+    const { getByRole, queryByRole } = render(
+      <PtyMobileControls
+        sessionKind="agent"
+        provider="claude"
+        onInput={onInput}
+        onPaste={vi.fn()}
+      />,
+    );
+    const clear = getByRole("button", { name: "清空输入区" });
+    expect(clear.textContent).toBe("清空");
+    expect(clear.getAttribute("data-key-position")).toBe("editing");
+    expect(queryByRole("button", { name: "发送 Ctrl+U" })).toBeNull();
+    fireEvent.click(clear);
+    expect(onInput.mock.calls).toEqual([["\x1b\x1b"]]);
   });
 
   it.each(["codex", "kimi"] as const)(
-    "clears %s's whole agent input area through a guarded Ctrl+C draft clear path",
+    "restores %s whole-draft clear and suppresses rapid repeat taps",
     (provider) => {
       vi.useFakeTimers();
       const onInput = vi.fn();
-      const onPaste = vi.fn();
-
-      render(<PtyMobileControls provider={provider} onInput={onInput} onPaste={onPaste} />);
-
-      const clearButton = document.querySelector('[data-slot="pty-mobile-key-clear"]')!;
-      fireEvent.click(clearButton);
-      fireEvent.click(clearButton);
-
-      expect(onInput).toHaveBeenCalledTimes(1);
-      expect(onInput).toHaveBeenCalledWith("\x03");
-      expect(clearButton.getAttribute("data-guarded")).toBe("true");
-
-      act(() => {
-        vi.advanceTimersByTime(1200);
-      });
-      fireEvent.click(clearButton);
-
-      expect(onInput).toHaveBeenCalledTimes(2);
+      const { getByRole } = render(
+        <PtyMobileControls
+          sessionKind="agent"
+          provider={provider}
+          onInput={onInput}
+          onPaste={vi.fn()}
+        />,
+      );
+      const clear = getByRole("button", { name: "清空输入区" });
+      fireEvent.click(clear);
+      fireEvent.click(clear);
+      expect(onInput.mock.calls).toEqual([["\x03"]]);
+      expect(clear.getAttribute("aria-disabled")).toBe("true");
+      act(() => vi.advanceTimersByTime(1200));
+      expect(clear.textContent).toBe("清空");
+      fireEvent.click(clear);
+      expect(onInput.mock.calls).toEqual([["\x03"], ["\x03"]]);
     },
   );
+
+  it("updates contextual keys when a retained view changes from an agent to CMD", () => {
+    const onInput = vi.fn();
+    const props = { onInput, onPaste: vi.fn() };
+    const { rerender, queryByRole, getByRole } = render(
+      <PtyMobileControls {...props} sessionKind="agent" provider="codex" />,
+    );
+    expect(queryByRole("button", { name: "发送 Ctrl+S" })).toBeNull();
+    fireEvent.click(getByRole("button", { name: "发送 Ctrl+R" }));
+    rerender(
+      <PtyMobileControls {...props} sessionKind="terminal" provider="claude" shellFamily="cmd" />,
+    );
+    expect(queryByRole("button", { name: "发送 Ctrl+R" })).toBeNull();
+    expect(queryByRole("button", { name: "发送 Ctrl+U" })).toBeNull();
+    fireEvent.click(getByRole("button", { name: "发送 F7" }));
+    expect(onInput.mock.calls).toEqual([["\x12"], ["\x1b[18~"]]);
+  });
 
   it("repeats arrow input immediately after the long-press threshold", () => {
     vi.useFakeTimers();

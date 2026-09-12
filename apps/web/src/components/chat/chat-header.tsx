@@ -44,6 +44,7 @@ import {
 } from "@/lib/chat-font-size";
 import { useAppStore } from "@/stores/app-store";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
+import { getPtyShortcutPreset } from "@/lib/pty-shortcuts";
 import { PTY_MIN_COLS, PTY_MIN_ROWS, type PtyResizeAction } from "@/lib/pty-fit-geometry";
 import { formatUnlockedTerminalPathName } from "@/lib/format-session-name";
 import { useFileStore } from "@/stores/file-store";
@@ -153,11 +154,6 @@ const terminalSizeControls = [
     max: PTY_INITIAL_MAX_ROWS,
   },
 ] as const;
-const codexQuestionShortcuts = [
-  { slot: "answer-next", icon: "⌥↑", label: "发送 Alt+↑", data: "\x1b[1;3A" },
-  { slot: "main-prompt", icon: "⌥↓", label: "发送 Alt+↓", data: "\x1b[1;3B" },
-  { slot: "skip", icon: "^]", label: "发送 Ctrl+]", data: "\x1d" },
-] as const;
 
 function ChatMenuIcon({ children, className }: { children: ReactNode; className?: string }) {
   return (
@@ -215,6 +211,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const touchEditingSurface = nativeTouchEditingSurface && !forceHardwareInput;
   const isPty = mode === "pty" || session?.mode === "pty";
+  const shortcuts = getPtyShortcutPreset(session ?? {}).menu;
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const menuPtyFocusRef = useRef<HTMLTextAreaElement | null>(null);
   const menuClosedByEscapeRef = useRef(false);
@@ -701,43 +698,23 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
                         collisionPadding={8}
                         data-slot="chat-menu-shortcuts"
                       >
-                        <DropdownMenuItem
-                          className={menuItemClass}
-                          data-slot="chat-menu-send-ctrl-o"
-                          onSelect={() => sendRemoteInputRaw(sessionId, "\x0f")}
-                        >
-                          <ShortcutKeyIcon label="^O" />
-                          发送 Ctrl+O
-                        </DropdownMenuItem>
-                        <DropdownMenuItem
-                          className={menuItemClass}
-                          data-slot="chat-menu-send-ctrl-r"
-                          disabled={
-                            !connected ||
-                            !proxyOnline ||
-                            session?.mode !== "pty" ||
-                            session.state === "error"
-                          }
-                          onSelect={() => sendRemoteInputRaw(sessionId, "\x12")}
-                        >
-                          <ShortcutKeyIcon label="^R" />
-                          发送 Ctrl+R
-                        </DropdownMenuItem>
-                        {session?.kind === "agent" &&
-                          session.mode === "pty" &&
-                          session.provider === "codex" &&
-                          codexQuestionShortcuts.map((shortcut) => (
-                            <DropdownMenuItem
-                              key={shortcut.slot}
-                              className={menuItemClass}
-                              data-slot={`chat-menu-codex-question-${shortcut.slot}`}
-                              disabled={!connected || !proxyOnline || session.state === "error"}
-                              onSelect={() => sendRemoteInputRaw(sessionId, shortcut.data)}
-                            >
-                              <ShortcutKeyIcon label={shortcut.icon} />
-                              {shortcut.label}
-                            </DropdownMenuItem>
-                          ))}
+                        {shortcuts.map((shortcut) => (
+                          <DropdownMenuItem
+                            key={shortcut.id}
+                            className={menuItemClass}
+                            data-slot={`chat-menu-send-${shortcut.id}`}
+                            disabled={
+                              !connected ||
+                              !proxyOnline ||
+                              session?.mode !== "pty" ||
+                              session.state === "error"
+                            }
+                            onSelect={() => sendRemoteInputRaw(sessionId, shortcut.data)}
+                          >
+                            <ShortcutKeyIcon label={shortcut.display} />
+                            发送 {shortcut.key}
+                          </DropdownMenuItem>
+                        ))}
                       </DropdownMenuSubContent>
                     </DropdownMenuPortal>
                   </DropdownMenuSub>

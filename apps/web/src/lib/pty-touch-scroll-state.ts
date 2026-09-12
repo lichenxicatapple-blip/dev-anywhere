@@ -7,7 +7,6 @@ export interface PtyTouchScrollState {
   startScrollLeft: number | null;
   lastClientY: number | null;
   lastGestureAt: number | null;
-  lastHorizontalGestureAt: number | null;
   gestureMode: TouchScrollGestureMode | null;
   verticalDirection: PtyTouchVerticalDirection | null;
 }
@@ -19,7 +18,6 @@ export function createInitialPtyTouchScrollState(): PtyTouchScrollState {
     startScrollLeft: null,
     lastClientY: null,
     lastGestureAt: null,
-    lastHorizontalGestureAt: null,
     gestureMode: null,
     verticalDirection: null,
   };
@@ -51,16 +49,6 @@ export function markPtyTouchGesture(state: PtyTouchScrollState, now: number): Pt
   return {
     ...state,
     lastGestureAt: now,
-  };
-}
-
-export function markPtyTouchHorizontalGesture(
-  state: PtyTouchScrollState,
-  now: number,
-): PtyTouchScrollState {
-  return {
-    ...state,
-    lastHorizontalGestureAt: now,
   };
 }
 

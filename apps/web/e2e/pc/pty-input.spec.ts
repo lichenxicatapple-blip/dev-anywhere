@@ -53,16 +53,16 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-enter"]'));
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-tab"]'));
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-shift-tab"]'));
-    await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-t"]'));
+    await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-o"]'));
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-esc"]'));
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-c"]'));
-    await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-b"]'));
+    await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-r"]'));
     await expectTouchTarget(page.locator('[data-slot="pty-mobile-key-ctrl-s"]'));
     await page.locator('[data-slot="pty-mobile-key-tab"]').click();
     await page.locator('[data-slot="pty-mobile-key-shift-tab"]').click();
-    await page.locator('[data-slot="pty-mobile-key-ctrl-t"]').click();
+    await page.locator('[data-slot="pty-mobile-key-ctrl-o"]').click();
     await page.locator('[data-slot="pty-mobile-key-esc"]').click();
-    await page.locator('[data-slot="pty-mobile-key-ctrl-b"]').click();
+    await page.locator('[data-slot="pty-mobile-key-ctrl-r"]').click();
     await page.locator('[data-slot="pty-mobile-key-ctrl-c"]').click();
     await page.locator('[data-slot="pty-mobile-key-clear"]').click();
     await page.locator('[data-slot="pty-mobile-key-ctrl-s"]').click();
@@ -73,7 +73,7 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await page.locator('[data-slot="pty-mobile-key-enter"]').click();
     await expect
       .poll(() => readRawPtyInput(page))
-      .toContain("abc\n\t\x1b[Z\x14\x1b\x02\x03\x1b\x1b\x13\x1b[D\x1b[C\x1b[A\x1b[B\r");
+      .toContain("abc\n\t\x1b[Z\x0f\x1b\x12\x03\x1b\x1b\x13\x1b[D\x1b[C\x1b[A\x1b[B\r");
 
     await page.evaluate(() =>
       window.__devAnywhereSetVisualViewport?.({
@@ -238,11 +238,9 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     expect(offsets.helpersTopAfterEnd).toBe(offsets.originalHelpersTop);
   });
 
-  test("guards Codex mobile clear button from sending duplicate Ctrl+C on double tap", async ({
-    page,
-  }) => {
+  test("guards repeated Codex clear taps while preserving explicit Ctrl+C", async ({ page }) => {
     await setupPtyChat(page, {
-      sessionId: "pty-input-codex-clear",
+      sessionId: "pty-input-codex-editing",
       sessionKind: "agent",
       provider: "codex",
       ptyOwner: "proxy-hosted",
@@ -261,7 +259,7 @@ test.describe("PTY input: keyboard, mobile soft controls, IME", () => {
     await expect(page.locator('[data-slot="pty-mobile-controls"]')).toBeVisible();
     const clearButton = page.locator('[data-slot="pty-mobile-key-clear"]');
     await clearButton.click();
-    await clearButton.click();
+    await clearButton.dispatchEvent("click");
 
     await expect.poll(() => readRawPtyInput(page)).toBe("\x03");
 

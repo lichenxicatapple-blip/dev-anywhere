@@ -41,6 +41,7 @@ import { parsePx } from "./pty-style-utils";
 import { createPtyStyleWriter } from "./pty-style-writer";
 import { createPtyTouchScrollHandler } from "./pty-touch-scroll-handler";
 import { findLiveScreenLastNonEmptyRow, measureXtermCellSize } from "./pty-xterm-metrics";
+import { observePtyCursorFollowTarget } from "./pty-cursor-follow-target";
 
 interface PtyScrollControllerOptions {
   container: HTMLDivElement;
@@ -106,6 +107,7 @@ interface PtyScrollController {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
+  resumeHorizontalCursorFollow: (reason?: string) => void;
   markHorizontalLiveFramePending: () => void;
   markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
@@ -193,6 +195,7 @@ export function attachPtyScrollController(
   // 的历史光标落在 lookahead 区就改写 scrollLeft。一个 xterm write 可能在解析期间产生
   // 多次 render；资格必须从二进制帧入队一直保留到 onWriteParsed 后的最终 render。
   let horizontalLookaheadPhase: "idle" | "parsing" | "parsed" = "idle";
+  const cursorFollowTarget = observePtyCursorFollowTarget(term);
   // 纵向同样需要"用户向下滚到底"的方向判定来释放 intent。longHost 模式下
   // isAtBottom = cursorInViewport, 用户小幅 wheel up 时 cursor 仍可见 → atBottom 仍 true,
   // 仅看 atBottom + 时间窗会把刚 set 的 intent 立刻清掉。改成跟 onContainerScroll 拿到的
@@ -291,7 +294,10 @@ export function attachPtyScrollController(
     return true;
   };
 
-  const markHorizontalUserInput = (details: string): void => {
+  const markHorizontalUserInput = (
+    details: string,
+    opts: { resumeWhenCursorVisible?: boolean } = {},
+  ): void => {
     cancelPendingPageResumeRestore(`horizontal:${details}`);
     if (!hasHorizontalOverflow()) {
       clearHorizontalIntentIfUnscrollable("markHorizontalUserInput");
@@ -300,6 +306,7 @@ export function attachPtyScrollController(
     const result = markPtyHorizontalUserInput(horizontalState, {
       now: performance.now(),
       details,
+      ...opts,
     });
     horizontalState = result.state;
     traceHorizontalIntent(result.trace);
@@ -1030,12 +1037,23 @@ export function attachPtyScrollController(
       container.scrollLeft = 0;
     }
     if (opts.holdUntilCursorVisible) {
-      markHorizontalUserInput(`site=resetHorizontalScroll-hold reason=${reason}`);
+      markHorizontalUserInput(`site=resetHorizontalScroll-hold reason=${reason}`, {
+        resumeWhenCursorVisible: true,
+      });
     }
     trace(`horizontal-scroll-reset[${reason}]`, {
       details: `scrollLeft=${previous}->${container.scrollLeft}`,
     });
     notifyScroll();
+  };
+
+  const resumeHorizontalCursorFollow = (reason: string = "input"): void => {
+    const result = clearPtyHorizontalIntent(horizontalState, {
+      details: `site=resumeHorizontalCursorFollow reason=${reason}`,
+      scrollLeft: container.scrollLeft,
+    });
+    horizontalState = result.state;
+    traceHorizontalIntent(result.trace);
   };
 
   const markHorizontalScrollIntent = (reason: string = "external"): void => {
@@ -1318,14 +1336,6 @@ export function attachPtyScrollController(
     notifyAtBottom,
     flushPendingTouchScrollNotify,
   });
-
-  const shouldHoldHorizontalIntentForTouch = (): boolean => {
-    if (!horizontalState.intent) return false;
-    return (
-      touchHandler.getState().gestureMode === "horizontal" ||
-      touchHandler.isRecentHorizontalGesture()
-    );
-  };
 
   const restoreImpossibleTouchScrollJump = (effectiveScrollTop: number): boolean => {
     const expectation = touchHandler.getScrollExpectation();
@@ -1722,12 +1732,16 @@ export function attachPtyScrollController(
   };
 
   // 长行实时输出让光标进入右侧 lookahead 区时，把 scrollLeft 调到能让光标位于视窗
-  // 中部并留出输入上下文；snapshot / 普通重绘则只在光标真正出视窗时救回。用户主动
-  // 横向滚到光标视窗外后，通过 horizontal intent 持续抑制直到光标重新可见。
+  // 中部并留出输入上下文；snapshot / 普通重绘则只在光标真正出视窗时救回。手动横滑后
+  // 保持查看位置，直到用户再次输入；光标仍然可见或后台输出都不能结束手动查看。
   const followCursorX = (allowLookaheadFollow: boolean): boolean => {
     if (!hasHorizontalOverflow()) {
       clearHorizontalIntentIfUnscrollable("followCursorX");
       return true;
+    }
+    if (!cursorFollowTarget.canFollow()) {
+      trace("followCursorX:skip", { details: "paintCursor" });
+      return false;
     }
     const { cellW } = getDims();
     // Metrics can be temporarily unavailable between xterm parsing and layout. Keep the live
@@ -1737,14 +1751,9 @@ export function attachPtyScrollController(
     const viewportLeft = container.scrollLeft;
     const viewportRight = viewportLeft + container.clientWidth;
     const cursorInViewportX = cursorPxX >= viewportLeft && cursorPxX <= viewportRight;
-    if (cursorInViewportX) {
-      if (shouldHoldHorizontalIntentForTouch()) {
-        trace("followCursorX:skip", {
-          details: `horizontalTouchIntent cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
-        });
-        return true;
-      }
-      // 用户滚回到光标可见范围 (或光标自己进了 viewport), 重新 engage 跟踪
+    if (horizontalState.resumeWhenCursorVisible && cursorInViewportX) {
+      // Enter resets to the line start before remote echo arrives. Release that temporary hold
+      // once the new prompt is visible, independently of manual horizontal review.
       const result = clearPtyHorizontalIntent(horizontalState, {
         details: `site=followCursorX cursorPx=${cursorPxX} viewport=${viewportLeft}..${viewportRight}`,
         scrollLeft: container.scrollLeft,
@@ -1881,6 +1890,7 @@ export function attachPtyScrollController(
     },
   });
   const bufferChangeDisposable = term.buffer.onBufferChange(() => {
+    cursorFollowTarget.reset();
     // Direct Terminal.reset does not necessarily produce a later onWriteParsed callback. Invalidate
     // every buffer-derived cache synchronously at the identity boundary itself.
     bufferRevision += 1;
@@ -1943,6 +1953,7 @@ export function attachPtyScrollController(
   return {
     dispose: () => {
       disposed = true;
+      cursorFollowTarget.dispose();
       cancelPendingTermScrollReconcile();
       bufferChangeDisposable.dispose();
       domAdapter.dispose();
@@ -1958,6 +1969,7 @@ export function attachPtyScrollController(
     scrollToRatio,
     scrollToXRatio,
     resetHorizontalScroll,
+    resumeHorizontalCursorFollow,
     markHorizontalLiveFramePending,
     markSelectionAutoscrollIntent,
     markHorizontalScrollIntent,

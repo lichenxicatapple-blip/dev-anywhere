@@ -8,6 +8,7 @@ import {
 } from "../../helpers";
 import {
   expectPtyAtBottom,
+  expectPtyCursorAwareBottom,
   expectPtyRendered,
   expectPtyScrollable,
   ptyTerminal,
@@ -404,7 +405,10 @@ test.describe("WebSocket reconnect chaos", () => {
         ).join(""),
       );
     });
-    await expect(page.locator('[data-slot="pty-scrollbar"]')).toHaveClass(/opacity-100/);
+    await expect
+      .poll(() => page.evaluate(() => window.__ccTest?.pty.serialize("claude-pty") ?? ""))
+      .toContain("history line 119");
+    await expectPtyCursorAwareBottom(page);
 
     await scrollPtyToTop(page);
     await expect(page.locator('[data-slot="back-to-bottom"]')).toBeVisible();

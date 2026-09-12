@@ -170,6 +170,7 @@ interface ScrollControllerHandle {
   scrollToRatio: (ratio: number) => void;
   scrollToXRatio: (ratio: number) => void;
   resetHorizontalScroll: (reason?: string, opts?: { holdUntilCursorVisible?: boolean }) => void;
+  resumeHorizontalCursorFollow: (reason?: string) => void;
   markHorizontalLiveFramePending: () => void;
   markSelectionAutoscrollIntent: (reason?: string) => void;
   markHorizontalScrollIntent: (reason?: string) => void;
@@ -629,7 +630,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     [],
   );
 
-  const resetHorizontalScrollAfterLineSubmit = useCallback((data: string, reason: string): void => {
+  const followHorizontalScrollAfterInput = useCallback((data: string, reason: string): void => {
+    if (!data || isOnlyPtyNonTypingInput(data)) return;
+    scrollControllerRef.current?.resumeHorizontalCursorFollow(reason);
     if (!data.includes("\r") && !data.includes("\n")) return;
     // The terminal cursor still points at the submitted line until remote echo arrives. Keep the
     // line-start viewport stable through intervening render frames, then resume horizontal follow
@@ -694,7 +697,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       event.stopPropagation();
       sendRemoteInputRaw(sessionId, raw);
       scheduleRawInputFollow("physicalKeyboard");
-      resetHorizontalScrollAfterLineSubmit(raw, "physicalKeyboardEnter");
+      followHorizontalScrollAfterInput(raw, "physicalKeyboardEnter");
     };
 
     window.addEventListener("keydown", onKeyDown, true);
@@ -704,7 +707,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     canAcceptInput,
     containerEl,
     inputModePreference,
-    resetHorizontalScrollAfterLineSubmit,
+    followHorizontalScrollAfterInput,
     scheduleRawInputFollow,
     sessionId,
     setAdaptiveInputModality,
@@ -817,6 +820,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const path = await uploadFileAndShowToast({ relay, sessionId, file });
       if (path) {
         sendRemoteInputRaw(sessionId, `@${path} `);
+        scrollControllerRef.current?.resumeHorizontalCursorFollow("dropUpload");
         scheduleRawInputFollow("dropUpload");
       }
     },
@@ -882,7 +886,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     const onRawInput = (data: string): void => {
       if (isOnlyPtyNonTypingInput(data)) return;
       scheduleRawInputFollow("rawInput", { force: true });
-      resetHorizontalScrollAfterLineSubmit(data, "rawInputEnter");
+      followHorizontalScrollAfterInput(data, "rawInputEnter");
     };
 
     const termCtrl = attachPtyTerminalController({
@@ -1202,7 +1206,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     openImagePreview,
     suppressPtyFocus,
     scheduleRawInputFollow,
-    resetHorizontalScrollAfterLineSubmit,
+    followHorizontalScrollAfterInput,
     clearPtySelection,
     refreshProjectedSearchSelection,
   ]);
@@ -1331,10 +1335,10 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       const encoded = encodePtyInputForTerminalModes(data, terminalRef.current?.modes);
       sendRemoteInputRaw(sessionId, encoded);
       scheduleRawInputFollow("mobileControl", { force: true });
-      resetHorizontalScrollAfterLineSubmit(data, "mobileControlEnter");
+      followHorizontalScrollAfterInput(data, "mobileControlEnter");
       terminalRef.current?.focus();
     },
-    [canAcceptInput, resetHorizontalScrollAfterLineSubmit, scheduleRawInputFollow, sessionId],
+    [canAcceptInput, followHorizontalScrollAfterInput, scheduleRawInputFollow, sessionId],
   );
 
   const pasteMobileClipboard = useCallback((): void => {
@@ -1357,14 +1361,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         }
         sendRemoteInputRaw(sessionId, text);
         scheduleRawInputFollow("paste");
-        resetHorizontalScrollAfterLineSubmit(text, "pasteEnter");
+        followHorizontalScrollAfterInput(text, "pasteEnter");
       })
       .catch((err: unknown) => {
         const message = err instanceof Error && err.message ? err.message : "无法读取剪贴板";
         toast.error(message);
       })
       .finally(() => terminalRef.current?.focus());
-  }, [canAcceptInput, resetHorizontalScrollAfterLineSubmit, scheduleRawInputFollow, sessionId]);
+  }, [canAcceptInput, followHorizontalScrollAfterInput, scheduleRawInputFollow, sessionId]);
 
   // 控制条会随横竖屏在一行/两行之间切换，PTY 留白直接跟随实测高度。
   const containerPaddingBottom = resolvePtyContainerPaddingBottom({

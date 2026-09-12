@@ -41,6 +41,38 @@ describe("SessionManager", () => {
   });
 
   describe("createSession", () => {
+    it("preserves the actual shell family when a terminal reconnects after a daemon restart", () => {
+      const session = manager.createSession(
+        "terminal",
+        "pty",
+        "claude",
+        "/tmp/project",
+        ALIVE_PID,
+        "Editable title",
+        undefined,
+        "proxy-hosted",
+        false,
+        "zsh",
+      );
+      manager.releasePtyBinding(session.id, ALIVE_PID);
+      const restored = new SessionManager({
+        persistPath,
+        allowSessionRuntimeHandover: { terminal: true, worker: true },
+      });
+      try {
+        const rebound = restored.claimPtySession({
+          kind: "terminal",
+          provider: "claude",
+          ptyOwner: "proxy-hosted",
+          cwd: session.cwd,
+          pid: ALIVE_PID,
+          sessionId: session.id,
+        });
+        expect(rebound.session).toMatchObject({ shellFamily: "zsh", name: "Editable title" });
+      } finally {
+        restored.stopReaper();
+      }
+    });
     it("creates a PTY session with unique id and idle state", () => {
       const info = manager.createSession(
         "agent",

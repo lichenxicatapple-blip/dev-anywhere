@@ -65,7 +65,8 @@ test.describe("PTY scroll: back-to-bottom, new-message hint, approval, resize, t
     );
 
     await sendPtyLines(page, { count: 90, pad: 2 });
-    await expect(ptyScrollbar(page)).toHaveClass(/opacity-100/);
+    await expectPtyCursorAwareBottom(page);
+    await expect(ptyScrollbar(page)).toHaveClass(/opacity-0/);
 
     await ptyTerminal(page).hover();
     await scrollPtyToTop(page, { wheelDeltaY: -1200 });

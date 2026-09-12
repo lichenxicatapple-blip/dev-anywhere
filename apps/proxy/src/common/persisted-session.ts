@@ -1,4 +1,4 @@
-import { providerValues } from "@dev-anywhere/shared";
+import { providerValues, TerminalShellFamilySchema } from "@dev-anywhere/shared";
 import { z } from "zod";
 
 const persistedSessionFields = {
@@ -38,6 +38,7 @@ export const PersistedSessionRecordSchema = z.union([
       mode: z.literal("pty"),
       provider: z.literal("claude"),
       ptyOwner: z.literal("proxy-hosted"),
+      shellFamily: TerminalShellFamilySchema.optional(),
     })
     .strict(),
 ]);

@@ -14,11 +14,14 @@ import {
   ClipboardPaste,
   CornerDownLeft,
 } from "lucide-react";
+import type { TerminalShellFamily } from "@dev-anywhere/shared";
+import { getPtyShortcutPreset, type PtyShortcut } from "@/lib/pty-shortcuts";
 import type { SessionProvider } from "@/lib/session-provider";
 
 interface PtyMobileControlsProps {
   sessionKind?: "agent" | "terminal";
   provider?: SessionProvider;
+  shellFamily?: TerminalShellFamily;
   bottomInset?: number;
   onInput: (data: string) => void;
   onPaste: () => void;
@@ -30,35 +33,19 @@ interface PtyMobileControlsProps {
 const REPEAT_INITIAL_DELAY_MS = 300;
 const REPEAT_INTERVAL_MS = 50;
 const CTRL_C_CLEAR_GUARD_MS = 1200;
-
-function usesGuardedCtrlCClear(provider: SessionProvider | undefined): boolean {
-  return provider === "codex" || provider === "kimi";
-}
-
-function clearInputSequence(
-  sessionKind: "agent" | "terminal" | undefined,
-  provider: SessionProvider | undefined,
-): string {
-  if (sessionKind === "terminal") return "\x15";
-  return usesGuardedCtrlCClear(provider) ? "\x03" : "\x1b\x1b";
-}
-
-// 移动端浮层按键。竖屏保持 2 行倒 T 方向键，横屏利用可用宽度压成 1 行：
-//   Row1: [Esc ][Tab ][⇧Tab][^T  ][ ↑ ][ ^S ]
-//   Row2: [清空][ ^C ][ ^B ][  ← ][ ↓ ][  → ]
-//   横屏: [Esc][Tab][⇧Tab][^T][^S][清空][^C][^B][←][↑][↓][→][粘贴][回车]
-//   Paste / Enter 在竖屏最右, 各占一行
-// 方向键长按连发, 其他单击。所有按键统一 h-11 外壳 / h-9 内 pill, 视觉上一致。
-// onPointerDown preventDefault 防把焦点抢走 xterm。
+// The four contextual keys share one preset with the menu. Their positions leave the
+// arrow cluster, Paste and Enter unchanged in portrait and landscape.
 export function PtyMobileControls({
   sessionKind,
   provider,
+  shellFamily,
   bottomInset = 0,
   onInput,
   onPaste,
   onHeightChange,
 }: PtyMobileControlsProps) {
   const rootRef = useRef<HTMLDivElement>(null);
+  const { mobile } = getPtyShortcutPreset({ kind: sessionKind, provider, shellFamily });
 
   useLayoutEffect(() => {
     if (!onHeightChange) return;
@@ -107,42 +94,21 @@ export function PtyMobileControls({
         >
           ⇧Tab
         </SinglePressKey>
+        <ShortcutKey shortcut={mobile[0]} position="primary" onInput={onInput} />
+        <ShortcutKey shortcut={mobile[1]} position="secondary" onInput={onInput} />
+        {mobile[2] === "clear" ? (
+          <ClearInputKey key={provider} provider={provider} onInput={onInput} />
+        ) : (
+          <ShortcutKey shortcut={mobile[2]} position="editing" onInput={onInput} />
+        )}
         <SinglePressKey
-          label="发送 Ctrl+T"
-          slot="pty-mobile-key-ctrl-t"
-          onPress={() => onInput("\x14")}
-        >
-          ^T
-        </SinglePressKey>
-        <SinglePressKey
-          label="发送 Ctrl+S"
-          slot="pty-mobile-key-ctrl-s"
-          onPress={() => onInput("\x13")}
-        >
-          ^S
-        </SinglePressKey>
-
-        <ClearInputKey
-          sessionKind={sessionKind}
-          provider={provider}
-          label="清空输入区"
-          slot="pty-mobile-key-clear"
-          onInput={onInput}
-        />
-        <SinglePressKey
-          label="发送 Ctrl+C 中断"
+          label="发送 Ctrl+C"
           slot="pty-mobile-key-ctrl-c"
           onPress={() => onInput("\x03")}
         >
           ^C
         </SinglePressKey>
-        <SinglePressKey
-          label="发送 Ctrl+B"
-          slot="pty-mobile-key-ctrl-b"
-          onPress={() => onInput("\x02")}
-        >
-          ^B
-        </SinglePressKey>
+        <ShortcutKey shortcut={mobile[3]} position="tertiary" onInput={onInput} />
         <RepeatableKey
           label="光标左移"
           slot="pty-mobile-key-left"
@@ -206,7 +172,6 @@ const KEY_BUTTON_OUTER_CLASS =
 const KEY_PILL_BASE_CLASS =
   "dev-pty-mobile-key-pill inline-flex h-9 w-full items-center justify-center rounded-[6px] border px-1 text-xs font-mono";
 const KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} dev-pty-mobile-key-pill-default`;
-const GUARDED_KEY_PILL_CLASS = `${KEY_PILL_BASE_CLASS} dev-pty-mobile-key-pill-guarded`;
 const ARROW_KEY_PILL_CLASS =
   "dev-pty-mobile-key-pill dev-pty-mobile-key-pill-arrow inline-flex h-9 w-full items-center justify-center rounded-[6px] border px-1 text-xs font-mono";
 
@@ -214,16 +179,18 @@ interface SinglePressKeyProps {
   label: string;
   slot: string;
   onPress: () => void;
+  position?: string;
   children: ReactNode;
 }
 
-function SinglePressKey({ label, slot, onPress, children }: SinglePressKeyProps) {
+function SinglePressKey({ label, slot, onPress, position, children }: SinglePressKeyProps) {
   return (
     <button
       type="button"
       className={KEY_BUTTON_OUTER_CLASS}
       aria-label={label}
       data-slot={slot}
+      data-key-position={position}
       onPointerDown={(event) => event.preventDefault()}
       onClick={onPress}
     >
@@ -232,28 +199,37 @@ function SinglePressKey({ label, slot, onPress, children }: SinglePressKeyProps)
   );
 }
 
-interface ClearInputKeyProps {
-  sessionKind?: "agent" | "terminal";
-  provider?: SessionProvider;
-  label: string;
-  slot: string;
+function ShortcutKey({
+  shortcut,
+  position,
+  onInput,
+}: {
+  shortcut: PtyShortcut;
+  position: string;
   onInput: (data: string) => void;
+}) {
+  return (
+    <SinglePressKey
+      label={`发送 ${shortcut.key}`}
+      slot={`pty-mobile-key-${shortcut.id}`}
+      position={position}
+      onPress={() => onInput(shortcut.data)}
+    >
+      {shortcut.display}
+    </SinglePressKey>
+  );
 }
 
-function ClearInputKey({ sessionKind, provider, label, slot, onInput }: ClearInputKeyProps) {
+function ClearInputKey({
+  provider,
+  onInput,
+}: {
+  provider?: SessionProvider;
+  onInput: (data: string) => void;
+}) {
+  const usesCtrlC = provider === "codex" || provider === "kimi";
   const guardTimerRef = useRef<number | null>(null);
-  const guardedRef = useRef(false);
   const [guarded, setGuarded] = useState(false);
-
-  const clearGuard = (): void => {
-    if (guardTimerRef.current !== null) {
-      window.clearTimeout(guardTimerRef.current);
-      guardTimerRef.current = null;
-    }
-    guardedRef.current = false;
-    setGuarded(false);
-  };
-
   useEffect(
     () => () => {
       if (guardTimerRef.current !== null) window.clearTimeout(guardTimerRef.current);
@@ -261,31 +237,28 @@ function ClearInputKey({ sessionKind, provider, label, slot, onInput }: ClearInp
     [],
   );
 
-  const startCtrlCGuard = (): void => {
-    guardedRef.current = true;
-    setGuarded(true);
-    if (guardTimerRef.current !== null) window.clearTimeout(guardTimerRef.current);
-    guardTimerRef.current = window.setTimeout(clearGuard, CTRL_C_CLEAR_GUARD_MS);
-  };
-
-  const handlePress = (): void => {
-    if (usesGuardedCtrlCClear(provider) && guardedRef.current) return;
-    onInput(clearInputSequence(sessionKind, provider));
-    if (usesGuardedCtrlCClear(provider)) startCtrlCGuard();
-  };
-
   return (
     <button
       type="button"
       className={KEY_BUTTON_OUTER_CLASS}
-      aria-label={label}
-      aria-disabled={guarded ? "true" : undefined}
-      data-slot={slot}
-      data-guarded={guarded ? "true" : undefined}
+      aria-label="清空输入区"
+      aria-disabled={guarded || undefined}
+      data-slot="pty-mobile-key-clear"
+      data-key-position="editing"
       onPointerDown={(event) => event.preventDefault()}
-      onClick={handlePress}
+      onClick={() => {
+        if (guardTimerRef.current !== null) return;
+        onInput(usesCtrlC ? "\x03" : "\x1b\x1b");
+        if (!usesCtrlC) return;
+        // Codex/Kimi reuse Ctrl+C for exit. Suppress a rapid second tap after clearing.
+        setGuarded(true);
+        guardTimerRef.current = window.setTimeout(() => {
+          guardTimerRef.current = null;
+          setGuarded(false);
+        }, CTRL_C_CLEAR_GUARD_MS);
+      }}
     >
-      <span className={guarded ? GUARDED_KEY_PILL_CLASS : KEY_PILL_CLASS}>
+      <span className={`${KEY_PILL_CLASS}${guarded ? " opacity-60" : ""}`}>
         {guarded ? "已清" : "清空"}
       </span>
     </button>

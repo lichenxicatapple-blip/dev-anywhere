@@ -535,6 +535,57 @@ async function readPtyLiveTopCoverage(page: Page): Promise<{
 }
 
 test.describe("L4 mobile / PTY scroll back-to-bottom", () => {
+  test("shows the vertical scrollbar for touch but keeps it hidden during automatic output", async ({
+    emuPage,
+  }) => {
+    await setupPtyChat(emuPage, {
+      sessionId: `${SESSION_ID}-scrollbar`,
+      sessionKind: "agent",
+      provider: "codex",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    await sendPtyLines(emuPage, { count: 120 });
+    await expectPtyScrollable(emuPage, 200);
+    await expectPtyCursorAwareBottom(emuPage);
+    const scrollbar = emuPage.locator('[data-slot="pty-scrollbar"]');
+    const beforeOutput = await readPtyScrollMetrics(emuPage);
+    for (let index = 0; index < 20; index += 1) {
+      await sendPtyOutput(emuPage, `automatic output ${index}\r\n`);
+      await emuPage.waitForTimeout(100);
+      await expect(scrollbar).toHaveCSS("opacity", "0");
+    }
+    await expectPtyCursorAwareBottom(emuPage);
+    expect((await readPtyScrollMetrics(emuPage)).scrollTop).toBeGreaterThan(beforeOutput.scrollTop);
+
+    const box = await ptyTerminal(emuPage).boundingBox();
+    if (!box) throw new Error("PTY terminal is not visible");
+    await touchDrag(
+      emuPage,
+      { x: box.x + box.width / 2, y: box.y + box.height * 0.35 },
+      { x: box.x + box.width / 2, y: box.y + box.height * 0.7 },
+      { primeMovePx: 32 },
+    );
+    await expect(scrollbar).toHaveCSS("opacity", "1");
+    await expect(backToBottom(emuPage)).toHaveJSProperty("inert", false);
+    // Output continues while the user reviews history. It must not renew the fade timer.
+    for (let index = 0; index < 15; index += 1) {
+      await sendPtyOutput(emuPage, `output while reviewing ${index}\r\n`);
+      await emuPage.waitForTimeout(100);
+    }
+    await expect(scrollbar).toHaveCSS("opacity", "0");
+    await expect(backToBottomNewIndicator(emuPage)).toBeVisible();
+
+    await touchTap(emuPage, backToBottom(emuPage));
+    await expectPtyCursorAwareBottom(emuPage);
+    await sendPtyOutput(emuPage, "automatic following resumed\r\n");
+    await expectPtyCursorAwareBottom(emuPage);
+    await expect(scrollbar).toHaveCSS("opacity", "0");
+  });
+
   test.setTimeout(60_000);
 
   test("PTY screen covers the mobile scroll viewport without a full-row bottom blank", async ({

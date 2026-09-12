@@ -1,5 +1,8 @@
 interface PtyHorizontalScrollState {
   intent: boolean;
+  // Only the temporary line-submit hold can end on a visible cursor. Manual review requires
+  // explicit local input; remote redraws must never infer that the reader has finished.
+  resumeWhenCursorVisible: boolean;
   lastUserInputAt: number | null;
   unmarkedOriginLeft: number | null;
   lastSeenLeft: number;
@@ -14,6 +17,7 @@ export type PtyHorizontalScrollIntentTrace =
 export function createInitialPtyHorizontalScrollState(): PtyHorizontalScrollState {
   return {
     intent: false,
+    resumeWhenCursorVisible: false,
     lastUserInputAt: null,
     unmarkedOriginLeft: null,
     lastSeenLeft: 0,
@@ -35,6 +39,7 @@ export function clearPtyHorizontalIntent(
 ): { state: PtyHorizontalScrollState; trace: PtyHorizontalScrollIntentTrace | null } {
   const next = {
     ...withIntent(state, false),
+    resumeWhenCursorVisible: false,
     lastUserInputAt: null,
     pendingFollowLeft: null,
     ...(input.scrollLeft !== undefined ? { lastSeenLeft: input.scrollLeft } : {}),
@@ -47,11 +52,12 @@ export function clearPtyHorizontalIntent(
 
 export function markPtyHorizontalUserInput(
   state: PtyHorizontalScrollState,
-  input: { now: number; details: string },
+  input: { now: number; details: string; resumeWhenCursorVisible?: boolean },
 ): { state: PtyHorizontalScrollState; trace: PtyHorizontalScrollIntentTrace | null } {
   const next = {
     ...state,
     intent: true,
+    resumeWhenCursorVisible: input.resumeWhenCursorVisible ?? false,
     lastUserInputAt: input.now,
     unmarkedOriginLeft: null,
   };
@@ -122,6 +128,7 @@ export function reducePtyHorizontalContainerScroll(
       state: {
         ...state,
         intent: true,
+        resumeWhenCursorVisible: false,
         pendingFollowLeft: null,
         unmarkedOriginLeft: null,
         lastSeenLeft: input.scrollLeft,
@@ -139,6 +146,7 @@ export function reducePtyHorizontalContainerScroll(
       state: {
         ...state,
         intent: true,
+        resumeWhenCursorVisible: false,
         pendingFollowLeft: null,
         unmarkedOriginLeft: null,
         lastSeenLeft: input.scrollLeft,

@@ -10,6 +10,7 @@ import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent }
 import { createPortal } from "react-dom";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
 import type { SessionProvider } from "@/lib/session-provider";
+import { useSessionStore } from "@/stores/session-store";
 import { BackToBottom } from "./back-to-bottom";
 import { ChatFindBar } from "./chat-find-bar";
 import { PtyConnectionOverlay } from "./pty-connection-overlay";
@@ -36,6 +37,10 @@ export function ChatPtyView({
   findRequest,
   resizeRequest,
 }: ChatPtyViewProps) {
+  const shellFamily = useSessionStore((s) => {
+    const session = s.sessions.find((entry) => entry.sessionId === sessionId);
+    return session?.kind === "terminal" ? session.shellFamily : undefined;
+  });
   // containerEl 用 state 是为了让 scroll controller 在 DOM 挂载后初始化
   const [containerEl, setContainerEl] = useState<HTMLDivElement | null>(null);
   const [mobileControlsHeight, setMobileControlsHeight] = useState(0);
@@ -193,6 +198,7 @@ export function ChatPtyView({
         <PtyMobileControls
           sessionKind={sessionKind}
           provider={provider}
+          shellFamily={shellFamily}
           bottomInset={view.mobileControlsBottomInset}
           onInput={view.sendMobileInput}
           onPaste={view.pasteMobileClipboard}
@@ -252,7 +258,11 @@ export function ChatPtyView({
           ) : null}
         </div>
       ) : null}
-      <PtyScrollbar state={view.scrollState} onScrollRatio={view.scrollToRatio} />
+      <PtyScrollbar
+        state={view.scrollState}
+        scrollContainer={containerEl}
+        onScrollRatio={view.scrollToRatio}
+      />
       <PtyHorizontalScrollbar state={view.scrollState} onScrollRatio={view.scrollToXRatio} />
       <PtyConnectionOverlay {...view.connectionOverlay} />
       <PtyInputDebugPanel

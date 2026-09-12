@@ -105,6 +105,8 @@ export function createPtyScrollTerminal(lineTextByIndex: Record<number, string> 
   const terminal = {
     rows: 20,
     cols: 80,
+    modes: { synchronizedOutputMode: false },
+    parser: { registerCsiHandler: vi.fn(() => ({ dispose: vi.fn() })) },
     buffer: {
       onBufferChange: vi.fn((handler: Handler) => {
         bufferChangeHandler = handler;

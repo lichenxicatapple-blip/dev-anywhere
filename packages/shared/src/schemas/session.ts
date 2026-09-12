@@ -3,6 +3,9 @@ import { providerValues, ptyOwnerValues } from "../constants/enums.js";
 import { ptySemanticStateValues } from "../constants/pty.js";
 import { IdSchema } from "./id.js";
 
+export const TerminalShellFamilySchema = z.enum(["bash", "zsh", "fish", "powershell", "cmd"]);
+export type TerminalShellFamily = z.infer<typeof TerminalShellFamilySchema>;
+
 export const sessionStateValues = [
   "idle",
   "working",
@@ -46,6 +49,7 @@ export function createSessionIdentitySchema<T extends z.ZodRawShape>(commonField
       mode: z.literal("pty"),
       provider: z.literal("claude"),
       ptyOwner: z.literal("proxy-hosted"),
+      shellFamily: TerminalShellFamilySchema.optional(),
     }),
   ]);
 }

@@ -1,5 +1,5 @@
 import { win32 } from "node:path";
-import type { TerminalShell, TerminalShellOption } from "@dev-anywhere/shared";
+import type { TerminalShell, TerminalShellFamily, TerminalShellOption } from "@dev-anywhere/shared";
 import {
   defaultShell,
   environmentValue,
@@ -11,6 +11,18 @@ import {
 interface ResolvedTerminalShell {
   command: string;
   label?: string;
+}
+
+/** Identify the launched executable; OS and editable session titles are not shell identities. */
+export function getTerminalShellFamily(command: string): TerminalShellFamily | undefined {
+  const name = command
+    .split(/[\\/]/)
+    .at(-1)
+    ?.toLowerCase()
+    .replace(/\.exe$/, "");
+  if (name === "pwsh" || name === "powershell") return "powershell";
+  if (name === "bash" || name === "zsh" || name === "fish" || name === "cmd") return name;
+  return undefined;
 }
 
 interface WindowsTerminalShell extends TerminalShellOption {

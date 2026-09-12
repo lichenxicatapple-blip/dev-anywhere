@@ -14,6 +14,10 @@ import {
   sendPtyOutput,
 } from "../pty-scroll-helpers";
 import { touchPtyTerminalAndWaitForSoftKeyboard } from "./pty-soft-keyboard";
+import {
+  verifyHiddenCursorRedraw,
+  verifyManualHorizontalReview,
+} from "../pty-cursor-redraw-helpers";
 
 const SESSION_ID = "mobile-pty-horizontal-scroll";
 
@@ -71,6 +75,50 @@ async function touchDrag(
 
 test.describe("L4 mobile / PTY input scroll", () => {
   test.setTimeout(60_000);
+
+  test("keeps split software-cursor redraws stable and still follows long input", async ({
+    emuPage,
+  }, testInfo) => {
+    await verifyHiddenCursorRedraw(emuPage, testInfo, mobileBaseUrl);
+  });
+
+  test("keeps a partial native touch pan until the user resumes input", async ({
+    emuPage,
+  }, testInfo) => {
+    await verifyManualHorizontalReview(emuPage, testInfo, {
+      baseUrl: mobileBaseUrl,
+      pan: async () => {
+        const box = await ptyTerminal(emuPage).boundingBox();
+        if (!box) throw new Error("PTY terminal is not visible");
+        const cdp = await emuPage.context().newCDPSession(emuPage);
+        try {
+          const point = (dx: number) => ({
+            x: box.x + 80 + dx,
+            y: box.y + box.height * 0.55,
+            id: 1,
+            radiusX: 2,
+            radiusY: 2,
+            force: 1,
+          });
+          await cdp.send("Input.dispatchTouchEvent", {
+            type: "touchStart",
+            touchPoints: [point(0)],
+          });
+          for (let step = 1; step <= 6; step += 1) {
+            await emuPage.waitForTimeout(50);
+            await cdp.send("Input.dispatchTouchEvent", {
+              type: "touchMove",
+              touchPoints: [point(step * 20)],
+            });
+          }
+          await emuPage.waitForTimeout(100);
+          await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+        } finally {
+          await cdp.detach();
+        }
+      },
+    });
+  });
 
   test("keeps a hosted Shell session at its snapshot width after mobile reconnect", async ({
     emuPage,

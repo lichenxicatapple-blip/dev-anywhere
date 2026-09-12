@@ -60,7 +60,7 @@ export function TerminalDimensionInput({
       data-terminal-dimension-input=""
       data-editing={draft !== null ? "true" : "false"}
       className={cn(
-        "h-[22px] w-9 rounded-[5px] border border-transparent bg-transparent px-0.5 text-center text-sm font-medium leading-none tabular-nums text-foreground outline-none hover:bg-muted/45 focus:border-ring focus:bg-background disabled:cursor-not-allowed disabled:opacity-50 [@media(pointer:coarse)]:text-base",
+        "h-[22px] w-9 rounded-[5px] border border-transparent bg-transparent px-0.5 text-center text-sm font-medium leading-none tabular-nums text-foreground outline-none hover:bg-muted/45 focus:border-ring focus:bg-background disabled:cursor-not-allowed disabled:opacity-50 [@media(pointer:coarse)]:focus:text-base",
         invalid && "border-destructive focus:border-destructive",
       )}
       disabled={disabled}

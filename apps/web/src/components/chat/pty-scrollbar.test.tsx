@@ -1,18 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { act, cleanup, render } from "@testing-library/react";
+import { act, cleanup, fireEvent, render } from "@testing-library/react";
 import type { PtyScrollState } from "@/lib/pty-scroll-controller";
 import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
 
-afterEach(cleanup);
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+});
 
 function dispatchPointer(
   type: string,
   target: HTMLElement,
-  props: { pointerId: number; clientY?: number; clientX?: number },
+  props: { pointerId: number; pointerType?: string; clientY?: number; clientX?: number },
 ): void {
   const event = new Event(type, { bubbles: true, cancelable: true });
   Object.defineProperties(event, {
     pointerId: { value: props.pointerId },
+    pointerType: { value: props.pointerType ?? "mouse" },
     clientY: { value: props.clientY ?? 0 },
     clientX: { value: props.clientX ?? 0 },
   });
@@ -78,7 +82,7 @@ function makeScrollState(overrides: Partial<PtyScrollState> = {}): PtyScrollStat
 describe("PtyScrollbar", () => {
   it("stays non-interactive when content is not scrollable", () => {
     const { container } = render(
-      <PtyScrollbar state={makeScrollState()} onScrollRatio={vi.fn()} />,
+      <PtyScrollbar scrollContainer={null} state={makeScrollState()} onScrollRatio={vi.fn()} />,
     );
 
     const track = container.querySelector('[data-slot="pty-scrollbar"]');
@@ -89,6 +93,7 @@ describe("PtyScrollbar", () => {
   it("renders thumb geometry from scroll state", () => {
     const { container } = render(
       <PtyScrollbar
+        scrollContainer={null}
         state={makeScrollState({ scrollTop: 800, scrollHeight: 2000, scrollable: true })}
         onScrollRatio={vi.fn()}
       />,
@@ -99,35 +104,109 @@ describe("PtyScrollbar", () => {
     expect(thumb?.style.top).toBe("40%");
   });
 
-  // 平时隐藏, 滚动时短暂出现, 静止 ~1s 后再隐藏。
-  it("hides on initial render even when scrollable, and reveals after scrollTop changes", () => {
-    vi.useFakeTimers();
+  it("stays hidden during automatic scrolling, output growth and layout changes", () => {
     const { container, rerender } = render(
       <PtyScrollbar
-        state={makeScrollState({ scrollTop: 0, scrollHeight: 2000, scrollable: true })}
+        scrollContainer={null}
+        state={makeScrollState({ scrollHeight: 2000, scrollable: true })}
         onScrollRatio={vi.fn()}
       />,
     );
     const track = container.querySelector('[data-slot="pty-scrollbar"]');
     expect(track?.className).toContain("opacity-0");
 
+    for (const update of [
+      { scrollTop: 1600 },
+      { scrollTop: 1800, scrollHeight: 2200 },
+      { scrollTop: 1900, scrollHeight: 2200, clientHeight: 300 },
+    ]) {
+      rerender(
+        <PtyScrollbar
+          scrollContainer={null}
+          state={makeScrollState({ scrollHeight: 2000, scrollable: true, ...update })}
+          onScrollRatio={vi.fn()}
+        />,
+      );
+      expect(track?.className).toContain("opacity-0");
+    }
+  });
+
+  it("reveals during touch and fades after release even when output continues", () => {
+    vi.useFakeTimers();
+    const scrollContainer = document.createElement("div");
+    const { container, rerender } = render(
+      <PtyScrollbar
+        scrollContainer={scrollContainer}
+        state={makeScrollState({ scrollTop: 1600, scrollHeight: 2000, scrollable: true })}
+        onScrollRatio={vi.fn()}
+      />,
+    );
+    const track = container.querySelector('[data-slot="pty-scrollbar"]');
+    fireEvent.touchStart(scrollContainer, { touches: [{ identifier: 1 }] });
+    expect(track?.className).toContain("opacity-100");
+    act(() => vi.advanceTimersByTime(1500));
+    expect(track?.className).toContain("opacity-100");
+
+    fireEvent.touchEnd(scrollContainer, { touches: [] });
+    act(() => vi.advanceTimersByTime(700));
     rerender(
       <PtyScrollbar
-        state={makeScrollState({ scrollTop: 200, scrollHeight: 2000, scrollable: true })}
+        scrollContainer={scrollContainer}
+        state={makeScrollState({ scrollTop: 1800, scrollHeight: 2200, scrollable: true })}
         onScrollRatio={vi.fn()}
       />,
     );
     expect(track?.className).toContain("opacity-100");
-
-    act(() => vi.advanceTimersByTime(1000));
+    act(() => vi.advanceTimersByTime(300));
     expect(track?.className).toContain("opacity-0");
-    vi.useRealTimers();
+  });
+
+  it("reveals for vertical wheel input and resets the fade on another wheel event", () => {
+    vi.useFakeTimers();
+    const scrollContainer = document.createElement("div");
+    const { container } = render(
+      <PtyScrollbar
+        scrollContainer={scrollContainer}
+        state={makeScrollState({ scrollHeight: 2000, scrollable: true })}
+        onScrollRatio={vi.fn()}
+      />,
+    );
+    const track = container.querySelector('[data-slot="pty-scrollbar"]');
+    fireEvent.wheel(scrollContainer, { deltaX: 100, deltaY: 0 });
+    expect(track?.className).toContain("opacity-0");
+    fireEvent.wheel(scrollContainer, { deltaY: -100 });
+    expect(track?.className).toContain("opacity-100");
+    act(() => vi.advanceTimersByTime(700));
+    fireEvent.wheel(scrollContainer, { deltaY: -100 });
+    act(() => vi.advanceTimersByTime(700));
+    expect(track?.className).toContain("opacity-100");
+    act(() => vi.advanceTimersByTime(300));
+    expect(track?.className).toContain("opacity-0");
+  });
+
+  it("reveals on mouse hover without treating touch pointer entry as sticky hover", () => {
+    const { container } = render(
+      <PtyScrollbar
+        scrollContainer={null}
+        state={makeScrollState({ scrollHeight: 2000, scrollable: true })}
+        onScrollRatio={vi.fn()}
+      />,
+    );
+    const track = container.querySelector<HTMLElement>('[data-slot="pty-scrollbar"]');
+    if (!track) throw new Error("missing scrollbar track");
+    act(() => dispatchPointer("pointerover", track, { pointerId: 1, pointerType: "touch" }));
+    expect(track.className).toContain("opacity-0");
+    act(() => dispatchPointer("pointerover", track, { pointerId: 2, pointerType: "mouse" }));
+    expect(track.className).toContain("opacity-100");
+    act(() => dispatchPointer("pointerout", track, { pointerId: 2, pointerType: "mouse" }));
+    expect(track.className).toContain("opacity-0");
   });
 
   it("maps pointer drag to scroll ratios", () => {
     const onScrollRatio = vi.fn();
     const { container } = render(
       <PtyScrollbar
+        scrollContainer={null}
         state={makeScrollState({ scrollHeight: 2000, scrollable: true })}
         onScrollRatio={onScrollRatio}
       />,
@@ -152,6 +231,7 @@ describe("PtyScrollbar", () => {
     const onScrollRatio = vi.fn();
     const { container } = render(
       <PtyScrollbar
+        scrollContainer={null}
         state={makeScrollState({ scrollTop: 800, scrollHeight: 2000, scrollable: true })}
         onScrollRatio={onScrollRatio}
       />,

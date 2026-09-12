@@ -180,12 +180,6 @@ body {
   color: var(--foreground);
 }
 
-.dev-pty-mobile-key-pill-guarded {
-  border-color: color-mix(in srgb, var(--color-status-warning) 40%, var(--border));
-  background: color-mix(in srgb, var(--color-status-warning) 12%, var(--background));
-  color: var(--color-status-warning);
-}
-
 .dev-pty-mobile-key-pill-arrow {
   border-color: color-mix(in srgb, var(--color-status-working) 30%, var(--border));
   background: color-mix(in srgb, var(--color-status-working) 10%, var(--background));
@@ -204,18 +198,18 @@ body {
   color: color-mix(in srgb, var(--primary) 84%, var(--foreground));
 }
 
-@media (orientation: portrait) {
+@media (orientation: portrait), (width < 600px) {
   .dev-pty-mobile-key-grid > [data-slot="pty-mobile-key-up"] {
     grid-column: 5;
     grid-row: 1;
   }
 
-  .dev-pty-mobile-key-grid > [data-slot="pty-mobile-key-ctrl-s"] {
+  .dev-pty-mobile-key-grid > [data-key-position="secondary"] {
     grid-column: 6;
     grid-row: 1;
   }
 
-  .dev-pty-mobile-key-grid > [data-slot="pty-mobile-key-clear"] {
+  .dev-pty-mobile-key-grid > [data-key-position="editing"] {
     grid-column: 1;
     grid-row: 2;
   }
@@ -225,7 +219,7 @@ body {
     grid-row: 2;
   }
 
-  .dev-pty-mobile-key-grid > [data-slot="pty-mobile-key-ctrl-b"] {
+  .dev-pty-mobile-key-grid > [data-key-position="tertiary"] {
     grid-column: 3;
     grid-row: 2;
   }

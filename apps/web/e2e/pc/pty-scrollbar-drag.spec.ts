@@ -34,9 +34,10 @@ test.describe("PTY scrollbar thumb drag", () => {
     const scrollbar = page.locator('[data-slot="pty-scrollbar"]');
     const thumb = page.locator('[data-slot="pty-scrollbar-thumb"]');
 
-    // hover 让 scrollbar 浮起 (scrolling || hovering || dragging 任一即可见).
-    await terminal.hover();
-    await expect(scrollbar).toBeVisible();
+    // 自动滚底不显示滚动条；鼠标移到右侧轨道后才显示，且始终可以开始拖动。
+    await expect(scrollbar).toHaveCSS("opacity", "0");
+    await scrollbar.hover();
+    await expect(scrollbar).toHaveCSS("opacity", "1");
     await expect(thumb).toBeVisible();
 
     const initialScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
