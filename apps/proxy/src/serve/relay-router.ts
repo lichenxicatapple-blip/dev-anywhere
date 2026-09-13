@@ -229,6 +229,9 @@ export class RelayRouter {
       case "dir_list_request":
         this.resourceHandlers.onDirListRequest(msg);
         return;
+      case "filesystem_roots_request":
+        void this.resourceHandlers.onFileSystemRootsRequest(msg);
+        return;
       case "dir_create_request":
         this.resourceHandlers.onDirCreateRequest(msg);
         return;

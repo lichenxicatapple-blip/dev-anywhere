@@ -7,6 +7,7 @@ import { measureXtermCellSize } from "./pty-xterm-metrics";
 import type { PtySelectionPathAction } from "./pty-selection-path-action";
 import { findFileDownloadPathMatchesInWrappedBuffer } from "./xterm-file-download-links";
 import { findImagePreviewPathMatchesInWrappedBuffer } from "./xterm-image-preview-links";
+import { findUrlTextRanges } from "./url-text";
 
 export interface TerminalSelectionPoint {
   row: number;
@@ -18,9 +19,10 @@ export interface TerminalSelectionResult {
   focus: TerminalSelectionPoint;
   text: string;
   columnMode?: boolean;
+  pathAction?: PtySelectionPathAction;
 }
 
-export interface TerminalPathSelectionResult extends TerminalSelectionResult {
+interface TerminalPathSelectionResult extends TerminalSelectionResult {
   pathAction: PtySelectionPathAction;
 }
 
@@ -456,9 +458,16 @@ export function resolveTerminalInitialRangeAtBufferPoint({
       span.row === point.row && point.column >= span.cellStart && point.column <= span.cellEnd,
   );
   if (!targetSpan) return null;
-  let semanticRange = findSemanticTextRanges(logicalText).find(
+  let semanticRange = findUrlTextRanges(logicalText).find(
     (range) => range.start < targetSpan.textEnd && range.end > targetSpan.textStart,
   );
+  if (!semanticRange) {
+    const pathSelection = resolveTerminalPathLinkAtBufferPoint({ terminal, point });
+    if (pathSelection) return pathSelection;
+    semanticRange = findSemanticTextRanges(logicalText).find(
+      (range) => range.start < targetSpan.textEnd && range.end > targetSpan.textStart,
+    );
+  }
   if (!semanticRange) {
     const targetIndex = mappedSpans.indexOf(targetSpan);
     const targetText = logicalText.slice(targetSpan.textStart, targetSpan.textEnd);
@@ -517,7 +526,7 @@ export function resolveTerminalLineAtBufferPoint({
   });
 }
 
-export function resolveTerminalPathLinkAtBufferPoint({
+function resolveTerminalPathLinkAtBufferPoint({
   terminal,
   point,
 }: SelectTerminalPathLinkAtBufferPointOptions): TerminalPathSelectionResult | null {

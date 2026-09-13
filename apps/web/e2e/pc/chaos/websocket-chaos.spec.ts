@@ -497,7 +497,7 @@ test.describe("WebSocket reconnect chaos", () => {
     }
     await selectFakeProxy(page);
     await openCreateAgentSessionDialog(page);
-    await page.getByLabel("工作目录").fill("/home/dev/projects/sample-app");
+    await page.getByLabel("工作目录", { exact: true }).fill("/home/dev/projects/sample-app");
     const dialog = page.getByRole("dialog", { name: "新建会话" });
     const createButton = dialog.getByRole("button", { name: "创建" });
 

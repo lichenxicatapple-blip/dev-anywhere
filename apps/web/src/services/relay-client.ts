@@ -17,6 +17,7 @@ import type {
   DevicePreviewSummary,
   DevicePreviewTarget,
   DirEntry,
+  FileSystemRoot,
   FileTreeGroup,
   HistorySession,
   MessageEnvelope,
@@ -519,6 +520,24 @@ export class RelayClient {
     ).then((resp) => ({
       success: resp.success,
       path: resp.path,
+      error: resp.error,
+      errorCode: resp.errorCode,
+    }));
+  }
+
+  requestFileSystemRoots(
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+  ): Promise<{ roots: FileSystemRoot[] } & RequestError> {
+    const requestId = nextRequestId("filesystem-roots");
+    return this.waitForMessage(
+      (msg): msg is Extract<RelayControlMessage, { type: "filesystem_roots_response" }> =>
+        msg.type === "filesystem_roots_response" && msg.requestId === requestId,
+      () => this.ws.send(JSON.stringify({ type: "filesystem_roots_request", requestId })),
+      "读取磁盘位置超时",
+      timeoutMs,
+      requestId,
+    ).then((resp) => ({
+      roots: resp.roots,
       error: resp.error,
       errorCode: resp.errorCode,
     }));

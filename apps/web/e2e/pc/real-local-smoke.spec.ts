@@ -31,7 +31,7 @@ test.describe("real local smoke", () => {
     await expect(heading).toBeVisible({ timeout: 15_000 });
     await expectNoHorizontalDocumentOverflow(page);
 
-    const workdir = page.getByLabel("工作目录");
+    const workdir = page.getByLabel("工作目录", { exact: true });
     await expect(workdir).toBeVisible();
     if (isMobile(page)) await expectTouchTarget(workdir);
     await workdir.focus();
@@ -79,7 +79,7 @@ test.describe("real local smoke", () => {
         timeout: 15_000,
       });
 
-      await page.getByLabel("工作目录").fill(smokeCwd);
+      await page.getByLabel("工作目录", { exact: true }).fill(smokeCwd);
       await page.getByRole("heading", { name: "新建会话" }).click();
       await page
         .getByLabel("交互方式")
@@ -115,7 +115,7 @@ test.describe("real local smoke", () => {
         timeout: 15_000,
       });
 
-      await page.getByLabel("工作目录").fill(smokeCwd);
+      await page.getByLabel("工作目录", { exact: true }).fill(smokeCwd);
       await page.getByRole("heading", { name: "新建会话" }).click();
       await page
         .getByLabel("交互方式")

@@ -7,6 +7,7 @@ import type { RelaySend } from "./relay-router-types.js";
 import type { SessionManager } from "./session-manager.js";
 import { serviceLogger } from "../common/logger.js";
 import { listTerminalShells } from "../common/terminal-shell.js";
+import { listFileSystemRoots } from "../common/filesystem-roots.js";
 import { saveAgentCliPath } from "../common/config.js";
 import { detectAgentCliStatus } from "../providers/index.js";
 import type { ProviderId } from "../providers/types.js";
@@ -97,6 +98,31 @@ export class RelayResourceHandlers {
         }),
       );
       serviceLogger.warn({ provider, path: rawPath, error }, "Agent CLI path update rejected");
+    }
+  }
+
+  async onFileSystemRootsRequest(msg: ControlMessage<"filesystem_roots_request">): Promise<void> {
+    try {
+      const roots = await listFileSystemRoots();
+      this.deps.relaySend(
+        serializeControl({
+          type: "filesystem_roots_response",
+          requestId: msg.requestId,
+          roots,
+        }),
+      );
+    } catch (err) {
+      const error = errorMessage(err);
+      serviceLogger.warn({ error }, "Filesystem root listing failed");
+      this.deps.relaySend(
+        serializeControl({
+          type: "filesystem_roots_response",
+          requestId: msg.requestId,
+          roots: [],
+          errorCode: ControlErrorCode.UNKNOWN,
+          error: "无法读取磁盘位置",
+        }),
+      );
     }
   }
 

@@ -35,7 +35,7 @@ test.describe("real local chaos UI", () => {
 
     await openCreateAgentSessionDialog(page);
 
-    await page.getByLabel("工作目录").focus();
+    await page.getByLabel("工作目录", { exact: true }).focus();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toBeVisible({
       timeout: 15_000,
     });

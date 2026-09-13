@@ -177,69 +177,41 @@ describe("RemotePathSelector", () => {
     expect(browser(container)).toHaveAttribute("data-placement", "floating");
   });
 
-  it("uses only a button and hidden form value without auto-opening on coarse pointers", () => {
-    media.coarse = true;
-    const { container, getByRole, queryByRole } = renderSelector({
-      autoFocus: true,
-      name: "remotePath",
-      value: "/home/dev/site",
-    });
-
-    const control = getByRole("button", { name: "远程路径" });
-    expect(control).toHaveAttribute("data-path-control", "button");
-    expect(queryByRole("textbox")).toBeNull();
-    expect(container.querySelector('input[type="text"]')).toBeNull();
-    expect(container.querySelector('input[type="hidden"][name="remotePath"]')).toHaveValue(
-      "/home/dev/site",
-    );
-    expect(container.querySelector('[data-slot="mock-file-path-picker"]')).toBeNull();
-    expect(control).not.toHaveFocus();
-
-    fireEvent.click(control);
-    expect(browser(container)).toHaveAttribute("data-placement", "inline");
-    expect(browser(container)).toHaveAttribute("data-auto-highlight-first", "false");
-  });
-
-  it("uses the touch path control for a phone even before pointer media settles", () => {
-    media.deviceKind = "phone";
-
-    const { container, getByRole, queryByRole } = renderSelector();
-
-    expect(getByRole("button", { name: "远程路径" })).toHaveAttribute(
-      "data-path-control",
-      "button",
-    );
-    expect(queryByRole("textbox")).toBeNull();
-    expect(container.querySelector('input[type="text"]')).toBeNull();
-  });
-
-  it.each([
-    ["/Users/dev", "/Users/dev/projects/sample-app/pages", "~/projects/sample-app/pages"],
-    [
-      "C:\\Users\\dev",
-      "C:\\Users\\dev\\projects\\sample-app\\pages",
-      "~\\projects\\sample-app\\pages",
-    ],
-  ])(
-    "abbreviates remote Home %s on touch controls while preserving form and browser paths",
-    (homePath, value, displayPath) => {
-      media.coarse = true;
-      useFileStore.setState({ homePath });
-      const { container, getByRole, onValueChange } = renderSelector({
-        value,
+  it.each(["phone", "tablet", "desktop"])(
+    "keeps touch paths editable without opening the keyboard on %s",
+    (deviceKind) => {
+      media.deviceKind = deviceKind;
+      media.coarse = deviceKind === "desktop";
+      const { container, getByRole } = renderSelector({
+        autoFocus: true,
         name: "remotePath",
+        value: "/home/dev/site",
       });
-      const control = getByRole("button", { name: "远程路径" });
+      const input = getByRole("textbox", { name: "远程路径" });
+      expect(input).toHaveValue("/home/dev/site");
+      expect(input).toHaveAttribute("name", "remotePath");
+      expect(input).not.toHaveFocus();
+      expect(container.querySelector('[data-slot="mock-file-path-picker"]')).toBeNull();
 
-      expect(control).toHaveTextContent(displayPath);
-      expect(control.querySelector("[title]")).toHaveAttribute("title", value);
-      expect(container.querySelector('input[type="hidden"][name="remotePath"]')).toHaveValue(value);
-
-      fireEvent.click(control);
-      expect(browser(container)).toHaveAttribute("data-filter", value);
-      expect(onValueChange).not.toHaveBeenCalled();
+      fireEvent.click(getByRole("button", { name: "浏览远程路径" }));
+      expect(browser(container)).toHaveAttribute("data-placement", "inline");
+      expect(browser(container)).toHaveAttribute("data-auto-highlight-first", "false");
+      expect(input).not.toHaveFocus();
     },
   );
+
+  it.each([false, true])("pastes a quoted Windows path with spaces on touch %s", (coarse) => {
+    media.coarse = coarse;
+    useFileStore.setState({ homePath: "C:\\Users\\dev" });
+    const { container, getByRole, onValueChange } = renderSelector({ value: "C:\\Users\\dev" });
+    const input = getByRole("textbox", { name: "远程路径" });
+    input.focus();
+    fireEvent.paste(input, { clipboardData: { getData: () => '"D:\\My Projects\\项目 A"' } });
+    expect(input).toHaveValue("D:\\My Projects\\项目 A");
+    expect(onValueChange).toHaveBeenLastCalledWith("D:\\My Projects\\项目 A");
+    if (coarse) expect(container.querySelector('[data-slot="mock-file-path-picker"]')).toBeNull();
+    else expect(browser(container)).toHaveAttribute("data-filter", "D:\\My Projects\\项目 A");
+  });
 
   it.each([
     ["/Users/dev", "/Users/dev/projects/sample-app"],
@@ -278,7 +250,7 @@ describe("RemotePathSelector", () => {
       </>,
     );
 
-    fireEvent.click(getByRole("button", { name: "远程路径" }));
+    fireEvent.click(getByRole("button", { name: "浏览远程路径" }));
     expect(browser(container)).toBeInTheDocument();
     fireEvent.click(getByRole("button", { name: "outside action" }));
 
@@ -291,7 +263,7 @@ describe("RemotePathSelector", () => {
     const onValueChange = vi.fn();
     const { container, getByRole } = renderSelector({ onValueChange });
 
-    fireEvent.click(getByRole("button", { name: "远程路径" }));
+    fireEvent.click(getByRole("button", { name: "浏览远程路径" }));
     fireEvent.click(getByRole("button", { name: "navigate directory" }));
     expect(onValueChange).not.toHaveBeenCalled();
     expect(browser(container)).toHaveAttribute("data-filter", "/home/dev/project/");
@@ -300,7 +272,7 @@ describe("RemotePathSelector", () => {
     expect(onValueChange).toHaveBeenCalledWith("/home/dev/project/");
     expect(container.querySelector('[data-slot="mock-file-path-picker"]')).toBeNull();
 
-    fireEvent.click(getByRole("button", { name: "远程路径" }));
+    fireEvent.click(getByRole("button", { name: "浏览远程路径" }));
     fireEvent.click(getByRole("button", { name: "select file" }));
     expect(onValueChange).toHaveBeenLastCalledWith("/home/dev/project/index.html");
     expect(container.querySelector('[data-slot="mock-file-path-picker"]')).toBeNull();
@@ -319,7 +291,7 @@ describe("RemotePathSelector", () => {
     const { container, getByRole, rerender } = render(
       <RemotePathSelector {...common} selectionKind="file" />,
     );
-    fireEvent.click(getByRole("button", { name: "远程路径" }));
+    fireEvent.click(getByRole("button", { name: "浏览远程路径" }));
 
     expect(browser(container)).toHaveAttribute("data-include-hidden", "true");
     expect(browser(container)).toHaveAttribute("data-file-extensions", ".html,.htm");
@@ -342,7 +314,7 @@ describe("RemotePathSelector", () => {
       selectionKind: "file",
     });
 
-    fireEvent.click(getByRole("button", { name: "远程路径" }));
+    fireEvent.click(getByRole("button", { name: "浏览远程路径" }));
     expect(browser(container)).toHaveAttribute("data-filter", "/opt/bin/");
   });
 
@@ -351,7 +323,7 @@ describe("RemotePathSelector", () => {
     const onValueChange = vi.fn();
     const { container, getByRole } = renderSelector({ onValueChange });
 
-    fireEvent.click(getByRole("button", { name: "远程路径" }));
+    fireEvent.click(getByRole("button", { name: "浏览远程路径" }));
     const initialFilter = browser(container).getAttribute("data-filter");
     fireEvent.click(getByRole("button", { name: "navigate relative directory" }));
     expect(browser(container)).toHaveAttribute("data-filter", initialFilter);
@@ -372,7 +344,9 @@ describe("RemotePathSelector", () => {
       value: "C:\\Tools\\codex.exe",
       selectionKind: "file",
     });
-    const control = getByRole(coarse ? "button" : "textbox", { name: "远程路径" });
+    const control = coarse
+      ? getByRole("button", { name: "浏览远程路径" })
+      : getByRole("textbox", { name: "远程路径" });
     if (coarse) fireEvent.click(control);
     else fireEvent.focus(control);
     expect(browser(container)).toHaveAttribute("data-filter", "C:\\Tools\\");

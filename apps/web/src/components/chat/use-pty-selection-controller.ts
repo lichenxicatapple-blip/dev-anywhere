@@ -12,7 +12,6 @@ import {
   getTerminalPointAtClient,
   resolveTerminalInitialRangeAtBufferPoint,
   resolveTerminalLineAtBufferPoint,
-  resolveTerminalPathLinkAtBufferPoint,
   resolveTerminalRange,
   type TerminalSelectionPoint,
   type TerminalSelectionResult,
@@ -1085,10 +1084,7 @@ export function usePtySelectionController(
       if (!terminal) return null;
       if (unit === "line") return resolveTerminalLineAtBufferPoint({ terminal, point });
       if (unit === "word") {
-        return (
-          resolveTerminalPathLinkAtBufferPoint({ terminal, point }) ??
-          resolveTerminalInitialRangeAtBufferPoint({ terminal, point })
-        );
+        return resolveTerminalInitialRangeAtBufferPoint({ terminal, point });
       }
       return null;
     };
@@ -1474,13 +1470,10 @@ export function usePtySelectionController(
           selectionLinesRef.current = previousSelectionLines;
           return;
         }
-        const pathSelection = resolveTerminalPathLinkAtBufferPoint({
+        const selected = resolveTerminalInitialRangeAtBufferPoint({
           terminal: selectionTerminal,
           point,
         });
-        const selected =
-          pathSelection ??
-          resolveTerminalInitialRangeAtBufferPoint({ terminal: selectionTerminal, point });
         if (selected) {
           setManagedSelection(
             selected,
@@ -1488,7 +1481,7 @@ export function usePtySelectionController(
               handles: false,
               toolbar: "hide",
               clientPoint: { clientX: event.clientX, clientY: event.clientY },
-              explicitPathAction: pathSelection?.pathAction,
+              explicitPathAction: selected.pathAction,
             },
             true,
           );
@@ -1734,13 +1727,10 @@ export function usePtySelectionController(
       selectionLinesRef.current = new Map();
       const selectionTerminal = getSelectionTerminalView();
       if (!selectionTerminal) return;
-      const pathSelection = resolveTerminalPathLinkAtBufferPoint({
+      const selected = resolveTerminalInitialRangeAtBufferPoint({
         terminal: selectionTerminal,
         point,
       });
-      const selected =
-        pathSelection ??
-        resolveTerminalInitialRangeAtBufferPoint({ terminal: selectionTerminal, point });
       if (!selected) {
         clearPtySelection();
         return;
@@ -1752,7 +1742,7 @@ export function usePtySelectionController(
           handles: true,
           toolbar: "hide",
           clientPoint: { clientX, clientY },
-          explicitPathAction: pathSelection?.pathAction,
+          explicitPathAction: selected.pathAction,
         },
         true,
       );

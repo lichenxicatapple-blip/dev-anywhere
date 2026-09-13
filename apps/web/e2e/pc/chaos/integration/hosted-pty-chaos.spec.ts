@@ -34,7 +34,7 @@ test.describe("hosted PTY real chaos", () => {
     await selectFirstProxy(page);
 
     await openCreateAgentSessionDialog(page);
-    await page.getByLabel("工作目录").fill(chaosCwd);
+    await page.getByLabel("工作目录", { exact: true }).fill(chaosCwd);
     if (provider === "codex") {
       await selectAgentCli(page, "Codex");
     }

@@ -597,6 +597,30 @@ describe("Message routing integration", () => {
   // 3. Control 请求-响应（client -> relay -> proxy -> relay -> client）
   // ==========================================================
 
+  it("routes filesystem roots through the selected proxy", async () => {
+    const { proxy, client } = await setupBoundPair();
+    const requestId = "roots-round-trip";
+    const request = waitForMessage(proxy);
+    client.send(JSON.stringify({ type: "filesystem_roots_request", requestId }));
+    expect(JSON.parse(await request)).toMatchObject({
+      type: "filesystem_roots_request",
+      requestId,
+    });
+    const response = waitForMessage(client);
+    proxy.send(
+      JSON.stringify({
+        type: "filesystem_roots_response",
+        requestId,
+        roots: [{ name: "D:\\", path: "D:\\" }],
+      }),
+    );
+    expect(JSON.parse(await response)).toMatchObject({
+      type: "filesystem_roots_response",
+      requestId,
+      roots: [{ path: "D:\\" }],
+    });
+  });
+
   it("routes dir_list_request/response full round trip", async () => {
     const { proxy, client } = await setupBoundPair();
     const requestId = "dir-list-round-trip";

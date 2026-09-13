@@ -74,7 +74,7 @@ async function createHostedPtySession(
   await selectFirstProxy(page);
 
   await openCreateAgentSessionDialog(page);
-  await page.getByLabel("工作目录").fill(smokeCwd);
+  await page.getByLabel("工作目录", { exact: true }).fill(smokeCwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
   await page
@@ -108,7 +108,7 @@ async function createJsonSession(
   await selectFirstProxy(page);
 
   await openCreateAgentSessionDialog(page);
-  await page.getByLabel("工作目录").fill(smokeCwd);
+  await page.getByLabel("工作目录", { exact: true }).fill(smokeCwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
   await page

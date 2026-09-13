@@ -52,7 +52,7 @@ test.describe("functional browser walkthrough", () => {
     ).toBeVisible();
 
     await openCreateAgentSessionDialog(page);
-    await page.getByLabel("工作目录").focus();
+    await page.getByLabel("工作目录", { exact: true }).focus();
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toBeVisible();
     await selectAgentCli(page, "Codex");
     await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
@@ -72,7 +72,7 @@ test.describe("functional browser walkthrough", () => {
       .getByRole("button", { name: /终端模式/ })
       .click();
     await expect(agentCliSelect).toHaveText("Codex");
-    await page.getByLabel("工作目录").fill("/home/dev/projects/sample-app");
+    await page.getByLabel("工作目录", { exact: true }).fill("/home/dev/projects/sample-app");
     await page
       .getByRole("dialog", { name: "新建会话" })
       .getByRole("button", { name: "创建" })
@@ -197,11 +197,11 @@ test.describe("functional browser walkthrough", () => {
   test("creating a session can create a child directory before launch", async ({ page }) => {
     await selectFakeProxy(page);
     await openCreateAgentSessionDialog(page);
-    await page.getByLabel("工作目录").fill("/home/dev");
+    await page.getByLabel("工作目录", { exact: true }).fill("/home/dev");
     await page.locator('[data-slot="file-path-picker"] button:has-text("新建目录")').click();
     await page.getByPlaceholder("目录名称").fill("new-project-e2e");
     await page.getByRole("button", { name: "创建目录" }).click();
-    await expect(page.getByLabel("工作目录")).toHaveValue("/home/dev/new-project-e2e/");
+    await expect(page.getByLabel("工作目录", { exact: true })).toHaveValue("/home/dev/new-project-e2e/");
 
     await page
       .getByRole("dialog", { name: "新建会话" })

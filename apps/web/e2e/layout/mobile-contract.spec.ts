@@ -446,24 +446,24 @@ test.describe("mobile UX contract", () => {
       )
       .not.toMatch(/^(INPUT|TEXTAREA):/);
 
-    const cwdControl = page.getByLabel("工作目录");
+    const cwdControl = page.getByLabel("工作目录", { exact: true });
     await expectTouchTarget(cwdControl);
-    await expect(cwdControl).toHaveAttribute("data-path-control", "button");
+    await expect(cwdControl).toHaveAttribute("data-path-control", "input");
     await expect(dialog.locator('input[type="text"][name="dev-anywhere-session-cwd"]')).toHaveCount(
-      0,
+      1,
     );
     await expectTouchTarget(page.getByRole("combobox", { name: "Agent CLI" }));
     await expectTouchTarget(page.getByLabel("交互方式").getByRole("button", { name: /终端模式/ }));
     const cliPathCard = page.locator('[data-slot="agent-cli-path-card"]');
-    const cliPathControl = cliPathCard.getByLabel("CLI 路径");
+    const cliPathControl = cliPathCard.getByLabel("CLI 路径", { exact: true });
     await expectTouchTarget(cliPathControl);
     await expect(cliPathCard.getByRole("button", { name: "指定路径" })).toHaveCount(0);
     await expect(cliPathCard.locator('[data-slot="agent-cli-path-actions"]')).toHaveCount(0);
     const compactCliPathCardBox = await cliPathCard.boundingBox();
     expect(compactCliPathCardBox?.height ?? 0).toBeLessThanOrEqual(100);
 
-    await expect(cliPathControl).toHaveAttribute("data-path-control", "button");
-    await expect(cliPathCard.locator('input[type="text"]')).toHaveCount(0);
+    await expect(cliPathControl).toHaveAttribute("data-path-control", "input");
+    await expect(cliPathCard.locator('input[type="text"]')).toHaveCount(1);
     await expect(cliPathCard.locator('[data-slot="remote-path-browser"]')).toHaveCount(0);
     expect(
       await cliPathCard.evaluate((node) => {
@@ -479,7 +479,7 @@ test.describe("mobile UX contract", () => {
       borderWidth: "0px",
       padding: "0px",
     });
-    await cliPathControl.click();
+    await cliPathCard.getByRole("button", { name: "浏览CLI 路径", exact: true }).click();
     await expect(cliPathCard.locator('[data-slot="remote-path-browser"]')).toBeVisible();
     await expect
       .poll(async () => {
@@ -498,16 +498,16 @@ test.describe("mobile UX contract", () => {
       })
       .toBe(true);
     await cliPathCard.locator('[data-slot="file-entry"][data-entry-name="README.md"]').click();
-    await expect(cliPathControl).toHaveText("~/.local/bin/README.md");
+    await expect(cliPathControl).toHaveValue("/home/dev/.local/bin/README.md");
     const cliPathActions = cliPathCard.locator('[data-slot="agent-cli-path-actions"]');
     await expect(cliPathActions).toBeVisible();
     await expectTouchTarget(cliPathActions.getByRole("button", { name: "取消" }));
     await expectTouchTarget(cliPathActions.getByRole("button", { name: "保存" }));
     await cliPathActions.getByRole("button", { name: "取消" }).click();
-    await expect(cliPathControl).toHaveText("~/.local/bin/claude");
+    await expect(cliPathControl).toHaveValue("/home/dev/.local/bin/claude");
     await expect(cliPathActions).toHaveCount(0);
 
-    await cwdControl.click();
+    await dialog.getByRole("button", { name: "浏览工作目录", exact: true }).click();
     const pathPicker = page.locator('[data-slot="file-path-picker"][data-mode="select"]');
     await expect(pathPicker).toBeVisible();
     const pathActions = pathPicker.locator('[data-slot="file-path-picker-actions"]');
@@ -532,21 +532,17 @@ test.describe("mobile UX contract", () => {
     await expect(pathPicker.locator('[data-slot="file-path-picker-current-directory"]')).toHaveText(
       "~/sample-app",
     );
-    await expect(cwdControl).toHaveText("~");
+    await expect(cwdControl).toHaveValue("/home/dev");
     await parentAction.click();
     await expect(pathPicker.locator('[data-slot="file-path-picker-current-directory"]')).toHaveText(
       "~",
     );
     await pathPicker.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
     await selectAction.click();
-    await expect(cwdControl).toHaveText("~/sample-app");
-    await expect(cwdControl.locator("span[title]")).toHaveAttribute(
-      "title",
-      "/home/dev/sample-app/",
-    );
+    await expect(cwdControl).toHaveValue("/home/dev/sample-app/");
   });
 
-  test("mobile web preview chooses a path without exposing a text field", async ({ page }) => {
+  test("mobile web preview browses alongside an editable path field", async ({ page }) => {
     await selectFakeProxy(page);
     const createSheet = await openMobileCreateTypeSheet(page);
     await createSheet.locator('[data-slot="create-frontend-preview-sheet-item"]').click();
@@ -556,21 +552,17 @@ test.describe("mobile UX contract", () => {
     const previewSheet = page.locator('[data-slot="create-web-preview-dialog"]');
     await expect(previewSheet).toBeVisible();
     await previewSheet.locator('[data-slot="web-preview-source-static"]').click();
-    const pathControl = previewSheet.getByLabel("网页位置");
-    await expect(pathControl).toHaveAttribute("data-path-control", "button");
+    const pathControl = previewSheet.getByLabel("网页位置", { exact: true });
+    await expect(pathControl).toHaveAttribute("data-path-control", "input");
     await expect(
       previewSheet.locator('input[type="text"][name="dev-anywhere-preview-static-path"]'),
-    ).toHaveCount(0);
+    ).toHaveCount(1);
 
-    await pathControl.click();
+    await previewSheet.getByRole("button", { name: "浏览网页位置", exact: true }).click();
     await previewSheet.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
     await previewSheet.locator('[data-slot="select-current-directory"]').click();
 
-    await expect(pathControl).toHaveText("~/sample-app");
-    await expect(pathControl.locator("span[title]")).toHaveAttribute(
-      "title",
-      "/home/dev/sample-app/",
-    );
+    await expect(pathControl).toHaveValue("/home/dev/sample-app/");
     await expect(
       previewSheet.locator('[data-slot="web-preview-static-inspection"]'),
     ).toHaveAttribute("data-status", "ready");
@@ -1257,7 +1249,7 @@ test.describe("desktop frontend preview menu", () => {
     const dialog = page.locator('[data-slot="create-web-preview-dialog"]');
     await expect(dialog).toBeVisible();
     await dialog.locator('[data-slot="web-preview-source-static"]').click();
-    const pathInput = dialog.getByLabel("网页位置");
+    const pathInput = dialog.getByLabel("网页位置", { exact: true });
     await expect(pathInput).toHaveAttribute("data-path-control", "input");
     await expect(pathInput).toHaveAttribute("type", "text");
     await pathInput.fill("/home/dev/sample-app/");

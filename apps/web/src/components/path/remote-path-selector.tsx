@@ -13,7 +13,6 @@ import type { PickerHandle } from "@/components/chat/picker-handle";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useFileStore } from "@/stores/file-store";
 import { describeCurrentClientDevice } from "@/lib/client-device";
-import { formatRemotePath } from "@/lib/format-remote-path";
 import { cn } from "@/lib/utils";
 import {
   normalizeRemoteAbsolutePath,
@@ -53,9 +52,8 @@ function pickerStart(
 ): string {
   const absolute = absoluteInputPath(value, homePath);
   if (!absolute) return homePath;
-  return selectionKind === "file"
-    ? withTrailingSeparator(remoteParentDirectory(absolute))
-    : absolute;
+  if (selectionKind === "file") return withTrailingSeparator(remoteParentDirectory(absolute));
+  return selectionKind === "directory" ? withTrailingSeparator(absolute) : absolute;
 }
 
 function absoluteInputPath(path: string, homePath: string): string {
@@ -96,14 +94,15 @@ export function RemotePathSelector({
   const nativeTouchSurface = coarsePointer || deviceKind === "phone" || deviceKind === "tablet";
   const [open, setOpen] = useState(false);
   const [browsePath, setBrowsePath] = useState(() => pickerStart(value, homePath, selectionKind));
-  const [desktopDraft, setDesktopDraft] = useState(value);
+  const [draft, setDraft] = useState(value);
   const rootRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
   const pickerRef = useRef<PickerHandle>(null);
 
   useEffect(() => {
-    if (open || desktopDraft === value) return;
-    setDesktopDraft(value);
-  }, [desktopDraft, open, value]);
+    if (open || document.activeElement === inputRef.current || draft === value) return;
+    setDraft(value);
+  }, [draft, open, value]);
 
   useEffect(() => {
     if (!open) return;
@@ -120,7 +119,7 @@ export function RemotePathSelector({
         return;
       }
       setOpen(false);
-      setDesktopDraft(value);
+      setDraft(value);
     }
 
     // Let the clicked control finish its own action before an inline picker changes layout.
@@ -132,7 +131,7 @@ export function RemotePathSelector({
   useEffect(() => {
     if (!disabled) return;
     setOpen(false);
-    setDesktopDraft(value);
+    setDraft(value);
   }, [disabled, value]);
 
   const canSelectCurrentDirectory = selectionKind !== "file";
@@ -141,20 +140,20 @@ export function RemotePathSelector({
     if (disabled) return;
     const start = pickerStart(value, homePath, selectionKind);
     setBrowsePath(start);
-    setDesktopDraft(value);
+    setDraft(value);
     setOpen(true);
   }
 
   function closePicker(): void {
     setOpen(false);
-    setDesktopDraft(value);
+    setDraft(value);
   }
 
   function commitAbsolutePath(path: string): void {
     const absolute = absoluteInputPath(path, homePath);
     if (!absolute) return;
     setBrowsePath(absolute);
-    setDesktopDraft(absolute);
+    setDraft(absolute);
     onValueChange(absolute);
     setOpen(false);
   }
@@ -165,7 +164,7 @@ export function RemotePathSelector({
     setBrowsePath(absolute);
   }
 
-  function handleDesktopKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
+  function handleKeyDown(event: React.KeyboardEvent<HTMLInputElement>): void {
     if (open && pickerRef.current?.handleKey(event)) {
       event.preventDefault();
       return;
@@ -220,73 +219,73 @@ export function RemotePathSelector({
           }, 0);
         }}
       >
-        {nativeTouchSurface ? (
-          <>
-            <button
-              id={controlId}
-              type="button"
-              aria-labelledby={labelId}
-              aria-describedby={ariaDescribedBy}
-              aria-invalid={ariaInvalid}
-              aria-expanded={open}
-              aria-controls={`${controlId}-browser`}
-              disabled={disabled}
-              data-slot={dataSlot}
-              data-path-control="button"
-              onClick={() => {
-                if (open) closePicker();
-                else openPicker();
-              }}
-              className="flex min-h-11 w-full min-w-0 items-center gap-2 rounded-md border border-border bg-input px-3 text-left text-base outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
-            >
-              <FolderOpen className="size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-              <span
-                className={cn(
-                  "min-w-0 flex-1 truncate font-mono",
-                  value ? "text-foreground" : "text-muted-foreground",
-                )}
-                title={value || undefined}
-              >
-                {formatRemotePath(value, homePath) || placeholder}
-              </span>
-            </button>
-            {name ? <input type="hidden" name={name} value={value} required={required} /> : null}
-            <div id={`${controlId}-browser`}>{picker}</div>
-          </>
-        ) : (
-          <>
-            <input
-              id={controlId}
-              type="text"
-              aria-labelledby={labelId}
-              aria-describedby={ariaDescribedBy}
-              aria-invalid={ariaInvalid}
-              name={name}
-              required={required}
-              autoFocus={autoFocus}
-              autoComplete="off"
-              autoCorrect="off"
-              spellCheck={false}
-              disabled={disabled}
-              value={desktopDraft}
-              data-slot={dataSlot}
-              data-path-control="input"
-              onFocus={openPicker}
-              onChange={(event) => {
-                const path = event.target.value;
-                const absolute = absoluteInputPath(path, homePath);
-                setDesktopDraft(path);
-                setBrowsePath(absolute || homePath);
-                onValueChange(absolute || path);
-                setOpen(true);
-              }}
-              onKeyDown={handleDesktopKeyDown}
-              placeholder={placeholder}
-              className="min-h-11 min-w-0 w-full rounded-md border border-border bg-input px-3 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 md:h-9 md:min-h-0 md:text-sm"
-            />
-            {picker}
-          </>
-        )}
+        <div className="relative flex min-w-0 items-center">
+          <input
+            ref={inputRef}
+            id={controlId}
+            type="text"
+            aria-labelledby={labelId}
+            aria-describedby={ariaDescribedBy}
+            aria-invalid={ariaInvalid}
+            name={name}
+            required={required}
+            autoFocus={autoFocus && !nativeTouchSurface}
+            autoComplete="off"
+            autoCorrect="off"
+            autoCapitalize="off"
+            spellCheck={false}
+            disabled={disabled}
+            value={draft}
+            data-slot={dataSlot}
+            data-path-control="input"
+            onFocus={() => {
+              if (nativeTouchSurface) setOpen(false);
+              else openPicker();
+            }}
+            onBlur={() => setDraft(value)}
+            onKeyDown={handleKeyDown}
+            onChange={(event) => {
+              const path = event.target.value;
+              const absolute = absoluteInputPath(path, homePath);
+              setDraft(path);
+              setBrowsePath(absolute || homePath);
+              onValueChange(absolute || path);
+              setOpen(!nativeTouchSurface);
+            }}
+            onPaste={(event) => {
+              // Windows Explorer's “Copy as path” includes surrounding quotes.
+              const pasted = event.clipboardData.getData("text").trim();
+              const unquoted =
+                pasted.startsWith('"') && pasted.endsWith('"') ? pasted.slice(1, -1) : pasted;
+              const absolute = absoluteInputPath(unquoted, homePath);
+              if (!absolute) return;
+              event.preventDefault();
+              setDraft(absolute);
+              setBrowsePath(absolute);
+              onValueChange(absolute);
+              setOpen(!nativeTouchSurface);
+            }}
+            placeholder={placeholder}
+            className="min-h-11 min-w-0 w-full rounded-md border border-border bg-input pl-3 pr-12 font-mono text-base outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60 md:h-9 md:min-h-0 md:text-sm"
+          />
+          <button
+            type="button"
+            aria-label={typeof label === "string" ? `浏览${label}` : "浏览路径"}
+            aria-expanded={open}
+            aria-controls={`${controlId}-browser`}
+            disabled={disabled}
+            data-slot="remote-path-browse"
+            onClick={() => {
+              if (nativeTouchSurface) inputRef.current?.blur();
+              if (open) closePicker();
+              else openPicker();
+            }}
+            className="absolute inset-y-0 right-0 flex w-11 items-center justify-center rounded-r-md text-muted-foreground hover:text-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <FolderOpen className="size-5" aria-hidden="true" />
+          </button>
+        </div>
+        <div id={`${controlId}-browser`}>{picker}</div>
       </div>
     </div>
   );

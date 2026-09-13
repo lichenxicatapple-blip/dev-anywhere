@@ -1,5 +1,6 @@
 import { isScpLikeRemotePath } from "./scp-like-remote";
 import { isRecognizedBareDomain } from "./bare-domain";
+import { findUrlTextRanges } from "./url-text";
 
 export type PtySelectionPathAction =
   | { kind: "image-preview"; path: string }
@@ -21,6 +22,11 @@ function getSingleSelectedPath(text: string): string | null {
   if (!trimmed || trimmed.includes("\n")) return null;
   const path = normalizeSelectionToken(trimmed);
   if (!path) return null;
+  if (
+    !trimmed.startsWith("@") &&
+    findUrlTextRanges(path).some((range) => range.start === 0 && range.end === path.length)
+  )
+    return null;
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return null;
   if (isScpLikeRemotePath(path)) return null;
   if (path.split(/[\\/]/).includes("...")) return null;

@@ -85,7 +85,10 @@ declare global {
 
 // 安装一个协议级 Fake Relay。它不是 mock 组件树，而是在浏览器 WebSocket 层模拟
 // relay/proxy 的真实控制消息，让测试像用户一样点 UI，同时避免依赖本机真实 CLI。
-export async function installFakeRelay(page: Page): Promise<void> {
+export async function installFakeRelay(
+  page: Page,
+  options: { fileSystemRoots?: Array<{ name: string; path: string }> } = {},
+): Promise<void> {
   await page.route("**/health", async (route) => {
     await route.fulfill({
       status: 200,
@@ -128,9 +131,11 @@ export async function installFakeRelay(page: Page): Promise<void> {
   const installFakeRelayInDocument = ({
     currentControlProtocolVersion,
     currentEnvelopeVersion,
+    fileSystemRoots,
   }: {
     currentControlProtocolVersion: number;
     currentEnvelopeVersion: string;
+    fileSystemRoots: Array<{ name: string; path: string }>;
   }) => {
     if (window.__devAnywhereFakeRelayInstalled) return;
     Object.defineProperty(window, "__devAnywhereFakeRelayInstalled", {
@@ -807,6 +812,13 @@ export async function installFakeRelay(page: Page): Promise<void> {
               summary: "代码和表格内容已转换成语音摘要，重点是实现路径和风险。",
             });
             break;
+          case "filesystem_roots_request":
+            this.emitJson({
+              type: "filesystem_roots_response",
+              requestId: msg.requestId,
+              roots: fileSystemRoots,
+            });
+            break;
           case "dir_list_request": {
             const allowedKeys = new Set(["type", "requestId", "path", "includeHidden"]);
             if (
@@ -1433,6 +1445,7 @@ export async function installFakeRelay(page: Page): Promise<void> {
   await page.addInitScript(installFakeRelayInDocument, {
     currentControlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
     currentEnvelopeVersion: MESSAGE_ENVELOPE_VERSION,
+    fileSystemRoots: options.fileSystemRoots ?? [{ name: "/", path: "/" }],
   });
 }
 

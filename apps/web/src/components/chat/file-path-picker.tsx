@@ -13,6 +13,8 @@ import {
   useState,
 } from "react";
 import { useFileStore } from "@/stores/file-store";
+import { useAppStore } from "@/stores/app-store";
+import type { FileSystemRoot } from "@dev-anywhere/shared";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import type { RelayClient } from "@/services/relay-client";
 import { cn } from "@/lib/utils";
@@ -26,6 +28,12 @@ import {
   withTrailingSeparator,
 } from "@/lib/remote-path";
 import type { PickerHandle } from "./picker-handle";
+
+interface PickerEntry {
+  name: string;
+  isDir: boolean;
+  path?: string;
+}
 
 interface FilePathPickerBaseProps {
   filter: string;
@@ -79,6 +87,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   const tree = useFileStore((s) => (includeHidden ? s.treeWithHidden : s.tree));
   const sessionCwd = useFileStore((s) => s.cwd);
   const homePath = useFileStore((s) => s.homePath);
+  const proxyId = useAppStore((s) => s.selectedProxyId);
   // insert 模式在 Chat 页, 锚到 session cwd (@ 后的相对路径拼在 session cwd 下)
   // select 模式不依赖会话 cwd，统一从开发机的 $HOME 开始
   const baseCwd = mode === "insert" ? sessionCwd : homePath || sessionCwd;
@@ -98,10 +107,38 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   const [creatingDir, setCreatingDir] = useState(false);
   const [loadFailure, setLoadFailure] = useState<{ path: string; message: string } | null>(null);
   const [retryGeneration, setRetryGeneration] = useState(0);
+  const [locationsOpen, setLocationsOpen] = useState(false);
+  const [roots, setRoots] = useState<FileSystemRoot[] | null>(null);
+  const [locationsError, setLocationsError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!absolutePath) return;
-    const requestKey = `${includeHidden ? "hidden" : "default"}\0${absolutePath}`;
+    if (!locationsOpen) return;
+    let cancelled = false;
+    setRoots(null);
+    setLocationsError(null);
+    const request = relayClientRef?.requestFileSystemRoots();
+    if (!request) setLocationsError("尚未连接开发机");
+    void request?.then(
+      (result) => {
+        if (cancelled) return;
+        if (result.error !== undefined || result.errorCode !== undefined) {
+          setLocationsError(result.error || "读取失败");
+        } else {
+          setRoots(result.roots);
+        }
+      },
+      (error: unknown) => {
+        if (!cancelled) setLocationsError(error instanceof Error ? error.message : "读取失败");
+      },
+    );
+    return () => {
+      cancelled = true;
+    };
+  }, [locationsOpen, proxyId, retryGeneration]);
+
+  useEffect(() => {
+    if (!absolutePath || locationsOpen) return;
+    const requestKey = `${proxyId}\0${includeHidden ? "hidden" : "default"}\0${absolutePath}`;
     if (tree.has(absolutePath)) return;
     const relay = relayClientRef;
     if (!relay) return;
@@ -141,13 +178,21 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     return () => {
       cancelled = true;
     };
-  }, [absolutePath, includeHidden, tree, retryGeneration]);
+  }, [absolutePath, includeHidden, tree, retryGeneration, locationsOpen, proxyId]);
 
   // tree.has vs tree.get 分两档:
   // - 没 key: 目录请求飞行中, 显示 "加载中" 别误导成 "没有匹配"
   // - 有 key 但过滤后空: 才是 "没有匹配的路径"
-  const activeLoadFailure = loadFailure?.path === absolutePath ? loadFailure : null;
-  const isLoading = !tree.has(absolutePath) && !activeLoadFailure;
+  const activeLoadFailure = locationsOpen
+    ? locationsError
+      ? { message: locationsError }
+      : null
+    : loadFailure?.path === absolutePath
+      ? loadFailure
+      : null;
+  const isLoading = locationsOpen
+    ? roots === null && !locationsError
+    : !tree.has(absolutePath) && !activeLoadFailure;
   const normalizedFileExtensions = useMemo(
     () =>
       fileExtensions?.map((extension) =>
@@ -155,7 +200,17 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
       ),
     [fileExtensions],
   );
-  const filteredEntries = useMemo(() => {
+  const filteredEntries = useMemo<PickerEntry[]>(() => {
+    if (locationsOpen) {
+      if (!roots) return [];
+      const locations: FileSystemRoot[] = [
+        ...(homePath ? [{ name: "主目录", path: homePath }] : []),
+        ...roots,
+      ];
+      return [...new Map(locations.map((location) => [location.path, location])).values()].map(
+        (location) => ({ ...location, isDir: true }),
+      );
+    }
     let entries = tree.get(absolutePath) ?? [];
     if (dirsOnly) entries = entries.filter((e) => e.isDir);
     else if (normalizedFileExtensions?.length) {
@@ -169,11 +224,23 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     }
     if (query) entries = entries.filter((e) => e.name.toLowerCase().includes(query));
     return entries;
-  }, [tree, absolutePath, query, dirsOnly, normalizedFileExtensions]);
+  }, [
+    tree,
+    absolutePath,
+    query,
+    dirsOnly,
+    normalizedFileExtensions,
+    locationsOpen,
+    roots,
+    homePath,
+  ]);
 
   const [index, setIndex] = useState(autoHighlightFirst ? 0 : -1);
   // filter 或所在目录变化时重置高亮到首项
-  useEffect(() => setIndex(autoHighlightFirst ? 0 : -1), [autoHighlightFirst, currentPath, query]);
+  useEffect(
+    () => setIndex(autoHighlightFirst ? 0 : -1),
+    [autoHighlightFirst, currentPath, query, locationsOpen],
+  );
   useEffect(() => {
     setCreateOpen(false);
     setNewDirName("");
@@ -212,6 +279,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
     (path: string): void => {
       const absolute = toAbsolutePath(baseCwd, path);
       if (!absolute) return;
+      setLocationsOpen(false);
       const directory = withTrailingSeparator(absolute);
       if (mode === "select") {
         onNavigate!(directory);
@@ -223,7 +291,11 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
   );
 
   const selectEntry = useCallback(
-    (entry: { name: string; isDir: boolean }): void => {
+    (entry: PickerEntry): void => {
+      if (entry.path) {
+        navigate(entry.path);
+        return;
+      }
       const path = emitPath(entry);
       if (entry.isDir) {
         navigate(path);
@@ -314,9 +386,11 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
             <p
               className="truncate font-mono text-xs text-foreground"
               data-slot="file-path-picker-current-directory"
-              title={absolutePath}
+              title={locationsOpen ? undefined : absolutePath}
             >
-              {formatRemotePath(absolutePath, homePath) || "正在读取路径"}
+              {locationsOpen
+                ? "磁盘/挂载点"
+                : formatRemotePath(absolutePath, homePath) || "正在读取路径"}
             </p>
           </div>
           <div
@@ -325,22 +399,40 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
             aria-label="路径操作"
             data-slot="file-path-picker-actions"
           >
-            <button
-              type="button"
-              data-slot="file-path-picker-parent"
-              className="inline-flex min-h-11 min-w-11 items-center justify-start px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
-              disabled={!absolutePath || absolutePath === parentPath}
-              onClick={() => navigate(parentPath)}
-            >
-              上一级
-            </button>
-            {onSelectCurrentDirectory || onCreateDirectory ? (
+            <span className="flex items-center gap-4">
+              <button
+                type="button"
+                aria-pressed={locationsOpen}
+                className="inline-flex min-h-11 min-w-11 items-center justify-start px-0 text-left text-xs font-medium text-primary hover:underline focus-visible:underline md:min-h-8 md:min-w-0"
+                onClick={() => {
+                  setLocationsOpen((value) => !value);
+                  setCreateOpen(false);
+                }}
+              >
+                {locationsOpen ? "返回目录" : "磁盘/挂载点"}
+              </button>
+              {!locationsOpen ? (
+                <button
+                  type="button"
+                  data-slot="file-path-picker-parent"
+                  className="inline-flex min-h-11 min-w-11 items-center justify-start px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
+                  disabled={!absolutePath}
+                  onClick={() => {
+                    if (absolutePath === parentPath) setLocationsOpen(true);
+                    else navigate(parentPath);
+                  }}
+                >
+                  上一级
+                </button>
+              ) : null}
+            </span>
+            {!locationsOpen && (onSelectCurrentDirectory || onCreateDirectory) ? (
               <span className="flex shrink-0 items-center gap-4">
                 {onCreateDirectory ? (
                   <button
                     type="button"
                     data-slot="file-path-picker-create-directory-toggle"
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-end px-0 text-right text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
                     disabled={!absolutePath || creatingDir}
                     onClick={() => setCreateOpen((value) => !value)}
                   >
@@ -351,7 +443,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
                   <button
                     type="button"
                     data-slot="select-current-directory"
-                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-end px-0 text-right text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
                     disabled={!absolutePath}
                     onClick={() => onSelectCurrentDirectory(withTrailingSeparator(absolutePath))}
                   >
@@ -361,7 +453,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
               </span>
             ) : null}
           </div>
-          {createOpen ? (
+          {createOpen && !locationsOpen ? (
             <div className="mt-2 flex items-center gap-2">
               <input
                 type="text"
@@ -396,7 +488,21 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
             </div>
           ) : null}
         </div>
-      ) : null}
+      ) : (
+        <div className="flex items-center gap-3 border-b border-border/70 px-3">
+          <button
+            type="button"
+            aria-pressed={locationsOpen}
+            className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-start px-0 text-left text-xs font-medium text-primary hover:underline md:min-h-8 md:min-w-0"
+            onClick={() => setLocationsOpen((value) => !value)}
+          >
+            {locationsOpen ? "返回目录" : "磁盘/挂载点"}
+          </button>
+          <span className="truncate font-mono text-xs text-muted-foreground">
+            {locationsOpen ? "磁盘/挂载点" : formatRemotePath(absolutePath, homePath)}
+          </span>
+        </div>
+      )}
       <div className={listClass} data-slot="file-path-picker-entries">
         {activeLoadFailure ? (
           <div
@@ -405,7 +511,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
             role="alert"
           >
             <span className="min-w-0 text-xs text-destructive" title={activeLoadFailure.message}>
-              无法读取这个文件夹
+              {locationsOpen ? "无法读取磁盘位置" : "无法读取这个文件夹"}
             </span>
             <button
               type="button"
@@ -423,7 +529,7 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
         ) : (
           <ul ref={listRef} role="list" className="flex flex-col">
             {filteredEntries.map((e, i) => (
-              <li key={e.name}>
+              <li key={e.path ?? e.name}>
                 <button
                   type="button"
                   onClick={() => selectEntry(e)}
@@ -439,11 +545,17 @@ export const FilePathPicker = forwardRef<PickerHandle, FilePathPickerProps>(func
                   data-entry-type={e.isDir ? "dir" : "file"}
                   data-entry-name={e.name}
                   data-entry-index={i}
+                  title={e.path}
                 >
-                  <span className="font-mono text-[13px]">
+                  <span className="min-w-0 truncate font-mono text-[13px]">
                     {e.name}
-                    {e.isDir ? "/" : ""}
+                    {e.isDir && !e.path ? "/" : ""}
                   </span>
+                  {e.path && e.path !== e.name ? (
+                    <span className="ml-auto min-w-0 truncate text-xs font-normal text-muted-foreground">
+                      {e.path}
+                    </span>
+                  ) : null}
                 </button>
               </li>
             ))}

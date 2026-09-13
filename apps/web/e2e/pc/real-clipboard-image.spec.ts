@@ -135,7 +135,7 @@ async function createSession(
 ): Promise<string> {
   await selectFirstProxy(page);
   await openCreateAgentSessionDialog(page);
-  await page.getByLabel("工作目录").fill(options.cwd);
+  await page.getByLabel("工作目录", { exact: true }).fill(options.cwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
 
   if (options.mode === "json") {

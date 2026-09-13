@@ -1,17 +1,19 @@
 import { act, cleanup, fireEvent, render, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-const { requestDirectoryList } = vi.hoisted(() => ({
+const { requestDirectoryList, requestFileSystemRoots } = vi.hoisted(() => ({
   requestDirectoryList: vi.fn(),
+  requestFileSystemRoots: vi.fn(),
 }));
 
 vi.mock("@/hooks/use-relay-setup", () => ({
-  relayClientRef: { requestDirectoryList },
+  relayClientRef: { requestDirectoryList, requestFileSystemRoots },
   wsManagerRef: null,
 }));
 
 import { FilePathPicker } from "./file-path-picker";
 import { useFileStore } from "@/stores/file-store";
+import { useAppStore } from "@/stores/app-store";
 
 function deferred<T>(): {
   promise: Promise<T>;
@@ -26,6 +28,8 @@ function deferred<T>(): {
 
 describe("FilePathPicker", () => {
   beforeEach(() => {
+    requestFileSystemRoots.mockReset();
+    requestFileSystemRoots.mockResolvedValue({ roots: [{ name: "D:\\", path: "D:\\" }] });
     requestDirectoryList.mockReset();
     requestDirectoryList.mockResolvedValue({
       path: "/home/dev",
@@ -42,6 +46,83 @@ describe("FilePathPicker", () => {
   });
 
   afterEach(() => cleanup());
+
+  it("switches drives without committing, then selects a file on the other drive", async () => {
+    useFileStore.setState({
+      homePath: "C:\\Users\\dev",
+      tree: new Map([
+        ["C:\\Users\\dev", []],
+        ["D:\\", [{ name: "项目 A.html", isDir: false }]],
+      ]),
+    });
+    const onSelect = vi.fn();
+    const onNavigate = vi.fn();
+    const { getByRole, findByRole, rerender } = render(
+      <FilePathPicker
+        mode="select"
+        filter=""
+        fileExtensions={[".html"]}
+        onSelect={onSelect}
+        onNavigate={onNavigate}
+      />,
+    );
+    fireEvent.click(getByRole("button", { name: "磁盘/挂载点" }));
+    fireEvent.click(await findByRole("button", { name: "D:\\" }));
+    expect(onNavigate).toHaveBeenCalledWith("D:\\");
+    expect(onSelect).not.toHaveBeenCalled();
+    rerender(
+      <FilePathPicker
+        mode="select"
+        filter="D:\\"
+        fileExtensions={[".html"]}
+        onSelect={onSelect}
+        onNavigate={onNavigate}
+      />,
+    );
+    fireEvent.click(getByRole("button", { name: "项目 A.html" }));
+    expect(onSelect).toHaveBeenCalledWith("D:\\项目 A.html");
+  });
+
+  it("inserts an absolute path when switching drives from an @ picker", async () => {
+    useFileStore.setState({
+      cwd: "C:\\Projects",
+      homePath: "C:\\Users\\dev",
+      tree: new Map([["C:\\Projects", []]]),
+    });
+    const onSelect = vi.fn();
+    const { getByRole, findByRole } = render(<FilePathPicker filter="" onSelect={onSelect} />);
+    fireEvent.click(getByRole("button", { name: "磁盘/挂载点" }));
+    fireEvent.click(await findByRole("button", { name: "D:\\" }));
+    expect(onSelect).toHaveBeenCalledWith("D:\\");
+  });
+
+  it("retries a failed disk listing and refreshes it when reopened", async () => {
+    requestFileSystemRoots.mockRejectedValueOnce(new Error("timeout"));
+    const { getByRole, findByRole } = render(
+      <FilePathPicker mode="select" filter="" onSelect={vi.fn()} onNavigate={vi.fn()} />,
+    );
+    fireEvent.click(getByRole("button", { name: "磁盘/挂载点" }));
+    expect(await findByRole("alert")).toHaveTextContent("无法读取磁盘位置");
+    fireEvent.click(getByRole("button", { name: "重试" }));
+    await findByRole("button", { name: "D:\\" });
+    fireEvent.click(getByRole("button", { name: "返回目录" }));
+    fireEvent.click(getByRole("button", { name: "磁盘/挂载点" }));
+    await findByRole("button", { name: "D:\\" });
+    expect(requestFileSystemRoots).toHaveBeenCalledTimes(3);
+  });
+
+  it("ignores the previous host's disk response after a host switch", async () => {
+    const oldRequest = deferred<{ roots: Array<{ name: string; path: string }> }>();
+    requestFileSystemRoots.mockReturnValueOnce(oldRequest.promise);
+    const { getByRole, findByRole, queryByRole } = render(
+      <FilePathPicker mode="select" filter="" onSelect={vi.fn()} onNavigate={vi.fn()} />,
+    );
+    fireEvent.click(getByRole("button", { name: "磁盘/挂载点" }));
+    act(() => useAppStore.setState({ selectedProxyId: "new-host" }));
+    await findByRole("button", { name: "D:\\" });
+    await act(async () => oldRequest.resolve({ roots: [{ name: "old disk", path: "/old" }] }));
+    expect(queryByRole("button", { name: /old disk/ })).toBeNull();
+  });
 
   it.each([
     ["/Users/dev", "/", "~/projects/sample-app/pages"],
@@ -129,13 +210,16 @@ describe("FilePathPicker", () => {
   );
 
   it.each(["C:\\", "\\\\server\\share\\"])(
-    "disables parent navigation at Windows root %s",
-    (homePath) => {
+    "opens locations from Windows root %s",
+    async (homePath) => {
       useFileStore.setState({ homePath, tree: new Map([[homePath, []]]) });
       const { baseElement } = render(
         <FilePathPicker mode="select" filter="" onSelect={vi.fn()} onNavigate={vi.fn()} />,
       );
-      expect(baseElement.querySelector('[data-slot="file-path-picker-parent"]')).toBeDisabled();
+      fireEvent.click(baseElement.querySelector('[data-slot="file-path-picker-parent"]')!);
+      await waitFor(() =>
+        expect(baseElement.querySelector('[data-entry-name="D:\\\\"]')).not.toBeNull(),
+      );
     },
   );
 

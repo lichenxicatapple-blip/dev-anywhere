@@ -101,6 +101,9 @@ export type TerminalShellOption = z.infer<typeof TerminalShellOptionSchema>;
 export const DirEntrySchema = z.object({ name: z.string(), isDir: z.boolean() });
 export type DirEntry = z.infer<typeof DirEntrySchema>;
 
+export const FileSystemRootSchema = z.object({ name: z.string(), path: z.string() });
+export type FileSystemRoot = z.infer<typeof FileSystemRootSchema>;
+
 export const FileTreeGroupSchema = z.object({
   path: z.string(),
   entries: z.array(DirEntrySchema),
@@ -1339,6 +1342,17 @@ const relayControlDefinitions = [
   control("proxy_online", {
     proxyId: IdSchema,
   }),
+
+  strictControl("filesystem_roots_request", { ...RequestIdShape }, "client_to_proxy"),
+  control(
+    "filesystem_roots_response",
+    {
+      ...RequestIdShape,
+      ...RequestErrorShape,
+      roots: z.array(FileSystemRootSchema),
+    },
+    "proxy_to_client",
+  ),
 
   // 目录列表请求与响应
   strictControl(

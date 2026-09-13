@@ -67,7 +67,7 @@ async function createJsonSession(page: Page, cwd: string): Promise<string> {
   await selectFirstProxy(page);
 
   await openCreateAgentSessionDialog(page);
-  await page.getByLabel("工作目录").fill(cwd);
+  await page.getByLabel("工作目录", { exact: true }).fill(cwd);
   await page.getByRole("heading", { name: "新建会话" }).click();
   await expect(page.locator('[data-slot="file-path-picker"][data-mode="select"]')).toHaveCount(0);
   await page

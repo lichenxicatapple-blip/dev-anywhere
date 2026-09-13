@@ -47,4 +47,29 @@ describe("resolvePtySelectionPathAction", () => {
     expect(resolvePtySelectionPathAction("example.com")).toBeNull();
     expect(resolvePtySelectionPathAction("5.0")).toBeNull();
   });
+
+  it.each([
+    "x.com/report.md",
+    "x.com?download=report.md",
+    "x.com/report.md?user=cat&download=report.txt",
+    "x.com/image.png#preview.png",
+    "[x.com/image.png]",
+    "(x.com/report.md)",
+    "https://x.com/report.md?user=cat",
+    "ftp://cat@example.com/pub/report.md",
+    "sftp://cat@server/report.md",
+    "file:///C:/Users/cat/report.md",
+  ])("does not offer a local file action for the selected URL %s", (url) => {
+    expect(resolvePtySelectionPathAction(url)).toBeNull();
+  });
+
+  it.each(["@x.com/report.md", "./x.com/report.md", "/tmp/x.com/report.md"])(
+    "keeps explicitly local paths available: %s",
+    (path) => {
+      expect(resolvePtySelectionPathAction(path)).toEqual({
+        kind: "file-download",
+        path: path.replace(/^@/, ""),
+      });
+    },
+  );
 });

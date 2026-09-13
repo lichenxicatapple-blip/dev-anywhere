@@ -565,6 +565,27 @@ describe("RelayClient request handling", () => {
     });
   });
 
+  it("correlates filesystem roots with the selected host request", async () => {
+    const { relay, ws } = createClient();
+    const promise = relay.requestFileSystemRoots();
+    const requestId = sentRequestId(ws);
+    expect(JSON.parse(ws.sent.at(-1) ?? "{}")).toEqual({
+      type: "filesystem_roots_request",
+      requestId,
+    });
+    ws.emit({
+      type: "filesystem_roots_response",
+      requestId: "unrelated",
+      roots: [{ name: "wrong", path: "/wrong" }],
+    });
+    ws.emit({
+      type: "filesystem_roots_response",
+      requestId,
+      roots: [{ name: "D:\\", path: "D:\\" }],
+    });
+    await expect(promise).resolves.toMatchObject({ roots: [{ name: "D:\\", path: "D:\\" }] });
+  });
+
   it("waits for the matching directory list response", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestDirectoryList("/home/dev", { includeHidden: true });

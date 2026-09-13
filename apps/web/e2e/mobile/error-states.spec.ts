@@ -22,15 +22,11 @@ test.describe("L4 mobile / error UI states", () => {
     await expect(dialog).toBeVisible({ timeout: 15_000 });
 
     // 选择一个 fakeRelay 会列出、但不在其可创建会话目录集合中的路径。
-    const cwdControl = dialog.getByLabel("工作目录");
-    await cwdControl.click();
+    const cwdControl = dialog.getByLabel("工作目录", { exact: true });
+    await dialog.getByRole("button", { name: "浏览工作目录", exact: true }).click();
     await dialog.locator('[data-slot="file-entry"][data-entry-name="sample-app"]').click();
     await dialog.locator('[data-slot="select-current-directory"]').click();
-    await expect(cwdControl).toHaveText("~/sample-app");
-    await expect(cwdControl.locator("span[title]")).toHaveAttribute(
-      "title",
-      "/home/dev/sample-app/",
-    );
+    await expect(cwdControl).toHaveValue("/home/dev/sample-app/");
     await dialog.getByRole("button", { name: "创建" }).click();
 
     // 错误文案出现; dialog 不关闭, 用户仍能编辑.
@@ -61,20 +57,11 @@ test.describe("L4 mobile / error UI states", () => {
     const dialog = emuPage.locator('[data-slot="create-session-dialog"]');
     await expect(dialog).toBeVisible({ timeout: 15_000 });
 
-    // 手机端常显路径按钮而非文本框；逐层进入目录后选中文件，构造长路径草稿。
     const cliPathCard = dialog.locator('[data-slot="agent-cli-path-card"]');
-    const cliPathControl = cliPathCard.getByLabel("CLI 路径");
-    await expect(cliPathControl).toHaveAttribute("data-path-control", "button");
-    await expect(cliPathCard.getByRole("button", { name: "指定路径" })).toHaveCount(0);
-    await expect(cliPathCard.locator('[data-slot="agent-cli-path-actions"]')).toHaveCount(0);
-    await cliPathControl.click();
-    for (let depth = 0; depth < 8; depth += 1) {
-      await cliPathCard.locator('[data-slot="file-entry"][data-entry-name="src"]').click();
-    }
-    await cliPathCard.locator('[data-slot="file-entry"][data-entry-name="README.md"]').click();
-    await expect(cliPathControl).toContainText(
-      "~/.local/bin/src/src/src/src/src/src/src/src/README.md",
-    );
+    const cliPathControl = cliPathCard.getByLabel("CLI 路径", { exact: true });
+    const longPath = "/home/dev/.local/bin/" + "long-directory/".repeat(12) + "claude";
+    await cliPathControl.fill(longPath);
+    await expect(cliPathControl).toHaveValue(longPath);
     await expect(cliPathCard.locator('[data-slot="agent-cli-path-actions"]')).toBeVisible();
     await expectNoHorizontalDocumentOverflow(emuPage);
     await expect(dialog).toBeVisible();

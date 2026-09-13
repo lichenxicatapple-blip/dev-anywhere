@@ -53,7 +53,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     const dialog = page.locator('[data-slot="create-session-dialog"]');
     const form = page.locator('[data-slot="create-session-form"]');
     await expect(dialog).toBeVisible();
-    const cliPathInput = dialog.getByLabel("CLI 路径");
+    const cliPathInput = dialog.getByLabel("CLI 路径", { exact: true });
     await expect(cliPathInput).toHaveValue("/home/dev/.local/bin/claude");
 
     async function expectFormContained() {
@@ -91,31 +91,36 @@ test.describe("CreateSessionDialog — 字段校验", () => {
 
   test("桌面端保留可编辑的工作目录和 CLI 路径输入", async ({ page }) => {
     const dialog = await openCreateAgentSessionDialog(page);
-    const cwdInput = dialog.getByLabel("工作目录");
+    const cwdInput = dialog.getByLabel("工作目录", { exact: true });
 
     await expect(cwdInput).toHaveAttribute("data-path-control", "input");
     await expect(cwdInput).toHaveAttribute("type", "text");
     await cwdInput.fill("/home/dev/projects/");
     const pathPicker = dialog.locator('[data-slot="file-path-picker"]');
     await expect(pathPicker).toBeVisible();
-    const pathLabel = pathPicker.locator('[data-slot="file-path-picker-title"]');
     const currentPath = pathPicker.locator('[data-slot="file-path-picker-current-directory"]');
     await expect(cwdInput).toHaveValue("/home/dev/projects/");
     await expect(currentPath).toHaveText("~/projects");
     await expect(currentPath).toHaveAttribute("title", "/home/dev/projects");
     const actions = pathPicker.locator('[data-slot="file-path-picker-actions"]');
     const parentAction = actions.locator('[data-slot="file-path-picker-parent"]');
-    const [labelBox, pathBox, actionsBox, parentBox] = await Promise.all([
-      pathLabel.boundingBox(),
-      currentPath.boundingBox(),
-      actions.boundingBox(),
-      parentAction.boundingBox(),
-    ]);
+    const [labelBox, pathBox, actionsBox, parentBox, locationsBox] = await pathPicker.evaluate(
+      (node) =>
+        [
+          '[data-slot="file-path-picker-title"]',
+          '[data-slot="file-path-picker-current-directory"]',
+          '[data-slot="file-path-picker-actions"]',
+          '[data-slot="file-path-picker-parent"]',
+          '[data-slot="file-path-picker-actions"] button[aria-pressed]',
+        ].map((selector) => node.querySelector(selector)?.getBoundingClientRect().toJSON()),
+    );
     expect(labelBox).not.toBeNull();
     expect(pathBox).not.toBeNull();
     expect(actionsBox).not.toBeNull();
     expect(parentBox).not.toBeNull();
-    expect(Math.abs(pathBox!.x - parentBox!.x)).toBeLessThanOrEqual(1);
+    expect(locationsBox).not.toBeNull();
+    expect(Math.abs(pathBox!.x - locationsBox!.x)).toBeLessThanOrEqual(1);
+    expect(parentBox!.x).toBeGreaterThan(locationsBox!.x + locationsBox!.width);
     expect(pathBox!.y - (labelBox!.y + labelBox!.height)).toBeGreaterThan(
       actionsBox!.y - (pathBox!.y + pathBox!.height),
     );
@@ -159,7 +164,7 @@ test.describe("CreateSessionDialog — 字段校验", () => {
     await pathPicker.locator('[data-slot="select-current-directory"]').click();
     await expect(cwdInput).toHaveValue("/home/dev/projects/src/");
 
-    const cliPathInput = dialog.getByLabel("CLI 路径");
+    const cliPathInput = dialog.getByLabel("CLI 路径", { exact: true });
     await expect(cliPathInput).toHaveAttribute("data-path-control", "input");
     await expect(cliPathInput).toHaveValue("/home/dev/.local/bin/claude");
     await expect(dialog.getByRole("button", { name: "指定路径" })).toHaveCount(0);

@@ -993,6 +993,26 @@ describe("RelayControlSchema", () => {
     });
   });
 
+  it("registers disk listing without accepting a forged target host", () => {
+    expect(
+      RelayControlSchema.parse({ type: "filesystem_roots_request", requestId: "roots-1" }),
+    ).toMatchObject({ type: "filesystem_roots_request" });
+    expect(() =>
+      RelayControlSchema.parse({
+        type: "filesystem_roots_request",
+        requestId: "roots-1",
+        proxyId: "other-proxy",
+      }),
+    ).toThrow();
+    expect(
+      RelayControlSchema.parse({
+        type: "filesystem_roots_response",
+        requestId: "roots-1",
+        roots: [{ name: "D:\\", path: "D:\\" }],
+      }),
+    ).toMatchObject({ roots: [{ path: "D:\\" }] });
+  });
+
   it("parses dir_list_response with entries and path", () => {
     const result = RelayControlSchema.parse({
       type: "dir_list_response",
