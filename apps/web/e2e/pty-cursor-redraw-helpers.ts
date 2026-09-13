@@ -240,7 +240,12 @@ export async function verifyVerticalCursorRedraw(
       }
     });
   await settlePaints();
-  const before = await readPtyScrollMetrics(page);
+  const before = {
+    ...(await readPtyScrollMetrics(page)),
+    bottomScrollTop: await page.evaluate(
+      () => window.__devAnywherePtyDebug!()!.anchor.bottomScrollTop,
+    ),
+  };
 
   // A shrinking spacer makes the browser clamp scrollTop without a controller assignment.
   // Sample actual paints and native scroll events, not just writes to scrollTop.
@@ -295,8 +300,12 @@ export async function verifyVerticalCursorRedraw(
     .poll(() => readPtyScrollMetrics(page).then((m) => m.scrollTop))
     .toBeLessThan(before.scrollTop - 100);
   await sendPtyOutput(page, `\x1b[${inputRow};6H`);
-  // Allow the same one-pixel browser rounding as the redraw samples above.
+  // Keyboard resizing can leave the initial position within the bottom tolerance. A real
+  // caret move returns to the live-tail anchor, not that residual offset. Keep the same
+  // one-pixel browser rounding as the redraw samples above.
   await expect
-    .poll(() => readPtyScrollMetrics(page).then((m) => Math.abs(m.scrollTop - before.scrollTop)))
+    .poll(() =>
+      readPtyScrollMetrics(page).then((m) => Math.abs(m.scrollTop - before.bottomScrollTop)),
+    )
     .toBeLessThanOrEqual(1);
 }
