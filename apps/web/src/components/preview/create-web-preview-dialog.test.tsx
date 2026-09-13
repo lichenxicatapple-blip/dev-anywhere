@@ -574,22 +574,21 @@ describe("CreateWebPreviewDialog", () => {
       accepted: true,
       previewId: "preview-mobile-file",
     });
-    const { baseElement, getByRole, queryByRole } = render(
+    const { baseElement, getByRole } = render(
       <CreateWebPreviewDialog open onOpenChange={vi.fn()} />,
     );
     await waitForCapability(baseElement, "ready");
 
     fireEvent.click(getSlot(baseElement, "web-preview-source-static"));
-    const pathButton = getByRole("button", { name: "网页位置" });
-    expect(pathButton).toHaveAttribute("data-path-control", "button");
-    expect(queryByRole("textbox", { name: "网页位置" })).not.toBeInTheDocument();
+    const pathInput = getByRole("textbox", { name: "网页位置" });
+    const pathButton = getByRole("button", { name: "浏览网页位置" });
+    expect(pathInput).not.toHaveFocus();
 
     fireEvent.click(pathButton);
     fireEvent.click(
       baseElement.querySelector('[data-slot="file-entry"][data-entry-name="landing.html"]')!,
     );
-    expect(pathButton).toHaveTextContent("~/landing.html");
-    expect(pathButton.querySelector("[title]")).toHaveAttribute("title", "/home/dev/landing.html");
+    expect(pathInput).toHaveValue("/home/dev/landing.html");
 
     await waitFor(() => {
       expect(inspectStaticWebPreview).toHaveBeenCalledWith(

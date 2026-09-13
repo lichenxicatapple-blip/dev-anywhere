@@ -570,24 +570,18 @@ describe("CreateSessionDialog", () => {
       agentCli: availableAgentCli,
     });
 
-    const { baseElement, getByRole, queryByRole } = renderDialog();
-    const cwdButton = await waitFor(() => {
-      const control = getByRole("button", { name: "工作目录" });
-      expect(control).toHaveTextContent("~");
-      expect(control.querySelector("[title]")).toHaveAttribute("title", "/home/dev");
-      return control;
-    });
-    expect(cwdButton).toHaveAttribute("data-path-control", "button");
-    expect(queryByRole("textbox", { name: "工作目录" })).not.toBeInTheDocument();
+    const { baseElement, getByRole } = renderDialog();
+    const cwdInput = getByRole("textbox", { name: "工作目录" });
+    await waitFor(() => expect(cwdInput).toHaveValue("/home/dev"));
+    expect(cwdInput).not.toHaveFocus();
 
-    fireEvent.click(cwdButton);
+    fireEvent.click(getByRole("button", { name: "浏览工作目录" }));
     fireEvent.click(
       baseElement.querySelector('[data-slot="file-entry"][data-entry-name="projects"]')!,
     );
     expect(createSession).not.toHaveBeenCalled();
     fireEvent.click(baseElement.querySelector('[data-slot="select-current-directory"]')!);
-    expect(cwdButton).toHaveTextContent("~/projects");
-    expect(cwdButton.querySelector("[title]")).toHaveAttribute("title", "/home/dev/projects/");
+    expect(cwdInput).toHaveValue("/home/dev/projects/");
 
     fireEvent.click(getByRole("button", { name: "创建" }));
     await waitFor(() => {
@@ -598,7 +592,7 @@ describe("CreateSessionDialog", () => {
     });
   });
 
-  it("uses a button browser instead of a text field for CLI paths on phones", async () => {
+  it("keeps CLI paths editable while browsing and saving on phones", async () => {
     testViewport = "mobile";
     updateAgentCliPath.mockResolvedValueOnce({
       provider: "claude",
@@ -619,17 +613,17 @@ describe("CreateSessionDialog", () => {
       agentCli: availableAgentCli,
     });
 
-    const { getByRole, queryByRole } = renderDialog();
-    const pathButton = getByRole("button", { name: "CLI 路径" });
-    expect(pathButton).toHaveAttribute("data-path-control", "button");
-    expect(queryByRole("textbox", { name: "CLI 路径" })).not.toBeInTheDocument();
-    expect(queryByRole("button", { name: "指定路径" })).not.toBeInTheDocument();
+    const { getByRole } = renderDialog();
+    const pathInput = getByRole("textbox", { name: "CLI 路径" });
+    const pathButton = getByRole("button", { name: "浏览CLI 路径" });
+    expect(pathInput).toHaveValue("/usr/local/bin/claude");
+    expect(pathInput).not.toHaveFocus();
 
     expect(pathButton).toHaveAttribute("aria-expanded", "false");
     fireEvent.click(pathButton);
     expect(pathButton).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(getByRole("button", { name: "claude-custom" }));
-    expect(pathButton).toHaveTextContent("/usr/local/bin/claude-custom");
+    expect(pathInput).toHaveValue("/usr/local/bin/claude-custom");
     fireEvent.click(getByRole("button", { name: "保存" }));
 
     await waitFor(() => {
