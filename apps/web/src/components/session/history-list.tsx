@@ -425,8 +425,8 @@ function normalizeHistoryProjectDir(dir: string): string {
   return trimmed.replace(/\/+$/, "") || "/";
 }
 
-function availableRestoreModes(provider: SessionProvider): RestoreMode[] {
-  return provider === "cursor" ? ["pty"] : ["json", "pty"];
+function availableRestoreModes(_provider: SessionProvider): RestoreMode[] {
+  return ["json", "pty"];
 }
 
 function defaultRestoreMode(session: HistorySession): RestoreMode {

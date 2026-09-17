@@ -99,6 +99,16 @@ pnpm --filter @dev-anywhere/proxy run dev -- \
 
 Kimi Code 同时接入 PTY 终端与 ACP 聊天链路：可以用上面的命令启动并接管终端，也可以在 Web 中新建终端或聊天会话。ACP 聊天测试应覆盖流式输出、工具调用与审批、取消当前回合，以及从历史会话恢复。
 
+Cursor CLI：
+
+```bash
+pnpm --filter @dev-anywhere/proxy run dev -- \
+  --profile local \
+  agent
+```
+
+Cursor CLI 同样接入 PTY 终端与 ACP 聊天链路。ACP 聊天测试应覆盖流式输出、工具调用与审批、提问、计划批准、取消当前回合，以及用 native session id 恢复（`session/load` 失败时应新建会话并提示）。
+
 测试 coding agent 创建流程时，不要让它修改当前仓库。可以在 Web 中选择临时目录，或者为终端命令指定一次性工作目录：
 
 ```bash

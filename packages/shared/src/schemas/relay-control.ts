@@ -7,7 +7,13 @@ import {
   sessionStateValues,
   TerminalShellFamilySchema,
 } from "./session.js";
-import { ApprovalOptionSchema, ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
+import {
+  ApprovalOptionSchema,
+  CursorPromptSchema,
+  CursorSessionUiSchema,
+  ToolApprovePayloadSchema,
+  ToolDenyPayloadSchema,
+} from "./tool.js";
 import {
   VoiceCapabilitiesSchema,
   VoiceConfigUpdateSchema,
@@ -1629,8 +1635,18 @@ const relayControlDefinitions = [
           toolName: z.string(),
           input: z.record(z.string(), z.unknown()),
           options: z.array(ApprovalOptionSchema).optional(),
+          cursorPrompt: CursorPromptSchema.optional(),
         }),
       ),
+    },
+    "proxy_to_client",
+  ),
+
+  control(
+    "cursor_session_ui",
+    {
+      sessionId: IdSchema,
+      payload: CursorSessionUiSchema,
     },
     "proxy_to_client",
   ),

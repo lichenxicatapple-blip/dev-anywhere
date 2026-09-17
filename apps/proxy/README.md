@@ -83,10 +83,13 @@ Kimi Code supports both terminal sessions and structured ACP chat. You can start
 a terminal with `dev-anywhere kimi ...`, create either mode from the Web UI, and
 resume Kimi sessions from the historical session list.
 
-Cursor CLI is terminal-only. Use `dev-anywhere agent ...` (or `dev-anywhere cursor ...`)
-to wrap a local session, or create a terminal session from the Web UI. DEV Anywhere
-looks up `CURSOR_BIN`, then `agent`, then `cursor-agent`; it does not use the Cursor
-IDE binary named `cursor`.
+Cursor CLI supports both terminal sessions and structured ACP chat. Use
+`dev-anywhere agent ...` (or `dev-anywhere cursor ...`) to wrap a local terminal,
+or create either mode from the Web UI. ACP chat streams output, tool calls,
+approvals, questions, and plan confirmation. DEV Anywhere looks up `CURSOR_BIN`,
+then `agent`, then `cursor-agent`; it does not use the Cursor IDE binary named
+`cursor`. Log in first with `agent login`, or set `CURSOR_API_KEY` /
+`CURSOR_AUTH_TOKEN`.
 
 ## Relay server
 
@@ -185,7 +188,7 @@ Environment variables are reserved for temporary overrides:
 
 ## How it works
 
-- Local daemon wraps Claude Code, Codex, Kimi Code, and Cursor CLI sessions with `node-pty` for transparent terminal control. Claude Code and Codex also support structured chat-message mode; Kimi Code supports ACP chat with streaming output, tool calls and interactive approvals, turn cancellation, and history resume. Cursor CLI currently supports terminal sessions only.
+- Local daemon wraps Claude Code, Codex, Kimi Code, and Cursor CLI sessions with `node-pty` for transparent terminal control. Claude Code and Codex also support structured chat-message mode; Kimi Code and Cursor CLI support ACP chat with streaming output, tool calls and interactive approvals, turn cancellation, and history resume. Cursor ACP also surfaces questions, plan approval, and todos.
 - Local terminal attachment uses a Unix-domain socket on macOS/Linux or a named pipe on Windows.
 - Terminal bytes + structured control messages are forwarded to relay over WebSocket.
 - Relay serves the Web client and routes live traffic; session state remains on the proxy side.

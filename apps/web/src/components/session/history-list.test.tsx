@@ -231,17 +231,16 @@ describe("HistoryList", () => {
     },
   );
 
-  it("only offers terminal restore for Cursor CLI history", async () => {
+  it("offers chat restore for Cursor CLI history", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       success: true,
-      sessionId: "cursor-pty-session",
+      sessionId: "cursor-json-session",
       cwd: "/Users/dev/project",
       lastActive: 1,
       kind: "agent",
-      mode: "pty",
+      mode: "json",
       provider: "cursor",
-      ptyOwner: "proxy-hosted",
     });
     const { container } = renderHistoryList([
       {
@@ -256,8 +255,8 @@ describe("HistoryList", () => {
     expandHistory(container);
 
     fireEvent.click(screen.getByRole("button", { name: "恢复会话：Cursor CLI 会话" }));
-    expect(screen.getByRole("radio", { name: "终端" }).getAttribute("aria-checked")).toBe("true");
-    expect(screen.queryByRole("radio", { name: "聊天" })).toBeNull();
+    expect(screen.getByRole("radio", { name: "聊天" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "终端" })).toBeInTheDocument();
     fireEvent.click(screen.getByRole("button", { name: "恢复" }));
 
     await waitFor(() => {
@@ -265,7 +264,7 @@ describe("HistoryList", () => {
         expect.objectContaining({
           kind: "agent",
           provider: "cursor",
-          mode: "pty",
+          mode: "json",
           resumeSessionId: "cursor-history",
         }),
       );

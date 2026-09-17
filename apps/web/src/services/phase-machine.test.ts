@@ -908,6 +908,7 @@ describe("phase-machine explicit proxy removal", () => {
           historyLoading: false,
           workingToolName: "",
           pendingApprovals: [],
+          cursorTodos: [],
           quotedMessage: null,
           inputDraft: "draft",
           draftAttachments: [],

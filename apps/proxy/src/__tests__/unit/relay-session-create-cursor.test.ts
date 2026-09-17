@@ -1,22 +1,24 @@
+import { tmpdir } from "node:os";
 import { describe, expect, it, vi } from "vitest";
 import { ControlErrorCode } from "@dev-anywhere/shared";
-import { CURSOR_JSON_UNSUPPORTED_MESSAGE } from "#src/providers/cursor.js";
 import { RelaySessionCreateHandler } from "#src/serve/relay-session-create-handler.js";
 import type { SessionManager } from "#src/serve/session-manager.js";
+
+const existingCwd = tmpdir();
 
 vi.mock("#src/common/pty-runtime.js", () => ({
   buildHostedPtyArgs: () => [],
 }));
 
 describe("Cursor session create", () => {
-  it("rejects JSON sessions for Cursor CLI", () => {
+  it("starts a JSON worker for Cursor ACP chat", () => {
     const relaySend = vi.fn();
-    const start = vi.fn();
+    const spawn = vi.fn(() => 4321);
     const handler = new RelaySessionCreateHandler({
       relaySend,
-      terminalWorkerSpawner: { start } as never,
-      sessionManager: { createSession: vi.fn() } as unknown as SessionManager,
-      workerRegistry: { spawn: vi.fn() } as never,
+      terminalWorkerSpawner: { start: vi.fn() } as never,
+      sessionManager: { createSession: vi.fn(), listSessions: vi.fn(() => []) } as unknown as SessionManager,
+      workerRegistry: { spawn } as never,
       controlHandlers: {} as never,
       permissionBroker: {} as never,
       agentStatusRegistry: {} as never,
@@ -33,21 +35,57 @@ describe("Cursor session create", () => {
       kind: "agent",
       mode: "json",
       provider: "cursor",
-      cwd: "/tmp/project",
+      cwd: existingCwd,
       permissionMode: "default",
     });
 
-    expect(start).not.toHaveBeenCalled();
-    expect(relaySend).toHaveBeenCalledTimes(1);
+    expect(spawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        cwd: existingCwd,
+        provider: "cursor",
+        permissionMode: "default",
+      }),
+    );
+    expect(relaySend).not.toHaveBeenCalled();
+  });
+
+  it("rejects unsupported Cursor permission modes", () => {
+    const relaySend = vi.fn();
+    const spawn = vi.fn();
+    const handler = new RelaySessionCreateHandler({
+      relaySend,
+      terminalWorkerSpawner: { start: vi.fn() } as never,
+      sessionManager: { createSession: vi.fn(), listSessions: vi.fn(() => []) } as unknown as SessionManager,
+      workerRegistry: { spawn } as never,
+      controlHandlers: {} as never,
+      permissionBroker: {} as never,
+      agentStatusRegistry: {} as never,
+      getProviderEnv: () => ({}),
+      createHookContext: vi.fn(),
+      cleanupHookContext: vi.fn(),
+      broadcastSessionSync: vi.fn(),
+      broadcastSessionList: vi.fn(),
+    });
+
+    handler.onSessionCreate({
+      type: "session_create",
+      requestId: "cursor-bad-mode",
+      kind: "agent",
+      mode: "json",
+      provider: "cursor",
+      cwd: existingCwd,
+      permissionMode: "acceptEdits",
+    });
+
+    expect(spawn).not.toHaveBeenCalled();
     const payload = JSON.parse(relaySend.mock.calls[0][0] as string) as {
       success: boolean;
       errorCode: string;
-      error: string;
     };
     expect(payload).toMatchObject({
       success: false,
-      errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
-      error: CURSOR_JSON_UNSUPPORTED_MESSAGE,
+      errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
     });
   });
 });

@@ -26,7 +26,7 @@ DEV Anywhere lets you continue using Claude Code, Codex, Kimi Code, Cursor CLI, 
 
 To continue a locally started Claude Code, Codex, Kimi Code, or Cursor CLI session from the browser, add `dev-anywhere` before the original command. Apart from the prefix, the development experience stays exactly the same. The session also appears in the DEV Anywhere Web interface, so you can continue working anytime and anywhere. You can also create a new coding agent session directly from the Web.
 
-Kimi Code supports both its native terminal interface and ACP chat sessions. ACP chat streams responses and tool calls, lets you allow once, always allow, or reject tool approvals in the Web, and supports cancelling the current turn and resuming historical sessions. Cursor CLI currently supports terminal sessions only.
+Kimi Code and Cursor CLI both support their native terminal interface and ACP chat sessions. ACP chat streams responses and tool calls, lets you allow once, always allow, or reject tool approvals in the Web, and supports cancelling the current turn and resuming historical sessions. Cursor ACP also supports questions, plan approval, and todo lists.
 
 DEV Anywhere is designed around remote coding agent workflows. In addition to reading coding agent output, you can track running state, handle tool approvals, upload or download files, search previous output, and receive browser notifications when work finishes. Your repositories, coding agent CLIs, and model credentials remain on the development machine.
 
@@ -201,7 +201,7 @@ dev-anywhere --profile quick-tunnel agent
 
 #### Start a new session from the browser
 
-Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, Kimi Code, Cursor CLI, or Shell in a directory on that machine. Claude Code, Codex, and Kimi Code all offer terminal and chat modes; Kimi Code chat runs over ACP. Cursor CLI currently supports terminal mode only.
+Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, Kimi Code, Cursor CLI, or Shell in a directory on that machine. Claude Code, Codex, Kimi Code, and Cursor CLI all offer terminal and chat modes; Kimi Code and Cursor CLI chat run over ACP.
 
 For terminal compatibility, DEV Anywhere forces the sparkle effect off (`tui.whimsy=false`) for Codex terminal sessions started or resumed through its local CLI or Web interface; running `codex` directly still follows your own settings. Existing Codex processes must exit before you restart or resume the session to apply this setting; refreshing the browser does not apply it.
 
@@ -247,9 +247,9 @@ For pinned versions, disabled automatic updates, or migration from a release old
 
 ### Session management
 
-- Create terminal or chat sessions for Claude Code, Codex, and Kimi Code, Cursor CLI terminal sessions, and Shell sessions, directly from the browser.
-- Choose the working directory and permission mode for Claude Code, Codex, Kimi Code, or Cursor CLI sessions; Claude Code, Codex, and Kimi Code can also choose terminal or chat interaction.
-- Attach sessions started from a local terminal, or resume Claude Code, Codex, and Kimi Code historical sessions.
+- Create terminal or chat sessions for Claude Code, Codex, Kimi Code, and Cursor CLI, plus Shell sessions, directly from the browser.
+- Choose the working directory, permission mode, and terminal or chat interaction for Claude Code, Codex, Kimi Code, or Cursor CLI sessions.
+- Attach sessions started from a local terminal, or resume Claude Code, Codex, Kimi Code, and Cursor CLI historical sessions.
 - Rename, terminate, or detach sessions; sessions started from a local terminal can reconnect after a Proxy restart.
 - Switch between development machines, and inspect or disconnect clients currently connected to the Relay. Remove an unused offline machine by swiping left on mobile or using its desktop overflow menu; it will appear again if it reconnects.
 
@@ -257,7 +257,7 @@ For pinned versions, disabled automatic updates, or migration from a release old
 
 ### Terminal and chat views
 
-The **terminal view** presents the original CLI interface and preserves colors, cursor behavior, keyboard interaction, and full-screen programs. The **chat view** organizes coding agent output, tool calls, approvals, and final responses into messages that are easier to read and operate by touch. Kimi Code chat uses ACP and supports streaming output, tool calls and approvals, cancelling the current turn, and resuming historical sessions.
+The **terminal view** presents the original CLI interface and preserves colors, cursor behavior, keyboard interaction, and full-screen programs. The **chat view** organizes coding agent output, tool calls, approvals, and final responses into messages that are easier to read and operate by touch. Kimi Code and Cursor CLI chat use ACP and support streaming output, tool calls and approvals, cancelling the current turn, and resuming historical sessions. Cursor ACP also supports questions, plan approval, and todo lists.
 
 ![DEV Anywhere terminal and chat views](./docs/assets/readme-session-modes.gif)
 

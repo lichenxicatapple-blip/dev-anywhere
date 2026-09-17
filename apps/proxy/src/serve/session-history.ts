@@ -126,6 +126,8 @@ async function findSessionFile(
   sessionId: string,
   provider?: ProviderId,
 ): Promise<string | null> {
+  // Cursor ACP transcripts are not stored in a documented on-disk layout yet.
+  // Resume uses the native session id we persist; session/load falls back to session/new.
   if (provider === "cursor") return null;
   if (provider === "claude") return findClaudeSessionFile(sessionId);
   if (provider === "codex") return findCodexSessionFile(sessionId);

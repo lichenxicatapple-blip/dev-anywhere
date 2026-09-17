@@ -7,20 +7,31 @@ import type {
 import { findExecutableCandidates, resolveExecutable } from "./path-resolver.js";
 import { environmentValue } from "../common/executable.js";
 
-export const CURSOR_JSON_UNSUPPORTED_MESSAGE = "Cursor CLI 目前仅支持终端模式";
-
-export class CursorJsonUnsupportedError extends Error {
-  constructor() {
-    super(CURSOR_JSON_UNSUPPORTED_MESSAGE);
-    this.name = "CursorJsonUnsupportedError";
-  }
-}
-
 export class CursorPermissionModeUnsupportedError extends Error {
   constructor(permissionMode: string) {
     super(`Cursor CLI 不支持审批策略“${permissionMode}”。请刷新页面后重新选择。`);
     this.name = "CursorPermissionModeUnsupportedError";
   }
+}
+
+export type CursorAcpMode = "agent" | "plan" | "ask";
+
+export function resolveCursorAcpMode(permissionMode?: string): CursorAcpMode {
+  switch (permissionMode) {
+    case undefined:
+    case "default":
+    case "auto":
+    case "bypassPermissions":
+      return "agent";
+    case "plan":
+      return "plan";
+    default:
+      throw new CursorPermissionModeUnsupportedError(permissionMode);
+  }
+}
+
+export function cursorAcpAutoApprovesPermissions(permissionMode?: string): boolean {
+  return permissionMode === "auto" || permissionMode === "bypassPermissions";
 }
 
 const CURSOR_NOT_FOUND_MESSAGE =
@@ -78,8 +89,12 @@ export const CURSOR_PROVIDER: ProviderAdapter = {
     supportsProjectScopedConfig: true,
     supportsGlobalSetup: true,
   },
-  buildJsonCommand(_options: ProviderJsonOptions, _env: NodeJS.ProcessEnv): ProviderCommand {
-    throw new CursorJsonUnsupportedError();
+  buildJsonCommand(options: ProviderJsonOptions, env: NodeJS.ProcessEnv): ProviderCommand {
+    return {
+      command: resolveCursorCommand(env, options.cwd),
+      args: ["acp"],
+      env,
+    };
   },
   buildTerminalCommand(options: ProviderTerminalOptions, env: NodeJS.ProcessEnv): ProviderCommand {
     return {

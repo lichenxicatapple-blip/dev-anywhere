@@ -162,7 +162,7 @@ dev-anywhere serve status
 
 Kimi Code 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere kimi ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
 
-Cursor CLI 目前只支持终端会话。可以运行 `dev-anywhere agent ...` 或 `dev-anywhere cursor ...` 接管原生终端，也可以在 Web 中新建终端会话。
+Cursor CLI 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere agent ...` 或 `dev-anywhere cursor ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、提问、计划批准、取消当前回合和恢复历史会话。未登录时请先在本机运行 `agent login`，或设置 `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`。
 
 ### 可选：登录后自动启动
 

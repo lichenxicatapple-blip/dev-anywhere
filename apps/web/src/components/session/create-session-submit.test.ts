@@ -26,7 +26,7 @@ describe("create-session submit model", () => {
     expect(PROVIDER_LABEL.claude).toBe("Claude Code");
     expect(PROVIDER_LABEL.kimi).toBe("Kimi Code");
     expect(PROVIDER_LABEL.cursor).toBe("Cursor CLI");
-    expect(providerSupportsChatMode("cursor")).toBe(false);
+    expect(providerSupportsChatMode("cursor")).toBe(true);
     expect(providerSupportsChatMode("claude")).toBe(true);
     expect(CURSOR_PERMISSION_MODE_OPTIONS).toEqual([
       { value: "default", label: "命令审批" },
@@ -166,18 +166,17 @@ describe("create-session submit model", () => {
     );
   });
 
-  it("forces Cursor CLI sessions onto terminal mode even if chat is requested", async () => {
+  it("creates Cursor CLI chat sessions over ACP", async () => {
     const relay = {
       createSession: vi.fn().mockResolvedValue({
         type: "session_create_response",
         success: true,
-        sessionId: "cursor-pty-1",
+        sessionId: "cursor-json-1",
         cwd: "/home/dev",
         lastActive: 1,
         kind: "agent",
-        mode: "pty",
+        mode: "json",
         provider: "cursor",
-        ptyOwner: "proxy-hosted",
       }),
     };
 
@@ -195,11 +194,11 @@ describe("create-session submit model", () => {
       }),
     ).resolves.toMatchObject({
       type: "success",
-      session: { sessionId: "cursor-pty-1", mode: "pty", provider: "cursor" },
-      route: "/chat/cursor-pty-1?mode=pty",
+      session: { sessionId: "cursor-json-1", mode: "json", provider: "cursor" },
+      route: "/chat/cursor-json-1?mode=json",
     });
     expect(relay.createSession).toHaveBeenCalledWith(
-      expect.objectContaining({ mode: "pty", provider: "cursor" }),
+      expect.objectContaining({ mode: "json", provider: "cursor" }),
       SESSION_CREATE_CLIENT_TIMEOUT_MS,
     );
   });

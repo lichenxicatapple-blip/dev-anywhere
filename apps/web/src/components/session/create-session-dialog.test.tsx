@@ -105,6 +105,10 @@ const sessionCreatePermissionCases = [
   ["Cursor CLI", "pty", "cursor", "智能自动", "auto"],
   ["Cursor CLI", "pty", "cursor", "只读规划", "plan"],
   ["Cursor CLI", "pty", "cursor", "跳过全部审批", "bypassPermissions"],
+  ["Cursor CLI", "json", "cursor", "命令审批", "default"],
+  ["Cursor CLI", "json", "cursor", "智能自动", "auto"],
+  ["Cursor CLI", "json", "cursor", "只读规划", "plan"],
+  ["Cursor CLI", "json", "cursor", "跳过全部审批", "bypassPermissions"],
 ] as const;
 
 type TestViewport = "desktop" | "mobile";
@@ -415,17 +419,16 @@ describe("CreateSessionDialog", () => {
     },
   );
 
-  it("hides chat mode when Cursor CLI is selected and submits terminal mode", async () => {
+  it("keeps chat mode available when Cursor CLI is selected", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       success: true,
-      sessionId: "cursor-pty-1",
+      sessionId: "cursor-json-1",
       cwd: "/home/dev",
       lastActive: 1,
       kind: "agent",
-      mode: "pty",
+      mode: "json",
       provider: "cursor",
-      ptyOwner: "proxy-hosted",
     });
     useFileStore.setState({
       tree: new Map(),
@@ -434,19 +437,18 @@ describe("CreateSessionDialog", () => {
       agentCli: availableAgentCli,
     });
 
-    const { getByRole, queryByRole } = renderDialog();
+    const { getByRole } = renderDialog();
     fireEvent.click(getByRole("button", { name: /聊天模式/ }));
     selectAgentCli("Cursor CLI");
 
-    expect(queryByRole("button", { name: /聊天模式/ })).not.toBeInTheDocument();
-    expect(getByRole("button", { name: /终端模式/ })).toHaveAttribute("aria-pressed", "true");
+    expect(getByRole("button", { name: /聊天模式/ })).toHaveAttribute("aria-pressed", "true");
 
     fireEvent.click(getByRole("button", { name: "创建" }));
     await waitFor(() => {
       expect(createSession).toHaveBeenCalledWith(
         expect.objectContaining({
           cwd: "/home/dev",
-          mode: "pty",
+          mode: "json",
           provider: "cursor",
         }),
         expect.any(Number),

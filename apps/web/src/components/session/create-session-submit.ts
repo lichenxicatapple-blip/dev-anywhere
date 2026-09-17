@@ -48,8 +48,8 @@ export const PROVIDER_LABEL: Record<ProviderId, string> = {
   cursor: "Cursor CLI",
 };
 
-export function providerSupportsChatMode(provider: ProviderId): boolean {
-  return provider !== "cursor";
+export function providerSupportsChatMode(_provider: ProviderId): boolean {
+  return true;
 }
 
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;

@@ -8,6 +8,9 @@ import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { MessageBubble } from "./message-bubble";
 import { ToolApprovalCard } from "./tool-approval-card";
+import { CursorAskQuestionCard } from "./cursor-ask-question-card";
+import { CursorCreatePlanCard } from "./cursor-create-plan-card";
+import { CursorTodoList } from "./cursor-todo-list";
 import { BackToBottom } from "./back-to-bottom";
 import { ThinkingIndicator } from "./thinking-indicator";
 import { StopButton } from "./send-button";
@@ -61,6 +64,9 @@ export function ChatJsonView({
   const setHistoryLoading = useChatStore((s) => s.setHistoryLoading);
   const pendingApprovals = useChatStore(
     (s) => s.bySessionId[sessionId]?.pendingApprovals ?? EMPTY_SLICE.pendingApprovals,
+  );
+  const cursorTodos = useChatStore(
+    (s) => s.bySessionId[sessionId]?.cursorTodos ?? EMPTY_SLICE.cursorTodos,
   );
   // thinking indicator 的 working 态 = session.state === "working"
   const isWorking = useSessionStore(
@@ -809,26 +815,47 @@ export function ChatJsonView({
         />
         {traceEnabled ? <JsonScrollTraceButton /> : null}
       </div>
-      {hasPendingApprovals && (
+      {(hasPendingApprovals || cursorTodos.length > 0) && (
         <div
           className="dev-render-scroll dev-chat-rail-inset flex flex-col gap-2 overflow-x-hidden overflow-y-auto py-2"
           aria-live="polite"
         >
+          {cursorTodos.length > 0 ? (
+            <div className="dev-message-rail mx-auto w-full min-w-0">
+              <CursorTodoList todos={cursorTodos} />
+            </div>
+          ) : null}
           {pendingApprovalQueue.length > 1 && (
             <div className="dev-message-rail mx-auto w-full min-w-0 px-1 text-xs text-muted-foreground">
               {pendingApprovalQueue.length} 个工具审批待处理
             </div>
           )}
-          {pendingApprovalQueue.map((approval, index) => (
-            <ToolApprovalCard
-              key={approval.requestId}
-              approval={approval}
-              sessionId={sessionId}
-              container="inline"
-              queuePosition={index + 1}
-              queueSize={pendingApprovalQueue.length}
-            />
-          ))}
+          {pendingApprovalQueue.map((approval, index) =>
+            approval.cursorPrompt?.type === "ask_question" ? (
+              <div
+                key={approval.requestId}
+                className="dev-message-rail mx-auto w-full min-w-0"
+              >
+                <CursorAskQuestionCard approval={approval} sessionId={sessionId} />
+              </div>
+            ) : approval.cursorPrompt?.type === "create_plan" ? (
+              <div
+                key={approval.requestId}
+                className="dev-message-rail mx-auto w-full min-w-0"
+              >
+                <CursorCreatePlanCard approval={approval} sessionId={sessionId} />
+              </div>
+            ) : (
+              <ToolApprovalCard
+                key={approval.requestId}
+                approval={approval}
+                sessionId={sessionId}
+                container="inline"
+                queuePosition={index + 1}
+                queueSize={pendingApprovalQueue.length}
+              />
+            ),
+          )}
         </div>
       )}
     </div>

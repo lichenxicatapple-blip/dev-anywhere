@@ -4,8 +4,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CURSOR_PROVIDER,
-  CursorJsonUnsupportedError,
   CursorPermissionModeUnsupportedError,
+  resolveCursorAcpMode,
   resolveCursorCommand,
 } from "#src/providers/cursor.js";
 
@@ -49,12 +49,21 @@ describe("Cursor provider", () => {
     });
   });
 
-  it("rejects JSON command construction", () => {
+  it("builds an ACP JSON command", () => {
     withExecutable("agent", (cursorBin) => {
-      expect(() => CURSOR_PROVIDER.buildJsonCommand({}, { CURSOR_BIN: cursorBin })).toThrow(
-        CursorJsonUnsupportedError,
-      );
+      expect(CURSOR_PROVIDER.buildJsonCommand({}, { CURSOR_BIN: cursorBin })).toMatchObject({
+        command: cursorBin,
+        args: ["acp"],
+      });
     });
+  });
+
+  it("maps hosted permission modes onto Cursor ACP modes", () => {
+    expect(resolveCursorAcpMode("default")).toBe("agent");
+    expect(resolveCursorAcpMode("auto")).toBe("agent");
+    expect(resolveCursorAcpMode("plan")).toBe("plan");
+    expect(resolveCursorAcpMode("bypassPermissions")).toBe("agent");
+    expect(() => resolveCursorAcpMode("acceptEdits")).toThrow(CursorPermissionModeUnsupportedError);
   });
 
   it("leaves local wrap argv unchanged", () => {

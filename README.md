@@ -26,7 +26,7 @@ DEV Anywhere 让你通过浏览器继续使用开发机上的 Claude Code、Code
 
 想让本地启动的 Claude Code、Codex、Kimi Code 或 Cursor CLI 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。除了多了这个前缀，其他都和你原来的开发体验完全一致；但启动后，对应会话会出现在 DEV Anywhere 的 Web 界面里，方便你随时随地继续开发。你也可以直接从 Web 创建新的 coding agent 会话。
 
-Kimi Code 同时支持原生终端与 ACP 聊天会话。ACP 聊天会流式显示回复和工具调用，支持在 Web 中允许、始终允许或拒绝工具审批，也可以取消当前回合并从历史会话恢复。Cursor CLI 目前只支持终端会话。
+Kimi Code 和 Cursor CLI 都同时支持原生终端与 ACP 聊天会话。ACP 聊天会流式显示回复和工具调用，支持在 Web 中允许、始终允许或拒绝工具审批，也可以取消当前回合并从历史会话恢复。Cursor ACP 还支持提问、计划批准和 todo 列表。
 
 DEV Anywhere 直接围绕远程 coding agent 工作流设计。除了查看 coding agent 的输出，你还可以跟踪运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。代码仓库、coding agent CLI 和模型凭据仍然留在开发机上。
 
@@ -201,7 +201,7 @@ dev-anywhere --profile quick-tunnel agent
 
 #### 从浏览器启动新会话
 
-打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex、Kimi Code、Cursor CLI 或 Shell。Claude Code、Codex 和 Kimi Code 都可以选择终端或聊天模式；Kimi Code 的聊天模式通过 ACP 工作。Cursor CLI 目前只支持终端模式。
+打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex、Kimi Code、Cursor CLI 或 Shell。Claude Code、Codex、Kimi Code 和 Cursor CLI 都可以选择终端或聊天模式；Kimi Code 和 Cursor CLI 的聊天模式通过 ACP 工作。
 
 作为终端兼容处理，DEV Anywhere 会为通过本地命令或网页新建、恢复的 Codex 终端会话强制关闭星芒特效（`tui.whimsy=false`），直接运行 `codex` 时仍遵循用户自己的设置。已有 Codex 进程需要退出并重新启动或恢复会话后才会应用此设置，刷新网页不会生效。
 
@@ -247,9 +247,9 @@ dev-anywhere serve status
 
 ### 会话管理
 
-- 直接从浏览器创建 Claude Code、Codex、Kimi Code 的终端或聊天会话，Cursor CLI 的终端会话，以及 Shell 会话。
-- 创建 Claude Code、Codex、Kimi Code 或 Cursor CLI 会话时，可以选择工作目录和权限模式；Claude Code、Codex 和 Kimi Code 还可以选择终端或聊天交互方式。
-- 接入从本地终端启动的会话，也可以恢复 Claude Code、Codex 与 Kimi Code 的历史会话。
+- 直接从浏览器创建 Claude Code、Codex、Kimi Code、Cursor CLI 的终端或聊天会话，以及 Shell 会话。
+- 创建 Claude Code、Codex、Kimi Code 或 Cursor CLI 会话时，可以选择工作目录、权限模式，以及终端或聊天交互方式。
+- 接入从本地终端启动的会话，也可以恢复 Claude Code、Codex、Kimi Code 与 Cursor CLI 的历史会话。
 - 重命名、终止或分离会话；从本地终端启动的会话在 Proxy 重启后可以重新连接。
 - 在多台开发机之间切换，并查看、断开当前连接到 Relay 的客户端；不再使用的离线开发机可在手机上左滑移除，或从桌面端的更多菜单移除，重新连接后会再次出现。
 
@@ -257,7 +257,7 @@ dev-anywhere serve status
 
 ### 终端与聊天视图
 
-**终端视图**直接呈现 CLI 的原始界面，保留颜色、光标、键盘交互和全屏程序。**聊天视图**将 coding agent 输出、工具调用、审批和最终回复整理为更易阅读和触摸操作的消息。Kimi Code 的聊天视图使用 ACP，支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
+**终端视图**直接呈现 CLI 的原始界面，保留颜色、光标、键盘交互和全屏程序。**聊天视图**将 coding agent 输出、工具调用、审批和最终回复整理为更易阅读和触摸操作的消息。Kimi Code 和 Cursor CLI 的聊天视图使用 ACP，支持流式输出、工具调用与审批、取消当前回合和恢复历史会话；Cursor ACP 还支持提问、计划批准和 todo 列表。
 
 ![DEV Anywhere 的终端与聊天视图](./docs/assets/readme-session-modes.gif)
 

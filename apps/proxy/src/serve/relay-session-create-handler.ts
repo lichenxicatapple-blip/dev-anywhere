@@ -27,9 +27,8 @@ import {
   resolveCodexPermissionPolicy,
 } from "../providers/codex.js";
 import {
-  CURSOR_JSON_UNSUPPORTED_MESSAGE,
-  CursorJsonUnsupportedError,
   CursorPermissionModeUnsupportedError,
+  resolveCursorAcpMode,
   resolveCursorPermissionFlags,
 } from "../providers/cursor.js";
 import {
@@ -168,25 +167,12 @@ export class RelaySessionCreateHandler {
     const permissionMode = msg.permissionMode;
     const resumeSessionId = msg.resumeSessionId;
 
-    if (provider === "cursor" && mode === "json") {
-      this.deps.relaySend(
-        serializeControl({
-          type: "session_create_response",
-          requestId,
-          success: false,
-          errorCode: ControlErrorCode.PROVIDER_UNSUPPORTED,
-          error: CURSOR_JSON_UNSUPPORTED_MESSAGE,
-        }),
-      );
-      serviceLogger.warn({ provider, mode }, "Cursor session create rejected: JSON unsupported");
-      return;
-    }
-
-    if (provider === "kimi" && resumeSessionId) {
+    if ((provider === "kimi" || provider === "cursor") && resumeSessionId) {
       const existing = this.deps.sessionManager
         .listSessions()
         .find(
-          (session) => session.provider === "kimi" && session.historySessionId === resumeSessionId,
+          (session) =>
+            session.provider === provider && session.historySessionId === resumeSessionId,
         );
       if (existing) {
         this.respondWithExistingSession(requestId, existing);
@@ -290,12 +276,10 @@ export class RelaySessionCreateHandler {
 
     if (provider === "cursor") {
       try {
-        resolveCursorPermissionFlags(permissionMode);
+        if (mode === "pty") resolveCursorPermissionFlags(permissionMode);
+        else resolveCursorAcpMode(permissionMode);
       } catch (err) {
-        if (
-          !(err instanceof CursorPermissionModeUnsupportedError) &&
-          !(err instanceof CursorJsonUnsupportedError)
-        ) {
+        if (!(err instanceof CursorPermissionModeUnsupportedError)) {
           throw err;
         }
         this.deps.relaySend(
@@ -303,16 +287,13 @@ export class RelaySessionCreateHandler {
             type: "session_create_response",
             requestId,
             success: false,
-            errorCode:
-              err instanceof CursorJsonUnsupportedError
-                ? ControlErrorCode.PROVIDER_UNSUPPORTED
-                : ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+            errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
             error: err.message,
           }),
         );
         serviceLogger.warn(
           { provider, permissionMode },
-          "Cursor session create rejected: unsupported policy",
+          "Cursor session create rejected: unsupported approval policy",
         );
         return;
       }
