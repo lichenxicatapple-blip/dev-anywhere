@@ -2,7 +2,11 @@ import { readdir, lstat, access, open, readFile } from "node:fs/promises";
 import { createReadStream } from "node:fs";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
-import { summarizeToolActivity, type SessionHistoryMessage } from "@dev-anywhere/shared";
+import {
+  summarizeToolActivity,
+  type ProviderId,
+  type SessionHistoryMessage,
+} from "@dev-anywhere/shared";
 import { collectJsonlFiles, collectFilesNamed } from "./history/files.js";
 import { claudeProjectsDir, codexSessionsDir, kimiSessionsDir } from "./history/paths.js";
 import { readCodexSessionId } from "./history/codex.js";
@@ -48,8 +52,6 @@ interface SessionMessagesPageOptions {
   limit?: number;
   before?: string;
 }
-
-type SessionHistoryProvider = "claude" | "codex" | "kimi";
 
 const DEFAULT_HISTORY_PAGE_LIMIT = 50;
 const MAX_HISTORY_PAGE_LIMIT = 200;
@@ -122,8 +124,9 @@ async function findCodexSessionFile(codexSessionId: string): Promise<string | nu
 
 async function findSessionFile(
   sessionId: string,
-  provider?: SessionHistoryProvider,
+  provider?: ProviderId,
 ): Promise<string | null> {
+  if (provider === "cursor") return null;
   if (provider === "claude") return findClaudeSessionFile(sessionId);
   if (provider === "codex") return findCodexSessionFile(sessionId);
   if (provider === "kimi") return findKimiSessionFile(sessionId);
@@ -996,7 +999,7 @@ async function readSessionMessagesPageFromFile(
 // 从 JSONL 文件中提取 user/assistant 对话消息用于恢复时展示历史
 export async function readSessionMessages(
   sessionId: string,
-  provider?: SessionHistoryProvider,
+  provider?: ProviderId,
 ): Promise<SessionMessage[]> {
   const filePath = await findSessionFile(sessionId, provider);
   if (!filePath) return [];
@@ -1052,7 +1055,7 @@ export async function readSessionMessages(
 export async function readSessionMessagesPage(
   sessionId: string,
   options: SessionMessagesPageOptions = {},
-  provider?: SessionHistoryProvider,
+  provider?: ProviderId,
 ): Promise<SessionMessagesPage> {
   const filePath = await findSessionFile(sessionId, provider);
   if (!filePath) return { messages: [], hasMore: false };

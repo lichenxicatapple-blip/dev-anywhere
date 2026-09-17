@@ -16,7 +16,7 @@ type PtyFakeRelayOptionsBase = {
 export type PtyFakeRelayOptions =
   | (PtyFakeRelayOptionsBase & {
       sessionKind: "agent";
-      provider: "claude" | "codex" | "kimi";
+      provider: "claude" | "codex" | "kimi" | "cursor";
       ptyOwner: "local-terminal" | "proxy-hosted";
     })
   | (PtyFakeRelayOptionsBase & {
@@ -81,7 +81,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
         try {
           return JSON.parse(sessionStorage.getItem(activeKey) ?? "null") as {
             sessionId?: string;
-            provider?: "claude" | "codex" | "kimi";
+            provider?: "claude" | "codex" | "kimi" | "cursor";
           } | null;
         } catch {
           return null;
@@ -198,6 +198,7 @@ export async function installPtyFakeRelay(page: Page, options: PtyFakeRelayOptio
                 claude: { available: true, command: "claude" },
                 codex: { available: true, command: "codex" },
                 kimi: { available: true, command: "kimi" },
+                cursor: { available: true, command: "agent" },
               },
             });
             return;

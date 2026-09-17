@@ -5,7 +5,7 @@ export { findExecutableCandidates } from "../common/executable.js";
 export function resolveExecutable(
   name: string,
   env: NodeJS.ProcessEnv,
-  envVarName: "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN",
+  envVarName: "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN" | "CURSOR_BIN",
   errorMessage: string,
   cwd: string = process.cwd(),
 ): string {

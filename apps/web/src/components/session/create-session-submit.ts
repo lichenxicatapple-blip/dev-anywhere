@@ -9,7 +9,7 @@ import {
 } from "@dev-anywhere/shared";
 
 export type SessionMode = "pty" | "json";
-export type ProviderId = "claude" | "codex" | "kimi";
+export type ProviderId = "claude" | "codex" | "kimi" | "cursor";
 export type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
@@ -34,11 +34,23 @@ export const KIMI_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label:
   { value: "bypassPermissions", label: "全自动" },
 ];
 
+export const CURSOR_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
+  { value: "default", label: "命令审批" },
+  { value: "auto", label: "智能自动" },
+  { value: "plan", label: "只读规划" },
+  { value: "bypassPermissions", label: "跳过全部审批" },
+];
+
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
   kimi: "Kimi Code",
+  cursor: "Cursor CLI",
 };
+
+export function providerSupportsChatMode(provider: ProviderId): boolean {
+  return provider !== "cursor";
+}
 
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
 
@@ -127,6 +139,11 @@ export function normalizePermissionModeForProvider(
       ? permissionMode
       : "default";
   }
+  if (provider === "cursor") {
+    return CURSOR_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
+      ? permissionMode
+      : "default";
+  }
   return permissionMode;
 }
 
@@ -160,7 +177,7 @@ export async function submitSessionCreate({
     };
   }
 
-  const submittedMode = form.mode;
+  const submittedMode = providerSupportsChatMode(form.provider) ? form.mode : "pty";
   const submittedProvider = form.provider;
   const submittedName = form.name.trim();
 

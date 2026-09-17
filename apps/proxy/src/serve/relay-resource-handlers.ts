@@ -57,7 +57,12 @@ export class RelayResourceHandlers {
     const { requestId, provider } = msg;
     const rawPath = msg.path;
 
-    if (provider !== "claude" && provider !== "codex" && provider !== "kimi") {
+    if (
+      provider !== "claude" &&
+      provider !== "codex" &&
+      provider !== "kimi" &&
+      provider !== "cursor"
+    ) {
       this.deps.relaySend(
         serializeControl({
           type: "agent_cli_config_update_response",
@@ -165,7 +170,7 @@ export class RelayResourceHandlers {
       sessionId: sid,
       requestId: msg.requestId,
       workDir: session.cwd,
-      includeCommands: session.provider !== "kimi",
+      includeCommands: session.provider !== "kimi" && session.provider !== "cursor",
     });
     serviceLogger.info({ sessionId: sid, cwd: session.cwd }, "Session resources requested");
   }

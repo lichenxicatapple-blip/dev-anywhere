@@ -108,7 +108,7 @@ irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/in
 
 ## 连接开发机
 
-开发机支持 macOS、Linux 和原生 Windows 11，Windows 无需安装 WSL。在运行 Claude Code、Codex、Kimi Code 或 Shell 的开发机上安装 Proxy：
+开发机支持 macOS、Linux 和原生 Windows 11，Windows 无需安装 WSL。在运行 Claude Code、Codex、Kimi Code、Cursor CLI 或 Shell 的开发机上安装 Proxy：
 
 ```bash
 npm install -g @dev-anywhere/proxy
@@ -152,14 +152,17 @@ dev-anywhere serve status
   "agentCli": {
     "claudeBin": "/absolute/path/to/claude",
     "codexBin": "/absolute/path/to/codex",
-    "kimiBin": "/absolute/path/to/kimi"
+    "kimiBin": "/absolute/path/to/kimi",
+    "cursorBin": "/absolute/path/to/agent"
   }
 }
 ```
 
-也可以分别使用 `CLAUDE_BIN`、`CODEX_BIN` 和 `KIMI_BIN` 临时覆盖这些路径。
+也可以分别使用 `CLAUDE_BIN`、`CODEX_BIN`、`KIMI_BIN` 和 `CURSOR_BIN` 临时覆盖这些路径。Cursor CLI 探测 `agent` 或 `cursor-agent`，不会使用 Cursor IDE 的 `cursor` 命令名。
 
 Kimi Code 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere kimi ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
+
+Cursor CLI 目前只支持终端会话。可以运行 `dev-anywhere agent ...` 或 `dev-anywhere cursor ...` 接管原生终端，也可以在 Web 中新建终端会话。
 
 ### 可选：登录后自动启动
 

@@ -8,7 +8,7 @@ import { fileURLToPath } from "node:url";
 // eslint-disable-next-line no-control-regex
 const OSC_PATTERN = /\x1b\](\d+);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
 
-type PtySignalProvider = "claude" | "codex" | "kimi";
+type PtySignalProvider = "claude" | "codex" | "kimi" | "cursor";
 
 interface PtyStateEvent {
   state: PtySemanticState | null;

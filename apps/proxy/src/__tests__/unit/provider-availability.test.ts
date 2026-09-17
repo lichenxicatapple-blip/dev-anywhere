@@ -11,16 +11,20 @@ describe("provider availability", () => {
       const claudeBin = join(root, "claude");
       const codexBin = join(root, "codex");
       const kimiBin = join(root, "kimi");
+      const cursorBin = join(root, "agent");
       writeFileSync(claudeBin, "#!/bin/sh\n");
       writeFileSync(codexBin, "#!/bin/sh\n");
       writeFileSync(kimiBin, "#!/bin/sh\n");
+      writeFileSync(cursorBin, "#!/bin/sh\n");
       chmodSync(claudeBin, 0o755);
       chmodSync(codexBin, 0o755);
       chmodSync(kimiBin, 0o755);
+      chmodSync(cursorBin, 0o755);
       const status = detectAgentCliStatus({
         CLAUDE_BIN: claudeBin,
         CODEX_BIN: codexBin,
         KIMI_BIN: kimiBin,
+        CURSOR_BIN: cursorBin,
       });
 
       expect(status).toEqual({
@@ -31,6 +35,7 @@ describe("provider availability", () => {
         },
         codex: { available: true, command: codexBin, suggestions: [codexBin] },
         kimi: { available: true, command: kimiBin, suggestions: [kimiBin] },
+        cursor: { available: true, command: cursorBin, suggestions: [cursorBin] },
       });
     } finally {
       rmSync(root, { recursive: true, force: true });
@@ -46,6 +51,23 @@ describe("provider availability", () => {
     expect(status.codex.error).toContain("codex not found");
     expect(status.kimi.available).toBe(false);
     expect(status.kimi.error).toContain("kimi not found");
+    expect(status.cursor.available).toBe(false);
+    expect(status.cursor.error).toContain("Cursor CLI not found");
+  });
+
+  it("does not treat the Cursor IDE binary name as the agent CLI", () => {
+    const root = mkdtempSync(join(tmpdir(), "dev-anywhere-cursor-ide-"));
+    try {
+      const cursorIde = join(root, "cursor");
+      writeFileSync(cursorIde, "#!/bin/sh\n");
+      chmodSync(cursorIde, 0o755);
+      const status = detectAgentCliStatus({ PATH: root });
+
+      expect(status.cursor.available).toBe(false);
+      expect(status.cursor.error).toContain("Cursor CLI not found");
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   it("always includes a Kimi detection result despite the wire field being optional", () => {

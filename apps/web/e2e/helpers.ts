@@ -7,7 +7,7 @@ export const BASE_URL = process.env.WEB_BASE_URL ?? "http://localhost:5173";
 
 export async function selectAgentCli(
   page: Page,
-  name: "Claude Code" | "Codex" | "Kimi Code",
+  name: "Claude Code" | "Codex" | "Kimi Code" | "Cursor CLI",
 ): Promise<void> {
   const trigger = page
     .getByRole("dialog", { name: "新建会话" })
@@ -163,7 +163,7 @@ export async function installFakeRelay(
       name?: string;
       state: "idle" | "working" | "waiting_approval" | "error" | "terminated";
       mode: "pty" | "json";
-      provider: "claude" | "codex" | "kimi";
+      provider: "claude" | "codex" | "kimi" | "cursor";
       ptyOwner?: "local-terminal" | "proxy-hosted";
       lastActive: number;
       cwd: string;
@@ -672,6 +672,10 @@ export async function installFakeRelay(
                   available: true,
                   command: "/home/dev/.local/bin/kimi",
                 },
+                cursor: {
+                  available: true,
+                  command: "/home/dev/.local/bin/agent",
+                },
               },
             });
             break;
@@ -1015,7 +1019,10 @@ export async function installFakeRelay(
             }
             if (
               msg.kind !== "agent" ||
-              (msg.provider !== "claude" && msg.provider !== "codex" && msg.provider !== "kimi") ||
+              (msg.provider !== "claude" &&
+                msg.provider !== "codex" &&
+                msg.provider !== "kimi" &&
+                msg.provider !== "cursor") ||
               (msg.mode !== "json" && msg.mode !== "pty") ||
               typeof msg.cwd !== "string" ||
               (msg.mode === "pty" &&

@@ -828,6 +828,7 @@ describe("RelayClient request handling", () => {
       claude: { available: true, command: "/usr/local/bin/claude" },
       codex: { available: false, error: "codex not found" },
       kimi: { available: false, error: "kimi not found" },
+      cursor: { available: false, error: "cursor not found" },
     };
 
     ws.emit({
@@ -864,6 +865,7 @@ describe("RelayClient request handling", () => {
         claude: { available: false },
         codex: { available: false },
         kimi: { available: false },
+        cursor: { available: false },
       },
       terminalShells,
     });
@@ -878,6 +880,7 @@ describe("RelayClient request handling", () => {
       claude: { available: true, command: "/home/dev/.local/bin/claude" },
       codex: { available: true, command: "/usr/local/bin/codex" },
       kimi: { available: true, command: "/usr/local/bin/kimi" },
+      cursor: { available: true, command: "/usr/local/bin/agent" },
     };
 
     ws.emit({
@@ -898,6 +901,7 @@ describe("RelayClient request handling", () => {
       claude: { available: true, command: "/usr/local/bin/claude" },
       codex: { available: true, command: "/usr/local/bin/codex" },
       kimi: { available: true, command: "/home/dev/.local/bin/kimi" },
+      cursor: { available: true, command: "/home/dev/.local/bin/agent" },
     };
 
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({

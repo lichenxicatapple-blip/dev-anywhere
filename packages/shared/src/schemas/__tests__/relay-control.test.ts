@@ -1089,6 +1089,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: false, error: "codex not found" },
           kimi: { available: false, error: "kimi not found" },
+          cursor: { available: false, error: "cursor not found" },
         },
       }),
     ).toEqual({
@@ -1099,6 +1100,7 @@ describe("RelayControlSchema", () => {
         claude: { available: true, command: "/usr/local/bin/claude" },
         codex: { available: false, error: "codex not found" },
         kimi: { available: false, error: "kimi not found" },
+        cursor: { available: false, error: "cursor not found" },
       },
     });
 
@@ -1111,6 +1113,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/home/dev/.kimi-code/bin/kimi" },
+          cursor: { available: false },
         },
       }),
     ).toMatchObject({
@@ -1168,6 +1171,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/home/dev/.local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/usr/local/bin/kimi" },
+          cursor: { available: true, command: "/usr/local/bin/agent" },
         },
       }),
     ).toEqual({
@@ -1178,6 +1182,7 @@ describe("RelayControlSchema", () => {
         claude: { available: true, command: "/home/dev/.local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
+        cursor: { available: true, command: "/usr/local/bin/agent" },
       },
     });
 

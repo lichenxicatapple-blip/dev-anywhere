@@ -71,6 +71,11 @@ const availableAgentCli = {
     command: "/usr/local/bin/kimi",
     suggestions: ["/usr/local/bin/kimi", "/home/dev/.local/bin/kimi"],
   },
+  cursor: {
+    available: true,
+    command: "/usr/local/bin/agent",
+    suggestions: ["/usr/local/bin/agent", "/home/dev/.local/bin/agent"],
+  },
 };
 
 const sessionCreatePermissionCases = [
@@ -96,6 +101,10 @@ const sessionCreatePermissionCases = [
   ["Kimi Code", "json", "kimi", "自动审批", "auto"],
   ["Kimi Code", "json", "kimi", "只读规划", "plan"],
   ["Kimi Code", "json", "kimi", "全自动", "bypassPermissions"],
+  ["Cursor CLI", "pty", "cursor", "命令审批", "default"],
+  ["Cursor CLI", "pty", "cursor", "智能自动", "auto"],
+  ["Cursor CLI", "pty", "cursor", "只读规划", "plan"],
+  ["Cursor CLI", "pty", "cursor", "跳过全部审批", "bypassPermissions"],
 ] as const;
 
 type TestViewport = "desktop" | "mobile";
@@ -130,7 +139,7 @@ function renderDialog() {
   );
 }
 
-function selectAgentCli(label: "Claude Code" | "Codex" | "Kimi Code"): void {
+function selectAgentCli(label: "Claude Code" | "Codex" | "Kimi Code" | "Cursor CLI"): void {
   fireEvent.click(screen.getByRole("combobox", { name: "Agent CLI" }));
   fireEvent.click(screen.getByRole("option", { name: label }));
 }
@@ -189,6 +198,7 @@ describe("CreateSessionDialog", () => {
       "Claude Code",
       "Codex",
       "Kimi Code",
+      "Cursor CLI",
     ]);
   });
 
@@ -377,7 +387,9 @@ describe("CreateSessionDialog", () => {
         fireEvent.click(getByRole("button", { name: /聊天模式/ }));
       }
       if (provider !== "claude") {
-        selectAgentCli(provider === "codex" ? "Codex" : "Kimi Code");
+        selectAgentCli(
+          provider === "codex" ? "Codex" : provider === "kimi" ? "Kimi Code" : "Cursor CLI",
+        );
       }
       fireEvent.click(getByRole("combobox", { name: "权限模式" }));
       fireEvent.click(getByRole("option", { name: permissionLabel }));
@@ -402,6 +414,45 @@ describe("CreateSessionDialog", () => {
       });
     },
   );
+
+  it("hides chat mode when Cursor CLI is selected and submits terminal mode", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      success: true,
+      sessionId: "cursor-pty-1",
+      cwd: "/home/dev",
+      lastActive: 1,
+      kind: "agent",
+      mode: "pty",
+      provider: "cursor",
+      ptyOwner: "proxy-hosted",
+    });
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole, queryByRole } = renderDialog();
+    fireEvent.click(getByRole("button", { name: /聊天模式/ }));
+    selectAgentCli("Cursor CLI");
+
+    expect(queryByRole("button", { name: /聊天模式/ })).not.toBeInTheDocument();
+    expect(getByRole("button", { name: /终端模式/ })).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(getByRole("button", { name: "创建" }));
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          cwd: "/home/dev",
+          mode: "pty",
+          provider: "cursor",
+        }),
+        expect.any(Number),
+      );
+    });
+  });
 
   it("requires a second destructive action before creating a bypass session", async () => {
     useFileStore.setState({
@@ -664,6 +715,7 @@ describe("CreateSessionDialog", () => {
         claude: { available: false, error: "claude not found in PATH" },
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
+        cursor: { available: true, command: "/usr/local/bin/agent" },
       },
     });
 
@@ -685,6 +737,7 @@ describe("CreateSessionDialog", () => {
         claude: { available: false, error: "claude not found in PATH" },
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
+        cursor: { available: true, command: "/usr/local/bin/agent" },
       },
     });
     updateAgentCliPath.mockResolvedValueOnce({

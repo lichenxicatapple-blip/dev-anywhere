@@ -199,7 +199,9 @@ export function HistoryList({ now }: HistoryListProps) {
 
   const hasHistory = historySessions.length > 0;
   const historyLoading = historyLoadStatus === "loading";
-  const restoreModes = restoreTarget ? availableRestoreModes() : [];
+  const restoreModes = restoreTarget
+    ? availableRestoreModes(historySessionProvider(restoreTarget))
+    : [];
 
   return (
     <div data-slot="history-list" className="flex flex-col">
@@ -423,14 +425,14 @@ function normalizeHistoryProjectDir(dir: string): string {
   return trimmed.replace(/\/+$/, "") || "/";
 }
 
-function availableRestoreModes(): RestoreMode[] {
-  return ["json", "pty"];
+function availableRestoreModes(provider: SessionProvider): RestoreMode[] {
+  return provider === "cursor" ? ["pty"] : ["json", "pty"];
 }
 
 function defaultRestoreMode(session: HistorySession): RestoreMode {
-  const modes = availableRestoreModes();
+  const modes = availableRestoreModes(historySessionProvider(session));
   if (session.preferredMode && modes.includes(session.preferredMode)) return session.preferredMode;
-  return modes[0] ?? "json";
+  return modes[0] ?? "pty";
 }
 
 function defaultRestorePermissionMode(session: HistorySession): RestorePermissionMode {
@@ -467,6 +469,7 @@ function HistoryRestoreDialog({
   const provider = session ? historySessionProvider(session) : null;
   const isCodex = provider === "codex";
   const isKimi = provider === "kimi";
+  const isCursor = provider === "cursor";
 
   useEffect(() => {
     if (!open) setConfirmingBypass(false);
@@ -507,9 +510,13 @@ function HistoryRestoreDialog({
           {!isCodex && (
             <PermissionChoiceButton
               checked={permissionMode === "default"}
-              label={isKimi ? "手工审批" : "严格审批"}
+              label={isKimi ? "手工审批" : isCursor ? "命令审批" : "严格审批"}
               description={
-                isKimi ? "工具调用会在 Web 中请求确认。" : "所有需要权限的操作都要确认。"
+                isKimi
+                  ? "工具调用会在 Web 中请求确认。"
+                  : isCursor
+                    ? "Cursor CLI 在执行命令前询问。"
+                    : "所有需要权限的操作都要确认。"
               }
               disabled={submitting}
               onClick={() => onPermissionModeChange("default")}
@@ -517,22 +524,30 @@ function HistoryRestoreDialog({
           )}
           <PermissionChoiceButton
             checked={permissionMode === "auto"}
-            label={isCodex ? "按需审批" : isKimi ? "自动审批" : "自动判定"}
+            label={
+              isCodex ? "按需审批" : isKimi ? "自动审批" : isCursor ? "智能自动" : "自动判定"
+            }
             description={
               isCodex
                 ? "Codex 在需要时请求确认。"
                 : isKimi
                   ? "Kimi Code 使用原生 yolo 模式自动审批。"
-                  : "交给 Agent CLI 的原生策略判断。"
+                  : isCursor
+                    ? "Cursor CLI 自动执行判定为安全的工具，其余仍会询问。"
+                    : "交给 Agent CLI 的原生策略判断。"
             }
             disabled={submitting}
             onClick={() => onPermissionModeChange("auto")}
           />
-          {isKimi && (
+          {(isKimi || isCursor) && (
             <PermissionChoiceButton
               checked={permissionMode === "plan"}
               label="只读规划"
-              description="Kimi Code 使用只读规划模式。"
+              description={
+                isCursor
+                  ? "Cursor CLI 使用只读规划模式。"
+                  : "Kimi Code 使用只读规划模式。"
+              }
               disabled={submitting}
               onClick={() => onPermissionModeChange("plan")}
             />

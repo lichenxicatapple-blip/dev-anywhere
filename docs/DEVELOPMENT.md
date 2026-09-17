@@ -9,7 +9,7 @@
 - Node.js 20.3 或更高版本；发布验证和 CI 使用 Node.js 22.22.2；
 - pnpm 9，与 CI 保持一致；
 - macOS、Linux 或原生 Windows 11；
-- 可选：已经登录的 Claude Code、Codex、Kimi Code，用于验证真实 coding agent 链路；
+- 可选：已经登录的 Claude Code、Codex、Kimi Code、Cursor CLI，用于验证真实 coding agent 链路；
 - 可选：`cloudflared`，用于验证 Quick Tunnel。
 
 安装 pnpm 和项目依赖：
@@ -142,7 +142,7 @@ docs/       长期维护的中文文档和 README 媒体资源
 - `agentCli`
 - `logLevel`
 
-`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin` 和 `kimiBin` 指定 Claude Code、Codex、Kimi Code 的绝对路径；对应的 `CLAUDE_BIN`、`CODEX_BIN` 和 `KIMI_BIN` 可以临时覆盖配置。
+`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin`、`kimiBin` 和 `cursorBin` 指定 Claude Code、Codex、Kimi Code、Cursor CLI 的绝对路径；对应的 `CLAUDE_BIN`、`CODEX_BIN`、`KIMI_BIN` 和 `CURSOR_BIN` 可以临时覆盖配置。Cursor CLI 探测顺序为 `CURSOR_BIN` → `agent` → `cursor-agent`，不会把 Cursor IDE 的 `cursor` 可执行文件当成 Agent。
 
 配置由 Zod schema 校验。新增字段时应同时修改 schema、默认配置、相关测试和用户文档。
 

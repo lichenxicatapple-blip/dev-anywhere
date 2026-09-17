@@ -86,6 +86,7 @@ export const AgentCliStatusSchema = z.object({
   claude: AgentCliAvailabilitySchema,
   codex: AgentCliAvailabilitySchema,
   kimi: AgentCliAvailabilitySchema,
+  cursor: AgentCliAvailabilitySchema,
 });
 export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
 

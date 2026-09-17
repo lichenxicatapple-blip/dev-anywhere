@@ -2,12 +2,14 @@ import { ControlErrorCode, SESSION_CREATE_CLIENT_TIMEOUT_MS } from "@dev-anywher
 import { describe, expect, it, vi } from "vitest";
 import {
   CODEX_PERMISSION_MODE_OPTIONS,
+  CURSOR_PERMISSION_MODE_OPTIONS,
   extractMissingCwd,
   KIMI_PERMISSION_MODE_OPTIONS,
   normalizePermissionModeForProvider,
   PERMISSION_MODE_OPTIONS,
   providerStatus,
   PROVIDER_LABEL,
+  providerSupportsChatMode,
   submitSessionCreate,
   submitTerminalCreate,
 } from "./create-session-submit";
@@ -16,12 +18,22 @@ const agentCli = {
   claude: { available: true, command: "/usr/local/bin/claude" },
   codex: { available: true, command: "/usr/local/bin/codex" },
   kimi: { available: true, command: "/usr/local/bin/kimi" },
+  cursor: { available: true, command: "/usr/local/bin/agent" },
 };
 
 describe("create-session submit model", () => {
   it("keeps provider labels and permission options centralized for the dialog", () => {
     expect(PROVIDER_LABEL.claude).toBe("Claude Code");
     expect(PROVIDER_LABEL.kimi).toBe("Kimi Code");
+    expect(PROVIDER_LABEL.cursor).toBe("Cursor CLI");
+    expect(providerSupportsChatMode("cursor")).toBe(false);
+    expect(providerSupportsChatMode("claude")).toBe(true);
+    expect(CURSOR_PERMISSION_MODE_OPTIONS).toEqual([
+      { value: "default", label: "命令审批" },
+      { value: "auto", label: "智能自动" },
+      { value: "plan", label: "只读规划" },
+      { value: "bypassPermissions", label: "跳过全部审批" },
+    ]);
     expect(PERMISSION_MODE_OPTIONS.map((option) => option.value)).toContain("acceptEdits");
     expect(CODEX_PERMISSION_MODE_OPTIONS.map((option) => option.value)).not.toContain(
       "acceptEdits",
@@ -40,6 +52,8 @@ describe("create-session submit model", () => {
     expect(normalizePermissionModeForProvider("kimi", "acceptEdits")).toBe("default");
     expect(normalizePermissionModeForProvider("kimi", "auto")).toBe("auto");
     expect(normalizePermissionModeForProvider("kimi", "plan")).toBe("plan");
+    expect(normalizePermissionModeForProvider("cursor", "acceptEdits")).toBe("default");
+    expect(normalizePermissionModeForProvider("cursor", "plan")).toBe("plan");
   });
 
   it("reports provider availability without requiring component render", () => {
@@ -49,6 +63,7 @@ describe("create-session submit model", () => {
         claude: { available: false, error: "claude not found" },
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
+        cursor: { available: true, command: "/usr/local/bin/agent" },
       }),
     ).toEqual({ label: "未找到", disabled: true, title: "claude not found" });
     expect(
@@ -56,6 +71,7 @@ describe("create-session submit model", () => {
         claude: { available: true, command: "/usr/local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: false, error: "kimi not found" },
+        cursor: { available: false, error: "cursor not found" },
       }),
     ).toEqual({ label: "未找到", disabled: true, title: "kimi not found" });
   });
@@ -150,6 +166,44 @@ describe("create-session submit model", () => {
     );
   });
 
+  it("forces Cursor CLI sessions onto terminal mode even if chat is requested", async () => {
+    const relay = {
+      createSession: vi.fn().mockResolvedValue({
+        type: "session_create_response",
+        success: true,
+        sessionId: "cursor-pty-1",
+        cwd: "/home/dev",
+        lastActive: 1,
+        kind: "agent",
+        mode: "pty",
+        provider: "cursor",
+        ptyOwner: "proxy-hosted",
+      }),
+    };
+
+    await expect(
+      submitSessionCreate({
+        relay,
+        agentCli,
+        form: {
+          cwd: "/home/dev",
+          name: "",
+          mode: "json",
+          provider: "cursor",
+          permissionMode: "default",
+        },
+      }),
+    ).resolves.toMatchObject({
+      type: "success",
+      session: { sessionId: "cursor-pty-1", mode: "pty", provider: "cursor" },
+      route: "/chat/cursor-pty-1?mode=pty",
+    });
+    expect(relay.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ mode: "pty", provider: "cursor" }),
+      SESSION_CREATE_CLIENT_TIMEOUT_MS,
+    );
+  });
+
   it("returns provider unavailable with the provider error", async () => {
     const relay = { createSession: vi.fn() };
 
@@ -160,6 +214,7 @@ describe("create-session submit model", () => {
           claude: { available: false, error: "claude not found" },
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/usr/local/bin/kimi" },
+          cursor: { available: true, command: "/usr/local/bin/agent" },
         },
         form: {
           cwd: "/home/dev",

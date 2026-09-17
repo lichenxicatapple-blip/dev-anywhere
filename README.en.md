@@ -22,11 +22,11 @@
 
 ## What it is
 
-DEV Anywhere lets you continue using Claude Code, Codex, Kimi Code, and Shell on your development machine from a browser. From another computer, phone, or tablet, you can continue your current session, resume a previous session, or start a new one. You can also preview web apps and interact with running iOS Simulators and Android Emulators on the development machine.
+DEV Anywhere lets you continue using Claude Code, Codex, Kimi Code, Cursor CLI, and Shell on your development machine from a browser. From another computer, phone, or tablet, you can continue your current session, resume a previous session, or start a new one. You can also preview web apps and interact with running iOS Simulators and Android Emulators on the development machine.
 
-To continue a locally started Claude Code, Codex, or Kimi Code session from the browser, add `dev-anywhere` before the original command. Apart from the prefix, the development experience stays exactly the same. The session also appears in the DEV Anywhere Web interface, so you can continue working anytime and anywhere. You can also create a new coding agent session directly from the Web.
+To continue a locally started Claude Code, Codex, Kimi Code, or Cursor CLI session from the browser, add `dev-anywhere` before the original command. Apart from the prefix, the development experience stays exactly the same. The session also appears in the DEV Anywhere Web interface, so you can continue working anytime and anywhere. You can also create a new coding agent session directly from the Web.
 
-Kimi Code supports both its native terminal interface and ACP chat sessions. ACP chat streams responses and tool calls, lets you allow once, always allow, or reject tool approvals in the Web, and supports cancelling the current turn and resuming historical sessions.
+Kimi Code supports both its native terminal interface and ACP chat sessions. ACP chat streams responses and tool calls, lets you allow once, always allow, or reject tool approvals in the Web, and supports cancelling the current turn and resuming historical sessions. Cursor CLI currently supports terminal sessions only.
 
 DEV Anywhere is designed around remote coding agent workflows. In addition to reading coding agent output, you can track running state, handle tool approvals, upload or download files, search previous output, and receive browser notifications when work finishes. Your repositories, coding agent CLIs, and model credentials remain on the development machine.
 
@@ -47,7 +47,7 @@ node --version
 npm --version
 ```
 
-To create coding agent sessions, install and authenticate Claude Code, Codex, or Kimi Code first. You can skip this step if you only need Shell sessions.
+To create coding agent sessions, install and authenticate Claude Code, Codex, Kimi Code, or Cursor CLI first. You can skip this step if you only need Shell sessions.
 
 ### 1. Install the local Proxy
 
@@ -175,9 +175,9 @@ Once connected, use the browser to take over a coding agent session started in a
 
 #### Take over a development-machine terminal session from the browser
 
-When starting Claude Code, Codex, or Kimi Code, add `dev-anywhere` before the original command:
+When starting Claude Code, Codex, Kimi Code, or Cursor CLI, add `dev-anywhere` before the original command:
 
-For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. The CLI arguments and local terminal experience stay the same. The session also appears in DEV Anywhere, where you can take it over from a browser at any time.
+For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. The CLI arguments and local terminal experience stay the same. The session also appears in DEV Anywhere, where you can take it over from a browser at any time. For Cursor CLI, use `dev-anywhere agent ...` (matching the native command) or the `dev-anywhere cursor ...` alias.
 
 **With a VPS Relay deployment**
 
@@ -185,6 +185,7 @@ For example, change `claude --permission-mode plan` to `dev-anywhere claude --pe
 dev-anywhere claude
 dev-anywhere codex
 dev-anywhere kimi
+dev-anywhere agent
 ```
 
 **With Quick Tunnel**
@@ -195,11 +196,12 @@ Keep `dev-anywhere tunnel` running and use another terminal:
 dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
 dev-anywhere --profile quick-tunnel kimi
+dev-anywhere --profile quick-tunnel agent
 ```
 
 #### Start a new session from the browser
 
-Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, Kimi Code, or Shell in a directory on that machine. Claude Code, Codex, and Kimi Code all offer terminal and chat modes; Kimi Code chat runs over ACP.
+Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, Kimi Code, Cursor CLI, or Shell in a directory on that machine. Claude Code, Codex, and Kimi Code all offer terminal and chat modes; Kimi Code chat runs over ACP. Cursor CLI currently supports terminal mode only.
 
 For terminal compatibility, DEV Anywhere forces the sparkle effect off (`tui.whimsy=false`) for Codex terminal sessions started or resumed through its local CLI or Web interface; running `codex` directly still follows your own settings. Existing Codex processes must exit before you restart or resume the session to apply this setting; refreshing the browser does not apply it.
 
@@ -245,8 +247,8 @@ For pinned versions, disabled automatic updates, or migration from a release old
 
 ### Session management
 
-- Create terminal or chat sessions for Claude Code, Codex, and Kimi Code, plus Shell sessions, directly from the browser.
-- Choose the working directory, terminal or chat interaction, and permission mode for Claude Code, Codex, or Kimi Code sessions.
+- Create terminal or chat sessions for Claude Code, Codex, and Kimi Code, Cursor CLI terminal sessions, and Shell sessions, directly from the browser.
+- Choose the working directory and permission mode for Claude Code, Codex, Kimi Code, or Cursor CLI sessions; Claude Code, Codex, and Kimi Code can also choose terminal or chat interaction.
 - Attach sessions started from a local terminal, or resume Claude Code, Codex, and Kimi Code historical sessions.
 - Rename, terminate, or detach sessions; sessions started from a local terminal can reconnect after a Proxy restart.
 - Switch between development machines, and inspect or disconnect clients currently connected to the Relay. Remove an unused offline machine by swiping left on mobile or using its desktop overflow menu; it will appear again if it reconnects.
@@ -323,7 +325,7 @@ flowchart LR
   subgraph machine["Development machine"]
     direction TB
     proxy["Proxy<br/>sessions · terminals · files"]
-    agent["Claude Code / Codex / Kimi Code"]
+    agent["Claude Code / Codex / Kimi Code / Cursor CLI"]
     shell["Shell"]
     local["Repositories · CLI configuration · local permissions"]
 

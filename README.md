@@ -22,11 +22,11 @@
 
 ## 这是什么
 
-DEV Anywhere 让你通过浏览器继续使用开发机上的 Claude Code、Codex、Kimi Code 和 Shell。无论手边是另一台电脑、手机还是平板，都能继续当前会话、恢复历史会话或启动新会话。你还可以预览网页效果，并查看和操控开发机上已经启动的 iOS Simulator 与 Android Emulator。
+DEV Anywhere 让你通过浏览器继续使用开发机上的 Claude Code、Codex、Kimi Code、Cursor CLI 和 Shell。无论手边是另一台电脑、手机还是平板，都能继续当前会话、恢复历史会话或启动新会话。你还可以预览网页效果，并查看和操控开发机上已经启动的 iOS Simulator 与 Android Emulator。
 
-想让本地启动的 Claude Code、Codex 或 Kimi Code 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。除了多了这个前缀，其他都和你原来的开发体验完全一致；但启动后，对应会话会出现在 DEV Anywhere 的 Web 界面里，方便你随时随地继续开发。你也可以直接从 Web 创建新的 coding agent 会话。
+想让本地启动的 Claude Code、Codex、Kimi Code 或 Cursor CLI 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。除了多了这个前缀，其他都和你原来的开发体验完全一致；但启动后，对应会话会出现在 DEV Anywhere 的 Web 界面里，方便你随时随地继续开发。你也可以直接从 Web 创建新的 coding agent 会话。
 
-Kimi Code 同时支持原生终端与 ACP 聊天会话。ACP 聊天会流式显示回复和工具调用，支持在 Web 中允许、始终允许或拒绝工具审批，也可以取消当前回合并从历史会话恢复。
+Kimi Code 同时支持原生终端与 ACP 聊天会话。ACP 聊天会流式显示回复和工具调用，支持在 Web 中允许、始终允许或拒绝工具审批，也可以取消当前回合并从历史会话恢复。Cursor CLI 目前只支持终端会话。
 
 DEV Anywhere 直接围绕远程 coding agent 工作流设计。除了查看 coding agent 的输出，你还可以跟踪运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。代码仓库、coding agent CLI 和模型凭据仍然留在开发机上。
 
@@ -47,7 +47,7 @@ node --version
 npm --version
 ```
 
-如果要创建 coding agent 会话，还需要提前安装并登录 Claude Code、Codex 或 Kimi Code。只使用 Shell 时可以跳过这一步。
+如果要创建 coding agent 会话，还需要提前安装并登录 Claude Code、Codex、Kimi Code 或 Cursor CLI。只使用 Shell 时可以跳过这一步。
 
 ### 1. 安装本地 Proxy
 
@@ -175,9 +175,9 @@ dev-anywhere serve autostart status
 
 #### 从浏览器接管开发机终端中的会话
 
-启动 Claude Code、Codex 或 Kimi Code 时，只需在原命令前加上 `dev-anywhere`：
+启动 Claude Code、Codex、Kimi Code 或 Cursor CLI 时，只需在原命令前加上 `dev-anywhere`：
 
-例如，将 `claude --permission-mode plan` 改为 `dev-anywhere claude --permission-mode plan`。CLI 参数和本地终端体验都不变。该会话也会出现在 DEV Anywhere 的 Web 界面中，随时可以从浏览器接管。
+例如，将 `claude --permission-mode plan` 改为 `dev-anywhere claude --permission-mode plan`。CLI 参数和本地终端体验都不变。该会话也会出现在 DEV Anywhere 的 Web 界面中，随时可以从浏览器接管。Cursor CLI 使用 `dev-anywhere agent ...`（与原生命令一致），也可以用 `dev-anywhere cursor ...`。
 
 **使用 VPS Relay 部署时**
 
@@ -185,6 +185,7 @@ dev-anywhere serve autostart status
 dev-anywhere claude
 dev-anywhere codex
 dev-anywhere kimi
+dev-anywhere agent
 ```
 
 **使用 Quick Tunnel 时**
@@ -195,11 +196,12 @@ dev-anywhere kimi
 dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
 dev-anywhere --profile quick-tunnel kimi
+dev-anywhere --profile quick-tunnel agent
 ```
 
 #### 从浏览器启动新会话
 
-打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex、Kimi Code 或 Shell。Claude Code、Codex 和 Kimi Code 都可以选择终端或聊天模式；Kimi Code 的聊天模式通过 ACP 工作。
+打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex、Kimi Code、Cursor CLI 或 Shell。Claude Code、Codex 和 Kimi Code 都可以选择终端或聊天模式；Kimi Code 的聊天模式通过 ACP 工作。Cursor CLI 目前只支持终端模式。
 
 作为终端兼容处理，DEV Anywhere 会为通过本地命令或网页新建、恢复的 Codex 终端会话强制关闭星芒特效（`tui.whimsy=false`），直接运行 `codex` 时仍遵循用户自己的设置。已有 Codex 进程需要退出并重新启动或恢复会话后才会应用此设置，刷新网页不会生效。
 
@@ -245,8 +247,8 @@ dev-anywhere serve status
 
 ### 会话管理
 
-- 直接从浏览器创建 Claude Code、Codex、Kimi Code 的终端或聊天会话，以及 Shell 会话。
-- 创建 Claude Code、Codex 或 Kimi Code 会话时，可以选择工作目录、终端或聊天交互方式，以及权限模式。
+- 直接从浏览器创建 Claude Code、Codex、Kimi Code 的终端或聊天会话，Cursor CLI 的终端会话，以及 Shell 会话。
+- 创建 Claude Code、Codex、Kimi Code 或 Cursor CLI 会话时，可以选择工作目录和权限模式；Claude Code、Codex 和 Kimi Code 还可以选择终端或聊天交互方式。
 - 接入从本地终端启动的会话，也可以恢复 Claude Code、Codex 与 Kimi Code 的历史会话。
 - 重命名、终止或分离会话；从本地终端启动的会话在 Proxy 重启后可以重新连接。
 - 在多台开发机之间切换，并查看、断开当前连接到 Relay 的客户端；不再使用的离线开发机可在手机上左滑移除，或从桌面端的更多菜单移除，重新连接后会再次出现。
@@ -325,7 +327,7 @@ flowchart LR
   subgraph machine["开发机"]
     direction TB
     proxy["Proxy<br/>会话 · 终端 · 文件"]
-    agent["Claude Code / Codex / Kimi Code"]
+    agent["Claude Code / Codex / Kimi Code / Cursor CLI"]
     shell["Shell"]
     local["代码仓库 · CLI 配置 · 本地权限"]
 
