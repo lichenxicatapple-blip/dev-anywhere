@@ -9,6 +9,7 @@ const unavailableAgentCli = {
   claude: { available: false },
   codex: { available: false },
   kimi: { available: false },
+  cursor: { available: false },
 };
 
 function command(name: string): CommandEntry {

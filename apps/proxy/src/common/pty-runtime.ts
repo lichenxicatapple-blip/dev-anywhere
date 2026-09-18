@@ -28,6 +28,7 @@ import { createIdleChecker, type IdleChecker } from "./pty-idle-checker.js";
 import {
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
+  CURSOR_PROVIDER,
   KIMI_PROVIDER,
   type ProviderAdapter,
   type ProviderHookContext,
@@ -38,6 +39,7 @@ const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   claude: CLAUDE_PROVIDER,
   codex: CODEX_PROVIDER,
   kimi: KIMI_PROVIDER,
+  cursor: CURSOR_PROVIDER,
 };
 
 export interface PtyRuntimeExit {

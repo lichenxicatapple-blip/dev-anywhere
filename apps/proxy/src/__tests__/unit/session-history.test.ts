@@ -9,12 +9,78 @@ import {
   writeFileSync,
 } from "node:fs";
 import { execFileSync } from "node:child_process";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
+import { DatabaseSync } from "node:sqlite";
 import { randomUUID } from "node:crypto";
 import { readSessionMessagesPage, readSessionMessages } from "#src/serve/session-history.js";
 import { normalizeHistoryTitle } from "#src/serve/history/title.js";
 import { scanSessionHistory } from "#src/serve/history/catalog.js";
+
+function encodeProtoBytes(field: number, data: Uint8Array): Buffer {
+  const lengthBytes: number[] = [];
+  let remaining = data.length;
+  while (remaining > 0x7f) {
+    lengthBytes.push((remaining & 0x7f) | 0x80);
+    remaining >>>= 7;
+  }
+  lengthBytes.push(remaining);
+  return Buffer.concat([Buffer.from([(field << 3) | 2]), Buffer.from(lengthBytes), Buffer.from(data)]);
+}
+
+function writeCursorAcpSession(
+  testDir: string,
+  sessionId: string,
+  options: { cwd: string; title?: string; messages: unknown[]; inlineMessages?: unknown[] },
+): void {
+  const directory = join(testDir, ".cursor", "acp-sessions", sessionId);
+  mkdirSync(directory, { recursive: true });
+  writeFileSync(
+    join(directory, "meta.json"),
+    JSON.stringify({
+      schemaVersion: 1,
+      cwd: options.cwd,
+      ...(options.title ? { title: options.title } : {}),
+    }),
+  );
+
+  const blobs = new Map<string, Buffer>();
+  const hashes: Buffer[] = [];
+  for (const message of options.messages) {
+    const data = Buffer.from(JSON.stringify(message));
+    const id = createHash("sha256").update(data).digest("hex");
+    blobs.set(id, data);
+    hashes.push(Buffer.from(id, "hex"));
+  }
+  const root = Buffer.concat([
+    ...hashes.map((hash) => encodeProtoBytes(1, hash)),
+    ...(options.inlineMessages ?? []).map((message) =>
+      encodeProtoBytes(4, Buffer.from(JSON.stringify(message))),
+    ),
+  ]);
+  const rootId = createHash("sha256").update(root).digest("hex");
+  blobs.set(rootId, root);
+
+  const db = new DatabaseSync(join(directory, "store.db"));
+  db.exec(
+    "CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB); CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);",
+  );
+  const insert = db.prepare("INSERT INTO blobs (id, data) VALUES (?, ?)");
+  for (const [id, data] of blobs) insert.run(id, data);
+  db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)").run(
+    "0",
+    Buffer.from(
+      JSON.stringify({
+        agentId: sessionId,
+        latestRootBlobId: rootId,
+        name: options.title ?? sessionId,
+        createdAt: 1,
+      }),
+    ).toString("hex"),
+  );
+  db.close();
+}
 
 // 用临时目录模拟 ~/.claude/projects/ 结构进行测试
 // 实际结构: ~/.claude/projects/<encoded-path>/<session-id>.jsonl
@@ -23,20 +89,25 @@ describe("scanSessionHistory", () => {
   let testDir: string;
   let originalHome: string | undefined;
   let originalKimiCodeHome: string | undefined;
+  let originalCursorAcpSessionsDir: string | undefined;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `session-history-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     originalHome = process.env.HOME;
     originalKimiCodeHome = process.env.KIMI_CODE_HOME;
+    originalCursorAcpSessionsDir = process.env.CURSOR_ACP_SESSIONS_DIR;
     process.env.HOME = testDir;
     delete process.env.KIMI_CODE_HOME;
+    delete process.env.CURSOR_ACP_SESSIONS_DIR;
   });
 
   afterEach(() => {
     process.env.HOME = originalHome;
     if (originalKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = originalKimiCodeHome;
+    if (originalCursorAcpSessionsDir === undefined) delete process.env.CURSOR_ACP_SESSIONS_DIR;
+    else process.env.CURSOR_ACP_SESSIONS_DIR = originalCursorAcpSessionsDir;
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -111,6 +182,46 @@ describe("scanSessionHistory", () => {
   it("returns empty array when ~/.claude/projects/ does not exist", async () => {
     const result = await scanSessionHistory();
     expect(result).toEqual([]);
+  });
+
+  it("lists Cursor ACP sessions from ~/.cursor/acp-sessions", async () => {
+    writeCursorAcpSession(testDir, "cursor-history-1", {
+      cwd: "/Users/dev/project",
+      title: "Bank Recon Analysis",
+      messages: [{ role: "user", content: [{ type: "text", text: "hello" }] }],
+    });
+    writeCursorAcpSession(testDir, "cursor-empty-meta", {
+      cwd: "/Users/dev/other",
+      messages: [],
+    });
+    writeCursorAcpSession(testDir, "cursor-envelopes-only", {
+      cwd: "/Users/dev/other",
+      title: "Only envelopes",
+      messages: [
+        { role: "system", content: "You are Cursor" },
+        { role: "user", content: "<user_info>\nOS Version: darwin\n</user_info>" },
+        {
+          role: "user",
+          content:
+            "<conversation_summary>\nThis session is being continued from a previous conversation that ran out of context.\n</conversation_summary>",
+        },
+      ],
+    });
+    mkdirSync(join(testDir, ".cursor", "acp-sessions", "cursor-no-store"), { recursive: true });
+    writeFileSync(
+      join(testDir, ".cursor", "acp-sessions", "cursor-no-store", "meta.json"),
+      JSON.stringify({ schemaVersion: 1, cwd: "/Users/dev/project", title: "No store" }),
+    );
+
+    const result = await scanSessionHistory();
+    expect(result.filter((row) => row.provider === "cursor")).toEqual([
+      expect.objectContaining({
+        id: "cursor-history-1",
+        provider: "cursor",
+        projectDir: "/Users/dev/project",
+        title: "Bank Recon Analysis",
+      }),
+    ]);
   });
 
   it("returns empty array when projects dir exists but has no sessions", async () => {
@@ -816,20 +927,25 @@ describe("readSessionMessages", () => {
   let testDir: string;
   let originalHome: string | undefined;
   let originalKimiCodeHome: string | undefined;
+  let originalCursorAcpSessionsDir: string | undefined;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `session-messages-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     originalHome = process.env.HOME;
     originalKimiCodeHome = process.env.KIMI_CODE_HOME;
+    originalCursorAcpSessionsDir = process.env.CURSOR_ACP_SESSIONS_DIR;
     process.env.HOME = testDir;
     delete process.env.KIMI_CODE_HOME;
+    delete process.env.CURSOR_ACP_SESSIONS_DIR;
   });
 
   afterEach(() => {
     process.env.HOME = originalHome;
     if (originalKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = originalKimiCodeHome;
+    if (originalCursorAcpSessionsDir === undefined) delete process.env.CURSOR_ACP_SESSIONS_DIR;
+    else process.env.CURSOR_ACP_SESSIONS_DIR = originalCursorAcpSessionsDir;
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -933,6 +1049,152 @@ describe("readSessionMessages", () => {
       { role: "assistant", text: "测试通过。", timestamp: 140 },
     ]);
     expect(page.messages.filter((message) => message.role === "user")).toHaveLength(1);
+  });
+
+  it("reads Cursor ACP transcripts from store.db conversation blobs", async () => {
+    writeCursorAcpSession(testDir, "cursor-acp-history", {
+      cwd: "/Users/dev/project",
+      title: "Kimi Always Yes",
+      messages: [
+        { role: "system", content: "You are Cursor" },
+        { role: "user", content: "<user_info>\nOS Version: darwin\n</user_info>" },
+        {
+          role: "user",
+          content:
+            "<conversation_summary>\nThis session is being continued from a previous conversation that ran out of context.\n</conversation_summary>",
+        },
+        {
+          role: "user",
+          content:
+            "<user_info>\nOS Version: darwin\n</user_info>\n<user_query>\nignore this envelope\n</user_query>",
+        },
+        {
+          role: "user",
+          content: [
+            {
+              type: "text",
+              text: "<timestamp>Friday, Sep 18, 2026, 8:15 PM (UTC+8)</timestamp>\n<user_query>\n看看 Always yes\n</user_query>",
+            },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [
+            { type: "reasoning", text: "hidden" },
+            { type: "text", text: "先查仓库。" },
+            {
+              type: "tool-call",
+              toolCallId: "call-read-1",
+              toolName: "Read",
+              args: { path: "/tmp/a.ts" },
+            },
+          ],
+        },
+        {
+          role: "tool",
+          content: [
+            {
+              type: "tool-result",
+              toolCallId: "call-read-1",
+              toolName: "Read",
+              result: "ok",
+            },
+          ],
+        },
+        {
+          role: "assistant",
+          content: [{ type: "text", text: "接上了。" }],
+        },
+      ],
+    });
+
+    const page = await readSessionMessagesPage("cursor-acp-history", { limit: 10 }, "cursor");
+    expect(page.messages).toMatchObject([
+      { role: "user", text: "ignore this envelope" },
+      { role: "user", text: "看看 Always yes" },
+      { role: "assistant", text: "先查仓库。" },
+      {
+        role: "activity",
+        toolId: "call-read-1",
+        toolName: "Read",
+        parameters: { path: "/tmp/a.ts" },
+        status: "done",
+      },
+      { role: "assistant", text: "接上了。" },
+    ]);
+    expect(page.hasMore).toBe(false);
+
+    const latest = await readSessionMessagesPage("cursor-acp-history", { limit: 2 }, "cursor");
+    expect(latest.messages).toMatchObject([
+      { role: "activity", toolName: "Read" },
+      { role: "assistant", text: "接上了。" },
+    ]);
+    expect(latest.hasMore).toBe(true);
+    const older = await readSessionMessagesPage(
+      "cursor-acp-history",
+      { limit: 2, before: latest.nextBefore },
+      "cursor",
+    );
+    expect(older.messages.map((message) => message.text)).toEqual(["看看 Always yes", "先查仓库。"]);
+    expect(older.hasMore).toBe(true);
+  });
+
+  it("does not invent Cursor history when the native store is missing", async () => {
+    await expect(readSessionMessagesPage("missing-cursor", { limit: 10 }, "cursor")).resolves.toEqual(
+      {
+        messages: [],
+        hasMore: false,
+      },
+    );
+    await expect(readSessionMessages("missing-cursor", "cursor")).resolves.toEqual([]);
+  });
+
+  it("does not invent Cursor history when store.db is unreadable", async () => {
+    mkdirSync(join(testDir, ".cursor", "acp-sessions", "cursor-corrupt"), { recursive: true });
+    writeFileSync(
+      join(testDir, ".cursor", "acp-sessions", "cursor-corrupt", "meta.json"),
+      JSON.stringify({ schemaVersion: 1, cwd: "/Users/dev/project", title: "Broken" }),
+    );
+    writeFileSync(join(testDir, ".cursor", "acp-sessions", "cursor-corrupt", "store.db"), "not-sqlite");
+    await expect(readSessionMessagesPage("cursor-corrupt", { limit: 10 }, "cursor")).resolves.toEqual(
+      {
+        messages: [],
+        hasMore: false,
+      },
+    );
+    await expect(scanSessionHistory()).resolves.toEqual([]);
+  });
+
+  it("appends an in-progress Cursor assistant blob that is not yet hashed into field 1", async () => {
+    writeCursorAcpSession(testDir, "cursor-inline-root", {
+      cwd: "/Users/dev/project",
+      messages: [
+        {
+          role: "user",
+          content: [{ type: "text", text: "<user_query>\n继续\n</user_query>" }],
+        },
+        {
+          id: "msg-hashed",
+          role: "assistant",
+          content: [{ type: "text", text: "已经落盘。" }],
+        },
+      ],
+      inlineMessages: [
+        {
+          id: "msg-hashed",
+          role: "assistant",
+          content: [{ type: "text", text: "已经落盘。" }],
+        },
+        {
+          id: "msg-live",
+          role: "assistant",
+          content: [{ type: "text", text: "还在写。" }],
+        },
+      ],
+    });
+
+    const page = await readSessionMessagesPage("cursor-inline-root", { limit: 10 }, "cursor");
+    expect(page.messages.map((message) => message.text)).toEqual(["继续", "已经落盘。", "还在写。"]);
   });
 
   it("restores terminal Kimi prompts from turn.prompt records", async () => {

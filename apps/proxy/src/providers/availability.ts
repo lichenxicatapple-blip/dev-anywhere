@@ -1,6 +1,7 @@
 import type { AgentCliAvailability, AgentCliStatus } from "@dev-anywhere/shared";
 import { resolveClaudePtyCommand } from "./claude.js";
 import { resolveCodexCommand } from "./codex.js";
+import { resolveCursorCommand } from "./cursor.js";
 import { resolveKimiCommand } from "./kimi.js";
 import { findExecutableCandidates } from "./path-resolver.js";
 import type { ProviderId } from "./types.js";
@@ -12,16 +13,19 @@ interface AgentCliStatusOptions {
 
 type DetectedAgentCliStatus = AgentCliStatus;
 
-const PROVIDER_BIN_NAME: Record<ProviderId, string> = {
-  claude: "claude",
-  codex: "codex",
-  kimi: "kimi",
+const PROVIDER_BIN_NAMES: Record<ProviderId, readonly string[]> = {
+  claude: ["claude"],
+  codex: ["codex"],
+  kimi: ["kimi"],
+  cursor: ["agent", "cursor-agent"],
 };
-const PROVIDER_ENV_NAME: Record<ProviderId, "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN"> = {
-  claude: "CLAUDE_BIN",
-  codex: "CODEX_BIN",
-  kimi: "KIMI_BIN",
-};
+const PROVIDER_ENV_NAME: Record<ProviderId, "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN" | "CURSOR_BIN"> =
+  {
+    claude: "CLAUDE_BIN",
+    codex: "CODEX_BIN",
+    kimi: "KIMI_BIN",
+    cursor: "CURSOR_BIN",
+  };
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
@@ -43,7 +47,7 @@ function discoverProviderCandidates(provider: ProviderId, env: NodeJS.ProcessEnv
   const envPath = environmentValue(env, PROVIDER_ENV_NAME[provider]);
   return uniqueSuggestions([
     envPath,
-    ...findExecutableCandidates(PROVIDER_BIN_NAME[provider], env),
+    ...PROVIDER_BIN_NAMES[provider].flatMap((name) => findExecutableCandidates(name, env)),
   ]);
 }
 
@@ -85,6 +89,10 @@ export function detectAgentCliStatus(
     kimi: detect(
       () => resolveKimiCommand(env),
       [...discoverProviderCandidates("kimi", env), ...(options.suggestions?.kimi ?? [])],
+    ),
+    cursor: detect(
+      () => resolveCursorCommand(env),
+      [...discoverProviderCandidates("cursor", env), ...(options.suggestions?.cursor ?? [])],
     ),
   };
 }

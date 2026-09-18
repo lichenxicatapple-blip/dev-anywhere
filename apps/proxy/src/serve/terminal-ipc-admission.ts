@@ -191,7 +191,7 @@ export function createTerminalIpcAdmissionController(
     request: {
       sessionId: string;
       pid?: number;
-      provider?: "claude" | "codex" | "kimi";
+      provider?: "claude" | "codex" | "kimi" | "cursor";
       kind?: "agent" | "terminal";
       generation: "unversioned" | `protocol-${number}`;
     },

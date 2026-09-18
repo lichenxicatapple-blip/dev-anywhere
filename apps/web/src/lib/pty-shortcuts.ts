@@ -42,6 +42,9 @@ interface PtyShortcutPreset {
 // Defaults: https://code.claude.com/docs/en/interactive-mode
 // https://learn.chatgpt.com/docs/developer-commands?surface=cli (Codex 0.154.0 /keymap)
 // https://moonshotai.github.io/kimi-code/en/reference/keyboard.html
+const shiftTab = key("shift-tab", "Shift+Tab", "⇧⇥", "\x1b[Z");
+const ctrlD = key("ctrl-d", "Ctrl+D", "^D", "\x04");
+
 const agentPresets: Record<SessionProvider, PtyShortcutPreset> = {
   claude: { menu: [ctrlO, ctrlR, ctrlT, ctrlS, ctrlB], mobile: [ctrlO, ctrlR, "clear", ctrlS] },
   codex: {
@@ -55,6 +58,7 @@ const agentPresets: Record<SessionProvider, PtyShortcutPreset> = {
     mobile: [ctrlT, ctrlR, "clear", ctrlK],
   },
   kimi: { menu: [ctrlO, ctrlE, ctrlT, ctrlS, ctrlB], mobile: [ctrlO, ctrlS, "clear", ctrlT] },
+  cursor: { menu: [shiftTab, ctrlR, ctrlD, ctrlT, ctrlS], mobile: [shiftTab, ctrlR, "clear", ctrlD] },
 };
 
 const emacsShell: PtyShortcutPreset = {

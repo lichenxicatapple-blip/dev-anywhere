@@ -7,7 +7,13 @@ import {
   sessionStateValues,
   TerminalShellFamilySchema,
 } from "./session.js";
-import { ApprovalOptionSchema, ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
+import {
+  ApprovalOptionSchema,
+  CursorPromptSchema,
+  CursorSessionUiSchema,
+  ToolApprovePayloadSchema,
+  ToolDenyPayloadSchema,
+} from "./tool.js";
 import {
   VoiceCapabilitiesSchema,
   VoiceConfigUpdateSchema,
@@ -86,6 +92,7 @@ export const AgentCliStatusSchema = z.object({
   claude: AgentCliAvailabilitySchema,
   codex: AgentCliAvailabilitySchema,
   kimi: AgentCliAvailabilitySchema,
+  cursor: AgentCliAvailabilitySchema,
 });
 export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
 
@@ -1628,8 +1635,18 @@ const relayControlDefinitions = [
           toolName: z.string(),
           input: z.record(z.string(), z.unknown()),
           options: z.array(ApprovalOptionSchema).optional(),
+          cursorPrompt: CursorPromptSchema.optional(),
         }),
       ),
+    },
+    "proxy_to_client",
+  ),
+
+  control(
+    "cursor_session_ui",
+    {
+      sessionId: IdSchema,
+      payload: CursorSessionUiSchema,
     },
     "proxy_to_client",
   ),

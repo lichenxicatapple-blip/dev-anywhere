@@ -188,7 +188,7 @@ export function handleTerminalConnection(
                   });
             const { session } = claim;
             const hook =
-              msg.kind === "terminal" || provider === "kimi"
+              msg.kind === "terminal" || provider === "kimi" || provider === "cursor"
                 ? undefined
                 : createHookContext(session.id, provider);
             acceptedRegistration = { sessionId: session.id, pid: msg.pid };

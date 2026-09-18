@@ -20,10 +20,14 @@ describe("CLI args", () => {
     });
   });
 
-  it("extracts Kimi without passing the provider name through", () => {
-    expect(extractAgentInvocation(["kimi", "--model", "kimi-code/k3"])).toEqual({
-      provider: "kimi",
-      args: ["--model", "kimi-code/k3"],
+  it("extracts Cursor CLI from both agent and cursor aliases", () => {
+    expect(extractAgentInvocation(["agent", "--yolo"])).toEqual({
+      provider: "cursor",
+      args: ["--yolo"],
+    });
+    expect(extractAgentInvocation(["cursor", "--mode=plan"])).toEqual({
+      provider: "cursor",
+      args: ["--mode=plan"],
     });
   });
 
@@ -41,9 +45,9 @@ describe("CLI args", () => {
       "serve",
       "status",
     ]);
-    expect(stripProxyProfileArgs(["--profile", "local", "kimi", "--plan"])).toEqual([
-      "kimi",
-      "--plan",
+    expect(stripProxyProfileArgs(["--profile", "local", "agent", "--yolo"])).toEqual([
+      "agent",
+      "--yolo",
     ]);
   });
 

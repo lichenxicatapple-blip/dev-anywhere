@@ -9,7 +9,7 @@
 - Node.js 20.3 或更高版本；发布验证和 CI 使用 Node.js 22.22.2；
 - pnpm 9，与 CI 保持一致；
 - macOS、Linux 或原生 Windows 11；
-- 可选：已经登录的 Claude Code、Codex、Kimi Code，用于验证真实 coding agent 链路；
+- 可选：已经登录的 Claude Code、Codex、Kimi Code、Cursor CLI，用于验证真实 coding agent 链路；
 - 可选：`cloudflared`，用于验证 Quick Tunnel。
 
 安装 pnpm 和项目依赖：
@@ -99,6 +99,16 @@ pnpm --filter @dev-anywhere/proxy run dev -- \
 
 Kimi Code 同时接入 PTY 终端与 ACP 聊天链路：可以用上面的命令启动并接管终端，也可以在 Web 中新建终端或聊天会话。ACP 聊天测试应覆盖流式输出、工具调用与审批、取消当前回合，以及从历史会话恢复。
 
+Cursor CLI：
+
+```bash
+pnpm --filter @dev-anywhere/proxy run dev -- \
+  --profile local \
+  agent
+```
+
+Cursor CLI 同样接入 PTY 终端与 ACP 聊天链路。ACP 聊天测试应覆盖流式输出、工具调用与审批、提问、计划批准、取消当前回合，以及用 native session id 恢复（`session/load` 失败时应新建会话并提示）。
+
 测试 coding agent 创建流程时，不要让它修改当前仓库。可以在 Web 中选择临时目录，或者为终端命令指定一次性工作目录：
 
 ```bash
@@ -142,7 +152,7 @@ docs/       长期维护的中文文档和 README 媒体资源
 - `agentCli`
 - `logLevel`
 
-`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin` 和 `kimiBin` 指定 Claude Code、Codex、Kimi Code 的绝对路径；对应的 `CLAUDE_BIN`、`CODEX_BIN` 和 `KIMI_BIN` 可以临时覆盖配置。
+`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin`、`kimiBin` 和 `cursorBin` 指定 Claude Code、Codex、Kimi Code、Cursor CLI 的绝对路径；对应的 `CLAUDE_BIN`、`CODEX_BIN`、`KIMI_BIN` 和 `CURSOR_BIN` 可以临时覆盖配置。Cursor CLI 探测顺序为 `CURSOR_BIN` → `agent` → `cursor-agent`，不会把 Cursor IDE 的 `cursor` 可执行文件当成 Agent。
 
 配置由 Zod schema 校验。新增字段时应同时修改 schema、默认配置、相关测试和用户文档。
 
