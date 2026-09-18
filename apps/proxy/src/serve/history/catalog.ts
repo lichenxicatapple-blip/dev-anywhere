@@ -2,8 +2,14 @@ import { tmpdir } from "node:os";
 import { isAbsolute, resolve, sep } from "node:path";
 import { scanClaudeHistory } from "./claude.js";
 import { scanCodexHistory } from "./codex.js";
+import { scanCursorHistory } from "./cursor.js";
 import { scanKimiHistory } from "./kimi.js";
-import { claudeProjectsDir, codexSessionsDir, kimiSessionsDir } from "./paths.js";
+import {
+  claudeProjectsDir,
+  codexSessionsDir,
+  cursorAcpSessionsDir,
+  kimiSessionsDir,
+} from "./paths.js";
 import { normalizeHistoryTitle } from "./title.js";
 import {
   nativeSessionKey,
@@ -67,6 +73,7 @@ export async function scanSessionHistory(
     scanClaudeHistory(claudeProjectsDir()),
     scanCodexHistory(codexSessionsDir()),
     scanKimiHistory(kimiSessionsDir()),
+    scanCursorHistory(cursorAcpSessionsDir()),
   ]);
   return applySessionHistoryMetadata(
     buildHistoryCatalog(records.flat()),

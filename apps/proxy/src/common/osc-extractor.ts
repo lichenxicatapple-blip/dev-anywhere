@@ -149,12 +149,44 @@ function extractClaudeTextSignal(text: string): PtyStateEvent | null {
   return null;
 }
 
+// Cursor CLI approval dialog (agent 2026.09.15 decision-logic / decision-dropdown).
+// Official docs only say y/n; the TUI is a question plus a selected first option.
+// Enter submits the highlighted option, which starts on approve — same as Always yes.
+const CURSOR_APPROVAL_QUESTIONS: ReadonlyArray<{ pattern: RegExp; tool: string }> = [
+  { pattern: /\bRun this command(?: outside the sandbox)?\?/i, tool: "Shell" },
+  { pattern: /\bRun this MCP tool\?/i, tool: "MCP" },
+  { pattern: /\bDelete this file\?/i, tool: "Delete" },
+  { pattern: /\bWrite to this file\?/i, tool: "Write" },
+  { pattern: /\bAllow this web search\?/i, tool: "WebSearch" },
+  { pattern: /\bAllow this web fetch\?/i, tool: "WebFetch" },
+  { pattern: /\bProceed with this edit\?/i, tool: "Edit" },
+  { pattern: /\bSwitch to \S+ mode\?/i, tool: "Mode" },
+];
+
+const CURSOR_APPROVAL_CONFIRM =
+  /(?:Run outside sandbox \(once\)|Run \(once\)|Allow search|Approve mode switch|Waiting for decision \(y\/n\/p\)|Proceed \(y\)|Delete \(y\)|Fetch \(y\))/i;
+
+function extractCursorTextSignal(text: string): PtyStateEvent | null {
+  const question = CURSOR_APPROVAL_QUESTIONS.find((entry) => entry.pattern.test(text));
+  if (!question) return null;
+  // Require a TUI confirm row, not a bare "(y)" that can appear in ordinary output.
+  if (!CURSOR_APPROVAL_CONFIRM.test(text)) return null;
+  return {
+    state: "approval_wait",
+    tool: question.tool,
+    title: `Cursor permission: ${question.tool}`,
+  };
+}
+
 export function extractTextSignals(
   semanticText: string,
   provider?: PtySignalProvider,
 ): PtyStateEvent | null {
   if (provider === "claude") {
     return extractClaudeTextSignal(semanticText);
+  }
+  if (provider === "cursor") {
+    return extractCursorTextSignal(semanticText);
   }
   return null;
 }

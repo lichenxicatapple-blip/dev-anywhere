@@ -8,6 +8,7 @@ import {
   type SessionHistoryMessage,
 } from "@dev-anywhere/shared";
 import { collectJsonlFiles, collectFilesNamed } from "./history/files.js";
+import { readCursorConversationRecords } from "./history/cursor.js";
 import { claudeProjectsDir, codexSessionsDir, kimiSessionsDir } from "./history/paths.js";
 import { readCodexSessionId } from "./history/codex.js";
 import {
@@ -57,6 +58,7 @@ const DEFAULT_HISTORY_PAGE_LIMIT = 50;
 const MAX_HISTORY_PAGE_LIMIT = 200;
 const HISTORY_READ_CHUNK_BYTES = 64 * 1024;
 const HISTORY_CURSOR_PREFIX = "b:";
+const CURSOR_INDEX_PREFIX = "i:";
 const ANSI_ESCAPE_PATTERN = new RegExp(`${String.fromCharCode(27)}\\[[0-?]*[ -/]*[@-~]`, "g");
 const COMPACT_HISTORY_MARKER = "上下文已压缩";
 
@@ -68,6 +70,17 @@ function normalizeHistoryPageLimit(limit: unknown): number {
 function encodeHistoryCursor(offset: number, itemIndex = 0): string {
   const base = `${HISTORY_CURSOR_PREFIX}${Math.max(0, Math.floor(offset))}`;
   return itemIndex > 0 ? `${base}:${itemIndex}` : base;
+}
+
+function encodeCursorIndexCursor(index: number): string {
+  return `${CURSOR_INDEX_PREFIX}${Math.max(0, Math.floor(index))}`;
+}
+
+function decodeCursorIndexCursor(cursor: string | undefined, length: number): number {
+  if (!cursor || !cursor.startsWith(CURSOR_INDEX_PREFIX)) return length;
+  const parsed = Number(cursor.slice(CURSOR_INDEX_PREFIX.length));
+  if (!Number.isInteger(parsed) || parsed < 0) return length;
+  return Math.min(parsed, length);
 }
 
 function decodeHistoryCursor(cursor: string | undefined, fileSize: number): number {
@@ -126,8 +139,7 @@ async function findSessionFile(
   sessionId: string,
   provider?: ProviderId,
 ): Promise<string | null> {
-  // Cursor ACP transcripts are not stored in a documented on-disk layout yet.
-  // Resume uses the native session id we persist; session/load falls back to session/new.
+  // Cursor ACP transcripts are SQLite blobs, not JSONL. Readers branch before findSessionFile.
   if (provider === "cursor") return null;
   if (provider === "claude") return findClaudeSessionFile(sessionId);
   if (provider === "codex") return findCodexSessionFile(sessionId);
@@ -693,6 +705,136 @@ function extractClaudeContentItems(
   return items;
 }
 
+function unwrapCursorUserText(text: string): string | null {
+  const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
+  if (query?.[1] !== undefined) {
+    const unwrapped = query[1].trim();
+    return unwrapped.length > 0 ? unwrapped : null;
+  }
+  if (
+    /^<(?:user_info|timestamp|environment_context|conversation_summary)(?:[\s>:-])/i.test(
+      text.trim(),
+    )
+  ) {
+    return null;
+  }
+  return text.trim() ? text : null;
+}
+
+function unwrapCursorUserContent(content: unknown): unknown {
+  if (typeof content === "string") return unwrapCursorUserText(content) ?? "";
+  if (!Array.isArray(content)) return content;
+  return content.flatMap((block) => {
+    const record = asRecord(block);
+    if (record?.type === "text" && typeof record.text === "string") {
+      const text = unwrapCursorUserText(record.text);
+      return text ? [{ ...record, text }] : [];
+    }
+    return [block];
+  });
+}
+
+function mapCursorAssistantContent(content: unknown): unknown {
+  if (!Array.isArray(content)) return content;
+  return content.flatMap((block) => {
+    const record = asRecord(block);
+    if (!record || typeof record.type !== "string") return [];
+    if (record.type === "reasoning") return [];
+    if (record.type === "tool-call") {
+      return [
+        {
+          type: "tool_use",
+          id: record.toolCallId,
+          name: record.toolName,
+          input: record.args ?? record.input,
+        },
+      ];
+    }
+    return [block];
+  });
+}
+
+function extractCursorToolResults(content: unknown): ExtractedHistoryItem[] {
+  if (!Array.isArray(content)) return [];
+  const items: ExtractedHistoryItem[] = [];
+  for (const block of content) {
+    const record = asRecord(block);
+    if (record?.type !== "tool-result" || typeof record.toolCallId !== "string") continue;
+    items.push({
+      kind: "tool-result",
+      toolId: record.toolCallId,
+      isError: record.isError === true || record.is_error === true,
+    });
+  }
+  return items;
+}
+
+function extractCursorConversationItems(obj: unknown): ExtractedHistoryItem[] {
+  const record = asRecord(obj);
+  if (!record || typeof record.role !== "string") return [];
+  if (record.role === "user") {
+    return extractClaudeContentItems("user", unwrapCursorUserContent(record.content));
+  }
+  if (record.role === "assistant") {
+    return extractClaudeContentItems("assistant", mapCursorAssistantContent(record.content));
+  }
+  if (record.role === "tool") return extractCursorToolResults(record.content);
+  return [];
+}
+
+function collectCursorHistoryMessages(records: unknown[]): UnpositionedSessionMessage[] {
+  const messages: UnpositionedSessionMessage[] = [];
+  const toolMessageIndexes = new Map<string, number>();
+  for (const record of records) {
+    for (const item of extractCursorConversationItems(record)) {
+      if (item.kind === "tool-result") {
+        const messageIndex = toolMessageIndexes.get(item.toolId);
+        const message = messageIndex !== undefined ? messages[messageIndex] : undefined;
+        if (messageIndex !== undefined && message?.role === "activity") {
+          messages[messageIndex] = {
+            ...message,
+            status: item.isError ? "error" : "done",
+          };
+        }
+        continue;
+      }
+      if (item.message.role === "activity") {
+        toolMessageIndexes.set(item.message.toolId, messages.length);
+      }
+      messages.push(item.message);
+    }
+  }
+  return messages;
+}
+
+function pageCursorHistoryMessages(
+  messages: UnpositionedSessionMessage[],
+  options: SessionMessagesPageOptions = {},
+): SessionMessagesPage {
+  const limit = normalizeHistoryPageLimit(options.limit);
+  const positioned = messages.map((message, index) => ({
+    ...message,
+    cursor: encodeCursorIndexCursor(index),
+  }));
+  const end = decodeCursorIndexCursor(options.before, positioned.length);
+  const start = Math.max(0, end - limit);
+  const page = positioned.slice(start, end);
+  const hasMore = start > 0;
+  return {
+    messages: page,
+    hasMore,
+    ...(hasMore ? { nextBefore: encodeCursorIndexCursor(start) } : {}),
+  };
+}
+
+async function readCursorSessionMessagesPage(
+  sessionId: string,
+  options: SessionMessagesPageOptions = {},
+): Promise<SessionMessagesPage> {
+  const messages = collectCursorHistoryMessages(await readCursorConversationRecords(sessionId));
+  return pageCursorHistoryMessages(messages, options);
+}
+
 function extractCodexMessage(
   payload: Record<string, unknown>,
   source: "response_item" | "event_msg",
@@ -1003,6 +1145,9 @@ export async function readSessionMessages(
   sessionId: string,
   provider?: ProviderId,
 ): Promise<SessionMessage[]> {
+  if (provider === "cursor") {
+    return collectCursorHistoryMessages(await readCursorConversationRecords(sessionId));
+  }
   const filePath = await findSessionFile(sessionId, provider);
   if (!filePath) return [];
 
@@ -1059,6 +1204,7 @@ export async function readSessionMessagesPage(
   options: SessionMessagesPageOptions = {},
   provider?: ProviderId,
 ): Promise<SessionMessagesPage> {
+  if (provider === "cursor") return readCursorSessionMessagesPage(sessionId, options);
   const filePath = await findSessionFile(sessionId, provider);
   if (!filePath) return { messages: [], hasMore: false };
   return readSessionMessagesPageFromFile(filePath, options);

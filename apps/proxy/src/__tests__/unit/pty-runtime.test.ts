@@ -528,6 +528,20 @@ describe("PTY runtime", () => {
     expect(events.semantic.mock.calls.at(-1)?.[0]).toBe("working");
   });
 
+  it("recognizes chunked Cursor text approval and releases it on Enter", () => {
+    const { runtime, data, events } = createRuntime({
+      kind: "agent",
+      provider: "cursor",
+      args: [],
+    });
+    data("Run this command?\nnpm test");
+    data("\nRun (once) (y)\nWaiting for decision (y/n/p)...");
+    data("\x1b]0;ordinary spinner\x07");
+    expect(events.semantic.mock.calls.every(([state]) => state === "approval_wait")).toBe(true);
+    runtime.write("\r");
+    expect(events.semantic.mock.calls.at(-1)?.[0]).toBe("working");
+  });
+
   it("completes idle working turns but does not clear pending hook approval", () => {
     vi.useFakeTimers();
     const { runtime, data, events } = createRuntime({ kind: "agent", provider: "kimi", args: [] });

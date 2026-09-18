@@ -7,3 +7,8 @@ export function kimiSessionsDir(): string {
   const configured = process.env.KIMI_CODE_HOME?.trim();
   return join(configured ? resolve(configured) : join(homedir(), ".kimi-code"), "sessions");
 }
+
+export function cursorAcpSessionsDir(): string {
+  const configured = process.env.CURSOR_ACP_SESSIONS_DIR?.trim();
+  return configured ? resolve(configured) : join(homedir(), ".cursor", "acp-sessions");
+}
