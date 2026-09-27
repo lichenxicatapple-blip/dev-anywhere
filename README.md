@@ -177,7 +177,7 @@ dev-anywhere serve autostart status
 
 启动 Claude Code、Codex、Kimi Code 或 Cursor CLI 时，只需在原命令前加上 `dev-anywhere`：
 
-例如，将 `claude --permission-mode plan` 改为 `dev-anywhere claude --permission-mode plan`。CLI 参数和本地终端体验都不变。该会话也会出现在 DEV Anywhere 的 Web 界面中，随时可以从浏览器接管。Cursor CLI 使用 `dev-anywhere agent ...`（与原生命令一致），也可以用 `dev-anywhere cursor ...`。
+例如，将 `claude --permission-mode plan` 改为 `dev-anywhere claude --permission-mode plan`。CLI 参数和本地终端体验都不变。该会话也会出现在 DEV Anywhere 的 Web 界面中，随时可以从浏览器接管。Cursor CLI 使用 `dev-anywhere cursor ...`，也可以用 `dev-anywhere agent ...`（与原生二进制 `agent` 一致）。
 
 **使用 VPS Relay 部署时**
 
@@ -185,7 +185,7 @@ dev-anywhere serve autostart status
 dev-anywhere claude
 dev-anywhere codex
 dev-anywhere kimi
-dev-anywhere agent
+dev-anywhere cursor
 ```
 
 **使用 Quick Tunnel 时**
@@ -196,7 +196,7 @@ dev-anywhere agent
 dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
 dev-anywhere --profile quick-tunnel kimi
-dev-anywhere --profile quick-tunnel agent
+dev-anywhere --profile quick-tunnel cursor
 ```
 
 #### 从浏览器启动新会话

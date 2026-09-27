@@ -45,7 +45,7 @@ export function extractAgentInvocation(args: string[]): { provider: ProviderId; 
   const provider = providerFromCliName(agent);
   if (!provider) {
     throw new Error(
-      'Missing Agent CLI. Use "dev-anywhere claude ...", "dev-anywhere codex ...", "dev-anywhere kimi ...", or "dev-anywhere agent ...".',
+      'Missing Agent CLI. Use "dev-anywhere claude ...", "dev-anywhere codex ...", "dev-anywhere kimi ...", or "dev-anywhere cursor ...".',
     );
   }
   return { provider, args: providerArgs };

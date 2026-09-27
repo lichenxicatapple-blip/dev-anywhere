@@ -33,7 +33,7 @@ dev-anywhere serve restart --relay cloud
 dev-anywhere claude
 dev-anywhere codex
 dev-anywhere kimi
-dev-anywhere agent
+dev-anywhere cursor
 
 # 5. Open the web SPA served by your relay, pick your computer, create or resume a session
 ```
@@ -57,8 +57,8 @@ dev-anywhere tunnel           # temporary account-free Cloudflare Quick Tunnel
 dev-anywhere claude [...args] # start/attach a Claude Code terminal session
 dev-anywhere codex [...args]  # start/attach a Codex terminal session
 dev-anywhere kimi [...args]   # start/attach a Kimi Code terminal session
-dev-anywhere agent [...args]  # start/attach a Cursor CLI terminal session
-dev-anywhere cursor [...args] # alias for `dev-anywhere agent`
+dev-anywhere cursor [...args] # start/attach a Cursor CLI terminal session
+dev-anywhere agent [...args]  # same as cursor; matches the native `agent` binary
 dev-anywhere --help
 ```
 
@@ -70,13 +70,13 @@ Add `--system` to run at boot without desktop login on macOS, systemd Linux, or 
 
 Windows also requires your account password on first installation. See the [system service guide](https://github.com/lichenxicatapple-blip/dev-anywhere/blob/main/docs/SYSTEM-SERVICE.md) for setup, verification, and switching back.
 
-Arguments after `claude`, `codex`, `kimi`, `agent`, or `cursor` are passed through to the real CLI:
+Arguments after `claude`, `codex`, `kimi`, `cursor`, or `agent` are passed through to the real CLI:
 
 ```bash
 dev-anywhere claude -c
 dev-anywhere codex --model gpt-5.5
 dev-anywhere kimi --auto
-dev-anywhere agent --mode=plan
+dev-anywhere cursor --mode=plan
 ```
 
 Kimi Code supports both terminal sessions and structured ACP chat. You can start
@@ -84,11 +84,11 @@ a terminal with `dev-anywhere kimi ...`, create either mode from the Web UI, and
 resume Kimi sessions from the historical session list.
 
 Cursor CLI supports both terminal sessions and structured ACP chat. Use
-`dev-anywhere agent ...` (or `dev-anywhere cursor ...`) to wrap a local terminal,
+`dev-anywhere cursor ...` (or `dev-anywhere agent ...`, matching the native binary) to wrap a local terminal,
 or create either mode from the Web UI. ACP chat streams output, tool calls,
 approvals, questions, and plan confirmation. DEV Anywhere looks up `CURSOR_BIN`,
 then `agent`, then `cursor-agent`; it does not use the Cursor IDE binary named
-`cursor`. Log in first with `agent login`, or set `CURSOR_API_KEY` /
+`cursor`. Log in first with Cursor CLI's `agent login`, or set `CURSOR_API_KEY` /
 `CURSOR_AUTH_TOKEN`.
 
 ## Relay server

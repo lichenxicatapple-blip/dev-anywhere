@@ -104,7 +104,7 @@ Cursor CLI：
 ```bash
 pnpm --filter @dev-anywhere/proxy run dev -- \
   --profile local \
-  agent
+  cursor
 ```
 
 Cursor CLI 同样接入 PTY 终端与 ACP 聊天链路。ACP 聊天测试应覆盖流式输出、工具调用与审批、提问、计划批准、取消当前回合，以及用 native session id 恢复（`session/load` 失败时应新建会话并提示）。
@@ -152,7 +152,7 @@ docs/       长期维护的中文文档和 README 媒体资源
 - `agentCli`
 - `logLevel`
 
-`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin`、`kimiBin` 和 `cursorBin` 指定 Claude Code、Codex、Kimi Code、Cursor CLI 的绝对路径；对应的 `CLAUDE_BIN`、`CODEX_BIN`、`KIMI_BIN` 和 `CURSOR_BIN` 可以临时覆盖配置。Cursor CLI 探测顺序为 `CURSOR_BIN` → `agent` → `cursor-agent`，不会把 Cursor IDE 的 `cursor` 可执行文件当成 Agent。
+`profiles` 选择 Relay，`relays` 保存 URL 与 Proxy Token。`agentCli` 可以通过 `claudeBin`、`codexBin`、`kimiBin` 和 `cursorBin` 指定 Claude Code、Codex、Kimi Code、Cursor CLI 的绝对路径；对应的 `CLAUDE_BIN`、`CODEX_BIN`、`KIMI_BIN` 和 `CURSOR_BIN` 可以临时覆盖配置。Cursor CLI 探测顺序为 `CURSOR_BIN` → `agent` → `cursor-agent`，不会把 Cursor IDE 的 `cursor` 可执行文件当成 Cursor CLI。
 
 配置由 Zod schema 校验。新增字段时应同时修改 schema、默认配置、相关测试和用户文档。
 

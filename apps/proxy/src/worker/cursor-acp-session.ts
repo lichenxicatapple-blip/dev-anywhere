@@ -113,7 +113,7 @@ const DEFAULT_CANCEL_ACKNOWLEDGE_TIMEOUT_MS = 2_000;
 const STDERR_TAIL_LIMIT = 8_192;
 const CANCELLED_RESPONSE_TOMBSTONE_LIMIT = 128;
 export const CURSOR_ACP_AUTH_REQUIRED_MESSAGE =
-  "Cursor CLI 未登录。请在本机运行 `agent login`，或设置 CURSOR_API_KEY / CURSOR_AUTH_TOKEN。";
+  "Cursor CLI 未登录。请在本机运行 Cursor CLI 的 `agent login`，或设置 CURSOR_API_KEY / CURSOR_AUTH_TOKEN。";
 
 const denyPermission = (): CursorAcpPermissionDecision => ({
   behavior: "deny",

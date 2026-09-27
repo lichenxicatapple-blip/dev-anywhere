@@ -149,7 +149,7 @@ function extractClaudeTextSignal(text: string): PtyStateEvent | null {
   return null;
 }
 
-// Cursor CLI approval dialog (agent 2026.09.15 decision-logic / decision-dropdown).
+// Cursor CLI approval dialog (`agent` binary 2026.09.15 decision-logic / decision-dropdown).
 // Official docs only say y/n; the TUI is a question plus a selected first option.
 // Enter submits the highlighted option, which starts on approve — same as Always yes.
 const CURSOR_APPROVAL_QUESTIONS: ReadonlyArray<{ pattern: RegExp; tool: string }> = [

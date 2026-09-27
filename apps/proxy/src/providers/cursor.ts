@@ -35,7 +35,7 @@ export function cursorAcpAutoApprovesPermissions(permissionMode?: string): boole
 }
 
 const CURSOR_NOT_FOUND_MESSAGE =
-  "Cursor CLI not found in PATH. Set CURSOR_BIN or install the `agent` CLI: https://cursor.com/cli";
+  "Cursor CLI not found in PATH. Set CURSOR_BIN or install Cursor CLI (the `agent` binary): https://cursor.com/cli";
 
 export function resolveCursorPermissionFlags(permissionMode?: string): string[] {
   switch (permissionMode) {

@@ -177,7 +177,7 @@ Once connected, use the browser to take over a coding agent session started in a
 
 When starting Claude Code, Codex, Kimi Code, or Cursor CLI, add `dev-anywhere` before the original command:
 
-For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. The CLI arguments and local terminal experience stay the same. The session also appears in DEV Anywhere, where you can take it over from a browser at any time. For Cursor CLI, use `dev-anywhere agent ...` (matching the native command) or the `dev-anywhere cursor ...` alias.
+For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. The CLI arguments and local terminal experience stay the same. The session also appears in DEV Anywhere, where you can take it over from a browser at any time. For Cursor CLI, use `dev-anywhere cursor ...`, or `dev-anywhere agent ...` to match the native `agent` binary.
 
 **With a VPS Relay deployment**
 
@@ -185,7 +185,7 @@ For example, change `claude --permission-mode plan` to `dev-anywhere claude --pe
 dev-anywhere claude
 dev-anywhere codex
 dev-anywhere kimi
-dev-anywhere agent
+dev-anywhere cursor
 ```
 
 **With Quick Tunnel**
@@ -196,7 +196,7 @@ Keep `dev-anywhere tunnel` running and use another terminal:
 dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
 dev-anywhere --profile quick-tunnel kimi
-dev-anywhere --profile quick-tunnel agent
+dev-anywhere --profile quick-tunnel cursor
 ```
 
 #### Start a new session from the browser

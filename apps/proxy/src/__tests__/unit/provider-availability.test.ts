@@ -55,7 +55,7 @@ describe("provider availability", () => {
     expect(status.cursor.error).toContain("Cursor CLI not found");
   });
 
-  it("does not treat the Cursor IDE binary name as the agent CLI", () => {
+  it("does not treat the Cursor IDE binary name as Cursor CLI", () => {
     const root = mkdtempSync(join(tmpdir(), "dev-anywhere-cursor-ide-"));
     try {
       const cursorIde = join(root, "cursor");
