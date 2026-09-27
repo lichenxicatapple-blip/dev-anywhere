@@ -27,6 +27,11 @@ import {
   resolveCodexPermissionPolicy,
 } from "../providers/codex.js";
 import {
+  CursorPermissionModeUnsupportedError,
+  resolveCursorAcpMode,
+  resolveCursorPermissionFlags,
+} from "../providers/cursor.js";
+import {
   buildKimiTerminalArgs,
   KimiPermissionModeUnsupportedError,
   resolveKimiAcpMode,
@@ -162,11 +167,12 @@ export class RelaySessionCreateHandler {
     const permissionMode = msg.permissionMode;
     const resumeSessionId = msg.resumeSessionId;
 
-    if (provider === "kimi" && resumeSessionId) {
+    if ((provider === "kimi" || provider === "cursor") && resumeSessionId) {
       const existing = this.deps.sessionManager
         .listSessions()
         .find(
-          (session) => session.provider === "kimi" && session.historySessionId === resumeSessionId,
+          (session) =>
+            session.provider === provider && session.historySessionId === resumeSessionId,
         );
       if (existing) {
         this.respondWithExistingSession(requestId, existing);
@@ -263,6 +269,31 @@ export class RelaySessionCreateHandler {
         serviceLogger.warn(
           { provider, permissionMode },
           "Kimi session create rejected: unsupported approval policy",
+        );
+        return;
+      }
+    }
+
+    if (provider === "cursor") {
+      try {
+        if (mode === "pty") resolveCursorPermissionFlags(permissionMode);
+        else resolveCursorAcpMode(permissionMode);
+      } catch (err) {
+        if (!(err instanceof CursorPermissionModeUnsupportedError)) {
+          throw err;
+        }
+        this.deps.relaySend(
+          serializeControl({
+            type: "session_create_response",
+            requestId,
+            success: false,
+            errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+            error: err.message,
+          }),
+        );
+        serviceLogger.warn(
+          { provider, permissionMode },
+          "Cursor session create rejected: unsupported approval policy",
         );
         return;
       }
@@ -583,6 +614,7 @@ export class RelaySessionCreateHandler {
           claudeBin: providerEnv.CLAUDE_BIN,
           codexBin: providerEnv.CODEX_BIN,
           kimiBin: providerEnv.KIMI_BIN,
+          cursorBin: providerEnv.CURSOR_BIN,
           path: providerEnv.PATH,
         },
         "Hosted PTY session create failed",
@@ -615,7 +647,7 @@ export class RelaySessionCreateHandler {
     );
     // Command discovery currently reads Claude's built-ins and ~/.claude commands.
     // Do not present that provider-specific list inside a Kimi terminal.
-    if (provider !== "kimi") {
+    if (provider !== "kimi" && provider !== "cursor") {
       this.deps.controlHandlers.pushCommandList(session.id, cwd);
     }
     this.deps.controlHandlers.pushFileTree(session.id, cwd);

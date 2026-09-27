@@ -4,7 +4,7 @@ const PRE_ADMISSION_SESSION_ID_MAX_LENGTH = 256;
 interface UnversionedTerminalReconnect {
   sessionId: string;
   pid: number;
-  provider: "claude" | "codex" | "kimi";
+  provider: "claude" | "codex" | "kimi" | "cursor";
   kind?: "agent" | "terminal";
 }
 
@@ -12,7 +12,7 @@ interface VersionedTerminalReconnect {
   sessionId: string;
   protocolVersion: number;
   pid?: number;
-  provider?: "claude" | "codex" | "kimi";
+  provider?: "claude" | "codex" | "kimi" | "cursor";
   kind?: "agent" | "terminal";
 }
 
@@ -44,7 +44,12 @@ export function parseUnversionedTerminalReconnect(
   if (!isRecord(value)) return null;
   if (Object.keys(value).some((key) => !UNVERSIONED_RECONNECT_KEYS.has(key))) return null;
   if (value.type !== "session_create_request" || value.mode !== "pty") return null;
-  if (value.provider !== "claude" && value.provider !== "codex" && value.provider !== "kimi") {
+  if (
+    value.provider !== "claude" &&
+    value.provider !== "codex" &&
+    value.provider !== "kimi" &&
+    value.provider !== "cursor"
+  ) {
     return null;
   }
   if (!isBoundedNonEmptyString(value.cwd, PRE_ADMISSION_PATH_MAX_LENGTH)) return null;
@@ -93,7 +98,8 @@ export function parseVersionedTerminalReconnect(value: unknown): VersionedTermin
     value.provider !== undefined &&
     value.provider !== "claude" &&
     value.provider !== "codex" &&
-    value.provider !== "kimi"
+    value.provider !== "kimi" &&
+    value.provider !== "cursor"
   ) {
     return null;
   }

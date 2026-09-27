@@ -27,6 +27,7 @@ import {
 } from "../ipc/ipc-protocol.js";
 import { mapClaudeStreamEvent } from "./claude-stream-event-mapper.js";
 import { mapCodexAppServerEvent } from "./codex-app-server-event-mapper.js";
+import { CursorAcpEventMapper } from "./cursor-acp-event-mapper.js";
 import { KimiAcpEventMapper } from "./kimi-acp-event-mapper.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
@@ -140,6 +141,7 @@ export class WorkerRegistry {
   private pendingNativeSessions = new Map<string, NativeSessionRef>();
   private assistantSnapshots = new Map<string, AssistantSnapshotState>();
   private readonly kimiAcpEventMapper = new KimiAcpEventMapper();
+  private readonly cursorAcpEventMapper = new CursorAcpEventMapper();
   private startupFailures = new Map<string, WorkerStartupError>();
   private assistantTurnCounter = 0;
 
@@ -535,6 +537,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
+    this.cursorAcpEventMapper.clearSession(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker session deleted before ready: ${sessionId}`),
       sessionId,
@@ -550,6 +553,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
+    this.cursorAcpEventMapper.clearSession(sessionId);
     this.startupFailures.delete(sessionId);
     this.children.delete(sessionId);
     this.providers.delete(sessionId);
@@ -579,6 +583,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.clear();
     this.assistantSnapshots.clear();
     this.kimiAcpEventMapper.clear();
+    this.cursorAcpEventMapper.clear();
     this.startupFailures.clear();
     this.rejectReadyWaiters(new Error("Worker registry destroyed"));
   }
@@ -637,6 +642,7 @@ export class WorkerRegistry {
 
       case "worker_interrupted":
         this.kimiAcpEventMapper.finishTurn(sessionId);
+        this.cursorAcpEventMapper.finishTurn(sessionId);
         this.deps.permissionBroker.cleanupSession(sessionId, "Turn interrupted");
         this.deps.relayConnection.sendRaw(
           serializeControl({
@@ -846,6 +852,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
+    this.cursorAcpEventMapper.clearSession(sessionId);
     if (child) this.startupFailures.set(sessionId, error);
     else this.startupFailures.delete(sessionId);
     this.rejectReadyWaiters(error, sessionId);
@@ -968,6 +975,10 @@ export class WorkerRegistry {
       this.forwardKimiAcpEvent(sessionId, seq, event);
       return;
     }
+    if (event.type === "cursor_acp") {
+      this.forwardCursorAcpEvent(sessionId, seq, event);
+      return;
+    }
     if (event.type === "codex_app_server") {
       this.forwardCodexAppServerEvent(sessionId, seq, event);
       return;
@@ -1084,6 +1095,41 @@ export class WorkerRegistry {
         serviceLogger.warn(
           { sessionId, seq, updateType: mapped.updateType },
           "Unknown Kimi ACP session update; protocol may have changed",
+        );
+      }
+    }
+  }
+
+  private forwardCursorAcpEvent(
+    sessionId: string,
+    seq: number,
+    event: Record<string, unknown>,
+  ): void {
+    const relay = this.deps.relayConnection;
+    this.deps.touchSessionActivity?.(sessionId);
+    for (const mapped of this.cursorAcpEventMapper.map(sessionId, seq, event)) {
+      if (mapped.kind === "assistant_text") {
+        this.appendAssistantSnapshot(sessionId, seq, mapped.text);
+      } else if (mapped.kind === "envelope") {
+        if (
+          mapped.envelope.type === "assistant_tool_use" ||
+          mapped.envelope.type === "user_input" ||
+          mapped.envelope.type === "assistant_message"
+        ) {
+          this.completeAssistantSnapshot(sessionId, seq);
+        }
+        relay.sendEnvelope(mapped.envelope);
+      } else if (mapped.kind === "control") {
+        if (mapped.providerCommands) {
+          this.deps.setProviderCommands?.(sessionId, mapped.providerCommands);
+        }
+        if (mapped.completeAssistant !== false) this.completeAssistantSnapshot(sessionId, seq);
+        relay.sendRaw(mapped.raw);
+        if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
+      } else {
+        serviceLogger.warn(
+          { sessionId, seq, updateType: mapped.updateType },
+          "Unknown Cursor ACP session update; protocol may have changed",
         );
       }
     }
@@ -1226,6 +1272,7 @@ export class WorkerRegistry {
           toolId: msg.requestId,
           parameters: msg.input,
           ...(msg.options ? { options: msg.options } : {}),
+          ...(msg.cursorPrompt ? { cursorPrompt: msg.cursorPrompt } : {}),
         },
         "proxy",
       );
@@ -1251,6 +1298,7 @@ export class WorkerRegistry {
           toolName: msg.toolName,
           input: msg.input,
           ...(msg.options ? { options: msg.options } : {}),
+          ...(msg.cursorPrompt ? { cursorPrompt: msg.cursorPrompt } : {}),
         },
         (decision: PermissionDecision) => {
           this.send(sessionId, {
@@ -1260,6 +1308,7 @@ export class WorkerRegistry {
             ...(decision.message ? { message: decision.message } : {}),
             ...(decision.remember ? { remember: true } : {}),
             ...(decision.optionId ? { optionId: decision.optionId } : {}),
+            ...(decision.cursorAnswer ? { cursorAnswer: decision.cursorAnswer } : {}),
           });
         },
       );

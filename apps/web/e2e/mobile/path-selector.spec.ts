@@ -119,6 +119,7 @@ test.describe("mobile remote path selection", () => {
             claude: { available: true, command: `${homePath}\\bin\\claude.exe` },
             codex: { available: false },
             kimi: { available: false },
+            cursor: { available: false },
           },
         });
         socket.emitJson({
@@ -169,6 +170,7 @@ test.describe("mobile remote path selection", () => {
           claude: { available: true, command: "C:\\Tools\\claude.exe" },
           codex: { available: false },
           kimi: { available: false },
+          cursor: { available: false },
         },
       });
       socket.emitJson({

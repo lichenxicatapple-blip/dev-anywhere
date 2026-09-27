@@ -167,6 +167,10 @@ function firstPendingApproval(approvals: ToolApprovalRequest[]): ToolApprovalReq
 }
 
 function hasDynamicApprovalOptions(approval: ToolApprovalRequest | null): boolean {
+  if (approval?.cursorPrompt?.type === "ask_question") {
+    return approval.cursorPrompt.questions.length === 1;
+  }
+  if (approval?.cursorPrompt?.type === "create_plan") return false;
   return Boolean(approval?.options?.length);
 }
 

@@ -283,4 +283,99 @@ describe("extractOscSignals", () => {
 
     expect(extractTextSignals(text, "codex")).toBeNull();
   });
+
+  it("returns approval_wait for Cursor shell confirmation text", () => {
+    const text = [
+      "Run this command?",
+      "ls -la",
+      "▶ Run (once) (y)",
+      "  Skip & tell the agent what to do instead (esc or n)",
+      "→ Waiting for decision (y/n/p)...",
+    ].join("\n");
+
+    expect(extractTextSignals(text, "cursor")).toEqual({
+      state: "approval_wait",
+      tool: "Shell",
+      title: "Cursor permission: Shell",
+    });
+  });
+
+  it("returns approval_wait for Cursor sandbox shell confirmation text", () => {
+    const text = [
+      "Run this command outside the sandbox?",
+      "npm test",
+      "Run outside sandbox (once) (y)",
+      "Add Shell(npm) to allowlist? (tab)",
+      "Waiting for decision (y/n/p)...",
+    ].join("\n");
+
+    expect(extractTextSignals(text, "cursor")).toEqual({
+      state: "approval_wait",
+      tool: "Shell",
+      title: "Cursor permission: Shell",
+    });
+  });
+
+  it.each([
+    ["Run this MCP tool?", "Run (once) (y)", "MCP"],
+    ["Write to this file?", "Proceed (y)", "Write"],
+    ["Delete this file?", "Delete (y)", "Delete"],
+    ["Allow this web search?", "Allow search (y)", "WebSearch"],
+    ["Allow this web fetch?", "Fetch (y)", "WebFetch"],
+    ["Proceed with this edit?", "Waiting for decision (y/n/p)...", "Edit"],
+    ["Switch to plan mode?", "Approve mode switch (y)", "Mode"],
+  ] as const)("returns approval_wait for Cursor %s", (question, confirm, tool) => {
+    const text = `${question}\n${confirm}`;
+
+    expect(extractTextSignals(text, "cursor")).toEqual({
+      state: "approval_wait",
+      tool,
+      title: `Cursor permission: ${tool}`,
+    });
+  });
+
+  it("does not treat a quoted Cursor question without the decision UI as approval", () => {
+    expect(
+      extractTextSignals("The agent asked: Run this command? I would not approve it.", "cursor"),
+    ).toBeNull();
+  });
+
+  it("does not treat a quoted Cursor question plus a prose (y) as approval", () => {
+    expect(
+      extractTextSignals(
+        "The agent asked: Run this command? Reply (y) only if you really mean it.",
+        "cursor",
+      ),
+    ).toBeNull();
+  });
+
+  it("does not treat Cursor ask-question or plan-revision prompts as approval", () => {
+    expect(
+      extractTextSignals("Answer questions (Enter to select/next, Esc to skip)", "cursor"),
+    ).toBeNull();
+    expect(
+      extractTextSignals("Describe how to revise the plan (Enter to submit, Esc to cancel)", "cursor"),
+    ).toBeNull();
+    expect(extractTextSignals("Ready to build?\n1. Yes, build locally (b)", "cursor")).toBeNull();
+  });
+
+  it("detects Cursor shell confirmation across PTY chunks", () => {
+    let tail = "";
+    tail = appendPtySemanticTextTail(tail, "Run this command?\nnpm test");
+    expect(extractTextSignals(tail, "cursor")).toBeNull();
+
+    tail = appendPtySemanticTextTail(tail, "\nRun (once) (y)\nWaiting for decision (y/n/p)...");
+
+    expect(extractTextSignals(tail, "cursor")).toEqual(
+      expect.objectContaining({ state: "approval_wait", tool: "Shell" }),
+    );
+  });
+
+  it("does not treat Cursor confirmation text as Claude or Codex approval", () => {
+    const text = "Run this command?\nRun (once) (y)\nWaiting for decision (y/n/p)...";
+
+    expect(extractTextSignals(text, "claude")).toBeNull();
+    expect(extractTextSignals(text, "codex")).toBeNull();
+    expect(extractTextSignals(text, "kimi")).toBeNull();
+  });
 });

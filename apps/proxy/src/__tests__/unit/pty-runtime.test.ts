@@ -65,6 +65,7 @@ function prepareRuntime(options: Partial<PtyRuntimeOptions> = {}) {
       CLAUDE_BIN: process.execPath,
       CODEX_BIN: process.execPath,
       KIMI_BIN: process.execPath,
+      CURSOR_BIN: process.execPath,
     },
     ...options,
   } as PtyRuntimeOptions;
@@ -94,6 +95,7 @@ describe("PTY runtime", () => {
     expect(buildHostedPtyArgs("claude", "native")).toEqual(["--resume", "native"]);
     expect(buildHostedPtyArgs("codex", "native")).toEqual(["resume", "native"]);
     expect(buildHostedPtyArgs("kimi", "native")).toEqual(["--session", "native"]);
+    expect(buildHostedPtyArgs("cursor", "native")).toEqual(["--resume", "native"]);
     expect(buildHostedPtyArgs("claude")).toEqual([]);
   });
 
@@ -124,6 +126,7 @@ describe("PTY runtime", () => {
       ["--dangerously-bypass-approvals-and-sandbox", "resume", "native", "-c", "tui.whimsy=false"],
     ],
     ["kimi", "auto", ["--yolo", "--session", "native"]],
+    ["cursor", "auto", ["--resume", "native", "--trust", "--auto-review"]],
   ] as const)(
     "preserves %s permission and resume launch settings",
     (provider, permissionMode, expected) => {
@@ -522,6 +525,20 @@ describe("PTY runtime", () => {
     data("\x1b]0;ordinary spinner\x07");
     expect(events.semantic.mock.calls.every(([state]) => state === "approval_wait")).toBe(true);
     runtime.write("y");
+    expect(events.semantic.mock.calls.at(-1)?.[0]).toBe("working");
+  });
+
+  it("recognizes chunked Cursor text approval and releases it on Enter", () => {
+    const { runtime, data, events } = createRuntime({
+      kind: "agent",
+      provider: "cursor",
+      args: [],
+    });
+    data("Run this command?\nnpm test");
+    data("\nRun (once) (y)\nWaiting for decision (y/n/p)...");
+    data("\x1b]0;ordinary spinner\x07");
+    expect(events.semantic.mock.calls.every(([state]) => state === "approval_wait")).toBe(true);
+    runtime.write("\r");
     expect(events.semantic.mock.calls.at(-1)?.[0]).toBe("working");
   });
 

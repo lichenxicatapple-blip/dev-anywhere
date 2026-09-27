@@ -231,6 +231,46 @@ describe("HistoryList", () => {
     },
   );
 
+  it("offers chat restore for Cursor CLI history", async () => {
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      success: true,
+      sessionId: "cursor-json-session",
+      cwd: "/Users/dev/project",
+      lastActive: 1,
+      kind: "agent",
+      mode: "json",
+      provider: "cursor",
+    });
+    const { container } = renderHistoryList([
+      {
+        id: "cursor-history",
+        title: "Cursor CLI 会话",
+        projectDir: "/Users/dev/project",
+        updatedAt: Date.now(),
+        provider: "cursor",
+        preferredMode: "json",
+      },
+    ]);
+    expandHistory(container);
+
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：Cursor CLI 会话" }));
+    expect(screen.getByRole("radio", { name: "聊天" }).getAttribute("aria-checked")).toBe("true");
+    expect(screen.getByRole("radio", { name: "终端" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: "恢复" }));
+
+    await waitFor(() => {
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          kind: "agent",
+          provider: "cursor",
+          mode: "json",
+          resumeSessionId: "cursor-history",
+        }),
+      );
+    });
+  });
+
   it("keeps same-title histories in their respective project directory groups", () => {
     const projectDirs = ["/Users/dev/project-a", "/Users/dev/project-b"];
     const { container } = renderHistoryList(

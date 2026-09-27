@@ -235,6 +235,55 @@ describe("RelayControlSchema", () => {
         payload: { toolId: "request-1", optionId: "reject-once" },
       }),
     ).toMatchObject({ payload: { optionId: "reject-once" } });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "pending_approvals_push",
+        sessionId: "session-1",
+        approvals: [
+          {
+            requestId: "request-2",
+            toolName: "AskQuestion",
+            input: {},
+            cursorPrompt: {
+              type: "ask_question",
+              title: "Choose a mode",
+              questions: [
+                {
+                  id: "q1",
+                  prompt: "Which mode?",
+                  options: [{ id: "agent", label: "Agent" }],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toMatchObject({
+      approvals: [
+        {
+          cursorPrompt: {
+            type: "ask_question",
+            title: "Choose a mode",
+          },
+        },
+      ],
+    });
+    expect(isProxyToClientRelayControlType("cursor_session_ui")).toBe(true);
+    expect(
+      RelayControlSchema.parse({
+        type: "cursor_session_ui",
+        sessionId: "session-1",
+        payload: {
+          kind: "todos",
+          merge: true,
+          todos: [{ id: "1", content: "Setup", status: "completed" }],
+        },
+      }),
+    ).toMatchObject({
+      type: "cursor_session_ui",
+      payload: { kind: "todos", merge: true },
+    });
   });
 
   it("parses relay-local voice config controls without routing them to proxy", () => {
@@ -1089,6 +1138,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: false, error: "codex not found" },
           kimi: { available: false, error: "kimi not found" },
+          cursor: { available: false, error: "cursor not found" },
         },
       }),
     ).toEqual({
@@ -1099,6 +1149,7 @@ describe("RelayControlSchema", () => {
         claude: { available: true, command: "/usr/local/bin/claude" },
         codex: { available: false, error: "codex not found" },
         kimi: { available: false, error: "kimi not found" },
+        cursor: { available: false, error: "cursor not found" },
       },
     });
 
@@ -1111,6 +1162,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/home/dev/.kimi-code/bin/kimi" },
+          cursor: { available: false },
         },
       }),
     ).toMatchObject({
@@ -1168,6 +1220,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/home/dev/.local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/usr/local/bin/kimi" },
+          cursor: { available: true, command: "/usr/local/bin/agent" },
         },
       }),
     ).toEqual({
@@ -1178,6 +1231,7 @@ describe("RelayControlSchema", () => {
         claude: { available: true, command: "/home/dev/.local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
+        cursor: { available: true, command: "/usr/local/bin/agent" },
       },
     });
 

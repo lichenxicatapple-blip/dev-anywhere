@@ -169,6 +169,7 @@ for (const viewport of [
             claude: { available: false },
             codex: { available: false },
             kimi: { available: false },
+            cursor: { available: false },
           },
         });
         socket.emitJson({

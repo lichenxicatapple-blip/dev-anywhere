@@ -1,5 +1,5 @@
 import { serviceLogger } from "../common/logger.js";
-import type { ApprovalOption, ProviderId } from "@dev-anywhere/shared";
+import type { ApprovalOption, CursorAnswer, CursorPrompt, ProviderId } from "@dev-anywhere/shared";
 
 interface PermissionRequest {
   requestId: string;
@@ -8,6 +8,7 @@ interface PermissionRequest {
   toolName: string;
   input: Record<string, unknown>;
   options?: ApprovalOption[];
+  cursorPrompt?: CursorPrompt;
 }
 
 export interface PermissionDecision {
@@ -15,6 +16,7 @@ export interface PermissionDecision {
   message?: string;
   remember?: boolean;
   optionId?: string;
+  cursorAnswer?: CursorAnswer;
 }
 
 interface PendingPermission extends PermissionRequest {
@@ -40,6 +42,7 @@ function snapshot(pending: PendingPermission): PendingPermissionView {
     toolName: pending.toolName,
     input: pending.input,
     ...(pending.options ? { options: pending.options } : {}),
+    ...(pending.cursorPrompt ? { cursorPrompt: pending.cursorPrompt } : {}),
     createdAt: pending.createdAt,
     ...(pending.deliveredAt !== undefined ? { deliveredAt: pending.deliveredAt } : {}),
   };

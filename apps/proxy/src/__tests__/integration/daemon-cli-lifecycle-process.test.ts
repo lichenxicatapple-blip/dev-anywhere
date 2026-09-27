@@ -98,7 +98,7 @@ async function createFixture(profile = "default", sharedRoot?: string): Promise<
     if (
       key.startsWith("DEV_ANYWHERE_") ||
       key.startsWith("RELAY_") ||
-      ["CLAUDE_BIN", "CODEX_BIN", "KIMI_BIN", "LOG_LEVEL"].includes(key)
+      ["CLAUDE_BIN", "CODEX_BIN", "KIMI_BIN", "CURSOR_BIN", "LOG_LEVEL"].includes(key)
     )
       delete env[key];
   }

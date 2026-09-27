@@ -1,8 +1,11 @@
-import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, renameSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { createHash } from "node:crypto";
+import { DatabaseSync } from "node:sqlite";
 import { scanClaudeHistory } from "#src/serve/history/claude.js";
+import { parseCursorRootBlobIds, scanCursorHistory } from "#src/serve/history/cursor.js";
 import { scanKimiHistory } from "#src/serve/history/kimi.js";
 
 let root: string;
@@ -305,5 +308,115 @@ describe("Kimi native history reader", () => {
     expect(
       (await scanKimiHistory(join(root, "kimi"))).every((entry) => !entry.hasConversation),
     ).toBe(true);
+  });
+});
+
+describe("Cursor ACP history reader", () => {
+  function writeCursorSession(
+    id: string,
+    meta: { cwd: string; title?: string },
+    messages: unknown[],
+  ): string {
+    const directory = join(root, "cursor", id);
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(join(directory, "meta.json"), JSON.stringify({ schemaVersion: 1, ...meta }));
+    const blobs = new Map<string, Buffer>();
+    const hashes: Buffer[] = [];
+    for (const message of messages) {
+      const data = Buffer.from(JSON.stringify(message));
+      const blobId = createHash("sha256").update(data).digest("hex");
+      blobs.set(blobId, data);
+      hashes.push(Buffer.from(blobId, "hex"));
+    }
+    const rootBlob = Buffer.concat(
+      hashes.map((hash) => Buffer.concat([Buffer.from([0x0a, 0x20]), hash])),
+    );
+    const rootId = createHash("sha256").update(rootBlob).digest("hex");
+    blobs.set(rootId, rootBlob);
+    const db = new DatabaseSync(join(directory, "store.db"));
+    db.exec(
+      "CREATE TABLE blobs (id TEXT PRIMARY KEY, data BLOB); CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT);",
+    );
+    const insert = db.prepare("INSERT INTO blobs (id, data) VALUES (?, ?)");
+    for (const [blobId, data] of blobs) insert.run(blobId, data);
+    db.prepare("INSERT INTO meta (key, value) VALUES (?, ?)").run(
+      "0",
+      Buffer.from(JSON.stringify({ latestRootBlobId: rootId })).toString("hex"),
+    );
+    db.close();
+    return directory;
+  }
+
+  it("reads field 1 hashes even after later protobuf fields", () => {
+    const first = Buffer.from("11".repeat(32), "hex");
+    const second = Buffer.from("22".repeat(32), "hex");
+    const blob = Buffer.concat([
+      Buffer.from([0x0a, 0x20]),
+      first,
+      Buffer.from([0x1a, 0x20]),
+      Buffer.from("33".repeat(32), "hex"),
+      Buffer.from([0x0a, 0x20]),
+      second,
+    ]);
+    expect(parseCursorRootBlobIds(blob)).toEqual([first.toString("hex"), second.toString("hex")]);
+  });
+
+  it("requires an absolute cwd, a real store, and visible conversation text", async () => {
+    writeCursorSession("cursor-ok", { cwd: join(root, "project"), title: "Always yes" }, [
+      { role: "user", content: [{ type: "text", text: "<user_query>\nhello\n</user_query>" }] },
+    ]);
+    writeCursorSession("cursor-relative", { cwd: "project" }, [
+      { role: "user", content: [{ type: "text", text: "<user_query>\nhello\n</user_query>" }] },
+    ]);
+    writeCursorSession("cursor-empty", { cwd: join(root, "project") }, []);
+    writeCursorSession("cursor-envelopes", { cwd: join(root, "project") }, [
+      { role: "user", content: "<user_info>\nOS Version: darwin\n</user_info>" },
+    ]);
+    const directory = join(root, "cursor", "cursor-no-store");
+    mkdirSync(directory, { recursive: true });
+    writeFileSync(
+      join(directory, "meta.json"),
+      JSON.stringify({ schemaVersion: 1, cwd: join(root, "project") }),
+    );
+    const entries = await scanCursorHistory(join(root, "cursor"));
+    expect(entries).toEqual([
+      expect.objectContaining({
+        provider: "cursor",
+        id: "cursor-ok",
+        projectDir: join(root, "project"),
+        title: "Always yes",
+        hasConversation: true,
+      }),
+    ]);
+  });
+
+  it("does not follow a store.db symlink or treat a corrupt store as conversation", async () => {
+    const linked = writeCursorSession("cursor-link", { cwd: join(root, "project") }, [
+      { role: "user", content: [{ type: "text", text: "<user_query>\n外部\n</user_query>" }] },
+    ]);
+    const store = join(linked, "store.db");
+    const outside = join(root, "outside-store.db");
+    renameSync(store, outside);
+    symlinkSync(outside, store);
+    mkdirSync(join(root, "cursor", "cursor-corrupt"), { recursive: true });
+    writeFileSync(
+      join(root, "cursor", "cursor-corrupt", "meta.json"),
+      JSON.stringify({ schemaVersion: 1, cwd: join(root, "project") }),
+    );
+    writeFileSync(join(root, "cursor", "cursor-corrupt", "store.db"), "not-sqlite");
+    expect(await scanCursorHistory(join(root, "cursor"))).toEqual([]);
+  });
+
+  it("uses WAL sidecar mtime when the checkpointed store.db is stale", async () => {
+    const directory = writeCursorSession("cursor-wal", { cwd: join(root, "project") }, [
+      { role: "user", content: [{ type: "text", text: "<user_query>\nhello\n</user_query>" }] },
+    ]);
+    const store = join(directory, "store.db");
+    const wal = join(directory, "store.db-wal");
+    writeFileSync(wal, "wal");
+    utimesSync(join(directory, "meta.json"), new Date(1_000), new Date(1_000));
+    utimesSync(store, new Date(1_000), new Date(1_000));
+    utimesSync(wal, new Date(5_000), new Date(5_000));
+    expect((await scanCursorHistory(join(root, "cursor")))[0]?.updatedAt).toBe(5_000);
   });
 });

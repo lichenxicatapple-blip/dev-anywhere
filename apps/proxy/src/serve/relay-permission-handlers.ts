@@ -54,7 +54,9 @@ export class RelayPermissionHandlers {
       );
       return;
     }
-    const optionError = validateDecisionOption(pending.options, optionId, "allow");
+    const optionError = pending.cursorPrompt
+      ? null
+      : validateDecisionOption(pending.options, optionId, "allow");
     if (optionError) {
       this.resolveInvalidOption(pending, payload.toolId, optionError);
       return;
@@ -64,6 +66,7 @@ export class RelayPermissionHandlers {
         behavior: "allow",
         ...(payload.whitelistTool ? { remember: true } : {}),
         ...(optionId ? { optionId } : {}),
+        ...(payload.cursorAnswer ? { cursorAnswer: payload.cursorAnswer } : {}),
       })
     ) {
       this.pushPermissionDecisionResult(
@@ -126,7 +129,9 @@ export class RelayPermissionHandlers {
       );
       return;
     }
-    const optionError = validateDecisionOption(pending.options, optionId, "deny");
+    const optionError = pending.cursorPrompt
+      ? null
+      : validateDecisionOption(pending.options, optionId, "deny");
     if (optionError) {
       this.resolveInvalidOption(pending, payload.toolId, optionError);
       return;
@@ -136,6 +141,7 @@ export class RelayPermissionHandlers {
         behavior: "deny",
         message: reason,
         ...(optionId ? { optionId } : {}),
+        ...(payload.cursorAnswer ? { cursorAnswer: payload.cursorAnswer } : {}),
       })
     ) {
       this.pushPermissionDecisionResult(

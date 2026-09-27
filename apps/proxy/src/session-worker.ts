@@ -12,6 +12,12 @@ import {
 } from "./worker/json-session.js";
 import { CodexAppServerSession } from "./worker/codex-app-server-session.js";
 import {
+  CursorAcpSession,
+  type CursorAcpExtensionDecision,
+  type CursorAcpPermissionDecision,
+  type CursorAcpPermissionOption,
+} from "./worker/cursor-acp-session.js";
+import {
   KimiAcpSession,
   type KimiAcpPermissionDecision,
   type KimiAcpPermissionOption,
@@ -30,7 +36,7 @@ import {
 } from "./ipc/worker-connection.js";
 import { readServeConnection } from "./worker/serve-connection.js";
 import type { ProviderHookContext, ProviderId } from "./providers/index.js";
-import { ControlErrorCode } from "@dev-anywhere/shared";
+import { ControlErrorCode, type CursorAnswer, type CursorPrompt } from "@dev-anywhere/shared";
 import {
   classifyCodexActiveWriterError,
   sanitizeProviderErrorTail,
@@ -66,7 +72,12 @@ if (!sessionId || !sockPath) {
   process.exit(1);
 }
 
-if (providerArg !== "claude" && providerArg !== "codex" && providerArg !== "kimi") {
+if (
+  providerArg !== "claude" &&
+  providerArg !== "codex" &&
+  providerArg !== "kimi" &&
+  providerArg !== "cursor"
+) {
   console.error(
     providerArg === undefined
       ? "JSON worker provider is required"
@@ -93,7 +104,7 @@ let latestKimiCommandEvent: Extract<WorkerMessage, { type: "worker_event" }> | n
 let readyMessage: Extract<WorkerMessage, { type: "worker_ready" }> | null = null;
 let providerReady = false;
 let exiting = false;
-let kimiTurnActive = false;
+let acpTurnActive = false;
 const seqCounter = new SeqCounter(sessionId);
 const whitelist = new ToolWhitelist();
 const nextApprovalRequestId = createApprovalRequestIdFactory(sessionId);
@@ -105,6 +116,7 @@ const pendingApprovals = new Map<
     toolName: string;
     input: Record<string, unknown>;
     options?: WorkerApprovalOption[];
+    cursorPrompt?: CursorPrompt;
   }
 >();
 
@@ -118,12 +130,19 @@ interface WorkerApprovalDecision {
   remember?: boolean;
   optionId?: string;
   cancelled?: boolean;
+  cursorAnswer?: CursorAnswer;
+}
+
+function isAcpProvider(value: ProviderId): boolean {
+  return value === "kimi" || value === "cursor";
 }
 
 function isKimiCommandEvent(
   msg: WorkerMessage,
 ): msg is Extract<WorkerMessage, { type: "worker_event" }> {
-  if (msg.type !== "worker_event" || msg.event.type !== "kimi_acp") return false;
+  if (msg.type !== "worker_event" || (msg.event.type !== "kimi_acp" && msg.event.type !== "cursor_acp")) {
+    return false;
+  }
   const params = msg.event.params;
   if (!params || typeof params !== "object" || Array.isArray(params)) return false;
   const update = (params as Record<string, unknown>).update;
@@ -177,7 +196,7 @@ function replayServeState(socket: Socket | null): void {
   );
   // If start happened on the previous connection, restore WORKING before replaying chunks. When
   // start itself is queued, preserve backlog order (previous result -> next start -> next chunks).
-  if (provider === "kimi" && kimiTurnActive && !queuedKimiTurnStart) {
+  if (isAcpProvider(provider) && acpTurnActive && !queuedKimiTurnStart) {
     socket.write(serializeWorkerMsg({ type: "worker_turn_started" }));
   }
   flushQueuedServeMessages();
@@ -193,6 +212,7 @@ function replayServeState(socket: Socket | null): void {
         toolName: pending.toolName,
         input: pending.input,
         ...(pending.options ? { options: pending.options } : {}),
+        ...(pending.cursorPrompt ? { cursorPrompt: pending.cursorPrompt } : {}),
       }),
     );
   }
@@ -203,16 +223,18 @@ const forwardToRelay = async (
   toolName: string,
   input: Record<string, unknown>,
   options?: WorkerApprovalOption[],
+  cursorPrompt?: CursorPrompt,
 ): Promise<WorkerApprovalDecision> => {
   return new Promise((resolve) => {
     const requestId = nextApprovalRequestId();
-    pendingApprovals.set(requestId, { resolve, toolName, input, options });
+    pendingApprovals.set(requestId, { resolve, toolName, input, options, cursorPrompt });
     sendToServe({
       type: "worker_approval_request",
       requestId,
       toolName,
       input,
       ...(options ? { options } : {}),
+      ...(cursorPrompt ? { cursorPrompt } : {}),
     });
   });
 };
@@ -246,17 +268,24 @@ function handleKimiEvent(
   handleProviderEvent({ type: "kimi_acp", method, params });
 }
 
-function workerApprovalOptions(options: KimiAcpPermissionOption[]): WorkerApprovalOption[] {
+function handleCursorEvent(method: string, params: Record<string, unknown>): void {
+  handleProviderEvent({ type: "cursor_acp", method, params });
+}
+
+function workerApprovalOptions(
+  options: Array<KimiAcpPermissionOption | CursorAcpPermissionOption>,
+): WorkerApprovalOption[] {
   return options.flatMap((option) => {
+    const kind = option.kind.replace(/-/g, "_");
     if (
-      option.kind !== "allow_once" &&
-      option.kind !== "allow_always" &&
-      option.kind !== "reject_once" &&
-      option.kind !== "reject_always"
+      kind !== "allow_once" &&
+      kind !== "allow_always" &&
+      kind !== "reject_once" &&
+      kind !== "reject_always"
     ) {
       return [];
     }
-    return [{ optionId: option.optionId, name: option.name, kind: option.kind }];
+    return [{ optionId: option.optionId, name: option.name, kind }];
   });
 }
 
@@ -281,10 +310,56 @@ async function handleKimiPermissionRequest(request: {
   };
 }
 
+async function handleCursorPermissionRequest(request: {
+  toolName: string;
+  input: Record<string, unknown>;
+  options: CursorAcpPermissionOption[];
+}): Promise<CursorAcpPermissionDecision> {
+  if (whitelist.has(request.toolName)) return { behavior: "allow_always" };
+  const options = workerApprovalOptions(request.options);
+  const decision = await forwardToRelay(
+    request.toolName,
+    request.input,
+    options.length > 0 ? options : undefined,
+  );
+  if (decision.cancelled) return { cancelled: true };
+  return {
+    behavior:
+      decision.behavior === "deny" ? "deny" : decision.remember ? "allow_always" : "allow_once",
+    ...(decision.message ? { message: decision.message } : {}),
+    ...(decision.optionId ? { optionId: decision.optionId } : {}),
+  };
+}
+
+async function handleCursorExtensionRequest(request: {
+  prompt: CursorPrompt;
+}): Promise<CursorAcpExtensionDecision> {
+  const toolName = request.prompt.type === "ask_question" ? "AskQuestion" : "CreatePlan";
+  const decision = await forwardToRelay(toolName, {}, undefined, request.prompt);
+  if (decision.cancelled) return { cancelled: true };
+  if (decision.cursorAnswer) return { answer: decision.cursorAnswer };
+  if (request.prompt.type === "create_plan") {
+    return {
+      answer: {
+        type: "create_plan",
+        outcome: decision.behavior === "deny" ? "rejected" : "accepted",
+        ...(decision.message ? { reason: decision.message } : {}),
+      },
+    };
+  }
+  return {
+    answer: {
+      type: "ask_question",
+      outcome: decision.behavior === "deny" ? "skipped" : "cancelled",
+      ...(decision.message ? { reason: decision.message } : {}),
+    },
+  };
+}
+
 function handleProviderExit(code: number): void {
   if (exiting) return;
   exiting = true;
-  kimiTurnActive = false;
+  acpTurnActive = false;
   whitelist.clear();
   const errorTail = code === 0 ? "" : sanitizeProviderErrorTail(session.getStderr());
   sendToServe({
@@ -321,15 +396,15 @@ const session =
           onUpdate: (params) => handleKimiEvent("session/update", params),
           onPermissionRequest: handleKimiPermissionRequest,
           onPromptStart: () => {
-            kimiTurnActive = true;
+            acpTurnActive = true;
             sendToServe({ type: "worker_turn_started" });
           },
           onPromptComplete: (result) => {
-            kimiTurnActive = false;
+            acpTurnActive = false;
             handleKimiEvent("session/prompt/result", { response: result });
           },
           onPromptError: (error) => {
-            kimiTurnActive = false;
+            acpTurnActive = false;
             handleKimiEvent("session/prompt/error", {
               message: sanitizeProviderErrorTail(error.message) || "Kimi ACP prompt failed",
             });
@@ -339,6 +414,42 @@ const session =
               type: "worker_native_session_id",
               provider: "kimi",
               sessionId: kimiSessionId,
+            });
+          },
+          onProtocolError: (error) => console.error(`[worker] ${error.message}`),
+          onProcessError: (error) => console.error(`[worker] ${error.message}`),
+          onExit: handleProviderExit,
+        })
+    : provider === "cursor"
+      ? new CursorAcpSession({
+          cwd: workerCwd,
+          resumeSessionId: workerResume,
+          permissionMode: workerPermissionMode,
+          onUpdate: (params) => handleCursorEvent("session/update", params),
+          onNotification: (method, params) => {
+            if (method !== "session/update") handleCursorEvent(method, params);
+          },
+          onPermissionRequest: handleCursorPermissionRequest,
+          onExtensionRequest: handleCursorExtensionRequest,
+          onPromptStart: () => {
+            acpTurnActive = true;
+            sendToServe({ type: "worker_turn_started" });
+          },
+          onPromptComplete: (result) => {
+            acpTurnActive = false;
+            handleCursorEvent("session/prompt/result", { response: result });
+          },
+          onPromptError: (error) => {
+            acpTurnActive = false;
+            handleCursorEvent("session/prompt/error", {
+              message: sanitizeProviderErrorTail(error.message) || "Cursor ACP prompt failed",
+            });
+          },
+          onSessionId: (cursorSessionId) => {
+            sendToServe({
+              type: "worker_native_session_id",
+              provider: "cursor",
+              sessionId: cursorSessionId,
             });
           },
           onProtocolError: (error) => console.error(`[worker] ${error.message}`),
@@ -386,14 +497,14 @@ function handleServeConnection(socket: Socket): void {
           session.sendMessage(msg.content);
           break;
         case "worker_interrupt":
-          if (provider === "kimi") {
+          if (isAcpProvider(provider)) {
             void session.interruptCurrentTurn().then((interrupted) => {
               if (interrupted) {
-                kimiTurnActive = false;
+                acpTurnActive = false;
                 rejectAllPendingApprovals("Turn interrupted", true);
                 sendToServe({ type: "worker_interrupted" });
               } else {
-                console.error("[worker] interrupt requested but Kimi had no active turn");
+                console.error(`[worker] interrupt requested but ${provider} had no active turn`);
               }
             });
           } else {
@@ -415,6 +526,7 @@ function handleServeConnection(socket: Socket): void {
               ...(msg.message ? { message: msg.message } : {}),
               ...(msg.remember ? { remember: true } : {}),
               ...(msg.optionId ? { optionId: msg.optionId } : {}),
+              ...(msg.cursorAnswer ? { cursorAnswer: msg.cursorAnswer } : {}),
             });
             pendingApprovals.delete(msg.requestId);
           }
@@ -540,6 +652,28 @@ server.listen(sockPath, () => {
           message: diagnostic,
         });
         console.error(`[worker] Kimi ACP failed to initialize: ${diagnostic}`);
+        void session.stop(0).finally(() => handleProviderExit(1));
+      });
+  } else if (provider === "cursor" && session instanceof CursorAcpSession) {
+    void session
+      .waitUntilReady()
+      .then((cursorSessionId) => {
+        reportReady({
+          type: "worker_ready",
+          pid,
+          nativeSession: { provider: "cursor", sessionId: cursorSessionId },
+        });
+      })
+      .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const diagnostic =
+          sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) || "Cursor ACP 初始化失败";
+        sendToServe({
+          type: "worker_startup_error",
+          provider: "cursor",
+          message: diagnostic,
+        });
+        console.error(`[worker] Cursor ACP failed to initialize: ${diagnostic}`);
         void session.stop(0).finally(() => handleProviderExit(1));
       });
   } else {

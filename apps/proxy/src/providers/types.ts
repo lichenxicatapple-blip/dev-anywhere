@@ -1,4 +1,4 @@
-export type ProviderId = "claude" | "codex" | "kimi";
+export type ProviderId = "claude" | "codex" | "kimi" | "cursor";
 export type HookProviderId = "claude" | "codex";
 
 export interface ProviderCapabilities {

@@ -6,9 +6,10 @@ const PROVIDER_LABEL: Record<SessionProvider, string> = {
   claude: "Claude Code",
   codex: "Codex",
   kimi: "Kimi Code",
+  cursor: "Cursor CLI",
 };
 
-const PROVIDER_ORDER: SessionProvider[] = ["claude", "codex", "kimi"];
+const PROVIDER_ORDER: SessionProvider[] = ["claude", "codex", "kimi", "cursor"];
 
 export function providerLabel(provider: SessionProvider): string {
   return PROVIDER_LABEL[provider];
