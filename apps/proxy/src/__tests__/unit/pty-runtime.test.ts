@@ -121,7 +121,15 @@ describe("PTY runtime", () => {
     [
       "codex",
       "bypassPermissions",
-      ["--dangerously-bypass-approvals-and-sandbox", "resume", "native", "-c", "tui.whimsy=false"],
+      [
+        "--dangerously-bypass-approvals-and-sandbox",
+        "resume",
+        "native",
+        "-c",
+        "tui.whimsy=false",
+        "-c",
+        'tui.alternate_screen="never"',
+      ],
     ],
     ["kimi", "auto", ["--yolo", "--session", "native"]],
   ] as const)(
