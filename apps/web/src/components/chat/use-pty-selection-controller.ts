@@ -1921,7 +1921,7 @@ export function usePtySelectionController(
     if (!refreshCurrentSelection()) return;
     const action = selectedPathActionRef.current;
     if (!action) return;
-    if (action.kind === "image-preview") onPreviewPath(action.path);
+    if (action.kind === "media-preview") onPreviewPath(action.path);
     else onDownloadPath(action.path);
     clearPtySelection();
   }, [clearPtySelection, onDownloadPath, onPreviewPath, refreshCurrentSelection]);

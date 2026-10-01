@@ -1,12 +1,21 @@
-import { mkdir } from "node:fs/promises";
-import { resolve } from "node:path";
+import { mkdtemp, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { expect, test, type Page } from "@playwright/test";
 import { BASE_URL } from "../helpers";
 import { spawnSessionViaRelay, type SessionViaRelay } from "../fixtures/relay-control";
 import { installVisualViewportMock } from "../mobile-helpers";
 
 const enabled = process.env.DEV_ANYWHERE_REAL_PTY_SHORTCUTS === "1";
+const sideEnabled = process.env.DEV_ANYWHERE_REAL_CODEX_SIDE_SHORTCUTS === "1";
 const relayUrl = process.env.DEV_ANYWHERE_REAL_RELAY_URL ?? "ws://127.0.0.1:3101";
+const codexFooterPattern =
+  /^\s+\S[^\n]*?\s(default|none|minimal|low|medium|high|xhigh|max|ultra)\s+·/m;
+const reasoningLevels = ["none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra"];
+
+function codexEffort(screen: string): string | undefined {
+  return codexFooterPattern.exec(screen)?.[1];
+}
 
 test.use({ viewport: { width: 360, height: 704 }, hasTouch: true });
 test.beforeEach(async ({ page }) => {
@@ -85,6 +94,31 @@ async function menu(page: Page, key: string) {
   await expect(page.locator('[data-slot="chat-overflow-menu"]')).toHaveCount(0);
 }
 
+async function waitForCodexReady(
+  state: () => ReturnType<typeof inspect>,
+  send: (data: string) => void,
+) {
+  await expect
+    .poll(async () => (await state())?.text ?? "")
+    .toMatch(/Update available|trust|Trust|OpenAI Codex/);
+  const initialScreen = (await state())?.screen ?? "";
+  if (initialScreen.includes("Update available") && initialScreen.includes("esc skip")) {
+    // Dismiss only the startup dialog, not the later nonmodal update banner.
+    // Never install updates or change preferences.
+    send("\x1b");
+  }
+  // Codex can briefly draw a composer before asynchronously opening folder trust.
+  // Its live footer is the readiness signal; the welcome banner alone is not.
+  await expect
+    .poll(async () => {
+      const screen = (await state())?.screen ?? "";
+      return screen.includes("Trust this folder?") || codexFooterPattern.test(screen);
+    })
+    .toBe(true);
+  if ((await state())?.screen.includes("Trust this folder?")) send("\r");
+  await expect.poll(async () => (await state())?.screen ?? "").toMatch(codexFooterPattern);
+}
+
 const linuxSshHost = process.env.DEV_ANYWHERE_SHORTCUTS_LINUX_SSH;
 if (linuxSshHost && !/^[a-zA-Z0-9._-]+$/.test(linuxSshHost)) {
   throw new Error("DEV_ANYWHERE_SHORTCUTS_LINUX_SSH must be an SSH host alias");
@@ -156,25 +190,30 @@ for (const provider of ["claude", "codex", "kimi"] as const) {
     page,
   }, testInfo) => {
     test.setTimeout(60_000);
-    const cwd = resolve("../../artifacts/shortcut-verification/empty-project");
-    await mkdir(cwd, { recursive: true });
-    const session = await spawnSessionViaRelay(
-      { relayUrl },
-      { kind: "agent", mode: "pty", provider, cwd, cols: 80, rows: 29 },
-    );
-    const state = () => inspect(page, session.sessionId);
-    const send = (data: string) =>
-      session.send({ type: "remote_input_raw", sessionId: session.sessionId, data });
+    const cwd = await mkdtemp(join(tmpdir(), "dev-anywhere-shortcuts-"));
+    let spawnedSession: SessionViaRelay | undefined;
     try {
+      const session = await spawnSessionViaRelay(
+        { relayUrl },
+        { kind: "agent", mode: "pty", provider, cwd, cols: 80, rows: 29 },
+      );
+      spawnedSession = session;
+      const state = () => inspect(page, session.sessionId);
+      const send = (data: string) =>
+        session.send({ type: "remote_input_raw", sessionId: session.sessionId, data });
       await open(page, session);
-      await expect
-        .poll(async () => (await state())?.text ?? "")
-        .toMatch(/trust|Trust|OpenAI Codex|No session yet|Claude Code/);
-      if (/trust this|Trust this|trust the files|trust this folder/i.test((await state())!.text))
-        send("\r");
-      await expect
-        .poll(async () => (await state())?.text ?? "")
-        .toMatch(/OpenAI Codex|No session yet|Claude Code/);
+      if (provider === "codex") {
+        await waitForCodexReady(state, send);
+      } else {
+        await expect
+          .poll(async () => (await state())?.text ?? "")
+          .toMatch(/trust|Trust|No session yet|Claude Code/);
+        if (/trust this|Trust this|trust the files|trust this folder/i.test((await state())!.text))
+          send("\r");
+        await expect
+          .poll(async () => (await state())?.text ?? "")
+          .toMatch(/No session yet|Claude Code/);
+      }
       await expect.poll(async () => (await state())?.x).toBe(provider === "kimi" ? 5 : 2);
       await type(page, "DA_SHORTCUT_DRAFT");
       await expect.poll(async () => (await state())?.line).toContain("DA_SHORTCUT_DRAFT");
@@ -204,6 +243,10 @@ for (const provider of ["claude", "codex", "kimi"] as const) {
       await expect(controls.getByRole("button")).toHaveCount(14);
       await controls.screenshot({ path: testInfo.outputPath(`${provider}-controls.png`) });
       if (provider === "codex") {
+        await testInfo.attach("codex-before-shortcuts", {
+          body: (await state())?.screen ?? "",
+          contentType: "text/plain",
+        });
         await type(page, "LEFT RIGHT");
         await expect.poll(async () => (await state())?.line).toContain("LEFT RIGHT");
         send("\x01" + "\x1b[C".repeat(5));
@@ -222,9 +265,58 @@ for (const provider of ["claude", "codex", "kimi"] as const) {
       if (provider === "codex") {
         await menu(page, "Ctrl+T");
         await expect
-          .poll(async () => (await state())?.text ?? "")
-          .toMatch(/transcript|esc to|esc.*back|No messages/i);
-        await mobile(page, "Escape");
+          .poll(async () => ((await state())?.screen ?? "").replace(/\s+/g, ""))
+          .toContain("TRANSCRIPT");
+        await expect.poll(async () => (await state())?.screen ?? "").toContain("q close");
+        await type(page, "q");
+        await expect.poll(async () => (await state())?.screen ?? "").toMatch(codexFooterPattern);
+
+        const originalEffort = codexEffort((await state())!.screen)!;
+        expect(reasoningLevels).toContain(originalEffort);
+        const increaseFirst = ["none", "minimal", "low"].includes(originalEffort);
+        await page.screenshot({ path: testInfo.outputPath("codex-effort-before.png") });
+        await menu(page, increaseFirst ? "Shift+↑" : "Shift+↓");
+        await expect
+          .poll(async () => {
+            const effort = codexEffort((await state())?.screen ?? "");
+            return effort !== undefined && effort !== originalEffort;
+          })
+          .toBe(true);
+        const changedEffort = codexEffort((await state())!.screen)!;
+        expect(reasoningLevels).toContain(changedEffort);
+        if (increaseFirst) {
+          expect(reasoningLevels.indexOf(changedEffort)).toBeGreaterThan(
+            reasoningLevels.indexOf(originalEffort),
+          );
+        } else {
+          expect(reasoningLevels.indexOf(changedEffort)).toBeLessThan(
+            reasoningLevels.indexOf(originalEffort),
+          );
+        }
+        await page.screenshot({ path: testInfo.outputPath("codex-effort-changed.png") });
+        await menu(page, increaseFirst ? "Shift+↓" : "Shift+↑");
+        await expect
+          .poll(async () => codexEffort((await state())?.screen ?? ""))
+          .toBe(originalEffort);
+        await testInfo.attach("codex-effort-transition", {
+          body: JSON.stringify({
+            originalEffort,
+            changedEffort,
+            restoredEffort: codexEffort((await state())!.screen),
+          }),
+          contentType: "application/json",
+        });
+
+        // No pending question or side conversation exists here. Check only that these
+        // raw keys do not become draft text, and that ordinary typing still works.
+        for (const [index, shortcut] of ["Shift+←", "Shift+→", "Ctrl+/"].entries()) {
+          await menu(page, shortcut);
+          const draft = `DA_IDLE_SHORTCUT_${index}`;
+          await type(page, draft);
+          await expect.poll(async () => (await state())?.line).toBe(`› ${draft}`);
+          await clearDraft(page);
+          await expect.poll(async () => (await state())?.line ?? "").not.toContain(draft);
+        }
       }
       await page.locator('[data-slot="chat-overflow-trigger"]').click();
       await page.getByRole("menuitem", { name: "发送快捷键", exact: true }).click();
@@ -242,7 +334,90 @@ for (const provider of ["claude", "codex", "kimi"] as const) {
         animations: "disabled",
       });
     } finally {
-      await session.terminate();
+      try {
+        await spawnedSession?.terminate();
+      } finally {
+        await rm(cwd, { recursive: true, force: true });
+      }
     }
   });
 }
+
+test("switches real codex side and parent conversations with Ctrl+/", async ({
+  page,
+}, testInfo) => {
+  test.skip(
+    !sideEnabled,
+    "set DEV_ANYWHERE_REAL_CODEX_SIDE_SHORTCUTS=1 to allow a real model request",
+  );
+  test.setTimeout(180_000);
+  const cwd = await mkdtemp(join(tmpdir(), "dev-anywhere-codex-side-"));
+  let spawnedSession: SessionViaRelay | undefined;
+  try {
+    const session = await spawnSessionViaRelay(
+      { relayUrl },
+      { kind: "agent", mode: "pty", provider: "codex", cwd, cols: 80, rows: 29 },
+    );
+    spawnedSession = session;
+    const state = () => inspect(page, session.sessionId);
+    const send = (data: string) =>
+      session.send({ type: "remote_input_raw", sessionId: session.sessionId, data });
+    await open(page, session);
+    await waitForCodexReady(state, send);
+    await type(page, "Reply exactly OK. Do not run commands or modify any files.");
+    await page.evaluate(() =>
+      window.__devAnywhereSetVisualViewport?.({ height: 400, offsetTop: 0 }),
+    );
+    // Mobile keyboard Enter inserts a newline; the existing toolbar button submits CR.
+    await page.getByRole("button", { name: "回车", exact: true }).click();
+    await expect
+      .poll(async () => (await state())?.screen ?? "", { timeout: 90_000 })
+      .toMatch(/(?:^|\n)\s*(?:[•●]\s*)?OK\s*(?:\n|$)/);
+    await page.screenshot({ path: testInfo.outputPath("codex-parent-ready.png") });
+    await type(page, "/side");
+    await page.getByRole("button", { name: "回车", exact: true }).click();
+    await expect.poll(async () => (await state())?.screen ?? "").toContain("Side from main thread");
+    await page.screenshot({ path: testInfo.outputPath("codex-side-created.png") });
+    await testInfo.attach("codex-side-created-screen", {
+      body: (await state())?.screen ?? "",
+      contentType: "text/plain",
+    });
+
+    await type(page, "DA_SIDE_DRAFT");
+    await expect.poll(async () => (await state())?.line).toBe("› DA_SIDE_DRAFT");
+    await menu(page, "Ctrl+/");
+    await expect.poll(async () => (await state())?.screen ?? "").toMatch(codexFooterPattern);
+    await expect
+      .poll(async () => (await state())?.screen ?? "")
+      .not.toContain("Side from main thread");
+    await expect.poll(async () => (await state())?.line).not.toContain("DA_SIDE_DRAFT");
+    await type(page, "DA_PARENT_DRAFT");
+    await expect.poll(async () => (await state())?.line).toBe("› DA_PARENT_DRAFT");
+    await menu(page, "Ctrl+/");
+    await expect.poll(async () => (await state())?.screen ?? "").toContain("Side from main thread");
+    await expect.poll(async () => (await state())?.line).toBe("› DA_SIDE_DRAFT");
+    await page.screenshot({ path: testInfo.outputPath("codex-side-restored.png") });
+    await menu(page, "Ctrl+/");
+    await expect.poll(async () => (await state())?.screen ?? "").toMatch(codexFooterPattern);
+    await expect
+      .poll(async () => (await state())?.screen ?? "")
+      .not.toContain("Side from main thread");
+    await expect.poll(async () => (await state())?.line).toBe("› DA_PARENT_DRAFT");
+    await page.screenshot({ path: testInfo.outputPath("codex-parent-restored.png") });
+  } catch (error) {
+    if (spawnedSession) {
+      await testInfo.attach("codex-side-failure-screen", {
+        body: (await inspect(page, spawnedSession.sessionId))?.screen ?? "",
+        contentType: "text/plain",
+      });
+      await page.screenshot({ path: testInfo.outputPath("codex-side-failure.png") });
+    }
+    throw error;
+  } finally {
+    try {
+      await spawnedSession?.terminate();
+    } finally {
+      await rm(cwd, { recursive: true, force: true });
+    }
+  }
+});

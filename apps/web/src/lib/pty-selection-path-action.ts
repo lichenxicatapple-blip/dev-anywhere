@@ -1,12 +1,12 @@
 import { isScpLikeRemotePath } from "./scp-like-remote";
 import { isRecognizedBareDomain } from "./bare-domain";
 import { findUrlTextRanges } from "./url-text";
+import { getMediaPreviewKind } from "./media-preview-path";
 
 export type PtySelectionPathAction =
-  | { kind: "image-preview"; path: string }
+  | { kind: "media-preview"; path: string }
   | { kind: "file-download"; path: string };
 
-const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const FILE_EXT_RE = /\.[\p{L}\p{N}]{1,16}$/u;
 
 function normalizeSelectionToken(value: string): string {
@@ -51,7 +51,7 @@ export function resolvePtySelectionPathAction(text: string): PtySelectionPathAct
   const path = getSingleSelectedPath(text);
   if (!path || isBareDomainLike(path) || !hasPlausibleStem(path)) return null;
 
-  if (IMAGE_EXT_RE.test(path)) return { kind: "image-preview", path };
+  if (getMediaPreviewKind(path)) return { kind: "media-preview", path };
   if (FILE_EXT_RE.test(path)) return { kind: "file-download", path };
 
   return null;

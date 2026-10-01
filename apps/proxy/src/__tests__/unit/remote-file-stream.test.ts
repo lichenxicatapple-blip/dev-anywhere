@@ -1,4 +1,4 @@
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -62,7 +62,7 @@ describe("RemoteFileStreamManager metadata", () => {
       type: "remote_file_metadata_response",
       requestId: "meta-1",
       sessionId: "s1",
-      path: "pa_break_analysis/SKILL.md",
+      path: realpathSync(join(skillsDir, "SKILL.md")),
       success: true,
       mimeType: "text/markdown",
       size: 5,

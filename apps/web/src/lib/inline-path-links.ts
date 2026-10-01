@@ -1,7 +1,7 @@
 import { findFileDownloadPathMatches } from "./file-download-path";
-import { findImagePreviewPathMatches } from "./image-preview-path";
+import { findMediaPreviewPathMatches } from "./media-preview-path";
 
-export type InlinePathLinkKind = "file" | "image";
+export type InlinePathLinkKind = "file" | "image" | "video";
 
 interface InlinePathLinkMatch {
   kind: InlinePathLinkKind;
@@ -11,10 +11,7 @@ interface InlinePathLinkMatch {
 }
 
 export function findInlinePathLinks(text: string): InlinePathLinkMatch[] {
-  const matches: InlinePathLinkMatch[] = findImagePreviewPathMatches(text).map((match) => ({
-    kind: "image",
-    ...match,
-  }));
+  const matches: InlinePathLinkMatch[] = findMediaPreviewPathMatches(text);
   for (const match of findFileDownloadPathMatches(text)) {
     const { start, end } = match;
     if (matches.some((existing) => start < existing.end && end > existing.start)) continue;

@@ -1,5 +1,5 @@
 import { isFileDownloadPath } from "./file-download-path";
-import { isImagePreviewPath } from "./image-preview-path";
+import { getMediaPreviewKind } from "./media-preview-path";
 import type { InlinePathLinkKind } from "./inline-path-links";
 
 export interface UserMessageAttachment {
@@ -26,11 +26,8 @@ function findExplicitAttachmentSuffixMatches(text: string): ExplicitAttachmentMa
     const path = match[1] ?? "";
     const start = match.index ?? -1;
     if (start < 0 || !path) continue;
-    const kind = isImagePreviewPath(path)
-      ? "image"
-      : isFileDownloadPath(path, { allowBare: true })
-        ? "file"
-        : null;
+    const kind =
+      getMediaPreviewKind(path) ?? (isFileDownloadPath(path, { allowBare: true }) ? "file" : null);
     if (!kind) continue;
     matches.push({ kind, path, start, end: start + (match[0]?.length ?? 0) });
   }

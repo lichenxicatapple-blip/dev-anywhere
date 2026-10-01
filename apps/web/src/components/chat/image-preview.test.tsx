@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
+import { registerMediaPreviewLinkProvider } from "@/lib/xterm-media-preview-links";
 
 const { requestRemoteFileUrl, toastLoading, toastSuccess, toastError } = vi.hoisted(() => ({
   requestRemoteFileUrl: vi.fn(),
@@ -41,20 +41,20 @@ vi.mock("react-zoom-pan-pinch", () => ({
   ),
 }));
 
-import { ImagePreviewProvider, useImagePreview } from "./image-preview";
+import { MediaPreviewProvider, useMediaPreview } from "./media-preview";
 
 afterEach(cleanup);
 
 function PreviewProbe({ path }: { path: string }) {
-  const { openImagePreview } = useImagePreview();
+  const { openMediaPreview } = useMediaPreview();
   return (
-    <button type="button" onClick={() => openImagePreview(path)}>
+    <button type="button" onClick={() => openMediaPreview(path)}>
       open preview
     </button>
   );
 }
 
-describe("ImagePreviewProvider", () => {
+describe("MediaPreviewProvider", () => {
   beforeEach(() => {
     requestRemoteFileUrl.mockReset();
     toastLoading.mockReset();
@@ -69,7 +69,7 @@ describe("ImagePreviewProvider", () => {
     const lines = [prefix + path.slice(0, 30), path.slice(30)];
     let openPreview: (path: string) => void = () => undefined;
     function TerminalPreviewProbe() {
-      openPreview = useImagePreview().openImagePreview;
+      openPreview = useMediaPreview().openMediaPreview;
       return null;
     }
     requestRemoteFileUrl.mockResolvedValueOnce({
@@ -78,9 +78,9 @@ describe("ImagePreviewProvider", () => {
       path: String.raw`C:\Users\liche\AppData\Local\Temp\dev-anywhere\paste-HCPesk.png`,
     });
     render(
-      <ImagePreviewProvider sessionId="s1">
+      <MediaPreviewProvider sessionId="s1">
         <TerminalPreviewProbe />
-      </ImagePreviewProvider>,
+      </MediaPreviewProvider>,
     );
     const terminal = {
       buffer: {
@@ -93,7 +93,7 @@ describe("ImagePreviewProvider", () => {
       },
       registerLinkProvider: vi.fn(() => ({ dispose: vi.fn() })),
     };
-    const { provider } = registerImagePreviewLinkProvider(terminal as never, (value) =>
+    const { provider } = registerMediaPreviewLinkProvider(terminal as never, (value) =>
       openPreview(value),
     );
 
@@ -121,9 +121,9 @@ describe("ImagePreviewProvider", () => {
     });
 
     render(
-      <ImagePreviewProvider sessionId="s1">
+      <MediaPreviewProvider sessionId="s1">
         <PreviewProbe path="docs/assets/example-preview.png" />
-      </ImagePreviewProvider>,
+      </MediaPreviewProvider>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "open preview" }));
@@ -145,9 +145,9 @@ describe("ImagePreviewProvider", () => {
     });
 
     render(
-      <ImagePreviewProvider sessionId="s1">
+      <MediaPreviewProvider sessionId="s1">
         <PreviewProbe path={path} />
-      </ImagePreviewProvider>,
+      </MediaPreviewProvider>,
     );
 
     fireEvent.click(screen.getByRole("button", { name: "open preview" }));

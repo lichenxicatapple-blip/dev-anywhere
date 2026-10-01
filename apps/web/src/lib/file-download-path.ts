@@ -1,7 +1,8 @@
-// 任意文件下载路径提取: 与 image-preview-path 形状对称, 但排除图片扩展, 让两条 link provider
+// 任意文件下载路径提取: 与 media-preview-path 形状对称, 但排除媒体扩展, 让两条 link provider
 // 在同一行不会双重 underline。要求必有扩展 (避免误把纯目录如 /Users 当文件链接)。
 import { isScpLikeRemotePath } from "./scp-like-remote";
 import { isRecognizedBareDomain } from "./bare-domain";
+import { getMediaPreviewKind } from "./media-preview-path";
 
 // 负 lookbehind 防止匹配 URL (https://... 里的 //example...) 或路径中段 (a/b/c.txt 不该从 b 切)。
 // 路径主干用 greedy `*` 而非 lazy `*?`: 双扩展 (.tar.gz / .min.js / .d.ts) 在 lazy 下只会匹配
@@ -17,7 +18,6 @@ const FILE_PATH_RE =
   /(?<![\p{L}\p{N}@:/.-])(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*\.[\p{L}\p{N}]{1,16}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/giu;
 const EXPLICIT_FILE_PATH_RE =
   /(?<![A-Za-z0-9._+-])@(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*\.[\p{L}\p{N}]{1,16}(?=[\s`"'<>),.;:!?,。；：！？、]|$)/giu;
-const IMAGE_EXT_RE = /\.(?:png|jpe?g|webp|gif)$/i;
 const FILE_EXT_RE = /\.[\p{L}\p{N}]{1,16}$/u;
 const KNOWN_TOP_LEVEL_FILE_NAMES = new Set([
   "cargo.toml",
@@ -83,7 +83,7 @@ export function isFileDownloadPath(value: string, options: { allowBare?: boolean
   if (/^[a-z][a-z0-9+.-]*:\/\//i.test(path)) return false;
   if (isScpLikeRemotePath(path)) return false;
   if (!options.allowBare && isBareDomainLike(path)) return false;
-  if (IMAGE_EXT_RE.test(path)) return false;
+  if (getMediaPreviewKind(path)) return false;
   if (!FILE_EXT_RE.test(path)) return false;
   if (!hasPathSignal(path, options.allowBare === true)) return false;
   if (path.split(/[\\/]/).includes("...")) return false;

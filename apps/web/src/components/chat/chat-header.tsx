@@ -696,6 +696,8 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
                         )}
                         sideOffset={4}
                         collisionPadding={8}
+                        // Keep every item reachable if the keyboard clips the parent trigger.
+                        sticky="always"
                         data-slot="chat-menu-shortcuts"
                       >
                         {shortcuts.map((shortcut) => (

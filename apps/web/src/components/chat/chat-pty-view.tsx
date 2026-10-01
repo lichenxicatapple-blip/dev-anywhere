@@ -9,6 +9,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { PointerEvent as ReactPointerEvent, TouchEvent as ReactTouchEvent } from "react";
 import { createPortal } from "react-dom";
 import { formatPtyScrollTraceReport } from "@/lib/pty-scroll-trace";
+import { getMediaPreviewKind } from "@/lib/media-preview-path";
 import type { SessionProvider } from "@/lib/session-provider";
 import { useSessionStore } from "@/stores/session-store";
 import { BackToBottom } from "./back-to-bottom";
@@ -248,12 +249,14 @@ export function ChatPtyView({
               onPointerDown={(event) => event.preventDefault()}
               onClick={view.openPtySelectionPathAction}
               aria-label={
-                view.ptySelectionPathAction.kind === "image-preview"
-                  ? "预览终端选区图片"
+                view.ptySelectionPathAction.kind === "media-preview"
+                  ? getMediaPreviewKind(view.ptySelectionPathAction.path) === "video"
+                    ? "预览终端选区视频"
+                    : "预览终端选区图片"
                   : "下载终端选区文件"
               }
             >
-              {view.ptySelectionPathAction.kind === "image-preview" ? "预览" : "下载"}
+              {view.ptySelectionPathAction.kind === "media-preview" ? "预览" : "下载"}
             </button>
           ) : null}
         </div>

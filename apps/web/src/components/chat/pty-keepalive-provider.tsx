@@ -14,7 +14,7 @@ import { useAppStore } from "@/stores/app-store";
 import { useSessionStore } from "@/stores/session-store";
 import { touchPtyKeepAliveEntry, type PtyKeepAliveEntry } from "@/lib/pty-keepalive-cache";
 import type { SessionProvider } from "@/lib/session-provider";
-import { ImagePreviewProvider } from "./image-preview";
+import { MediaPreviewProvider } from "./media-preview";
 import { ChatPtyView } from "./chat-pty-view";
 
 interface CachedPtyEntry extends PtyKeepAliveEntry {
@@ -268,7 +268,7 @@ function PtyKeepAliveLayer({
               visibility: active ? "visible" : "hidden",
             }}
           >
-            <ImagePreviewProvider sessionId={entry.sessionId}>
+            <MediaPreviewProvider sessionId={entry.sessionId} active={active}>
               <ChatPtyView
                 sessionId={entry.sessionId}
                 sessionKind={entry.sessionKind}
@@ -277,7 +277,7 @@ function PtyKeepAliveLayer({
                 findRequest={entry.findRequest}
                 resizeRequest={entry.resizeRequest}
               />
-            </ImagePreviewProvider>
+            </MediaPreviewProvider>
           </div>
         );
       })}

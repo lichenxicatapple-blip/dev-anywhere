@@ -205,6 +205,9 @@ export class RelayRouter {
       case "remote_file_stream_cancel":
         this.inputHandlers.onRemoteFileStreamCancel(msg);
         return;
+      case "remote_file_stream_ack":
+        this.inputHandlers.onRemoteFileStreamAck(msg);
+        return;
       case "remote_file_upload_stream_request":
         this.inputHandlers.onRemoteFileUploadStreamRequest(msg);
         return;

@@ -1,13 +1,4 @@
-import {
-  createContext,
-  useCallback,
-  useContext,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   ClipboardCopy,
   Copy,
@@ -27,21 +18,12 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
-import { describeControlError } from "@/lib/control-error-message";
 import { copyLoadedImageToClipboard } from "@/lib/copy-image";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { cn } from "@/lib/utils";
 import { toast } from "@/components/toast";
 
-type ImagePreviewStatus = "idle" | "loading" | "ready" | "error";
-
-type ImagePreviewState = {
-  status: ImagePreviewStatus;
-  path: string;
-  url?: string;
-  size?: number;
-  error?: string;
-};
+import type { MediaPreviewState } from "./media-preview";
 
 type ImagePreviewSize = {
   width: number;
@@ -52,112 +34,7 @@ type ImagePreviewNaturalSize = ImagePreviewSize & {
   src: string;
 };
 
-type ImagePreviewContextValue = {
-  openImagePreview: (path: string) => void;
-  requestImagePreviewUrl: (path: string) => Promise<{ url: string; path: string }>;
-};
-
-const ImagePreviewContext = createContext<ImagePreviewContextValue | null>(null);
-const NOOP_IMAGE_PREVIEW_CONTEXT: ImagePreviewContextValue = {
-  openImagePreview: () => undefined,
-  requestImagePreviewUrl: () => Promise.reject(new Error("图片预览不可用")),
-};
-
-export function useImagePreview(): ImagePreviewContextValue {
-  return useContext(ImagePreviewContext) ?? NOOP_IMAGE_PREVIEW_CONTEXT;
-}
-
-export function ImagePreviewProvider({
-  sessionId,
-  children,
-}: {
-  sessionId: string;
-  children: ReactNode;
-}) {
-  const [open, setOpen] = useState(false);
-  const [state, setState] = useState<ImagePreviewState>({ status: "idle", path: "" });
-  const requestSeqRef = useRef(0);
-  const previewUrlCacheRef = useRef(new Map<string, Promise<{ url: string; path: string }>>());
-
-  const requestImagePreviewUrl = useCallback(
-    (path: string): Promise<{ url: string; path: string }> => {
-      const cached = previewUrlCacheRef.current.get(path);
-      if (cached) return cached;
-      const relay = relayClientRef;
-      if (!relay) return Promise.reject(new Error("请先连接开发机"));
-      const request = relay
-        .requestRemoteFileUrl(sessionId, path, "inline")
-        .then((result) => {
-          if (!result.success || !result.url) {
-            throw new Error(
-              describeControlError({
-                errorCode: result.errorCode,
-                rawError: result.error,
-                fallback: "图片预览失败",
-              }),
-            );
-          }
-          return { url: result.url, path: result.path || path };
-        })
-        .catch((error: unknown) => {
-          previewUrlCacheRef.current.delete(path);
-          throw error;
-        });
-      previewUrlCacheRef.current.set(path, request);
-      return request;
-    },
-    [sessionId],
-  );
-
-  const openImagePreview = useCallback(
-    (path: string): void => {
-      const requestSeq = requestSeqRef.current + 1;
-      requestSeqRef.current = requestSeq;
-      setOpen(true);
-      setState({ status: "loading", path });
-
-      void requestImagePreviewUrl(path)
-        .then((result) => {
-          if (requestSeqRef.current !== requestSeq) return;
-          setState({
-            status: "ready",
-            path: result.path,
-            url: result.url,
-          });
-        })
-        .catch((err: unknown) => {
-          if (requestSeqRef.current !== requestSeq) return;
-          setState({
-            status: "error",
-            path,
-            error: err instanceof Error ? err.message : String(err),
-          });
-        });
-    },
-    [requestImagePreviewUrl],
-  );
-
-  useEffect(() => {
-    requestSeqRef.current += 1;
-    previewUrlCacheRef.current.clear();
-    setOpen(false);
-    setState({ status: "idle", path: "" });
-  }, [sessionId]);
-
-  const value = useMemo(
-    () => ({ openImagePreview, requestImagePreviewUrl }),
-    [openImagePreview, requestImagePreviewUrl],
-  );
-
-  return (
-    <ImagePreviewContext.Provider value={value}>
-      {children}
-      <ImagePreviewDialog open={open} onOpenChange={setOpen} sessionId={sessionId} state={state} />
-    </ImagePreviewContext.Provider>
-  );
-}
-
-function ImagePreviewDialog({
+export function ImagePreviewDialog({
   open,
   onOpenChange,
   sessionId,
@@ -166,7 +43,7 @@ function ImagePreviewDialog({
   open: boolean;
   onOpenChange: (open: boolean) => void;
   sessionId: string;
-  state: ImagePreviewState;
+  state: MediaPreviewState;
 }) {
   const [loadedSrc, setLoadedSrc] = useState("");
   const [decodeError, setDecodeError] = useState<{ src: string; message: string } | null>(null);
@@ -456,7 +333,7 @@ function formatBytes(bytes: number): string {
 }
 
 function getImagePreviewMetaText(
-  state: ImagePreviewState,
+  state: MediaPreviewState,
   imageLoaded: boolean,
   showDecodeError: boolean,
 ): string {

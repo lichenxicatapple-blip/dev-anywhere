@@ -873,6 +873,10 @@ const relayControlDefinitions = [
     sessionId: IdSchema,
     path: z.string().min(1),
     disposition: RemoteFileDispositionSchema,
+    range: z.string().optional(),
+    head: z.boolean().optional(),
+    // Opt-in: older relays never wait for chunk acknowledgements.
+    flowControl: z.boolean().optional(),
   }),
   control("remote_file_stream_response", {
     ...RequestErrorShape,
@@ -883,6 +887,12 @@ const relayControlDefinitions = [
     mimeType: z.string().optional(),
     size: z.number().int().nonnegative().optional(),
     fileName: z.string().optional(),
+    statusCode: z.union([z.literal(200), z.literal(206), z.literal(416)]).optional(),
+    contentRange: z
+      .string()
+      .regex(/^bytes (?:(?:\d+-\d+)|\*)\/\d+$/)
+      .optional(),
+    flowControl: z.boolean().optional(),
   }),
   control("remote_file_stream_complete", {
     ...RequestErrorShape,
@@ -891,6 +901,10 @@ const relayControlDefinitions = [
   }),
   control("remote_file_stream_cancel", {
     streamId: IdSchema,
+  }),
+  control("remote_file_stream_ack", {
+    streamId: IdSchema,
+    chunkSeq: z.number().int().nonnegative().safe(),
   }),
   control("remote_file_upload_url_request", {
     ...RequiredRequestIdShape,

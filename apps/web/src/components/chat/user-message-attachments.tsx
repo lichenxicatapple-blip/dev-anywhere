@@ -5,13 +5,15 @@ import {
   FileArchive,
   FileCode2,
   FileText,
+  Film,
   ImageOff,
   LoaderCircle,
+  Play,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { UserMessageAttachment } from "@/lib/user-message-attachments";
 import { useFileDownload } from "./file-download-link";
-import { useImagePreview } from "./image-preview";
+import { useMediaPreview } from "./media-preview";
 
 interface UserMessageAttachmentsProps {
   attachments: UserMessageAttachment[];
@@ -19,11 +21,13 @@ interface UserMessageAttachmentsProps {
 
 export function UserMessageAttachments({ attachments }: UserMessageAttachmentsProps) {
   const images = attachments.filter((attachment) => attachment.kind === "image");
+  const videos = attachments.filter((attachment) => attachment.kind === "video");
   const files = attachments.filter((attachment) => attachment.kind === "file");
 
   return (
     <div data-slot="user-message-attachments" className="space-y-2">
       {images.length > 0 ? <ImageGallery images={images} /> : null}
+      {videos.length > 0 ? <VideoCards videos={videos} /> : null}
       {files.length > 0 ? <FileCards files={files} /> : null}
     </div>
   );
@@ -118,13 +122,13 @@ function RemoteImageCard({
   multiple: boolean;
   onSettled: () => void;
 }) {
-  const { openImagePreview, requestImagePreviewUrl } = useImagePreview();
+  const { openMediaPreview, requestMediaPreviewUrl } = useMediaPreview();
   const [state, setState] = useState<{ url?: string; error?: boolean }>({});
 
   useEffect(() => {
     let cancelled = false;
     setState({});
-    void requestImagePreviewUrl(path)
+    void requestMediaPreviewUrl(path)
       .then(({ url }) => {
         if (!cancelled) setState({ url });
       })
@@ -134,7 +138,7 @@ function RemoteImageCard({
     return () => {
       cancelled = true;
     };
-  }, [path, requestImagePreviewUrl]);
+  }, [path, requestMediaPreviewUrl]);
 
   const label = count === 1 ? "打开图片" : `打开第 ${index + 1} 张图片`;
   return (
@@ -147,7 +151,7 @@ function RemoteImageCard({
         multiple ? "h-28 basis-[68%] shrink-0 sm:basis-40" : "h-24 w-32 shrink-0",
       )}
       aria-label={label}
-      onClick={() => openImagePreview(path)}
+      onClick={() => openMediaPreview(path)}
     >
       {state.url ? (
         <img
@@ -169,6 +173,42 @@ function RemoteImageCard({
         </span>
       )}
     </button>
+  );
+}
+
+function VideoCards({ videos }: { videos: UserMessageAttachment[] }) {
+  const { openMediaPreview } = useMediaPreview();
+  return (
+    <div data-slot="user-video-attachments" className="flex max-w-full flex-col gap-1.5">
+      {videos.map((video, index) => {
+        const fileName = video.path.split(/[\\/]/u).pop() || "视频";
+        return (
+          <button
+            key={`${video.path}-${index}`}
+            type="button"
+            data-slot="user-video-attachment"
+            className={cn(
+              "flex min-h-12 w-[min(66vw,18rem)] max-w-full items-center gap-3 rounded-lg bg-primary-foreground/10 px-3 py-2 text-left",
+              "transition-colors hover:bg-primary-foreground/15 active:bg-primary-foreground/20",
+              "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary-foreground/80",
+            )}
+            aria-label={`打开视频 ${fileName}`}
+            onClick={() => openMediaPreview(video.path)}
+          >
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-primary-foreground/12">
+              <Film className="size-4" aria-hidden="true" />
+            </span>
+            <span className="min-w-0 flex-1">
+              <span className="block truncate text-sm font-medium leading-tight">{fileName}</span>
+              <span className="mt-0.5 block text-[11px] leading-tight text-primary-foreground/70">
+                点按播放
+              </span>
+            </span>
+            <Play className="size-4 shrink-0 text-primary-foreground/75" aria-hidden="true" />
+          </button>
+        );
+      })}
+    </div>
   );
 }
 
