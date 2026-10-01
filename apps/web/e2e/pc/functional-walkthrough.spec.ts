@@ -201,7 +201,9 @@ test.describe("functional browser walkthrough", () => {
     await page.locator('[data-slot="file-path-picker"] button:has-text("新建目录")').click();
     await page.getByPlaceholder("目录名称").fill("new-project-e2e");
     await page.getByRole("button", { name: "创建目录" }).click();
-    await expect(page.getByLabel("工作目录", { exact: true })).toHaveValue("/home/dev/new-project-e2e/");
+    await expect(page.getByLabel("工作目录", { exact: true })).toHaveValue(
+      "/home/dev/new-project-e2e/",
+    );
 
     await page
       .getByRole("dialog", { name: "新建会话" })

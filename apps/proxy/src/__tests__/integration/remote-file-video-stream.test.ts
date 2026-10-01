@@ -281,7 +281,7 @@ describe("remote video HTTP streaming through the relay and proxy", () => {
     });
     expect(res.status).toBe(200);
     expect(res.headers.get("content-disposition")).toMatch(/^attachment;/);
-    expect(Buffer.from(await res.arrayBuffer())).toEqual(largeContents);
+    expect(Buffer.from(await res.arrayBuffer()).equals(largeContents)).toBe(true);
     expect(proxyControls.some((msg) => msg.type === "remote_file_stream_ack")).toBe(true);
   });
 
