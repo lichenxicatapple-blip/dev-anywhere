@@ -507,10 +507,20 @@ async function tapPointAwayFromControls(page: Page): Promise<Point> {
     const container = document.querySelector<HTMLElement>('[data-slot="pty-terminal"]');
     if (!container) throw new Error("PTY terminal missing");
     const rect = container.getBoundingClientRect();
+    const controlSelector = [
+      '[data-slot="pty-selection-handle"]',
+      '[data-slot="pty-selection-toolbar"]',
+      '[data-slot="pty-scrollbar"]',
+      '[data-slot="pty-horizontal-scrollbar"]',
+      "button",
+      "a",
+      '[role="button"]',
+      "input",
+      "textarea",
+      "select",
+    ].join(", ");
     const obstacles = Array.from(
-      document.querySelectorAll<HTMLElement>(
-        '[data-slot="pty-selection-handle"], [data-slot="pty-selection-toolbar"]',
-      ),
+      document.querySelectorAll<HTMLElement>(controlSelector),
       (element) => element.getBoundingClientRect(),
     );
     const candidates = [
@@ -524,7 +534,19 @@ async function tapPointAwayFromControls(page: Page): Promise<Point> {
       const dy = Math.max(obstacle.top - point.y, 0, point.y - obstacle.bottom);
       return Math.hypot(dx, dy);
     };
-    return candidates.sort((left, right) => {
+    // The visible scrollbar owns the rightmost 32 px, including the old right-28 candidate.
+    // Check the actual hit target so a terminal tap cannot silently become a control action.
+    const terminalCandidates = candidates.filter((point) => {
+      const hit = document.elementFromPoint(point.x, point.y);
+      return (
+        hit !== null &&
+        container.contains(hit) &&
+        !hit.closest(controlSelector) &&
+        hit.closest('.xterm, [data-slot="pty-host"], [data-slot="pty-spacer"]') !== null
+      );
+    });
+    if (terminalCandidates.length === 0) throw new Error("no unobstructed terminal tap point");
+    return terminalCandidates.sort((left, right) => {
       const leftDistance = Math.min(...obstacles.map((obstacle) => distance(left, obstacle)));
       const rightDistance = Math.min(...obstacles.map((obstacle) => distance(right, obstacle)));
       return rightDistance - leftDistance;
