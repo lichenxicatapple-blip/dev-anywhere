@@ -1090,19 +1090,53 @@ export function attachPtyScrollController(
     return cachedLiveLastY;
   };
 
-  let lastInputScreen: { cursorY: number; liveLastY: number } | null = null;
+  let lastLiveScreen: { baseY: number; cursorY: number; liveLastY: number } | null = null;
   const readLiveScreen = (): { cursorY: number; liveLastY: number } => {
+    const baseY = term.buffer.active.baseY;
     if (cursorFollowTarget.canFollow()) {
-      lastInputScreen = { cursorY: term.buffer.active.cursorY, liveLastY: getCachedLiveLastY() };
+      lastLiveScreen = {
+        baseY,
+        cursorY: term.buffer.active.cursorY,
+        liveLastY: getCachedLiveLastY(),
+      };
+    } else if (!term.modes.synchronizedOutputMode) {
+      const liveLastY = getCachedLiveLastY();
+      const baseDelta = baseY - (lastLiveScreen?.baseY ?? baseY);
+      // A scroll-region redraw can move the live-screen origin forward and redraw a menu at a
+      // smaller relative row. Compare its buffer extent too: equal or later absolute content
+      // must not inherit the old screen-relative tail and create a second copy of that offset.
+      const rebasedContent =
+        lastLiveScreen !== null &&
+        liveLastY >= 0 &&
+        liveLastY < lastLiveScreen.liveLastY &&
+        baseDelta > 0 &&
+        liveLastY + baseDelta >= lastLiveScreen.liveLastY;
+      if (lastLiveScreen === null || liveLastY > lastLiveScreen.liveLastY || rebasedContent) {
+        // Static menus can keep the cursor hidden after painting their final frame. New content
+        // must extend the reachable screen even when no input cursor will be restored. Anchor
+        // that growth to its content tail, never to the hardware cursor's paint position: an old
+        // caret near the top would otherwise cap the range and clip menus taller than the phone.
+        lastLiveScreen = {
+          baseY,
+          cursorY: Math.max(
+            (lastLiveScreen?.cursorY ?? liveLastY) - (rebasedContent ? baseDelta : 0),
+            liveLastY,
+          ),
+          liveLastY,
+        };
+      } else {
+        // Unchanged live rows still follow genuine scrollback growth. Checkpoint the completed
+        // origin so a later partial clear cannot mistake that earlier growth for new content.
+        lastLiveScreen.baseY = baseY;
+      }
     }
-    // A TUI can finish painting before restoring its input cursor in a later packet. Both the
-    // spacer and the semantic bottom must keep using the last input frame in that interval:
-    // merely skipping followCursorY is too late once a smaller spacer has clamped native scroll.
+    // A split redraw can clear content before restoring the input cursor in a later packet.
+    // Retain both the last accepted range and any completed growth until that cursor returns;
+    // shrinking the spacer earlier would let the browser clamp scrollTop and cause flicker.
     // Keep screen-relative rows so genuine scrollback growth still advances the live frame.
-    // With no input frame yet, use the visible tail instead of treating a paint row as a caret.
-    const tail = lastInputScreen?.liveLastY ?? getCachedLiveLastY();
+    const tail = lastLiveScreen?.liveLastY ?? -1;
     return {
-      cursorY: Math.max(0, Math.min(term.rows - 1, lastInputScreen?.cursorY ?? tail)),
+      cursorY: Math.max(0, Math.min(term.rows - 1, lastLiveScreen?.cursorY ?? tail)),
       liveLastY: Math.min(term.rows - 1, tail),
     };
   };
@@ -1909,7 +1943,7 @@ export function attachPtyScrollController(
   });
   const bufferChangeDisposable = term.buffer.onBufferChange(() => {
     cursorFollowTarget.reset();
-    lastInputScreen = null;
+    lastLiveScreen = null;
     // Direct Terminal.reset does not necessarily produce a later onWriteParsed callback. Invalidate
     // every buffer-derived cache synchronously at the identity boundary itself.
     bufferRevision += 1;

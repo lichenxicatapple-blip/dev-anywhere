@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { Terminal } from "@xterm/xterm";
 import { attachPtyScrollController, type PtyScrollState } from "./pty-scroll-controller";
 import { buildPtyScrollDebugSnapshot } from "./pty-scroll-debug-snapshot";
 import type { PtyHistoryProjection } from "./pty-history-projection";
@@ -77,6 +78,183 @@ describe("attachPtyScrollController", () => {
     expect(host.style.height).toBe("400px");
     expect(host.style.paddingTop).toBe("0px");
     expect(container.scrollTop).toBe(1600);
+  });
+
+  describe("completed hidden-cursor content (real xterm parser)", () => {
+    const disposables: Array<{ dispose(): void }> = [];
+    const menu =
+      "\x1b[?25l\x1b[?2026h\x1b[2J\x1b[1;1HFolder access" +
+      "\x1b[2;1HC:\\project\x1b[4;1HTrust this folder?" +
+      "\x1b[9;1H> Yes, continue\x1b[10;1HNo, exit" +
+      "\x1b[16;1HPress enter to confirm\x1b[?2026l";
+
+    function createHiddenCursorFixture(visibleHeight = 160, rows = 32) {
+      const { container, spacer, host } = createDom();
+      defineSize(container, { clientHeight: visibleHeight });
+      defineSize(host.querySelector<HTMLElement>(".xterm-screen")!, { clientHeight: rows * 20 });
+      Object.defineProperty(container, "scrollHeight", {
+        configurable: true,
+        get: () => Math.max(visibleHeight, parseFloat(spacer.style.height) || 0),
+      });
+      const term = new Terminal({ cols: 80, rows, allowProposedApi: true });
+      const controller = attachPtyScrollController({
+        container,
+        spacer,
+        host,
+        term,
+        hasNewFrame: () => false,
+        consumeNewFrame: vi.fn(),
+        hasNewFramesWhileAway: () => false,
+        setNewFramesWhileAway: vi.fn(),
+      });
+      disposables.push(term, controller);
+      const write = async (data: string) => {
+        await new Promise<void>((resolve) => term.write(data, resolve));
+        controller.relayout();
+      };
+      return { container, spacer, host, term, controller, write };
+    }
+
+    afterEach(() => {
+      for (const disposable of disposables.splice(0).reverse()) disposable.dispose();
+    });
+
+    it("removes stale cold-start padding when a static menu never restores its input cursor", async () => {
+      const { container, spacer, host, controller, write } = createHiddenCursorFixture(500);
+      await write("PS> codex\r\n");
+      expect(host.style.paddingTop).toBe("460px");
+
+      await write(menu);
+
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 15, liveLastY: 15 });
+      expect(host.style.paddingTop).toBe("180px");
+      expect(spacer.style.height).toBe("500px");
+      expect(container.scrollTop).toBe(0);
+      expect(parseFloat(host.style.paddingTop) + 16 * 20).toBe(container.clientHeight);
+    });
+
+    it("makes the end of a menu taller than the phone reachable despite an old top-row caret", async () => {
+      const { container, spacer, controller, write } = createHiddenCursorFixture();
+      await write("PS> codex\r\n");
+
+      await write(menu);
+
+      expect(spacer.style.height).toBe("320px");
+      expect(container.scrollTop).toBe(160);
+      controller.scrollToRatio(0);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      expect(container.scrollTop).toBe(0);
+      controller.scrollToRatio(1);
+      expect(container.scrollTop).toBe(160);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+    });
+
+    it("retains completed growth through partial clears and accepts a restored input caret", async () => {
+      const { container, spacer, controller, write } = createHiddenCursorFixture();
+      await write(menu);
+      expect(container.scrollTop).toBe(160);
+
+      // A larger intermediate paint remains inside synchronized output and must not become a
+      // committed extent. Ending with a shorter paint must not erase the previously shown menu.
+      await write("\x1b[?2026h\x1b[2J\x1b[32;1Htransient status");
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 15, liveLastY: 15 });
+      expect(spacer.style.height).toBe("320px");
+      expect(container.scrollTop).toBe(160);
+      await write("\x1b[2J\x1b[4;1Hpainting...\x1b[?2026l");
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 15, liveLastY: 15 });
+      expect(spacer.style.height).toBe("320px");
+      expect(container.scrollTop).toBe(160);
+
+      await write("\x1b[4;6H");
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 3, liveLastY: 3 });
+      expect(spacer.style.height).toBe("160px");
+      expect(container.scrollTop).toBe(0);
+    });
+
+    it("keeps Kimi input geometry while a hidden paint cursor moves above an unchanged tail", async () => {
+      const { container, spacer, controller, write } = createHiddenCursorFixture();
+      await write("\x1b[?25l\x1b[32;1Hstatus\x1b[29;1Hinput\x1b[29;6H");
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 28, liveLastY: 31 });
+      expect(container.scrollTop).toBe(480);
+
+      await write("\x1b[?2026h\x1b[13;1Hpainting...\x1b[?2026l");
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 28, liveLastY: 31 });
+      expect(spacer.style.height).toBe("640px");
+      expect(container.scrollTop).toBe(480);
+      await write("\x1b[16B\x1b[6G");
+      expect(container.scrollTop).toBe(480);
+    });
+
+    it("preserves manual review when hidden content grows", async () => {
+      const { container, controller, write } = createHiddenCursorFixture();
+      await write(menu);
+      controller.scrollToRatio(40 / 160);
+      expect(container.scrollTop).toBe(40);
+
+      await write("\x1b[20;1Hadditional menu choice");
+
+      expect(controller.getDebugProbe()).toMatchObject({
+        liveCursorY: 19,
+        liveLastY: 19,
+        verticalIntentMode: "reviewing",
+      });
+      expect(container.scrollTop).toBe(40);
+    });
+
+    it.each([7, 12])(
+      "rebases a scroll-region menu whose absolute tail is preserved or extended (row %i)",
+      async (menuLastY) => {
+        const { container, spacer, term, controller, write } = createHiddenCursorFixture(500, 70);
+        await write("\x1b[67;1Hcomposer\x1b[67;3H");
+        expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 66, liveLastY: 66 });
+        expect(container.scrollTop).toBe(840);
+
+        // Codex first scrolls the rows above its inline composer into history, then paints the
+        // trust menu near the new screen origin. The final content is not moving backwards.
+        await write("\x1b[?2026h\x1b[1;59r\x1b[59;1H" + "\r\n".repeat(59));
+        expect(term.buffer.active.baseY).toBe(59);
+        await write(`\x1b[r\x1b[2J\x1b[?25l\x1b[${menuLastY + 1};1Hmenu footer\x1b[?2026l`);
+
+        expect(controller.getDebugProbe()).toMatchObject({
+          liveCursorY: menuLastY,
+          liveLastY: menuLastY,
+        });
+        expect(spacer.style.height).toBe(`${(59 + menuLastY + 1) * 20}px`);
+        expect(container.scrollTop).toBe((59 + menuLastY + 1) * 20 - 500);
+      },
+    );
+
+    it("keeps an unchanged input row following scrollback growth without adopting a paint caret", async () => {
+      const { container, term, controller, write } = createHiddenCursorFixture();
+      await write("\x1b[?25l\x1b[32;1Hstatus\x1b[13;1Hinput\x1b[13;6H");
+      expect(container.scrollTop).toBe(240);
+
+      await write("\x1b[?2026h\x1b[1;5r\x1b[5;1H\r\n\r\n\r\n\x1b[r\x1b[10;1Hpaint\x1b[?2026l");
+      expect(term.buffer.active.baseY).toBe(3);
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 12, liveLastY: 31 });
+      expect(container.scrollTop).toBe(300);
+
+      await write("\x1b[2J\x1b[30;1Hpartial paint");
+      expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 12, liveLastY: 31 });
+      expect(container.scrollTop).toBe(300);
+    });
+
+    it.each(["reset", "alternate"])(
+      "clears retained growth at a %s buffer boundary",
+      async (boundary) => {
+        const { container, spacer, term, controller, write } = createHiddenCursorFixture();
+        await write(menu);
+        expect(spacer.style.height).toBe("320px");
+
+        if (boundary === "reset") term.reset();
+        else await write("\x1b[?1049h");
+        await write("\x1b[?25l\x1b[2J\x1b[2;1Hnew screen");
+
+        expect(controller.getDebugProbe()).toMatchObject({ liveCursorY: 1, liveLastY: 1 });
+        expect(spacer.style.height).toBe("160px");
+        expect(container.scrollTop).toBe(0);
+      },
+    );
   });
 
   it("keeps a short host backfilled from live scrollback while follow lock toggles", () => {
