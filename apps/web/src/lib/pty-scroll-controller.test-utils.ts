@@ -23,6 +23,22 @@ export function defineScrollWidth(el: HTMLElement, scrollWidth: number): void {
   Object.defineProperty(el, "scrollWidth", { configurable: true, value: scrollWidth });
 }
 
+/** jsdom has no native wheel scrolling. Deliver the input, then its browser-owned landing. */
+export function simulateBrowserWheel(container: HTMLElement, deltaY: number): WheelEvent {
+  const previous = container.scrollTop;
+  const event = new WheelEvent("wheel", { deltaY, cancelable: true });
+  container.dispatchEvent(event);
+  if (!event.defaultPrevented) {
+    container.scrollTop = Math.max(
+      0,
+      Math.min(container.scrollHeight - container.clientHeight, previous + deltaY),
+    );
+    container.dispatchEvent(new Event("scroll"));
+    container.dispatchEvent(new Event("scrollend"));
+  }
+  return event;
+}
+
 export function createPtyScrollDom() {
   const container = document.createElement("div") as HTMLDivElement;
   const spacer = document.createElement("div") as HTMLDivElement;

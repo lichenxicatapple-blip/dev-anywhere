@@ -17,10 +17,6 @@ export const PTY_VERTICAL_INTENT_TRANSITION_IDS = [
   "bottom.force",
   "ratio.reviewing",
   "selection-autoscroll.reviewing",
-  "wheel.clamped",
-  "wheel.up",
-  "wheel.down.not-bottom",
-  "wheel.down.bottom",
   "wheel.native",
   "container.programmatic-follow",
   "container.programmatic-bottom",
@@ -57,13 +53,6 @@ export type PtyVerticalIntentEvent =
       source: "selection-autoscroll";
       scrollTop: number;
       reason: string;
-    }
-  | {
-      type: "wheel";
-      deltaY: number;
-      previousScrollTop: number;
-      nextScrollTop: number;
-      reachedCursorAwareBottom: boolean;
     }
   | {
       type: "native-wheel";
@@ -287,34 +276,6 @@ export function reducePtyVerticalIntent(
         state,
         withReview(state, event.source, event.scrollTop, "selection-autoscroll.reviewing"),
         `source=${event.source} reason=${event.reason}`,
-      );
-    }
-    case "wheel": {
-      if (event.nextScrollTop === event.previousScrollTop) {
-        return finish(
-          state,
-          { ...state, lastTransitionId: "wheel.clamped", lastScrollTop: event.nextScrollTop },
-          `delta=${event.deltaY}`,
-        );
-      }
-      if (event.deltaY < 0) {
-        return finish(
-          state,
-          withReview(state, "wheel", event.nextScrollTop, "wheel.up"),
-          `delta=${event.deltaY}`,
-        );
-      }
-      if (event.deltaY > 0 && event.reachedCursorAwareBottom) {
-        return finish(
-          state,
-          withFollowing(state, "none", event.nextScrollTop, "wheel.down.bottom"),
-          `delta=${event.deltaY}`,
-        );
-      }
-      return finish(
-        state,
-        withReview(state, "wheel", event.nextScrollTop, "wheel.down.not-bottom"),
-        `delta=${event.deltaY}`,
       );
     }
     case "native-wheel": {

@@ -313,6 +313,17 @@ async function enterReview(page: Page, deltaY: number): Promise<TerminalDomSnaps
       page.evaluate(() => window.__devAnywherePtyDebug?.()?.verticalIntent.mode ?? "unavailable"),
     )
     .toBe("reviewing");
+  // Native scrolling lands before xterm paints the requested rows, especially at 4 fps.
+  // Choose drag coordinates from the painted live screen, not its previous viewport.
+  await expect
+    .poll(async () => {
+      const { container, screen } = await requireTerminalDom(page);
+      return (
+        Math.min(container.bottom - 36, screen.bottom - 18) >
+        Math.max(container.top + 36, screen.top + 18)
+      );
+    })
+    .toBe(true);
   return requireTerminalDom(page);
 }
 

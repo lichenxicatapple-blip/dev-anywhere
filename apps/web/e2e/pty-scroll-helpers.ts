@@ -293,22 +293,15 @@ export async function scrollPtyToTop(
   page: Page,
   options: { wheelDeltaY?: number } = {},
 ): Promise<void> {
-  await ptyTerminal(page).evaluate((el, wheelDeltaY) => {
-    const node = el as HTMLElement;
-    const maxScrollTop = Math.max(0, node.scrollHeight - node.clientHeight);
-    const requestedDelta = typeof wheelDeltaY === "number" ? wheelDeltaY : -maxScrollTop;
-    // Always travel far enough to reach the top, but enter review through the
-    // controller-owned wheel path. Assigning scrollTop before a synthetic
-    // scroll event pairs the moved DOM with xterm's previous painted viewport.
-    const deltaY = Math.min(requestedDelta, -maxScrollTop);
-    el.dispatchEvent(
-      new WheelEvent("wheel", {
-        bubbles: true,
-        cancelable: true,
-        deltaY,
-      }),
-    );
-  }, options.wheelDeltaY);
+  const { maxScrollTop } = await readPtyScrollMetrics(page);
+  const deltaY = Math.min(options.wheelDeltaY ?? -maxScrollTop, -maxScrollTop);
+  // A synthetic WheelEvent has no browser default action. Use actual browser input so the
+  // controller observes a native landing, including the later xterm paint.
+  await ptyTerminal(page).hover();
+  await page.mouse.wheel(0, deltaY);
+  await expect
+    .poll(async () => (await readPtyScrollMetrics(page)).scrollTop)
+    .toBeLessThanOrEqual(1);
 
   await expectPtyRendered(page);
 }

@@ -10,6 +10,7 @@ import {
   defineScrollWidth,
   defineSize,
   markUserVerticalScrollIntent,
+  simulateBrowserWheel,
   touchEvent,
 } from "./pty-scroll-controller.test-utils";
 
@@ -425,7 +426,7 @@ describe("attachPtyScrollController", () => {
 
   it("positions the host before changing xterm viewport at a row boundary", () => {
     const { container, spacer, host } = createDom();
-    const { terminal } = createTerminal({ 99: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -438,7 +439,8 @@ describe("attachPtyScrollController", () => {
     });
     // Establish the row through the controller so DOM scrollTop, xterm viewportY and host.top
     // describe one rendered frame before the next native event arrives.
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1400, cancelable: true }));
+    simulateBrowserWheel(container, -1400);
+    emitRender();
     expect(terminal.buffer.active.viewportY).toBe(10);
     expect(host.style.top).toBe("200px");
     terminal.scrollToLine.mockClear();
@@ -627,7 +629,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -400, cancelable: true }));
+    simulateBrowserWheel(container, -400);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     const normalReviewMarker = markers.at(-1);
     expect(normalReviewMarker?.isDisposed).toBe(false);
@@ -675,7 +677,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -400, cancelable: true }));
+    simulateBrowserWheel(container, -400);
     const reviewMarker = markers.at(-1);
     expect(reviewMarker?.isDisposed).toBe(false);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
@@ -721,7 +723,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -400, cancelable: true }));
+    simulateBrowserWheel(container, -400);
     const reviewMarker = markers.at(-1);
     container.scrollLeft = 120;
     controller.markHorizontalScrollIntent("alternate-round-trip");
@@ -834,7 +836,7 @@ describe("attachPtyScrollController", () => {
     expect(terminal.buffer.active.viewportY).toBe(paintedViewportY);
   });
 
-  it("commits wheel row transitions atomically with xterm viewport changes", () => {
+  it("keeps old wheel glyph coordinates until xterm paints the native scroll target", () => {
     const { container, spacer, host } = createDom();
     const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
@@ -855,13 +857,16 @@ describe("attachPtyScrollController", () => {
     const event = new WheelEvent("wheel", { deltaY: -20, cancelable: true });
     container.dispatchEvent(event);
 
-    expect(event.defaultPrevented).toBe(true);
-    expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
-    expect(host.style.top).toBe("180px");
+    expect(event.defaultPrevented).toBe(false);
+    expect(container.scrollTop).toBe(200);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+    expect(host.style.top).toBe("200px");
 
+    // The browser moves independently; the host must not relocate its old glyphs before paint.
+    container.scrollTop = 180;
     container.dispatchEvent(new Event("scroll"));
-
-    expect(host.style.top).toBe("180px");
+    expect(terminal.scrollToLine).toHaveBeenCalledWith(9);
+    expect(host.style.top).toBe("200px");
 
     emitRender();
 
@@ -898,15 +903,18 @@ describe("attachPtyScrollController", () => {
     }
 
     it.each([false, true])(
-      "leaves pixel movement to the browser when cancellation fails (cancelable=%s)",
+      "leaves pixel movement to the browser without attempting cancellation (cancelable=%s)",
       (cancelable) => {
         const { container, controller, terminal } = setupNativeWheel();
         const bottom = container.scrollTop;
         terminal.scrollToLine.mockClear();
         const event = new WheelEvent("wheel", { deltaY: -40, cancelable });
-        if (cancelable) vi.spyOn(event, "preventDefault").mockImplementation(() => {});
+        const preventDefault = vi.spyOn(event, "preventDefault");
+        const writeScrollTop = vi.spyOn(container, "scrollTop", "set");
         container.dispatchEvent(event);
 
+        expect(preventDefault).not.toHaveBeenCalled();
+        expect(writeScrollTop).not.toHaveBeenCalled();
         expect(event.defaultPrevented).toBe(false);
         expect(container.scrollTop).toBe(bottom);
         expect(terminal.scrollToLine).not.toHaveBeenCalled();
@@ -916,6 +924,68 @@ describe("attachPtyScrollController", () => {
         container.dispatchEvent(new Event("scroll"));
         expect(container.scrollTop).toBe(bottom - 40);
         expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+        writeScrollTop.mockRestore();
+        controller.dispose();
+      },
+    );
+
+    it.each(["zoom", "already-prevented"] as const)(
+      "does not claim scroll ownership for a %s wheel",
+      (kind) => {
+        const { container, controller, terminal } = setupNativeWheel();
+        defineScrollWidth(container, 2000);
+        const before = controller.getDebugProbe();
+        const top = container.scrollTop;
+        terminal.scrollToLine.mockClear();
+        const event = new WheelEvent("wheel", {
+          deltaX: 60,
+          deltaY: -120,
+          ctrlKey: kind === "zoom",
+          cancelable: true,
+        });
+        if (kind === "already-prevented") event.preventDefault();
+        const preventDefault = vi.spyOn(event, "preventDefault");
+        const writeScrollTop = vi.spyOn(container, "scrollTop", "set");
+
+        container.dispatchEvent(event);
+
+        expect(preventDefault).not.toHaveBeenCalled();
+        expect(event.defaultPrevented).toBe(kind === "already-prevented");
+        expect(writeScrollTop).not.toHaveBeenCalled();
+        expect(container.scrollTop).toBe(top);
+        expect(terminal.scrollToLine).not.toHaveBeenCalled();
+        expect(controller.getDebugProbe()).toMatchObject({
+          verticalIntentMode: before.verticalIntentMode,
+          verticalIntentSource: before.verticalIntentSource,
+          verticalIntentTransitionId: before.verticalIntentTransitionId,
+          userHasHorizontalScrollIntent: before.userHasHorizontalScrollIntent,
+        });
+        writeScrollTop.mockRestore();
+        controller.dispose();
+      },
+    );
+
+    it.each([WheelEvent.DOM_DELTA_LINE, WheelEvent.DOM_DELTA_PAGE])(
+      "uses the browser landing rather than interpreting delta mode %i as pixels",
+      (deltaMode) => {
+        const { container, controller, terminal } = setupNativeWheel();
+        const bottom = container.scrollTop;
+        terminal.scrollToLine.mockClear();
+        const event = new WheelEvent("wheel", { deltaY: -3, deltaMode, cancelable: true });
+        const writeScrollTop = vi.spyOn(container, "scrollTop", "set");
+
+        container.dispatchEvent(event);
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(writeScrollTop).not.toHaveBeenCalled();
+        expect(container.scrollTop).toBe(bottom);
+        expect(terminal.scrollToLine).not.toHaveBeenCalled();
+        // Deliberately unrelated to the raw delta: only the browser resolves line/page units.
+        container.scrollTop = bottom - 120;
+        container.dispatchEvent(new Event("scroll"));
+        expect(container.scrollTop).toBe(bottom - 120);
+        expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+        writeScrollTop.mockRestore();
         controller.dispose();
       },
     );
@@ -965,6 +1035,60 @@ describe("attachPtyScrollController", () => {
       expect(container.scrollTop).toBe(bottom - 400);
       controller.dispose();
     });
+
+    it("releases native ownership when the last tiny wheel produces no additional movement", () => {
+      const { container, controller, emitRender } = setupNativeWheel();
+      const bottom = container.scrollTop;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
+      container.scrollTop = bottom - 40;
+      container.dispatchEvent(new Event("scroll"));
+      emitRender();
+      const reviewedTop = container.scrollTop;
+
+      // A fractional tail event need not move the browser's exposed scroll coordinate.
+      // The already-moving gesture can still end without another scroll notification.
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -0.04, cancelable: true }));
+      expect(container.scrollTop).toBe(reviewedTop);
+      container.dispatchEvent(new Event("scrollend"));
+
+      // Once the gesture ends, an unrelated browser/layout replay must not move the
+      // reviewed buffer row. This is the same marker guarantee as a normal scrollend.
+      container.scrollTop = reviewedTop - 50;
+      emitRender();
+      expect(container.scrollTop).toBe(reviewedTop);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      controller.dispose();
+    });
+
+    it.each(["live-bottom", "review-top"] as const)(
+      "protects the first movable wheel after an immovable wheel at the %s boundary",
+      (boundary) => {
+        const { container, controller, emitRender } = setupNativeWheel();
+        if (boundary === "review-top") {
+          container.dispatchEvent(new WheelEvent("wheel", { deltaY: -100_000, cancelable: true }));
+          container.scrollTop = 0;
+          container.dispatchEvent(new Event("scroll"));
+          emitRender();
+          container.dispatchEvent(new Event("scrollend"));
+        }
+        const startTop = container.scrollTop;
+        const inwardDelta = boundary === "live-bottom" ? -40 : 40;
+        // The first wheel points out of the scroll range and cannot begin any movement.
+        container.dispatchEvent(
+          new WheelEvent("wheel", { deltaY: -inwardDelta, cancelable: true }),
+        );
+        expect(container.scrollTop).toBe(startTop);
+        container.dispatchEvent(new WheelEvent("wheel", { deltaY: inwardDelta, cancelable: true }));
+        // An old end notification must not revoke the newly possible first native landing.
+        container.dispatchEvent(new Event("scrollend"));
+        container.scrollTop = startTop + inwardDelta;
+        emitRender();
+        expect(container.scrollTop).toBe(startTop + inwardDelta);
+        container.dispatchEvent(new Event("scroll"));
+        expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+        controller.dispose();
+      },
+    );
 
     it("ignores queued old scroll notifications before the first native landing", () => {
       const { container, controller, emitRender } = setupNativeWheel();
@@ -1066,10 +1190,93 @@ describe("attachPtyScrollController", () => {
     });
   });
 
+  it.each([0, 75])(
+    "preserves a native short-host landing inside the leading gap at %ipx",
+    (top) => {
+      const { container, spacer, host } = createDom();
+      defineSize(container, { clientHeight: 550 });
+      const { terminal, emitRender, markers } = createTerminal({ 99: "prompt" });
+      const controller = attachPtyScrollController({
+        container,
+        spacer,
+        host,
+        term: terminal,
+        hasNewFrame: () => false,
+        consumeNewFrame: vi.fn(),
+        hasNewFramesWhileAway: () => false,
+        setNewFramesWhileAway: vi.fn(),
+      });
+      // The 400px terminal sits below a 150px leading gap in the 550px viewport.
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -100_000, cancelable: true }));
+      container.scrollTop = top;
+      container.dispatchEvent(new Event("scroll"));
+      emitRender();
+      container.dispatchEvent(new Event("scrollend"));
+      controller.relayout();
+
+      expect(container.scrollTop).toBe(top);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      expect(markers.at(-1)?.line).toBe(0);
+      expect(
+        markers.every((marker) => marker.line >= 0 && marker.line < terminal.buffer.active.length),
+      ).toBe(true);
+      controller.dispose();
+    },
+  );
+
+  it("preserves leading-gap review through resize and replacement of a trimmed first-row marker", () => {
+    const { container, spacer, host } = createDom();
+    defineSize(container, { clientHeight: 550 });
+    const { terminal, emitRender, markers } = createTerminal({ 99: "prompt" });
+    let rowIdentityOffset = 0;
+    const controller = attachPtyScrollController({
+      container,
+      spacer,
+      host,
+      term: terminal,
+      hasNewFrame: () => false,
+      consumeNewFrame: vi.fn(),
+      hasNewFramesWhileAway: () => false,
+      setNewFramesWhileAway: vi.fn(),
+      getBufferRowIdentityOffset: () => rowIdentityOffset,
+    });
+    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -100_000, cancelable: true }));
+    container.scrollTop = 50;
+    container.dispatchEvent(new Event("scroll"));
+    container.dispatchEvent(new Event("scrollend"));
+    // Row zero has five rows of visible leading space: origin150 - scrollTop50 = 100px.
+    expect(container.scrollTop).toBe(50);
+    const firstRowMarker = markers.at(-1)!;
+    expect(firstRowMarker.line).toBe(0);
+
+    defineSize(container, { clientHeight: 600 });
+    controller.relayout();
+    expect(container.scrollTop).toBe(100);
+    expect(markers.at(-1)).toBe(firstRowMarker);
+
+    // Font changes keep the same row-relative offset, like ordinary fractional row anchors.
+    defineSize(host.querySelector<HTMLElement>(".xterm-screen")!, { clientHeight: 360 });
+    controller.relayout();
+    expect(container.scrollTop).toBe(150);
+    expect(markers.at(-1)).toBe(firstRowMarker);
+
+    // Scrollback eviction removes the old row zero; bind its replacement to the first retained
+    // row without manufacturing a negative marker index or dropping the leading-space offset.
+    rowIdentityOffset = -10;
+    firstRowMarker.isDisposed = true;
+    firstRowMarker.line = -1;
+    emitRender();
+    expect(container.scrollTop).toBe(150);
+    expect(markers.at(-1)).not.toBe(firstRowMarker);
+    expect(markers.at(-1)?.line).toBe(0);
+    expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+    controller.dispose();
+  });
+
   it("keeps the short-host vertical origin when review begins", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 550 });
-    const { terminal } = createTerminal({ 99: "prompt" });
+    const { terminal, emitRender } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
       container,
       spacer,
@@ -1085,7 +1292,8 @@ describe("attachPtyScrollController", () => {
       Number.parseFloat(host.style.top) - terminal.buffer.active.viewportY * 20;
     expect(originBeforeReview).toBe(150);
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -80, cancelable: true }));
+    simulateBrowserWheel(container, -80);
+    emitRender();
 
     const originAfterReview =
       Number.parseFloat(host.style.top) - terminal.buffer.active.viewportY * 20;
@@ -1118,7 +1326,7 @@ describe("attachPtyScrollController", () => {
       onHistoryProjectionChange: renderProjection,
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
+    simulateBrowserWheel(container, -40);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     const backfillsAtLock = getHistoryProjections(renderProjection, "live-backfill").length;
     expect(backfillsAtLock).toBeGreaterThan(0);
@@ -1150,7 +1358,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    simulateBrowserWheel(container, -200);
     expect(container.scrollTop).toBe(1400);
     expect(terminal.buffer.active.viewportY).toBe(70);
 
@@ -1168,7 +1376,7 @@ describe("attachPtyScrollController", () => {
 
   it("rebases a follow-locked row when full scrollback trim moves its xterm marker", async () => {
     const { container, spacer, host } = createDom();
-    const { terminal, emitScroll, markers } = createTerminal({ 99: "prompt" });
+    const { terminal, emitScroll, emitRender, markers } = createTerminal({ 99: "prompt" });
     const controller = attachPtyScrollController({
       container,
       spacer,
@@ -1180,7 +1388,8 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    simulateBrowserWheel(container, -200);
+    emitRender();
     expect(markers.at(-1)?.line).toBe(70);
 
     const anchor = markers.at(-1);
@@ -1290,7 +1499,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: true }));
+    simulateBrowserWheel(container, -40);
     const scrollTop = container.scrollTop;
     const viewportY = terminal.buffer.active.viewportY;
     const scrollCalls = terminal.scrollToLine.mock.calls.length;
@@ -2923,7 +3132,7 @@ describe("attachPtyScrollController", () => {
       },
     });
 
-    const { terminal } = createTerminal({ 252: "live prompt" });
+    const { terminal, emitRender } = createTerminal({ 252: "live prompt" });
     terminal.rows = 24;
     terminal.buffer.active.length = 254;
     terminal.buffer.active.cursorY = 23;
@@ -2947,7 +3156,8 @@ describe("attachPtyScrollController", () => {
 
     // The host is shorter than the browser viewport, so its live frame has a 212px bottom-align
     // origin. Follow lock keeps using that live coordinate system while moving through history.
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -60, cancelable: true }));
+    simulateBrowserWheel(container, -60);
+    emitRender();
     const reviewedViewportY = terminal.buffer.active.viewportY;
     const reviewedHostTop = parseFloat(host.style.top);
     expect(container.scrollTop).toBeLessThan(chromeLandedBottom - 20);
@@ -3038,7 +3248,7 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollLeft).toBe(0);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -100, cancelable: true }));
+    simulateBrowserWheel(container, -100);
     const reviewedScrollTop = container.scrollTop;
     expect(reviewedScrollTop).toBeLessThan(1600);
     controller.scrollToXRatio(0.5);
@@ -3217,11 +3427,11 @@ describe("attachPtyScrollController", () => {
       onUserVerticalScrollIntentChange,
     });
     // wheel up 让 intent 进入 true, scrollTop 1600 → 1300
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -300, cancelable: true }));
+    simulateBrowserWheel(container, -300);
     onUserVerticalScrollIntentChange.mockClear();
 
     // wheel down 把 scrollTop 拉回 1600 (光标 1600 仍在 viewport, atBottom=true 保持)
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 300, cancelable: true }));
+    simulateBrowserWheel(container, 300);
 
     expect(onUserVerticalScrollIntentChange).toHaveBeenCalledWith(false);
   });
@@ -3246,12 +3456,12 @@ describe("attachPtyScrollController", () => {
     // The 299px accumulated review delta is one pixel short of 15 complete rows. Mapping
     // 1600px back through that review anchor would therefore stop at viewportY=79, which
     // excludes the cursor on absolute row 99 and leaves review intent stuck at pixel bottom.
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -299, cancelable: true }));
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 40, cancelable: true }));
+    simulateBrowserWheel(container, -299);
+    simulateBrowserWheel(container, 40);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     expect(terminal.buffer.active.viewportY).toBe(68);
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 10_000, cancelable: true }));
+    simulateBrowserWheel(container, 10_000);
 
     expect(container.scrollTop).toBe(1600);
     expect(terminal.buffer.active.viewportY).toBe(80);
@@ -3275,7 +3485,7 @@ describe("attachPtyScrollController", () => {
     });
 
     expect(container.scrollTop).toBe(1600);
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    simulateBrowserWheel(container, -200);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     expect(container.scrollTop).toBe(1400);
 
@@ -3290,13 +3500,13 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1400);
 
     for (const expectedScrollTop of [1520, 1640, 1760, 1880, 2000, 2120]) {
-      container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+      simulateBrowserWheel(container, 120);
       expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
       expect(container.scrollTop).toBe(expectedScrollTop);
       expect(terminal.buffer.active.viewportY).toBe(expectedScrollTop / 20);
     }
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+    simulateBrowserWheel(container, 120);
 
     expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
     expect(container.scrollTop).toBe(2200);
@@ -3320,7 +3530,7 @@ describe("attachPtyScrollController", () => {
     });
 
     expect(container.scrollTop).toBe(1600);
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    simulateBrowserWheel(container, -200);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
     expect(container.scrollTop).toBe(1400);
 
@@ -3370,7 +3580,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    simulateBrowserWheel(container, -200);
     terminal.buffer.active.length += 30;
     defineScrollHeight(container, 2600);
     emitScroll();
@@ -3428,7 +3638,7 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: true }));
+    simulateBrowserWheel(container, -200);
     terminal.buffer.active.length += 30;
     defineScrollHeight(container, 2600);
     emitScroll();
@@ -3473,7 +3683,7 @@ describe("attachPtyScrollController", () => {
     });
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+    simulateBrowserWheel(container, 120);
 
     expect(container.scrollTop).toBe(1600);
     expect(terminal.buffer.active.viewportY).toBe(80);
@@ -3507,7 +3717,7 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1460);
     onUserVerticalScrollIntentChange.mockClear();
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+    simulateBrowserWheel(container, 120);
 
     expect(container.scrollTop).toBe(1460);
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(true);
@@ -3825,7 +4035,7 @@ describe("attachPtyScrollController", () => {
     const screen = host.querySelector<HTMLElement>(".xterm-screen");
     if (!screen) throw new Error("missing xterm screen");
     defineSize(screen, { clientHeight: 400, clientWidth: 800 });
-    const { terminal, markers } = createTerminal({ 87: "live prompt" });
+    const { terminal, emitRender, markers } = createTerminal({ 87: "live prompt" });
     terminal.buffer.active.cursorY = 7;
 
     const controller = attachPtyScrollController({
@@ -3839,7 +4049,8 @@ describe("attachPtyScrollController", () => {
       setNewFramesWhileAway: vi.fn(),
     });
     expect(container.scrollTop).toBe(1500);
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -50, cancelable: true }));
+    simulateBrowserWheel(container, -50);
+    emitRender();
     expect(container.scrollTop).toBe(1450);
     expect(terminal.buffer.active.viewportY).toBe(66);
     expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
@@ -3985,7 +4196,7 @@ describe("attachPtyScrollController", () => {
     expect(container.scrollTop).toBe(1440);
     onUserVerticalScrollIntentChange.mockClear();
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+    simulateBrowserWheel(container, 120);
 
     expect(container.scrollTop).toBe(1560);
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(false);
@@ -4019,21 +4230,21 @@ describe("attachPtyScrollController", () => {
     });
     expect(container.scrollTop).toBeCloseTo(4226);
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1800, cancelable: true }));
+    simulateBrowserWheel(container, -1800);
 
     expect(terminal.buffer.active.viewportY).toBeLessThan(terminal.buffer.active.baseY);
     expect(onUserVerticalScrollIntentChange).toHaveBeenLastCalledWith(true);
     const reviewedScrollTop = container.scrollTop;
     onUserVerticalScrollIntentChange.mockClear();
 
-    container.dispatchEvent(new WheelEvent("wheel", { deltaY: 120, cancelable: true }));
+    simulateBrowserWheel(container, 120);
     emitRender();
 
     expect(container.scrollTop).toBeCloseTo(reviewedScrollTop + 120);
     expect(onUserVerticalScrollIntentChange).not.toHaveBeenCalledWith(false);
   });
 
-  it("owns wheel scrolling instead of leaving it to xterm internals", () => {
+  it("lets the outer browser scroller move while preventing xterm from also consuming wheel", () => {
     const { container, spacer, host } = createDom();
     const { terminal } = createTerminal({ 99: "prompt" });
     attachPtyScrollController({
@@ -4048,10 +4259,20 @@ describe("attachPtyScrollController", () => {
     });
     terminal.scrollToLine.mockClear();
 
-    const event = new WheelEvent("wheel", { deltaY: -300, cancelable: true });
-    container.dispatchEvent(event);
+    const target = document.createElement("div");
+    container.append(target);
+    const xtermWheel = vi.fn();
+    target.addEventListener("wheel", xtermWheel);
+    const event = new WheelEvent("wheel", { deltaY: -300, cancelable: true, bubbles: true });
+    target.dispatchEvent(event);
 
-    expect(event.defaultPrevented).toBe(true);
+    expect(event.defaultPrevented).toBe(false);
+    expect(xtermWheel).not.toHaveBeenCalled();
+    expect(container.scrollTop).toBe(1600);
+    expect(terminal.scrollToLine).not.toHaveBeenCalled();
+
+    container.scrollTop = 1300;
+    container.dispatchEvent(new Event("scroll"));
     expect(container.scrollTop).toBe(1300);
     expect(terminal.scrollToLine).toHaveBeenCalledWith(65);
   });
@@ -5034,7 +5255,7 @@ describe("attachPtyScrollController", () => {
       const ctrl = attach(params);
       expect(params.container.scrollTop).toBe(17380);
 
-      params.container.dispatchEvent(new WheelEvent("wheel", { deltaY: -1, cancelable: true }));
+      simulateBrowserWheel(params.container, -1);
       expect(params.container.scrollTop).toBe(17379);
 
       ctrl.relayout();

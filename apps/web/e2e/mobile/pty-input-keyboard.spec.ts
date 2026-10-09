@@ -384,11 +384,9 @@ async function movePtyViewportAwayWhileKeyboardStaysOpen(
   const before = await terminal.evaluate((element) => (element as HTMLElement).scrollTop);
   const clearance = await readPtyCursorKeyboardClearance(page, sessionId);
   const reviewDistance = Math.max(240, (clearance?.clearance ?? 0) + 80);
-  await terminal.evaluate((element, distance) => {
-    element.dispatchEvent(
-      new WheelEvent("wheel", { deltaY: -distance, bubbles: true, cancelable: true }),
-    );
-  }, reviewDistance);
+  // A real wheel scroll preserves keyboard focus without manufacturing a DOM scroll event.
+  await terminal.hover();
+  await page.mouse.wheel(0, -reviewDistance);
   await expect
     .poll(() => terminal.evaluate((element) => (element as HTMLElement).scrollTop))
     .toBeLessThan(before - 100);
