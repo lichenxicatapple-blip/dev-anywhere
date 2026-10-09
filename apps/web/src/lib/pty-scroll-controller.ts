@@ -1072,14 +1072,9 @@ export function attachPtyScrollController(
 
   const followNativeWheelAtBottom = (scrollTop: number): boolean => {
     invalidateNativeWheelOnLayoutChange();
+    if (nativeWheelDirection <= 0 || !userHasVerticalScrollIntent()) return false;
     const bottom = getCurrentAnchor().bottomScrollTop;
-    if (
-      nativeWheelDirection <= 0 ||
-      !userHasVerticalScrollIntent() ||
-      Math.abs(scrollTop - bottom) > atBottomThreshold
-    ) {
-      return false;
-    }
+    if (Math.abs(scrollTop - bottom) > atBottomThreshold) return false;
     // Unlike the cancelled-wheel path, a native delta is not a prediction of where the browser
     // has landed. Resume only from its actual position, including a wheel at an existing boundary.
     scrollToBottom("nativeWheelBottom", { force: true });
