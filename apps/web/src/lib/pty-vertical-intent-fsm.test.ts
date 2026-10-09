@@ -231,6 +231,14 @@ describe("pty vertical intent FSM", () => {
       expectedTraceAction: "set",
     },
     {
+      id: "wheel.native",
+      initial: createInitialPtyVerticalIntentState(),
+      event: { type: "native-wheel", deltaY: -120, scrollTop: 1600 },
+      expectedMode: "reviewing",
+      expectedSource: "wheel",
+      expectedTraceAction: "set",
+    },
+    {
       id: "wheel.clamped",
       initial: reviewingState(),
       event: {

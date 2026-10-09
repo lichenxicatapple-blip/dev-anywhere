@@ -868,6 +868,204 @@ describe("attachPtyScrollController", () => {
     expect(host.style.top).toBe("180px");
   });
 
+  describe("browser-owned wheel scrolling", () => {
+    function setupNativeWheel() {
+      const { container, spacer, host } = createDom();
+      defineSize(container, { clientHeight: 649, clientWidth: 930 });
+      container.style.paddingTop = "8px";
+      container.style.paddingBottom = "57px";
+      defineSize(host.querySelector<HTMLElement>(".xterm-screen")!, {
+        clientHeight: 2340,
+        clientWidth: 2000,
+      });
+      defineScrollHeight(container, 21645);
+      const fixture = createTerminal({ 1078: "tail" });
+      fixture.terminal.rows = 117;
+      fixture.terminal.cols = 250;
+      fixture.terminal.buffer.active.length = 1079;
+      fixture.terminal.buffer.active.cursorY = 114;
+      const controller = attachPtyScrollController({
+        container,
+        spacer,
+        host,
+        term: fixture.terminal,
+        hasNewFrame: () => false,
+        consumeNewFrame: vi.fn(),
+        hasNewFramesWhileAway: () => false,
+        setNewFramesWhileAway: vi.fn(),
+      });
+      return { container, host, controller, ...fixture };
+    }
+
+    it.each([false, true])(
+      "leaves pixel movement to the browser when cancellation fails (cancelable=%s)",
+      (cancelable) => {
+        const { container, controller, terminal } = setupNativeWheel();
+        const bottom = container.scrollTop;
+        terminal.scrollToLine.mockClear();
+        const event = new WheelEvent("wheel", { deltaY: -40, cancelable });
+        if (cancelable) vi.spyOn(event, "preventDefault").mockImplementation(() => {});
+        container.dispatchEvent(event);
+
+        expect(event.defaultPrevented).toBe(false);
+        expect(container.scrollTop).toBe(bottom);
+        expect(terminal.scrollToLine).not.toHaveBeenCalled();
+        expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+
+        container.scrollTop = bottom - 40;
+        container.dispatchEvent(new Event("scroll"));
+        expect(container.scrollTop).toBe(bottom - 40);
+        expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+        controller.dispose();
+      },
+    );
+
+    it.each(["render", "relayout", "term-scroll"] as const)(
+      "preserves native movement delivered before the scroll event during %s",
+      async (site) => {
+        const { container, controller, emitRender, emitScroll } = setupNativeWheel();
+        const bottom = container.scrollTop;
+        container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: false }));
+        container.scrollTop = bottom - 200;
+        container.dispatchEvent(new Event("scroll"));
+
+        container.dispatchEvent(new WheelEvent("wheel", { deltaY: 37, cancelable: false }));
+        container.scrollTop = bottom - 146;
+        if (site === "render") emitRender();
+        else if (site === "relayout") controller.relayout();
+        else {
+          emitScroll();
+          await flushNextAnimationFrame();
+        }
+        expect(container.scrollTop).toBe(bottom - 146);
+        container.dispatchEvent(new Event("scroll"));
+        expect(container.scrollTop).toBe(bottom - 146);
+        expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+        controller.dispose();
+      },
+    );
+
+    it("preserves later native inertia frames after the first scroll notification", () => {
+      const { container, controller, emitRender } = setupNativeWheel();
+      const bottom = container.scrollTop;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -400, cancelable: false }));
+      container.scrollTop = bottom - 300;
+      container.dispatchEvent(new Event("scroll"));
+      // One native wheel can land across several compositor frames. No new wheel is required.
+      for (const offset of [350, 380, 400]) {
+        container.scrollTop = bottom - offset;
+        emitRender();
+        expect(container.scrollTop).toBe(bottom - offset);
+        container.dispatchEvent(new Event("scroll"));
+      }
+      container.dispatchEvent(new Event("scrollend"));
+      // Once the native gesture is over, an unrelated DOM replay must still respect the marker.
+      container.scrollTop = bottom - 450;
+      emitRender();
+      expect(container.scrollTop).toBe(bottom - 400);
+      controller.dispose();
+    });
+
+    it("ignores queued old scroll notifications before the first native landing", () => {
+      const { container, controller, emitRender } = setupNativeWheel();
+      const bottom = container.scrollTop;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -40, cancelable: false }));
+      container.dispatchEvent(new Event("scroll"));
+      container.dispatchEvent(new Event("scrollend"));
+      container.scrollTop = bottom - 40;
+      emitRender();
+      expect(container.scrollTop).toBe(bottom - 40);
+      container.dispatchEvent(new Event("scroll"));
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      controller.dispose();
+    });
+
+    it("keeps the reviewed row when font resize clamps an outstanding native wheel", () => {
+      const { container, host, controller } = setupNativeWheel();
+      const bottom = container.scrollTop;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: false }));
+      container.scrollTop = bottom - 200;
+      container.dispatchEvent(new Event("scroll"));
+      const reviewedRow = container.scrollTop / 20;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: 37, cancelable: false }));
+
+      defineSize(host.querySelector<HTMLElement>(".xterm-screen")!, { clientHeight: 117 * 18 });
+      defineScrollHeight(container, 19487);
+      container.scrollTop = 19487 - container.clientHeight;
+      controller.relayout();
+
+      expect(container.scrollTop).toBeCloseTo(reviewedRow * 18, 5);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      controller.dispose();
+    });
+
+    it("does not mistake a later resize for native downward movement to the bottom", () => {
+      const { container, controller } = setupNativeWheel();
+      const bottom = container.scrollTop;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: false }));
+      container.scrollTop = bottom - 200;
+      container.dispatchEvent(new Event("scroll"));
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: 54, cancelable: false }));
+      container.scrollTop = bottom - 146;
+      container.dispatchEvent(new Event("scroll"));
+
+      defineSize(container, { clientHeight: 649 + 146 });
+      container.dispatchEvent(new Event("scroll"));
+      controller.relayout();
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      controller.dispose();
+    });
+
+    it("combines pending native movement with a scrollback trim exactly once", () => {
+      const { container, controller, emitRender, markers } = setupNativeWheel();
+      const bottom = container.scrollTop;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: false }));
+      container.scrollTop = bottom - 200;
+      container.dispatchEvent(new Event("scroll"));
+      const reviewedTop = container.scrollTop;
+      const marker = markers.at(-1)!;
+
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: 37, cancelable: false }));
+      container.scrollTop = reviewedTop + 37;
+      marker.line -= 10;
+      emitRender();
+      expect(container.scrollTop).toBeCloseTo(reviewedTop + 37 - 10 * 20, 5);
+      container.dispatchEvent(new Event("scroll"));
+      emitRender();
+      expect(container.scrollTop).toBeCloseTo(reviewedTop + 37 - 10 * 20, 5);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      container.dispatchEvent(new Event("scrollend"));
+      const settledTop = container.scrollTop;
+      container.scrollTop += 40;
+      emitRender();
+      expect(container.scrollTop).toBeCloseTo(settledTop, 5);
+      controller.dispose();
+    });
+
+    it("resumes following only when native scrolling actually reaches the live bottom", () => {
+      const { container, controller, emitRender } = setupNativeWheel();
+      const bottom = container.scrollTop;
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: -200, cancelable: false }));
+      container.scrollTop = bottom - 200;
+      container.dispatchEvent(new Event("scroll"));
+
+      container.dispatchEvent(new WheelEvent("wheel", { deltaY: 300, cancelable: false }));
+      expect(container.scrollTop).toBe(bottom - 200);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      emitRender();
+      expect(container.scrollTop).toBe(bottom - 200);
+
+      container.scrollTop = bottom - 90;
+      container.dispatchEvent(new Event("scroll"));
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("reviewing");
+      container.scrollTop = bottom;
+      container.dispatchEvent(new Event("scroll"));
+      expect(container.scrollTop).toBe(bottom);
+      expect(controller.getDebugProbe().verticalIntentMode).toBe("following");
+      controller.dispose();
+    });
+  });
+
   it("keeps the short-host vertical origin when review begins", () => {
     const { container, spacer, host } = createDom();
     defineSize(container, { clientHeight: 550 });
