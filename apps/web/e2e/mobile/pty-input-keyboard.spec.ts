@@ -676,6 +676,46 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       );
       const gesture = await swipeDownPtyToDismissSoftKeyboard(emuPage);
       await waitForPtyKeyboardGeometryToSettle(emuPage, sessionId);
+      const dismissed = await readClosedPtyLiveTailGeometry(emuPage, sessionId);
+      expect(dismissed?.keyboardOffset).toBe(0);
+      expect(dismissed?.verticalIntentMode).toBe("reviewing");
+      expect(dismissed?.verticalIntentSource).toBe("touch");
+      expect(dismissed?.compositeBlankAbove ?? Infinity).toBeLessThanOrEqual(1);
+      expect(dismissed?.compositeBlankBelow ?? Infinity).toBeLessThanOrEqual(1);
+      expect(dismissed?.compositeTopOrSeamGap ?? Infinity).toBeLessThanOrEqual(1);
+      expect(dismissed?.compositeFrameIdentityDriftRows ?? Infinity).toBeLessThanOrEqual(0.05);
+      expect(dismissed?.backfillPresent).toBe(true);
+      expect(dismissed?.legacyReviewSnapshotPresent).toBe(false);
+      expect(dismissed?.pendingContainerSyncRetry).toBe(false);
+
+      // Chrome may pan visualViewport while the IME is open, or resize the content area.
+      // Closing either keeps review intent, but a shallow dismiss gesture can land near
+      // the newly expanded bottom. Explicitly pan into history before asserting that no
+      // live output row is visible; do not rely on keyboard geometry or fling inertia.
+      const terminalBox = await emuPage.locator('[data-slot="pty-terminal"]').boundingBox();
+      if (!terminalBox) throw new Error("PTY is not visible after keyboard dismissal");
+      const client = await emuPage.context().newCDPSession(emuPage);
+      const x = terminalBox.x + terminalBox.width / 2;
+      const startY = terminalBox.y + terminalBox.height * 0.4;
+      const distance = terminalBox.height * 0.25;
+      try {
+        await client.send("Input.dispatchTouchEvent", {
+          type: "touchStart",
+          touchPoints: [{ x, y: startY, id: 1 }],
+        });
+        for (let step = 1; step <= 6; step += 1) {
+          await emuPage.waitForTimeout(40);
+          await client.send("Input.dispatchTouchEvent", {
+            type: "touchMove",
+            touchPoints: [{ x, y: startY + (distance * step) / 6, id: 1 }],
+          });
+        }
+        await emuPage.waitForTimeout(80);
+        await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+      } finally {
+        await client.detach();
+      }
+      await waitForPtyKeyboardGeometryToSettle(emuPage, sessionId);
       const closed = await readClosedPtyLiveTailGeometry(emuPage, sessionId);
       const legacyReviewSnapshot = emuPage.locator('[data-slot="pty-review-snapshot"]');
       await expect(legacyReviewSnapshot).toHaveCount(0);
@@ -704,7 +744,7 @@ test.describe("L4 mobile / PTY input + soft keyboard discipline", () => {
       await testInfo.attach("pty-downward-keyboard-dismiss.json", {
         body: Buffer.from(
           JSON.stringify(
-            { gesture, opened, closed, afterOutput, returned, gestureTrace, trace },
+            { gesture, opened, dismissed, closed, afterOutput, returned, gestureTrace, trace },
             null,
             2,
           ),
