@@ -135,10 +135,7 @@ async function findCodexSessionFile(codexSessionId: string): Promise<string | nu
   return null;
 }
 
-async function findSessionFile(
-  sessionId: string,
-  provider?: ProviderId,
-): Promise<string | null> {
+async function findSessionFile(sessionId: string, provider?: ProviderId): Promise<string | null> {
   // Cursor ACP transcripts are SQLite blobs, not JSONL. Readers branch before findSessionFile.
   if (provider === "cursor") return null;
   if (provider === "claude") return findClaudeSessionFile(sessionId);
@@ -705,7 +702,13 @@ function extractClaudeContentItems(
   return items;
 }
 
-function unwrapCursorUserText(text: string): string | null {
+/** Ask / Plan 模式会在用户输入前拼上 <system_reminder> 提示，这不是用户写的内容。 */
+function stripCursorSystemReminders(text: string): string {
+  return text.replace(/<system_reminder>[\s\S]*?<\/system_reminder>/gi, "");
+}
+
+function unwrapCursorUserText(rawText: string): string | null {
+  const text = stripCursorSystemReminders(rawText);
   const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
   if (query?.[1] !== undefined) {
     const unwrapped = query[1].trim();
@@ -718,7 +721,7 @@ function unwrapCursorUserText(text: string): string | null {
   ) {
     return null;
   }
-  return text.trim() ? text : null;
+  return text.trim() ? text.trim() : null;
 }
 
 function unwrapCursorUserContent(content: unknown): unknown {

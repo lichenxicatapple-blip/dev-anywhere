@@ -182,7 +182,9 @@ function conversationRecordIdentity(record: unknown): string | null {
   return parsed && typeof parsed.id === "string" && parsed.id.length > 0 ? parsed.id : null;
 }
 
-function cursorUserTextHasConversation(text: string): boolean {
+function cursorUserTextHasConversation(rawText: string): boolean {
+  // Ask / Plan 模式拼在用户输入前的 <system_reminder> 不算对话内容。
+  const text = rawText.replace(/<system_reminder>[\s\S]*?<\/system_reminder>/gi, "");
   if (/<user_query>\s*\S[\s\S]*?<\/user_query>/i.test(text)) return true;
   const trimmed = text.trim();
   if (!trimmed) return false;
