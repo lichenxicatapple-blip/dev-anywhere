@@ -72,7 +72,9 @@ jobs:
     name: Browser smoke
     # Keep the hosted browser image reproducible across release runs.
     runs-on: ubuntu-22.04
-    timeout-minutes: 15
+    # Installation, layout and the full serial desktop suite share this budget.
+    # Keep per-test timeouts unchanged while allowing the entire suite to finish.
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
 
