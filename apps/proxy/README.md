@@ -12,7 +12,7 @@ This installs the `dev-anywhere` command globally.
 
 Supported development machines: macOS, Linux, and native Windows 11. WSL is not required on Windows.
 
-Requires Node.js >= 20 and at least one supported local AI coding CLI installed locally: Claude Code, Codex, Kimi Code, or Cursor CLI.
+Requires Node.js >= 22.22.2 and at least one supported local AI coding CLI installed locally: Claude Code, Codex, Kimi Code, or Cursor CLI.
 
 ## Quick start
 

@@ -25,28 +25,35 @@ interface CursorStore {
   close(): void;
 }
 
-type DatabaseSyncCtor = new (
-  path: string,
-  options?: { readOnly?: boolean },
-) => CursorStore;
+type DatabaseSyncCtor = new (path: string, options?: { readOnly?: boolean }) => CursorStore;
 
-let cachedDatabaseSync: DatabaseSyncCtor | null | undefined;
-
-function loadDatabaseSync(): DatabaseSyncCtor | null {
-  if (cachedDatabaseSync !== undefined) return cachedDatabaseSync;
-  try {
-    const sqlite = require("node:sqlite") as { DatabaseSync?: DatabaseSyncCtor };
-    cachedDatabaseSync = typeof sqlite.DatabaseSync === "function" ? sqlite.DatabaseSync : null;
-  } catch {
-    cachedDatabaseSync = null;
+/** Cursor 历史依赖 Node 内置的 `node:sqlite`（Node 22.13 起默认可用）。 */
+export class CursorHistoryUnavailableError extends Error {
+  constructor(cause?: unknown) {
+    super(
+      `当前 Node.js ${process.version} 不支持读取 Cursor 历史（需要内置的 node:sqlite，请升级到 Node.js 22.22.2 或更高版本）`,
+      cause === undefined ? undefined : { cause },
+    );
+    this.name = "CursorHistoryUnavailableError";
   }
+}
+
+let cachedDatabaseSync: DatabaseSyncCtor | undefined;
+
+function loadDatabaseSync(): DatabaseSyncCtor {
+  if (cachedDatabaseSync) return cachedDatabaseSync;
+  let sqlite: { DatabaseSync?: DatabaseSyncCtor };
+  try {
+    sqlite = require("node:sqlite") as { DatabaseSync?: DatabaseSyncCtor };
+  } catch (error) {
+    throw new CursorHistoryUnavailableError(error);
+  }
+  if (typeof sqlite.DatabaseSync !== "function") throw new CursorHistoryUnavailableError();
+  cachedDatabaseSync = sqlite.DatabaseSync;
   return cachedDatabaseSync;
 }
 
-function readProtoVarint(
-  root: Uint8Array,
-  offset: number,
-): { value: number; next: number } | null {
+function readProtoVarint(root: Uint8Array, offset: number): { value: number; next: number } | null {
   let value = 0;
   let shift = 0;
   let index = offset;
@@ -132,8 +139,8 @@ function decodeStoreMeta(value: unknown): Record<string, unknown> | null {
 }
 
 function openCursorStore(storePath: string): CursorStore | null {
+  // 缺少 node:sqlite 时直接抛错，不能当作“没有历史”。
   const DatabaseSync = loadDatabaseSync();
-  if (!DatabaseSync) return null;
   try {
     return new DatabaseSync(storePath, { readOnly: true });
   } catch {
@@ -316,7 +323,9 @@ export async function scanCursorHistory(root: string): Promise<NativeHistorySess
         hasConversation: true,
         ...(title !== undefined ? { title } : {}),
       });
-    } catch {
+    } catch (error) {
+      // 环境不支持（缺 node:sqlite）要上报，不能把所有会话都当作“没有历史”。
+      if (error instanceof CursorHistoryUnavailableError) throw error;
       // One malformed ACP session must not hide the remaining native sessions.
     }
   }

@@ -24,7 +24,7 @@
   },
   "type": "module",
   "engines": {
-    "node": ">=20.3.0"
+    "node": ">=22.22.2"
   },
   "files": [
     "dist",

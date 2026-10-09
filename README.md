@@ -14,7 +14,7 @@
   <p>
     <a href="https://www.npmjs.com/package/@dev-anywhere/proxy"><img src="https://img.shields.io/npm/v/@dev-anywhere/proxy?label=npm" alt="npm 版本"></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT 许可证"></a>
-    <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node.js 20 或更高版本">
+    <img src="https://img.shields.io/badge/node-%3E%3D22.22.2-339933" alt="Node.js 22.22.2 或更高版本">
   </p>
 </div>
 
@@ -40,7 +40,7 @@ DEV Anywhere 直接围绕远程 coding agent 工作流设计。除了查看 codi
 
 开发机支持 macOS、Linux 和原生 Windows 11；Windows 无需安装 WSL。
 
-在开发机上安装 [Node.js 20 或更高版本](https://nodejs.org/zh-cn/download)，npm 会随 Node.js 一起安装。可以用以下命令确认环境：
+在开发机上安装 [Node.js 22.22.2 或更高版本](https://nodejs.org/zh-cn/download)，npm 会随 Node.js 一起安装。可以用以下命令确认环境：
 
 ```bash
 node --version
@@ -61,10 +61,10 @@ npm install -g @dev-anywhere/proxy
 
 DEV Anywhere 提供两种部署方式：
 
-| 方式                              | 适合场景           | 需要准备                   |
-| --------------------------------- | ------------------ | -------------------------- |
-| Quick Tunnel                      | 首次体验、临时使用 | Node.js 20+、`cloudflared` |
-| [VPS Relay](./docs/DEPLOYMENT.md) | 长期使用、稳定访问 | 有公网 IP 的 Linux VPS     |
+| 方式                              | 适合场景           | 需要准备                        |
+| --------------------------------- | ------------------ | ------------------------------- |
+| Quick Tunnel                      | 首次体验、临时使用 | Node.js 22.22.2+、`cloudflared` |
+| [VPS Relay](./docs/DEPLOYMENT.md) | 长期使用、稳定访问 | 有公网 IP 的 Linux VPS          |
 
 #### 方式一：Quick Tunnel（体验）
 

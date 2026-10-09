@@ -6,7 +6,7 @@
 
 需要：
 
-- Node.js 20.3 或更高版本；发布验证和 CI 使用 Node.js 22.22.2；
+- Node.js 22.22.2 或更高版本（Cursor 历史依赖内置的 `node:sqlite`），与发布验证和 CI 一致；
 - pnpm 9，与 CI 保持一致；
 - macOS、Linux 或原生 Windows 11；
 - 可选：已经登录的 Claude Code、Codex、Kimi Code、Cursor CLI，用于验证真实 coding agent 链路；
@@ -107,7 +107,7 @@ pnpm --filter @dev-anywhere/proxy run dev -- \
   cursor
 ```
 
-Cursor CLI 同样接入 PTY 终端与 ACP 聊天链路。ACP 聊天测试应覆盖流式输出、工具调用与审批、提问、计划批准、取消当前回合，以及用 native session id 恢复（`session/load` 失败时应新建会话并提示）。
+Cursor CLI 同样接入 PTY 终端与 ACP 聊天链路。ACP 聊天测试应覆盖流式输出、工具调用与审批、提问、计划批准、取消当前回合，以及用 native session id 恢复（`session/load` 失败时应如实报错，不自动新建会话）。
 
 测试 coding agent 创建流程时，不要让它修改当前仓库。可以在 Web 中选择临时目录，或者为终端命令指定一次性工作目录：
 

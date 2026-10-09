@@ -14,7 +14,7 @@
   <p>
     <a href="https://www.npmjs.com/package/@dev-anywhere/proxy"><img src="https://img.shields.io/npm/v/@dev-anywhere/proxy?label=npm" alt="npm version"></a>
     <a href="./LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="MIT license"></a>
-    <img src="https://img.shields.io/badge/node-%3E%3D20-339933" alt="Node.js 20 or later">
+    <img src="https://img.shields.io/badge/node-%3E%3D22.22.2-339933" alt="Node.js 22.22.2 or later">
   </p>
 </div>
 
@@ -40,7 +40,7 @@ DEV Anywhere is designed around remote coding agent workflows. In addition to re
 
 Development machines can run macOS, Linux, or native Windows 11. WSL is not required on Windows.
 
-Install [Node.js 20 or later](https://nodejs.org/en/download) on the development machine. npm is included with Node.js. Verify the environment with:
+Install [Node.js 22.22.2 or later](https://nodejs.org/en/download) on the development machine. npm is included with Node.js. Verify the environment with:
 
 ```bash
 node --version
@@ -63,7 +63,7 @@ DEV Anywhere supports two ways to connect. A VPS (virtual private server) is a c
 
 | Option                            | Best for                     | Requirements                       |
 | --------------------------------- | ---------------------------- | ---------------------------------- |
-| Quick Tunnel                      | Evaluation and temporary use | Node.js 20+, `cloudflared`         |
+| Quick Tunnel                      | Evaluation and temporary use | Node.js 22.22.2+, `cloudflared`    |
 | [VPS Relay](./docs/DEPLOYMENT.md) | Long-term, stable access     | Linux VPS with a public IP address |
 
 #### Option 1: Quick Tunnel for evaluation

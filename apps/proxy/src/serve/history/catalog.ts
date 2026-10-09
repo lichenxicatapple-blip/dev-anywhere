@@ -2,7 +2,7 @@ import { tmpdir } from "node:os";
 import { isAbsolute, resolve, sep } from "node:path";
 import { scanClaudeHistory } from "./claude.js";
 import { scanCodexHistory } from "./codex.js";
-import { scanCursorHistory } from "./cursor.js";
+import { CursorHistoryUnavailableError, scanCursorHistory } from "./cursor.js";
 import { scanKimiHistory } from "./kimi.js";
 import {
   claudeProjectsDir,
@@ -17,6 +17,7 @@ import {
   type NativeHistorySession,
   type SessionHistoryEntry,
 } from "./types.js";
+import { serviceLogger } from "../../common/logger.js";
 import {
   applySessionHistoryMetadata,
   readSessionHistoryMetadata,
@@ -73,7 +74,12 @@ export async function scanSessionHistory(
     scanClaudeHistory(claudeProjectsDir()),
     scanCodexHistory(codexSessionsDir()),
     scanKimiHistory(kimiSessionsDir()),
-    scanCursorHistory(cursorAcpSessionsDir()),
+    scanCursorHistory(cursorAcpSessionsDir()).catch((error: unknown) => {
+      // 不支持 Cursor 历史的环境只影响 Cursor，不能拖垮其他 Agent 的历史列表。
+      if (!(error instanceof CursorHistoryUnavailableError)) throw error;
+      serviceLogger.warn({ error: error.message }, "Cursor history is unavailable");
+      return [];
+    }),
   ]);
   return applySessionHistoryMetadata(
     buildHistoryCatalog(records.flat()),

@@ -10,7 +10,7 @@ npm install -g @dev-anywhere/relay
 
 This installs the `dev-anywhere-relay` command globally.
 
-Requires Node.js >= 20.
+Requires Node.js >= 22.22.2.
 
 ## Quick start
 
