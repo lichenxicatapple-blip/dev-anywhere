@@ -4,6 +4,7 @@
 （解释 TCP 三次握手；读取临时目录里的 `hello.txt`，触发一次 `Read` 工具调用）。
 
 脱敏处理：
+
 - system 提示词和包含本机环境、技能列表的 user_info blob 被替换为占位文本；
 - `meta` 里的 `blobEncryptionKey` 被清零；
 - `meta.json` 的 `cwd` 改成 `/workspace/cursor-sample`（历史目录会过滤临时目录下的会话，原值是 `/tmp/...`；tool 结果里仍保留原始的 `/tmp` 路径）；
