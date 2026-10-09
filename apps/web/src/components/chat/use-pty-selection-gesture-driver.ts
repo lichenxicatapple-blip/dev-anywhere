@@ -5,7 +5,7 @@ import type {
   TouchEvent as ReactTouchEvent,
 } from "react";
 import type { Terminal } from "@xterm/xterm";
-import { getEdgeAutoscrollDelta } from "@/lib/pty-edge-autoscroll";
+import { createEdgeAutoscrollStepper, getEdgeAutoscrollDelta } from "@/lib/pty-edge-autoscroll";
 import {
   usePtyTouchGesture,
   type PtyTouchGestureFinishKind,
@@ -92,6 +92,7 @@ export function usePtySelectionGestureDriver({
   onHandleDragCancel,
 }: UsePtySelectionGestureDriverOptions): UsePtySelectionGestureDriverResult {
   const autoscrollFrameRef = useRef<number | null>(null);
+  const autoscrollStepperRef = useRef(createEdgeAutoscrollStepper());
   const autoscrollPointRef = useRef<PtySelectionClientPoint | null>(null);
   const autoscrollApplyRef = useRef<((point: PtySelectionClientPoint) => void) | null>(null);
   const verticalScrollIntentMarkedRef = useRef(false);
@@ -100,6 +101,7 @@ export function usePtySelectionGestureDriver({
   const handleDragCancelRef = useRef<(() => void) | null>(null);
 
   const stopPtySelectionAutoscroll = useCallback((): void => {
+    autoscrollStepperRef.current.reset();
     autoscrollPointRef.current = null;
     autoscrollApplyRef.current = null;
     verticalScrollIntentMarkedRef.current = false;
@@ -116,53 +118,60 @@ export function usePtySelectionGestureDriver({
     stopPtySelectionAutoscroll();
   }, [stopPtySelectionAutoscroll]);
 
-  const runPtySelectionAutoscroll = useCallback((): void => {
-    autoscrollFrameRef.current = null;
-    const point = autoscrollPointRef.current;
-    if (!point || !containerEl || !isSelectionActive()) return;
-
-    const rect = containerEl.getBoundingClientRect();
-    const { dx, dy } = getEdgeAutoscrollDelta({
-      pointerX: point.clientX,
-      pointerY: point.clientY,
-      rect,
-      scrollLeft: containerEl.scrollLeft,
-      scrollTop: containerEl.scrollTop,
-      scrollWidth: containerEl.scrollWidth,
-      scrollHeight: containerEl.scrollHeight,
-      clientWidth: containerEl.clientWidth,
-      clientHeight: containerEl.clientHeight,
-      edgePx: 44,
-      maxSpeedPx: 18,
-    });
-
-    if (dx !== 0) {
-      onHorizontalScrollIntent?.(`selectionGestureAutoscroll dx=${Math.round(dx)}`);
-      containerEl.scrollLeft += dx;
-    }
-    if (dy !== 0) {
-      if (!verticalScrollIntentMarkedRef.current) {
-        onVerticalScrollIntent?.(`selectionGestureAutoscroll dy=${Math.round(dy)}`);
-        verticalScrollIntentMarkedRef.current = true;
+  const runPtySelectionAutoscroll = useCallback(
+    (time: number): void => {
+      autoscrollFrameRef.current = null;
+      const point = autoscrollPointRef.current;
+      if (!point || !containerEl || !isSelectionActive()) {
+        autoscrollStepperRef.current.reset();
+        return;
       }
-      containerEl.scrollTop += dy;
-    }
-    if (dx !== 0 || dy !== 0) {
-      onSelectionAutoscroll?.({
+
+      const rect = containerEl.getBoundingClientRect();
+      const delta = getEdgeAutoscrollDelta({
+        pointerX: point.clientX,
+        pointerY: point.clientY,
+        rect,
         scrollLeft: containerEl.scrollLeft,
         scrollTop: containerEl.scrollTop,
+        scrollWidth: containerEl.scrollWidth,
+        scrollHeight: containerEl.scrollHeight,
+        clientWidth: containerEl.clientWidth,
+        clientHeight: containerEl.clientHeight,
+        edgePx: 44,
+        maxSpeedPx: 18,
       });
-      autoscrollApplyRef.current?.(point);
-    }
+      const { dx, dy } = autoscrollStepperRef.current.step(delta, time);
 
-    autoscrollFrameRef.current = requestAnimationFrame(runPtySelectionAutoscroll);
-  }, [
-    containerEl,
-    isSelectionActive,
-    onHorizontalScrollIntent,
-    onSelectionAutoscroll,
-    onVerticalScrollIntent,
-  ]);
+      if (dx !== 0) {
+        onHorizontalScrollIntent?.(`selectionGestureAutoscroll dx=${Math.round(dx)}`);
+        containerEl.scrollLeft += dx;
+      }
+      if (dy !== 0) {
+        if (!verticalScrollIntentMarkedRef.current) {
+          onVerticalScrollIntent?.(`selectionGestureAutoscroll dy=${Math.round(dy)}`);
+          verticalScrollIntentMarkedRef.current = true;
+        }
+        containerEl.scrollTop += dy;
+      }
+      if (dx !== 0 || dy !== 0) {
+        onSelectionAutoscroll?.({
+          scrollLeft: containerEl.scrollLeft,
+          scrollTop: containerEl.scrollTop,
+        });
+        autoscrollApplyRef.current?.(point);
+      }
+
+      autoscrollFrameRef.current = requestAnimationFrame(runPtySelectionAutoscroll);
+    },
+    [
+      containerEl,
+      isSelectionActive,
+      onHorizontalScrollIntent,
+      onSelectionAutoscroll,
+      onVerticalScrollIntent,
+    ],
+  );
 
   const updatePtySelectionAutoscroll = useCallback(
     (point: PtySelectionClientPoint, applyMove: (point: PtySelectionClientPoint) => void): void => {
