@@ -739,15 +739,18 @@ describe("ChatHeader PTY upload menu", () => {
   }
 
   it.each(["local-terminal", "proxy-hosted"] as const)(
-    "sends manual Codex question shortcuts while %s is working and Always yes is hidden",
+    "sends Codex shortcuts while %s is working and Always yes is hidden",
     async (ptyOwner) => {
       configureCodexQuestionSession(ptyOwner);
       render(<ChatHeader onFind={() => {}} sessionId="s1" mode="pty" />);
 
       for (const [name, data] of [
-        ["发送 Alt+↑", "\x1b[1;3A"],
-        ["发送 Alt+↓", "\x1b[1;3B"],
+        ["发送 Shift+←", "\x1b[1;2D"],
+        ["发送 Shift+→", "\x1b[1;2C"],
         ["发送 Ctrl+]", "\x1d"],
+        ["发送 Shift+↑", "\x1b[1;2A"],
+        ["发送 Shift+↓", "\x1b[1;2B"],
+        ["发送 Ctrl+/", "\x1b[47;5u"],
       ]) {
         sendRawSpy.mockClear();
         fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
@@ -767,7 +770,7 @@ describe("ChatHeader PTY upload menu", () => {
   );
 
   it.each(["claude", "kimi", "terminal", "codex-json"] as const)(
-    "does not offer Codex question shortcuts for %s sessions",
+    "does not offer Codex-specific shortcuts for %s sessions",
     async (kind) => {
       useSessionStore.setState({
         sessions: [
@@ -814,14 +817,21 @@ describe("ChatHeader PTY upload menu", () => {
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
       await screen.findByRole("menu");
       if (kind !== "codex-json") await openShortcutsMenu();
-      for (const name of ["发送 Alt+↑", "发送 Alt+↓", "发送 Ctrl+]"]) {
+      for (const name of [
+        "发送 Shift+←",
+        "发送 Shift+→",
+        "发送 Ctrl+]",
+        "发送 Shift+↑",
+        "发送 Shift+↓",
+        "发送 Ctrl+/",
+      ]) {
         expect(screen.queryByRole("menuitem", { name })).toBeNull();
       }
     },
   );
 
   it.each(["disconnected", "proxy-offline", "session-error"] as const)(
-    "does not send Codex question shortcuts when %s",
+    "does not send Codex-specific shortcuts when %s",
     async (status) => {
       configureCodexQuestionSession(
         "local-terminal",
@@ -833,7 +843,14 @@ describe("ChatHeader PTY upload menu", () => {
       fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
       await openShortcutsMenu();
 
-      for (const name of ["发送 Alt+↑", "发送 Alt+↓", "发送 Ctrl+]"]) {
+      for (const name of [
+        "发送 Shift+←",
+        "发送 Shift+→",
+        "发送 Ctrl+]",
+        "发送 Shift+↑",
+        "发送 Shift+↓",
+        "发送 Ctrl+/",
+      ]) {
         const item = screen.getByRole("menuitem", { name });
         expect(item).toHaveAttribute("aria-disabled", "true");
         fireEvent.click(item);

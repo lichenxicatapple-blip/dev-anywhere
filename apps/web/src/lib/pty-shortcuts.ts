@@ -40,7 +40,7 @@ interface PtyShortcutPreset {
 // Shortcut entries send raw keys. The separate "clear" action retains the agent's
 // whole-draft clear behavior and its protection against repeated cancel/exit input.
 // Defaults: https://code.claude.com/docs/en/interactive-mode
-// https://learn.chatgpt.com/docs/developer-commands?surface=cli (Codex 0.154.0 /keymap)
+// https://learn.chatgpt.com/docs/developer-commands?surface=cli (Codex 0.159.2 /keymap)
 // https://moonshotai.github.io/kimi-code/en/reference/keyboard.html
 const shiftTab = key("shift-tab", "Shift+Tab", "⇧⇥", "\x1b[Z");
 const ctrlD = key("ctrl-d", "Ctrl+D", "^D", "\x04");
@@ -51,9 +51,14 @@ const agentPresets: Record<SessionProvider, PtyShortcutPreset> = {
     menu: [
       ctrlT,
       ctrlR,
-      key("alt-up", "Alt+↑", "⌥↑", "\x1b[1;3A"),
-      key("alt-down", "Alt+↓", "⌥↓", "\x1b[1;3B"),
+      // Match Codex's question hints. Alt+Up/Down are aliases for these actions.
+      key("shift-left", "Shift+←", "⇧←", "\x1b[1;2D"),
+      key("shift-right", "Shift+→", "⇧→", "\x1b[1;2C"),
       key("ctrl-bracket", "Ctrl+]", "^]", "\x1d"),
+      key("shift-up", "Shift+↑", "⇧↑", "\x1b[1;2A"),
+      key("shift-down", "Shift+↓", "⇧↓", "\x1b[1;2B"),
+      // CSI-u distinguishes Ctrl+/ from the legacy 0x1f decoded as Ctrl+7 by Codex.
+      key("ctrl-slash", "Ctrl+/", "^/", "\x1b[47;5u"),
     ],
     mobile: [ctrlT, ctrlR, "clear", ctrlK],
   },

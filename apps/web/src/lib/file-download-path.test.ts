@@ -35,7 +35,7 @@ describe("file-download-path extraction", () => {
     ]);
   });
 
-  it("strips leading @ and trailing punctuation like image-preview-path", () => {
+  it("strips leading @ and trailing punctuation like media-preview-path", () => {
     expect(extractFileDownloadPaths("attached @/tmp/log.txt, see")).toEqual(["/tmp/log.txt"]);
     expect(extractFileDownloadPaths("read /var/data/notes.md.")).toEqual(["/var/data/notes.md"]);
   });
@@ -46,6 +46,14 @@ describe("file-download-path extraction", () => {
     expect(isFileDownloadPath("./pic.gif")).toBe(false);
     expect(isFileDownloadPath("./pic.webp")).toBe(false);
   });
+
+  it.each(["mp4", "webm", "mov", "m4v", "ogv"])(
+    "leaves %s videos exclusively to the media preview provider",
+    (extension) => {
+      expect(extractFileDownloadPaths(`./demo.${extension} ./notes.txt`)).toEqual(["./notes.txt"]);
+      expect(isFileDownloadPath(`demo.${extension}`, { allowBare: true })).toBe(false);
+    },
+  );
 
   it("rejects URLs", () => {
     expect(extractFileDownloadPaths("https://example.com/file.txt")).toEqual([]);
@@ -150,7 +158,7 @@ describe("file-download-path extraction", () => {
   });
 
   it("does not extend a match across non-ASCII text into a later @path token", () => {
-    // 跟 image-preview-path 同样的失误形态: 中文里夹 ASCII 单词触发 regex 起始,
+    // 跟 media-preview-path 同样的失误形态: 中文里夹 ASCII 单词触发 regex 起始,
     // greedy 主干吞过中文到尾部 .ext, 把整段中文框成 link。严格白名单字符集挡住中文。
     expect(
       extractFileDownloadPaths(

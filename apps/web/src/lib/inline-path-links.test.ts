@@ -2,6 +2,15 @@ import { describe, expect, it } from "vitest";
 import { findInlinePathLinks } from "./inline-path-links";
 
 describe("inline path link detection", () => {
+  it("classifies a video as a single preview action alongside images and files", () => {
+    const text = "demo.mp4 ./shot.png README.md";
+    expect(findInlinePathLinks(text)).toEqual([
+      { kind: "video", path: "demo.mp4", start: 0, end: 8 },
+      { kind: "image", path: "./shot.png", start: 9, end: 19 },
+      { kind: "file", path: "README.md", start: 20, end: 29 },
+    ]);
+  });
+
   it("classifies file and image paths in source order", () => {
     expect(findInlinePathLinks("see README.md and .dev-anywhere/clipboard/s1/shot.png")).toEqual([
       { kind: "file", path: "README.md", start: 4, end: 13 },

@@ -113,6 +113,10 @@ export class RelayInputHandlers {
     this.deps.remoteFileStreamManager.cancel(msg);
   }
 
+  onRemoteFileStreamAck(msg: ControlMessage<"remote_file_stream_ack">): void {
+    this.deps.remoteFileStreamManager.acknowledge(msg);
+  }
+
   onRemoteFileUploadStreamRequest(msg: ControlMessage<"remote_file_upload_stream_request">): void {
     this.deps.remoteFileUploadManager.start(msg);
   }

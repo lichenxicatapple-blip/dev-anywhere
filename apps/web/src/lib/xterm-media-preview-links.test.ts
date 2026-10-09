@@ -1,12 +1,12 @@
 import { describe, expect, it, vi } from "vitest";
 import {
-  findImagePreviewPathMatches,
-  registerImagePreviewLinkProvider,
-} from "./xterm-image-preview-links";
+  findMediaPreviewPathMatches,
+  registerMediaPreviewLinkProvider,
+} from "./xterm-media-preview-links";
 
-describe("xterm image preview links", () => {
+describe("xterm media preview links", () => {
   it("finds image path ranges with 1-based terminal columns", () => {
-    expect(findImagePreviewPathMatches("open @.dev-anywhere/clipboard/s1/shot.png now")).toEqual([
+    expect(findMediaPreviewPathMatches("open @.dev-anywhere/clipboard/s1/shot.png now")).toEqual([
       {
         path: ".dev-anywhere/clipboard/s1/shot.png",
         startColumn: 6,
@@ -17,7 +17,7 @@ describe("xterm image preview links", () => {
 
   it("uses terminal display columns when wide CJK characters precede the path", () => {
     expect(
-      findImagePreviewPathMatches("可测路径，应该能直接点击： .dev-anywhere/preview-demo.png。"),
+      findMediaPreviewPathMatches("可测路径，应该能直接点击： .dev-anywhere/preview-demo.png。"),
     ).toEqual([
       {
         path: ".dev-anywhere/preview-demo.png",
@@ -28,7 +28,7 @@ describe("xterm image preview links", () => {
   });
 
   it("keeps a leading @ inside the terminal link range after CJK text", () => {
-    expect(findImagePreviewPathMatches("截图：@.dev-anywhere/clipboard/s1/shot.png")).toEqual([
+    expect(findMediaPreviewPathMatches("截图：@.dev-anywhere/clipboard/s1/shot.png")).toEqual([
       {
         path: ".dev-anywhere/clipboard/s1/shot.png",
         startColumn: 7,
@@ -38,7 +38,7 @@ describe("xterm image preview links", () => {
   });
 
   it("keeps a leading home shortcut inside the terminal link range", () => {
-    expect(findImagePreviewPathMatches("open ~/MyApps/project/comparison.jpg")).toEqual([
+    expect(findMediaPreviewPathMatches("open ~/MyApps/project/comparison.jpg")).toEqual([
       {
         path: "~/MyApps/project/comparison.jpg",
         startColumn: 6,
@@ -47,14 +47,14 @@ describe("xterm image preview links", () => {
     ]);
   });
 
-  it("provides every segment of an image path wrapped at the terminal edge", () => {
+  it.each(["png", "mp4", "webm"])("provides every wrapped segment of a %s path", (extension) => {
     const providerRef: {
       current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
     } = {};
     const first = "/Users/catli/MyApps/dev-anywhere/docs/assets/readme-mobile-create.";
     const lines = [
       { isWrapped: false, text: first },
-      { isWrapped: true, text: "png" },
+      { isWrapped: true, text: extension },
     ];
     const term = {
       buffer: {
@@ -74,7 +74,7 @@ describe("xterm image preview links", () => {
         return { dispose: vi.fn() };
       }),
     };
-    registerImagePreviewLinkProvider(term as never, vi.fn());
+    registerMediaPreviewLinkProvider(term as never, vi.fn());
 
     providerRef.current?.provideLinks(1, (links) => {
       const arr = links as
@@ -84,7 +84,7 @@ describe("xterm image preview links", () => {
           }>
         | undefined;
       expect(arr).toHaveLength(1);
-      expect(arr?.[0]?.text).toBe(`${first}png`);
+      expect(arr?.[0]?.text).toBe(`${first}${extension}`);
       expect(arr?.[0]?.range).toEqual({
         start: { x: 1, y: 1 },
         end: { x: 66, y: 1 },
@@ -99,10 +99,10 @@ describe("xterm image preview links", () => {
           }>
         | undefined;
       expect(arr).toHaveLength(1);
-      expect(arr?.[0]?.text).toBe(`${first}png`);
+      expect(arr?.[0]?.text).toBe(`${first}${extension}`);
       expect(arr?.[0]?.range).toEqual({
         start: { x: 1, y: 2 },
-        end: { x: 3, y: 2 },
+        end: { x: extension.length, y: 2 },
       });
     });
   });
@@ -112,6 +112,7 @@ describe("xterm image preview links", () => {
     event: { metaKey?: boolean; ctrlKey?: boolean; pointerType?: string } & Partial<
       Pick<MouseEvent, "type">
     > = {},
+    path = "/tmp/shot.png",
   ): { text?: string } {
     const providerRef: {
       current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
@@ -120,7 +121,7 @@ describe("xterm image preview links", () => {
       buffer: {
         active: {
           getLine: () => ({
-            translateToString: () => "artifact /tmp/shot.png",
+            translateToString: () => `artifact ${path}`,
           }),
         },
       },
@@ -129,7 +130,7 @@ describe("xterm image preview links", () => {
         return { dispose: vi.fn() };
       }),
     };
-    registerImagePreviewLinkProvider(term as never, onPreview);
+    registerMediaPreviewLinkProvider(term as never, onPreview);
 
     const captured: { text?: string } = {};
     providerRef.current?.provideLinks(1, (links) => {
@@ -161,6 +162,17 @@ describe("xterm image preview links", () => {
     const onPreview = vi.fn();
     provideAndActivate(onPreview, {});
     expect(onPreview).not.toHaveBeenCalled();
+  });
+
+  it("opens a video with the same desktop and touch gates as images", () => {
+    const onPreview = vi.fn();
+    const path = "/tmp/demo.mp4";
+    provideAndActivate(onPreview, {}, path);
+    expect(onPreview).not.toHaveBeenCalled();
+    provideAndActivate(onPreview, { ctrlKey: true }, path);
+    expect(onPreview).toHaveBeenLastCalledWith(path);
+    provideAndActivate(onPreview, { pointerType: "touch" }, path);
+    expect(onPreview).toHaveBeenCalledTimes(2);
   });
 
   // 触屏设备 (pointer: coarse) 没修饰键, plain tap 即触发. 平板接外置键盘走修饰键

@@ -369,6 +369,7 @@ export function handleProxyConnection(
         ptySnapshotRoutes.clearProxy(proxyId);
         sessionHistoryRoutes.clearProxy(proxyId);
         webPreviewRoutes.clearProxy(proxyId);
+        remoteFileBridge?.disconnectProxy(proxyId);
       }
       logger.info({ proxyId, proxyVersion, status }, "Proxy registered");
 
@@ -411,6 +412,7 @@ export function handleProxyConnection(
         sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
         webPreviewRoutes.clearProxy(proxyWs.proxyId);
         devicePreviewBridge.clearProxy(proxyWs.proxyId);
+        remoteFileBridge?.disconnectProxy(proxyWs.proxyId);
         notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
         registry.unregisterProxy(proxyWs.proxyId);
         logger.info(
@@ -732,6 +734,7 @@ export function handleProxyConnection(
     sessionHistoryRoutes.clearProxy(proxyWs.proxyId);
     webPreviewRoutes.clearProxy(proxyWs.proxyId);
     devicePreviewBridge.clearProxy(proxyWs.proxyId);
+    remoteFileBridge?.disconnectProxy(proxyWs.proxyId);
     notifyClientsProxyOffline(proxyWs.proxyId, registry, logger, chaos);
     try {
       registry.transitionProxy(proxyWs.proxyId, "online", "offline");

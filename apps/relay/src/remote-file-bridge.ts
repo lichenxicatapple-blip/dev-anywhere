@@ -51,6 +51,8 @@ interface PendingHttpStream {
   metadataTimer: NodeJS.Timeout;
   headersSent: boolean;
   finished: boolean;
+  head: boolean;
+  flowControl: boolean;
 }
 
 interface RemoteFileUploadToken {
@@ -118,6 +120,12 @@ export class RemoteFileBridge {
   private readonly pendingUploads = new Map<string, PendingHttpUpload>();
 
   constructor(private readonly deps: RemoteFileBridgeDeps) {}
+
+  disconnectProxy(proxyId: string): void {
+    for (const [streamId, pending] of this.pendingStreams) {
+      if (pending.token.proxyId === proxyId) this.failStream(streamId, 502, "开发机连接已断开");
+    }
+  }
 
   revokeProxy(proxyId: string): void {
     let revokedTokens = 0;
@@ -272,6 +280,8 @@ export class RemoteFileBridge {
       metadataTimer,
       headersSent: false,
       finished: false,
+      head: req.method === "HEAD",
+      flowControl: false,
     };
     this.pendingStreams.set(streamId, pending);
 
@@ -291,6 +301,9 @@ export class RemoteFileBridge {
         sessionId: token.sessionId,
         path: token.path,
         disposition: token.disposition,
+        ...(req.method === "HEAD" ? { head: true } : {}),
+        ...(req.method !== "HEAD" && req.headers.range ? { range: req.headers.range } : {}),
+        flowControl: true,
       }),
     );
     this.deps.logger.info(
@@ -469,10 +482,13 @@ export class RemoteFileBridge {
       return true;
     }
 
-    const { url, expiresAt } = this.issueUrlToken(pending);
+    // New proxies resolve relative paths once, so later seeks keep reading the
+    // same file even if the session changes its working directory.
+    const path = msg.path ?? pending.path;
+    const { url, expiresAt } = this.issueUrlToken({ ...pending, path });
     pending.resolve({
       success: true,
-      path: pending.path,
+      path,
       url,
       expiresAt,
     });
@@ -494,7 +510,25 @@ export class RemoteFileBridge {
     }
     if (!pending.headersSent || pending.finished) return true;
 
-    pending.res.write(Buffer.from(decoded.data));
+    pending.res.write(Buffer.from(decoded.data), (error?: Error | null) => {
+      if (pending.finished) return;
+      if (error) {
+        this.failStream(pending.streamId, 502, "文件流传输失败");
+        return;
+      }
+      // Acknowledging only after the HTTP write completes bounds queued data
+      // across both WebSocket and HTTP, including a paused video consumer.
+      const proxyWs = this.deps.registry.getProxy(proxyId);
+      if (pending.flowControl && proxyWs?.readyState === WebSocket.OPEN) {
+        proxyWs.send(
+          serializeControl({
+            type: "remote_file_stream_ack",
+            streamId: pending.streamId,
+            chunkSeq: decoded.chunkSeq,
+          }),
+        );
+      }
+    });
     return true;
   }
 
@@ -503,6 +537,17 @@ export class RemoteFileBridge {
     msg: ControlMessage<"remote_file_stream_response">,
   ): void {
     clearTimeout(pending.metadataTimer);
+    if (msg.statusCode === 416) {
+      pending.finished = true;
+      this.pendingStreams.delete(pending.streamId);
+      pending.res.status(416);
+      pending.res.setHeader("Accept-Ranges", "bytes");
+      if (msg.contentRange) pending.res.setHeader("Content-Range", msg.contentRange);
+      pending.res.setHeader("Content-Length", "0");
+      pending.res.setHeader("Cache-Control", "no-store");
+      pending.res.end();
+      return;
+    }
     if (!msg.success) {
       this.failStream(
         pending.streamId,
@@ -514,7 +559,13 @@ export class RemoteFileBridge {
     }
 
     try {
-      pending.res.status(200);
+      // Older proxies ignore the optional Range request. Their full response
+      // must remain 200, never a fabricated partial response.
+      pending.res.status(msg.statusCode ?? 200);
+      if (msg.statusCode !== undefined) pending.res.setHeader("Accept-Ranges", "bytes");
+      if (msg.statusCode === 206 && msg.contentRange) {
+        pending.res.setHeader("Content-Range", msg.contentRange);
+      }
       pending.res.setHeader("Content-Type", msg.mimeType ?? "application/octet-stream");
       pending.res.setHeader("Cache-Control", "no-store");
       pending.res.setHeader("X-Content-Type-Options", "nosniff");
@@ -527,6 +578,14 @@ export class RemoteFileBridge {
       );
       pending.res.flushHeaders();
       pending.headersSent = true;
+      pending.flowControl = msg.flowControl === true;
+      if (pending.head) {
+        pending.finished = true;
+        this.pendingStreams.delete(pending.streamId);
+        pending.res.end();
+        // Legacy proxies do not understand head and would otherwise stream the file.
+        this.sendCancel(pending.token.proxyId, pending.streamId);
+      }
     } catch (error) {
       pending.headersSent = pending.res.headersSent;
       this.deps.logger.error(

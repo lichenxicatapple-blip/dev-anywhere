@@ -8,7 +8,7 @@ describe("resolvePtySelectionPathAction", () => {
       path: String.raw`C:\项目 文档\发布 说明.md`,
     });
     expect(resolvePtySelectionPathAction(String.raw`.\1.png`)).toEqual({
-      kind: "image-preview",
+      kind: "media-preview",
       path: String.raw`.\1.png`,
     });
     expect(resolvePtySelectionPathAction(String.raw`C:\项目\...\说明.md`)).toBeNull();
@@ -16,10 +16,17 @@ describe("resolvePtySelectionPathAction", () => {
 
   it("resolves a selected image path as preview action", () => {
     expect(resolvePtySelectionPathAction("b.jpg")).toEqual({
-      kind: "image-preview",
+      kind: "media-preview",
       path: "b.jpg",
     });
   });
+
+  it.each(["./demo.mp4", "~/Movies/demo.mov", String.raw`C:\录屏 文件\demo.webm`])(
+    "previews the selected video %s instead of downloading it",
+    (path) => {
+      expect(resolvePtySelectionPathAction(path)).toEqual({ kind: "media-preview", path });
+    },
+  );
 
   it("resolves a selected downloadable file path", () => {
     expect(resolvePtySelectionPathAction("@./build/out.tar.gz")).toEqual({
@@ -30,7 +37,7 @@ describe("resolvePtySelectionPathAction", () => {
 
   it("resolves selected paths containing spaces and Unicode", () => {
     expect(resolvePtySelectionPathAction("/Users/cat/项目 素材/最终 截图.png")).toEqual({
-      kind: "image-preview",
+      kind: "media-preview",
       path: "/Users/cat/项目 素材/最终 截图.png",
     });
     expect(resolvePtySelectionPathAction("docs/项目 文档/发布 说明.md")).toEqual({

@@ -186,6 +186,56 @@ export function attachPtyScrollController(
   // controller transaction。否则 bare-scroll 的 canonical follow 会接管并把 cursor-follow
   // 目标覆盖成 semantic bottom。这个 mark 只做来源归属,不保存第二份滚动位置真相。
   let pendingFollowCursorScrollTop: number | null = null;
+  // An uncancelled wheel belongs to the browser scroller, not our pixel integrator. Direction
+  // survives its scroll notifications so native inertia can finish at the semantic bottom.
+  // One wheel may produce several native positions, so ownership lasts through scrollend.
+  // Geometry changes revoke it separately: a resize clamp is not user movement.
+  let nativeWheelDirection = 0;
+  let nativeWheelScrollPending = false;
+  let nativeWheelLayout: {
+    cellH: number;
+    clientHeight: number;
+    paddingTop: number;
+    paddingBottom: number;
+    rows: number;
+    cols: number;
+    scrollHeight: number;
+  } | null = null;
+
+  const clearNativeWheel = (): void => {
+    nativeWheelDirection = 0;
+    nativeWheelScrollPending = false;
+    nativeWheelLayout = null;
+  };
+
+  const readNativeWheelLayout = (cellH = getDims().cellH) => ({
+    cellH,
+    clientHeight: container.clientHeight,
+    ...getVerticalInsets(),
+    rows: term.rows,
+    cols: term.cols,
+    scrollHeight: container.scrollHeight,
+  });
+
+  const invalidateNativeWheelOnLayoutChange = (): void => {
+    if (!nativeWheelLayout) return;
+    const current = readNativeWheelLayout();
+    // Missing metrics are transient; wait for measurement before interpreting a coordinate.
+    if (current.cellH <= 0) return;
+    if (
+      current.cellH !== nativeWheelLayout.cellH ||
+      current.clientHeight !== nativeWheelLayout.clientHeight ||
+      current.paddingTop !== nativeWheelLayout.paddingTop ||
+      current.paddingBottom !== nativeWheelLayout.paddingBottom ||
+      current.rows !== nativeWheelLayout.rows ||
+      current.cols !== nativeWheelLayout.cols ||
+      current.scrollHeight < nativeWheelLayout.scrollHeight
+    ) {
+      // A resize or shrinking range can clamp scrollTop without user movement. Preserve the
+      // existing marker/resize policy instead of consuming that clamp as pending wheel input.
+      clearNativeWheel();
+    }
+  };
   // 横向同样需要区分 "我们刚刚 followCursorX 改 scrollLeft" vs "用户主动横向滚",
   // 否则用户滚到光标视窗外 → onRender → followCursorX snap 回 → onContainerScroll
   // 误把这次改写当成用户滚动 → 状态错乱。
@@ -485,6 +535,7 @@ export function attachPtyScrollController(
     options: { includeDomDelta?: boolean } = {},
   ): void => {
     if (!userHasVerticalScrollIntent() || cellH <= 0) return;
+    invalidateNativeWheelOnLayoutChange();
     const buffer = term.buffer.active;
     if ((buffer as typeof buffer & { type?: "normal" | "alternate" }).type === "alternate") {
       clearLiveReviewAnchor();
@@ -507,7 +558,13 @@ export function attachPtyScrollController(
         markerDisposed ? anchor.lastLine + Math.min(0, rowIdentityDelta) : anchor.marker.line,
       ),
     );
-    const userDelta = options.includeDomDelta ? container.scrollTop - anchor.scrollTopAtCapture : 0;
+    const includeDomDelta = options.includeDomDelta ?? nativeWheelDirection !== 0;
+    const userDelta = includeDomDelta ? container.scrollTop - anchor.scrollTopAtCapture : 0;
+    if (nativeWheelDirection !== 0 && userDelta !== 0) {
+      // A same-frame trim below can update lastSeenScrollTop before the scroll notification.
+      // The native movement has still landed, so its eventual scrollend can release ownership.
+      nativeWheelScrollPending = false;
+    }
 
     const desiredScrollTop = Math.max(
       0,
@@ -532,7 +589,7 @@ export function attachPtyScrollController(
       lastSeenScrollTop = container.scrollTop;
     }
 
-    if (markerDisposed || options.includeDomDelta) {
+    if (markerDisposed || includeDomDelta) {
       // A compositor/user delta changes which logical row the marker must identify. Re-register
       // immediately at the corrected DOM coordinate so a second reconciliation in the same
       // event cannot apply that delta twice against the old marker.
@@ -590,6 +647,9 @@ export function attachPtyScrollController(
     const previousReviewing = isReviewing(verticalIntent);
     const result = reducePtyVerticalIntent(verticalIntent, event, { atBottomThreshold });
     verticalIntent = result.state;
+    if (!isReviewing(verticalIntent) || verticalIntent.source !== "wheel") {
+      clearNativeWheel();
+    }
 
     if (result.trace) {
       trace(`intent:${result.trace.action}`, {
@@ -851,6 +911,7 @@ export function attachPtyScrollController(
     const preserveReviewIntent =
       isSameTypeBoundary && nextType === "normal" && userHasVerticalScrollIntent();
     activeBufferType = nextType;
+    clearNativeWheel();
 
     // Every buffer-change event is a row-space identity boundary. In particular, xterm reuses the
     // public normal BufferApiView across RIS/Terminal.reset, so neither its old marker nor its old
@@ -904,6 +965,7 @@ export function attachPtyScrollController(
   };
 
   const preparePageResumeRestore = (): void => {
+    clearNativeWheel();
     pageResumeRestorePending = true;
     trace("page-resume:prepare");
   };
@@ -1008,6 +1070,22 @@ export function attachPtyScrollController(
     }
   };
 
+  const followNativeWheelAtBottom = (scrollTop: number): boolean => {
+    invalidateNativeWheelOnLayoutChange();
+    const bottom = getCurrentAnchor().bottomScrollTop;
+    if (
+      nativeWheelDirection <= 0 ||
+      !userHasVerticalScrollIntent() ||
+      Math.abs(scrollTop - bottom) > atBottomThreshold
+    ) {
+      return false;
+    }
+    // Unlike the cancelled-wheel path, a native delta is not a prediction of where the browser
+    // has landed. Resume only from its actual position, including a wheel at an existing boundary.
+    scrollToBottom("nativeWheelBottom", { force: true });
+    return true;
+  };
+
   const scrollToXRatio = (ratio: number): void => {
     if (!hasHorizontalOverflow()) {
       clearHorizontalIntentIfUnscrollable("scrollToXRatio");
@@ -1090,19 +1168,53 @@ export function attachPtyScrollController(
     return cachedLiveLastY;
   };
 
-  let lastInputScreen: { cursorY: number; liveLastY: number } | null = null;
+  let lastLiveScreen: { baseY: number; cursorY: number; liveLastY: number } | null = null;
   const readLiveScreen = (): { cursorY: number; liveLastY: number } => {
+    const baseY = term.buffer.active.baseY;
     if (cursorFollowTarget.canFollow()) {
-      lastInputScreen = { cursorY: term.buffer.active.cursorY, liveLastY: getCachedLiveLastY() };
+      lastLiveScreen = {
+        baseY,
+        cursorY: term.buffer.active.cursorY,
+        liveLastY: getCachedLiveLastY(),
+      };
+    } else if (!term.modes.synchronizedOutputMode) {
+      const liveLastY = getCachedLiveLastY();
+      const baseDelta = baseY - (lastLiveScreen?.baseY ?? baseY);
+      // A scroll-region redraw can move the live-screen origin forward and redraw a menu at a
+      // smaller relative row. Compare its buffer extent too: equal or later absolute content
+      // must not inherit the old screen-relative tail and create a second copy of that offset.
+      const rebasedContent =
+        lastLiveScreen !== null &&
+        liveLastY >= 0 &&
+        liveLastY < lastLiveScreen.liveLastY &&
+        baseDelta > 0 &&
+        liveLastY + baseDelta >= lastLiveScreen.liveLastY;
+      if (lastLiveScreen === null || liveLastY > lastLiveScreen.liveLastY || rebasedContent) {
+        // Static menus can keep the cursor hidden after painting their final frame. New content
+        // must extend the reachable screen even when no input cursor will be restored. Anchor
+        // that growth to its content tail, never to the hardware cursor's paint position: an old
+        // caret near the top would otherwise cap the range and clip menus taller than the phone.
+        lastLiveScreen = {
+          baseY,
+          cursorY: Math.max(
+            (lastLiveScreen?.cursorY ?? liveLastY) - (rebasedContent ? baseDelta : 0),
+            liveLastY,
+          ),
+          liveLastY,
+        };
+      } else {
+        // Unchanged live rows still follow genuine scrollback growth. Checkpoint the completed
+        // origin so a later partial clear cannot mistake that earlier growth for new content.
+        lastLiveScreen.baseY = baseY;
+      }
     }
-    // A TUI can finish painting before restoring its input cursor in a later packet. Both the
-    // spacer and the semantic bottom must keep using the last input frame in that interval:
-    // merely skipping followCursorY is too late once a smaller spacer has clamped native scroll.
+    // A split redraw can clear content before restoring the input cursor in a later packet.
+    // Retain both the last accepted range and any completed growth until that cursor returns;
+    // shrinking the spacer earlier would let the browser clamp scrollTop and cause flicker.
     // Keep screen-relative rows so genuine scrollback growth still advances the live frame.
-    // With no input frame yet, use the visible tail instead of treating a paint row as a caret.
-    const tail = lastInputScreen?.liveLastY ?? getCachedLiveLastY();
+    const tail = lastLiveScreen?.liveLastY ?? -1;
     return {
-      cursorY: Math.max(0, Math.min(term.rows - 1, lastInputScreen?.cursorY ?? tail)),
+      cursorY: Math.max(0, Math.min(term.rows - 1, lastLiveScreen?.cursorY ?? tail)),
       liveLastY: Math.min(term.rows - 1, tail),
     };
   };
@@ -1409,6 +1521,7 @@ export function attachPtyScrollController(
   const onContainerScroll = (): void => {
     trace("container-scroll");
     if (reconcileActiveBufferSwitch("containerScroll")) return;
+    invalidateNativeWheelOnLayoutChange();
     const horizontalResult = reducePtyHorizontalContainerScroll(horizontalState, {
       hasOverflow: hasHorizontalOverflow(),
       scrollLeft: container.scrollLeft,
@@ -1425,6 +1538,9 @@ export function attachPtyScrollController(
     const rawScrollTop = container.scrollTop;
     const previousSeenScrollTop = lastSeenScrollTop;
     const verticalDelta = rawScrollTop - lastSeenScrollTop;
+    // A previously queued scroll (or a horizontal-only scroll) can arrive before the native
+    // vertical movement. It must not consume the outstanding wheel's repaint protection.
+    if (verticalDelta !== 0) nativeWheelScrollPending = false;
     const effectiveScrollTop = clampCursorAwareBottomOverscroll(
       rawScrollTop,
       previousSeenScrollTop,
@@ -1506,6 +1622,7 @@ export function attachPtyScrollController(
       notifyScroll();
       return;
     }
+    if (followNativeWheelAtBottom(effectiveScrollTop)) return;
     if (
       userHasVerticalScrollIntent() &&
       isRecentTouchNativeScroll() &&
@@ -1542,7 +1659,9 @@ export function attachPtyScrollController(
       if (userHasVerticalScrollIntent() && verticalDelta !== 0) captureLiveReviewAnchor();
       return;
     }
-    syncContainerScroll({ deferHostUntilRender: isRecentTouchNativeScroll() });
+    syncContainerScroll({
+      deferHostUntilRender: isRecentTouchNativeScroll() || nativeWheelDirection !== 0,
+    });
   };
 
   const reconcileTermScroll = (): void => {
@@ -1866,9 +1985,44 @@ export function attachPtyScrollController(
       markHorizontalUserInput(`site=wheel deltaX=${event.deltaX}`);
     }
     if (event.deltaY === 0) return;
-    trace("wheel:enter");
     event.preventDefault();
     event.stopPropagation();
+    trace("wheel:enter", {
+      details: `deltaY=${event.deltaY} cancelable=${event.cancelable ? 1 : 0} prevented=${event.defaultPrevented ? 1 : 0}`,
+    });
+    if (!event.defaultPrevented) {
+      cancelPendingPageResumeRestore("native-wheel");
+      // The browser owns both axes of an uncancelled diagonal gesture. Record even its weaker
+      // horizontal component before a repaint can drag that native movement back to the cursor.
+      if (hasHorizontalOverflow() && event.deltaX !== 0) {
+        markHorizontalUserInput(`site=native-wheel deltaX=${event.deltaX}`);
+      }
+      nativeWheelScrollPending = false;
+      nativeWheelDirection = Math.sign(event.deltaY);
+      nativeWheelLayout = readNativeWheelLayout();
+      if (followNativeWheelAtBottom(container.scrollTop)) return;
+      const anchor = getCurrentAnchor();
+      const maxScrollTop = resolvePtyNativeScrollMax({
+        reviewing: userHasVerticalScrollIntent(),
+        referenceScrollTop: container.scrollTop,
+        bottomScrollTop: anchor.bottomScrollTop,
+        domMaxScrollTop: Math.max(0, container.scrollHeight - container.clientHeight),
+        atBottomThreshold,
+      });
+      if (
+        (event.deltaY < 0 && container.scrollTop > 0) ||
+        (event.deltaY > 0 && container.scrollTop < maxScrollTop)
+      ) {
+        nativeWheelScrollPending = true;
+        dispatchVerticalIntent({
+          type: "native-wheel",
+          deltaY: event.deltaY,
+          scrollTop: container.scrollTop,
+        });
+      }
+      return;
+    }
+    clearNativeWheel();
     scrollByWheelDelta(event.deltaY);
   };
 
@@ -1876,7 +2030,10 @@ export function attachPtyScrollController(
     container,
     term,
     onWheel,
-    onTouchStart: touchHandler.onTouchStart,
+    onTouchStart: (event) => {
+      clearNativeWheel();
+      touchHandler.onTouchStart(event);
+    },
     onTouchMove: touchHandler.onTouchMove,
     onTouchEnd: (event) => {
       touchHandler.onTouchEnd(event);
@@ -1887,6 +2044,14 @@ export function attachPtyScrollController(
       relayout();
     },
     onContainerScroll,
+    onContainerScrollEnd: () => {
+      // A queued end from an older programmatic scroll can arrive before the browser lands the
+      // newly announced wheel. Wait for actual movement before releasing its ownership.
+      if (nativeWheelDirection === 0 || nativeWheelScrollPending) return;
+      if (followNativeWheelAtBottom(container.scrollTop)) return;
+      syncContainerScroll();
+      clearNativeWheel();
+    },
     onTermScroll,
     onRender,
     onRelayout: relayout,
@@ -1909,7 +2074,7 @@ export function attachPtyScrollController(
   });
   const bufferChangeDisposable = term.buffer.onBufferChange(() => {
     cursorFollowTarget.reset();
-    lastInputScreen = null;
+    lastLiveScreen = null;
     // Direct Terminal.reset does not necessarily produce a later onWriteParsed callback. Invalidate
     // every buffer-derived cache synchronously at the identity boundary itself.
     bufferRevision += 1;

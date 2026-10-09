@@ -1,5 +1,5 @@
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
-import { extractImagePreviewPaths } from "./image-preview-path";
+import { extractMediaPreviewPaths } from "./media-preview-path";
 import {
   findXtermPathMatches,
   findXtermPathMatchesInWrappedBuffer,
@@ -8,15 +8,15 @@ import {
   type XtermPathMatch,
 } from "./xterm-wrapped-path-matches";
 
-export function findImagePreviewPathMatches(line: string): XtermPathMatch[] {
-  return findXtermPathMatches(line, extractImagePreviewPaths);
+export function findMediaPreviewPathMatches(line: string): XtermPathMatch[] {
+  return findXtermPathMatches(line, extractMediaPreviewPaths);
 }
 
-export function findImagePreviewPathMatchesInWrappedBuffer(
+export function findMediaPreviewPathMatchesInWrappedBuffer(
   terminal: Pick<Terminal, "buffer">,
   bufferLineNumber: number,
 ): XtermBufferPathMatch[] {
-  return findXtermPathMatchesInWrappedBuffer(terminal, bufferLineNumber, extractImagePreviewPaths);
+  return findXtermPathMatchesInWrappedBuffer(terminal, bufferLineNumber, extractMediaPreviewPaths);
 }
 
 function shouldActivatePreview(event: MouseEvent): boolean {
@@ -29,13 +29,13 @@ function shouldActivatePreview(event: MouseEvent): boolean {
   return window.matchMedia?.("(pointer: coarse), (hover: none)")?.matches ?? false;
 }
 
-export function registerImagePreviewLinkProvider(
+export function registerMediaPreviewLinkProvider(
   terminal: Pick<Terminal, "buffer" | "registerLinkProvider">,
   onPreview: (path: string) => void,
 ): { dispose: () => void; provider: ILinkProvider } {
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
-      const matches = findImagePreviewPathMatchesInWrappedBuffer(terminal, bufferLineNumber);
+      const matches = findMediaPreviewPathMatchesInWrappedBuffer(terminal, bufferLineNumber);
       if (matches.length === 0) {
         callback(undefined);
         return;

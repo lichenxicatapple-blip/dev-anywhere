@@ -1,7 +1,7 @@
 import { afterEach, describe, it, expect } from "vitest";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { MessageBubble } from "./message-bubble";
-import { ImagePreviewProvider } from "./image-preview";
+import { MediaPreviewProvider } from "./media-preview";
 import { FileDownloadProvider } from "./file-download-link";
 import type { ChatMessage } from "@/stores/chat-store";
 
@@ -408,7 +408,7 @@ describe("MessageBubble", () => {
 
   it("renders image preview links for local image paths", () => {
     render(
-      <ImagePreviewProvider sessionId="s1">
+      <MediaPreviewProvider sessionId="s1">
         <MessageBubble
           message={makeMessage({
             id: "a4",
@@ -416,16 +416,48 @@ describe("MessageBubble", () => {
             text: "screenshot: @.dev-anywhere/clipboard/s1/shot.png",
           })}
         />
-      </ImagePreviewProvider>,
+      </MediaPreviewProvider>,
     );
 
     screen.getByRole("button", { name: /shot\.png/ });
   });
 
+  it.each([
+    "Watch ./clips/demo.mp4",
+    "Watch [the clip](./clips/demo.mp4)",
+    "| Clip |\n| - |\n| `./clips/demo.mp4` |",
+  ])("offers video preview for local paths in %s", (text) => {
+    const { container } = render(
+      <MediaPreviewProvider sessionId="s1">
+        <MessageBubble message={makeMessage({ role: "assistant", text })} />
+      </MediaPreviewProvider>,
+    );
+    const link = screen.getByRole("button", { name: "预览 ./clips/demo.mp4" });
+    expect(link).toHaveAttribute("data-slot", "inline-video-preview-link");
+    expect(container.querySelector('[data-slot="inline-file-download-link"]')).toBeNull();
+  });
+
+  it("previews a Windows video Markdown link without treating the drive as a URL scheme", () => {
+    render(
+      <MediaPreviewProvider sessionId="s1">
+        <MessageBubble
+          message={makeMessage({
+            role: "assistant",
+            text: "Watch [the clip](D:/clips/demo%20video.mp4)",
+          })}
+        />
+      </MediaPreviewProvider>,
+    );
+    expect(screen.getByRole("button", { name: "预览 D:/clips/demo video.mp4" })).toHaveAttribute(
+      "data-slot",
+      "inline-video-preview-link",
+    );
+  });
+
   it("does not combine a whitespace-containing path into one preview link", () => {
     const path = "/Users/cat/My Project/final shot.png";
     render(
-      <ImagePreviewProvider sessionId="s1">
+      <MediaPreviewProvider sessionId="s1">
         <MessageBubble
           message={makeMessage({
             id: "a4-spaced-path",
@@ -433,7 +465,7 @@ describe("MessageBubble", () => {
             text: `screenshot: @${path}`,
           })}
         />
-      </ImagePreviewProvider>,
+      </MediaPreviewProvider>,
     );
 
     expect(screen.queryByRole("button", { name: `预览 ${path}` })).toBeNull();
@@ -540,7 +572,7 @@ describe("MessageBubble", () => {
 
   it("renders image paths inline and does not duplicate them as bottom preview chips", () => {
     const { container } = render(
-      <ImagePreviewProvider sessionId="s1">
+      <MediaPreviewProvider sessionId="s1">
         <MessageBubble
           message={makeMessage({
             id: "a-image-link",
@@ -548,7 +580,7 @@ describe("MessageBubble", () => {
             text: "Screenshot: .dev-anywhere/clipboard/s1/shot.png",
           })}
         />
-      </ImagePreviewProvider>,
+      </MediaPreviewProvider>,
     );
 
     const paragraph = container.querySelector("p");

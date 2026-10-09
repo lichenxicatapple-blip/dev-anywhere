@@ -9,6 +9,7 @@ interface PtyScrollDomAdapterOptions {
   onTouchEnd: (event: TouchEvent) => void;
   onTouchCancel: (event: TouchEvent) => void;
   onContainerScroll: () => void;
+  onContainerScrollEnd?: () => void;
   onTermScroll: () => void;
   onRender: () => void;
   onRelayout: () => void;
@@ -28,6 +29,7 @@ export function attachPtyScrollDomAdapter({
   onTouchEnd,
   onTouchCancel,
   onContainerScroll,
+  onContainerScrollEnd,
   onTermScroll,
   onRender,
   onRelayout,
@@ -39,6 +41,9 @@ export function attachPtyScrollDomAdapter({
   container.addEventListener("touchend", onTouchEnd, { passive: true });
   container.addEventListener("touchcancel", onTouchCancel, { passive: true });
   container.addEventListener("scroll", onContainerScroll, { passive: true });
+  if (onContainerScrollEnd) {
+    container.addEventListener("scrollend", onContainerScrollEnd, { passive: true });
+  }
 
   const dispScroll = term.onScroll(onTermScroll);
   const dispRender = term.onRender(onRender);
@@ -51,6 +56,7 @@ export function attachPtyScrollDomAdapter({
   return {
     dispose: () => {
       container.removeEventListener("scroll", onContainerScroll);
+      if (onContainerScrollEnd) container.removeEventListener("scrollend", onContainerScrollEnd);
       container.removeEventListener("wheel", onWheel, { capture: true });
       container.removeEventListener("touchstart", onTouchStart);
       container.removeEventListener("touchmove", onTouchMove);

@@ -276,7 +276,21 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
   // A matching pong must still own the same socket after the replacement deadline passes.
   await page.waitForTimeout(2_200);
 
-  const state = await page.evaluate(() => {
+  // Freeze the stream before observing its last revision. Reading the revision counter and DOM
+  // in one task can race React's pending commit; emitting the next revision first can also replace
+  // the very text being checked. Verify each revision while it is still the current one.
+  const latestText = await page.evaluate(() => {
+    const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
+    if (!audit) throw new Error("the original page document was replaced");
+    window.clearInterval(audit.intervalId);
+    return `后台持续更新 ${audit.revision}`;
+  });
+  await page.getByText(latestText, { exact: true }).waitFor({
+    state: "visible",
+    timeout: 10_000,
+  });
+
+  const state = await page.evaluate((expectedLatestText) => {
     const audit = (window as BackgroundResumeWindow).__backgroundResumeAudit;
     if (!audit) throw new Error("the original page document was replaced");
     const readCounts = (): RelayCounts => {
@@ -291,7 +305,7 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
     const backgroundEmissions = audit.emissions
       .slice(audit.healthyEmissionStart)
       .filter((emission) => !emission.focused).length;
-    const latestText = `后台持续更新 ${audit.revision}`;
+    const latestVisible = document.body.innerText.includes(expectedLatestText);
     const sameSocket = audit.originalSocket === window.__devAnywhereE2E?.socket;
     const hiddenEvent = audit.lifecycle.find((event) => event.visibility === "hidden");
     const visibleEvent = hiddenEvent
@@ -300,10 +314,7 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
         )
       : undefined;
 
-    // Keep the explicit post-resume revision stable until the assertion observes it. Otherwise
-    // the one-second stream interval can replace revision N with N+1 before the CDP client starts
-    // polling, turning a healthy updating page into a permanent wait for stale text.
-    window.clearInterval(audit.intervalId);
+    // Observe a separate post-resume update before testing a silent, dead connection.
     audit.emitNext();
     window.__devAnywhereE2E?.setRelayLivenessPongEnabled(false);
     audit.preDeadSocket = window.__devAnywhereE2E?.socket ?? null;
@@ -317,15 +328,15 @@ async function inspectHealthyAndPrepareDead(): Promise<Record<string, unknown>> 
         hiddenEvent && visibleEvent ? visibleEvent.timestamp - hiddenEvent.timestamp : null,
       closeDelta: counts.close - audit.healthyBaseline.close,
       documentId: audit.documentId,
-      latestText,
-      latestVisible: document.body.innerText.includes(latestText),
+      latestText: expectedLatestText,
+      latestVisible,
       openDelta: counts.open - audit.healthyBaseline.open,
       pingDelta: counts.ping - audit.healthyBaseline.ping,
       postResumeText: `后台持续更新 ${audit.revision}`,
       route: location.href,
       sameSocket,
     };
-  });
+  }, latestText);
   await page.getByText(String(state.postResumeText)).waitFor({ state: "visible", timeout: 10_000 });
   // Keep the old socket completely silent for the dead-connection phase. A normal relay frame is
   // valid liveness evidence, so restarting the stream here would race (and correctly cancel) the

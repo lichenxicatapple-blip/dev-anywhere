@@ -405,6 +405,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
   });
   relayConnection.on("disconnected", () => {
     previewRuntime.disconnectRelay();
+    remoteFileStreamManager.cancelAll();
     broadcastBridgeStatus(false);
   });
 

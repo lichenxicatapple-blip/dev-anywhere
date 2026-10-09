@@ -21,6 +21,7 @@ export const PTY_VERTICAL_INTENT_TRANSITION_IDS = [
   "wheel.up",
   "wheel.down.not-bottom",
   "wheel.down.bottom",
+  "wheel.native",
   "container.programmatic-follow",
   "container.programmatic-bottom",
   "container.external-sync",
@@ -63,6 +64,11 @@ export type PtyVerticalIntentEvent =
       previousScrollTop: number;
       nextScrollTop: number;
       reachedCursorAwareBottom: boolean;
+    }
+  | {
+      type: "native-wheel";
+      deltaY: number;
+      scrollTop: number;
     }
   | {
       type: "container-scroll";
@@ -308,6 +314,15 @@ export function reducePtyVerticalIntent(
       return finish(
         state,
         withReview(state, "wheel", event.nextScrollTop, "wheel.down.not-bottom"),
+        `delta=${event.deltaY}`,
+      );
+    }
+    case "native-wheel": {
+      // The browser will move after this notification. Pause passive follow now without
+      // inventing a landed pixel coordinate or releasing review from a predicted delta.
+      return finish(
+        state,
+        withReview(state, "wheel", event.scrollTop, "wheel.native"),
         `delta=${event.deltaY}`,
       );
     }

@@ -40,7 +40,7 @@ import { isOnlyPtyNonTypingInput } from "@/lib/pty-non-typing-input";
 import { attachPtyScrollController, type PtyScrollState } from "@/lib/pty-scroll-controller";
 import { attachPtyTerminalController } from "@/lib/pty-terminal-controller";
 import { schedulePtyTransportAttach } from "@/lib/pty-transport-attach-scheduler";
-import { registerImagePreviewLinkProvider } from "@/lib/xterm-image-preview-links";
+import { registerMediaPreviewLinkProvider } from "@/lib/xterm-media-preview-links";
 import { registerFileDownloadLinkProvider } from "@/lib/xterm-file-download-links";
 import {
   activateXtermLinkAtPoint,
@@ -69,7 +69,7 @@ import {
 import { buildPtyScrollDebugSnapshot } from "@/lib/pty-scroll-debug-snapshot";
 import { serializeTerminalBuffer } from "@/lib/pty-serialize-buffer";
 import { registerPtyLinkProvider, registerPtySerializer, registerPtyTerminal } from "@/test-hooks";
-import { useImagePreview } from "./image-preview";
+import { useMediaPreview } from "./media-preview";
 import { usePtyConnectionState } from "./use-pty-connection-state";
 import { shouldAutoFocusPtyInput, usePtyFocusState } from "./use-pty-focus-state";
 import { usePtyFollowState } from "./use-pty-follow-state";
@@ -346,7 +346,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   const markDisconnected = connection.markDisconnected;
   const follow = usePtyFollowState();
   const traceEnabled = usePtyScrollTraceEnabled();
-  const { openImagePreview } = useImagePreview();
+  const { openMediaPreview } = useMediaPreview();
 
   // === 私有 ref（仅供 hook 内部使用，不暴露给 JSX）===
   const terminalRef = useRef<Terminal | null>(null);
@@ -761,7 +761,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     onTap: handlePtyTap,
     isTapCandidate: isPtyTapCandidate,
     onDownloadPath: downloadPtyPath,
-    onPreviewPath: openImagePreview,
+    onPreviewPath: openMediaPreview,
   });
   const clearManagedPtySelection = selection.clearManagedPtySelection;
   const clearPtySelection = selection.clearPtySelection;
@@ -858,7 +858,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     const spacer = spacerRef.current;
     if (!host || !ws || !relay || !container || !spacer) return;
 
-    let imageLinkDispose: (() => void) | null = null;
+    let mediaLinkDispose: (() => void) | null = null;
     let fileDownloadLinkDispose: (() => void) | null = null;
     let scrollDispose: (() => void) | null = null;
     let historyProjectionDispose: (() => void) | null = null;
@@ -947,9 +947,9 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
           refreshProjectedSearchSelection();
         });
         setFindReady(true);
-        const imageLinkRegistration = registerImagePreviewLinkProvider(xterm, openImagePreview);
-        imageLinkDispose = imageLinkRegistration.dispose;
-        registerPtyLinkProvider(sessionId, "image-preview", imageLinkRegistration.provider);
+        const mediaLinkRegistration = registerMediaPreviewLinkProvider(xterm, openMediaPreview);
+        mediaLinkDispose = mediaLinkRegistration.dispose;
+        registerPtyLinkProvider(sessionId, "image-preview", mediaLinkRegistration.provider);
         const fileDownloadLinkRegistration = registerFileDownloadLinkProvider(
           xterm,
           downloadPtyPath,
@@ -957,7 +957,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         fileDownloadLinkDispose = fileDownloadLinkRegistration.dispose;
         registerPtyLinkProvider(sessionId, "file-download", fileDownloadLinkRegistration.provider);
         ptyTouchLinkProvidersRef.current = [
-          imageLinkRegistration.provider,
+          mediaLinkRegistration.provider,
           fileDownloadLinkRegistration.provider,
         ];
         registerPtySerializer(sessionId, () => serializeTerminalBuffer(xterm));
@@ -1160,7 +1160,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
       historyProjectionDispose?.();
       searchResultsRegistration?.dispose();
       unregisterPtyDebugSnapshotProvider();
-      imageLinkDispose?.();
+      mediaLinkDispose?.();
       fileDownloadLinkDispose?.();
       registerPtyLinkProvider(sessionId, "image-preview", null);
       registerPtyLinkProvider(sessionId, "file-download", null);
@@ -1203,7 +1203,7 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
     getPtyPlainEnterBehavior,
     isPtyPhysicalKeyboardMode,
     downloadPtyPath,
-    openImagePreview,
+    openMediaPreview,
     suppressPtyFocus,
     scheduleRawInputFollow,
     followHorizontalScrollAfterInput,

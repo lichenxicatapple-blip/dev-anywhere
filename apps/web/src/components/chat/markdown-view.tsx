@@ -12,14 +12,14 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from "react";
-import { Download, ExternalLink, Image as ImageIcon } from "lucide-react";
+import { Download, ExternalLink, Film, Image as ImageIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { isFileDownloadPath } from "@/lib/file-download-path";
-import { isImagePreviewPath } from "@/lib/image-preview-path";
+import { getMediaPreviewKind, isMediaPreviewPath } from "@/lib/media-preview-path";
 import { findInlinePathLinks, type InlinePathLinkKind } from "@/lib/inline-path-links";
 import { findInlineWebLinks } from "@/lib/inline-web-links";
 import { useFileDownload } from "./file-download-link";
-import { useImagePreview } from "./image-preview";
+import { useMediaPreview } from "./media-preview";
 
 interface MarkdownViewProps {
   text: string;
@@ -30,6 +30,7 @@ interface MarkdownViewProps {
 
 const TRAILING_INLINE_MARKER = "\uE000";
 const INLINE_PATH_SCHEME = "dev-anywhere-path:";
+const WINDOWS_DRIVE_PATH_RE = /^[a-z]:[\\/]/i;
 
 type MarkdownAstNode = {
   type: string;
@@ -85,7 +86,7 @@ function decodeInlinePathHref(href: string): { kind: InlinePathLinkKind; path: s
   const separator = rest.indexOf(":");
   if (separator === -1) return null;
   const kind = rest.slice(0, separator);
-  if (kind !== "file" && kind !== "image") return null;
+  if (kind !== "file" && kind !== "image" && kind !== "video") return null;
   return { kind, path: decodeURIComponent(rest.slice(separator + 1)) };
 }
 
@@ -102,17 +103,29 @@ function stripLocalSourceLocation(path: string): string {
 }
 
 function decodeLocalPathHref(href: string): { kind: InlinePathLinkKind; path: string } | null {
-  if (!href || href.startsWith("#") || /^[a-z][a-z0-9+.-]*:/i.test(href)) return null;
+  if (
+    !href ||
+    href.startsWith("#") ||
+    (/^[a-z][a-z0-9+.-]*:/i.test(href) && !WINDOWS_DRIVE_PATH_RE.test(href))
+  )
+    return null;
   // Codex file links may append :line or :line:column for editor navigation.
   // Remote-file APIs need the underlying filesystem path, without that source location.
   const path = stripLocalSourceLocation(safeDecodeHrefPath(href));
-  if (isImagePreviewPath(path)) return { kind: "image", path };
+  const mediaKind = getMediaPreviewKind(path);
+  if (mediaKind && isMediaPreviewPath(path)) return { kind: mediaKind, path };
   if (isFileDownloadPath(path, { allowBare: true })) return { kind: "file", path };
   return null;
 }
 
 function markdownUrlTransform(value: string, key: string, node: unknown): string {
   if (value.startsWith(INLINE_PATH_SCHEME)) return value;
+  // A Windows drive is a local path, not an external URL protocol. Convert it
+  // to a file action before the Markdown URL sanitizer rejects the colon.
+  if (WINDOWS_DRIVE_PATH_RE.test(value)) {
+    const local = decodeLocalPathHref(value);
+    return local ? encodeInlinePathHref(local.kind, local.path) : "";
+  }
   void key;
   void node;
   return defaultUrlTransform(value);
@@ -280,7 +293,7 @@ function InlinePathAction({
 }) {
   const decoded = decodeInlinePathHref(href) ?? decodeLocalPathHref(href);
   const { download } = useFileDownload();
-  const { openImagePreview } = useImagePreview();
+  const { openMediaPreview } = useMediaPreview();
 
   if (!decoded) {
     const isExternalWebLink = /^https?:\/\//i.test(href);
@@ -311,13 +324,21 @@ function InlinePathAction({
   }
 
   const isImage = decoded.kind === "image";
-  const Icon = isImage ? ImageIcon : Download;
+  const isVideo = decoded.kind === "video";
+  const isMedia = isImage || isVideo;
+  const Icon = isImage ? ImageIcon : isVideo ? Film : Download;
   return (
     <button
       type="button"
-      data-slot={isImage ? "inline-image-preview-link" : "inline-file-download-link"}
+      data-slot={
+        isImage
+          ? "inline-image-preview-link"
+          : isVideo
+            ? "inline-video-preview-link"
+            : "inline-file-download-link"
+      }
       title={decoded.path}
-      aria-label={`${isImage ? "预览" : "下载"} ${decoded.path}`}
+      aria-label={`${isMedia ? "预览" : "下载"} ${decoded.path}`}
       className={cn(
         "inline cursor-pointer items-baseline rounded-sm border-0 bg-transparent p-0 font-mono text-[0.95em] underline decoration-dotted underline-offset-2 transition-colors",
         "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring",
@@ -326,7 +347,7 @@ function InlinePathAction({
           : "text-[var(--color-status-working)] hover:bg-accent/70",
       )}
       onClick={() => {
-        if (isImage) openImagePreview(decoded.path);
+        if (isMedia) openMediaPreview(decoded.path);
         else download(decoded.path);
       }}
     >

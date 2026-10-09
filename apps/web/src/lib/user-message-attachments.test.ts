@@ -23,6 +23,30 @@ describe("extractUserMessageAttachments", () => {
     });
   });
 
+  it.each(["mp4", "webm", "mov", "m4v", "ogv"])(
+    "extracts uploaded %s videos while preserving paths containing spaces",
+    (extension) => {
+      const path = `/private/uploads/demo clips/final cut.${extension}`;
+      expect(extractUserMessageAttachments(`看看这个 @${path}`)).toEqual({
+        bodyText: "看看这个",
+        attachments: [{ kind: "video", path }],
+      });
+    },
+  );
+
+  it("keeps the ordering of mixed image, video, and file attachment suffixes", () => {
+    expect(
+      extractUserMessageAttachments("@uploads/still.png @uploads/demo.MP4 @uploads/report.pdf"),
+    ).toEqual({
+      bodyText: "",
+      attachments: [
+        { kind: "image", path: "uploads/still.png" },
+        { kind: "video", path: "uploads/demo.MP4" },
+        { kind: "file", path: "uploads/report.pdf" },
+      ],
+    });
+  });
+
   it("keeps paths discussed inside the message body as inline content", () => {
     expect(extractUserMessageAttachments("对比 @docs/old.json 的结构，然后修改这里")).toEqual({
       bodyText: "对比 @docs/old.json 的结构，然后修改这里",

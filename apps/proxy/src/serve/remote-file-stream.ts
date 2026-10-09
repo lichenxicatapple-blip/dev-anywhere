@@ -10,10 +10,12 @@ import type { ControlErrorCode as ControlErrorCodeType } from "@dev-anywhere/sha
 import { serviceLogger } from "../common/logger.js";
 import { classifyPathError } from "./path-errors.js";
 import { guessMimeType, resolveRemoteFilePath } from "./remote-file-path.js";
+import { parseRemoteFileRange } from "./remote-file-range.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionManager } from "./session-manager.js";
 
 const FILE_STREAM_CHUNK_BYTES = 256 * 1024;
+const FILE_STREAM_WINDOW_CHUNKS = 4;
 
 interface RemoteFileStreamManagerDeps {
   relayConnection: RelayConnection;
@@ -25,6 +27,9 @@ interface ActiveFileStream {
   chunkSeq: number;
   completed: boolean;
   canceled: boolean;
+  flowControl: boolean;
+  acknowledgedSeq: number;
+  ended: boolean;
 }
 
 function errorCode(err: unknown): ControlErrorCodeType {
@@ -81,7 +86,7 @@ export class RemoteFileStreamManager {
         requestId,
         sessionId,
         success: true,
-        path,
+        path: resolvedPath,
         mimeType: guessMimeType(resolvedPath),
         size: stat.size,
         fileName: basename(resolvedPath) || "download",
@@ -148,36 +153,73 @@ export class RemoteFileStreamManager {
         return;
       }
 
-      const stream = createReadStream(resolvedPath, { highWaterMark: FILE_STREAM_CHUNK_BYTES });
-      const active: ActiveFileStream = {
-        stream,
-        chunkSeq: 0,
-        completed: false,
-        canceled: false,
-      };
-      this.activeStreams.set(streamId, active);
-
-      this.sendResponse({
+      // Range is only defined for GET; HEAD describes the full representation.
+      const range = parseRemoteFileRange(msg.head ? undefined : msg.range, stat.size);
+      if (range === "invalid") {
+        this.sendResponse({
+          streamId,
+          sessionId,
+          success: false,
+          statusCode: 416,
+          contentRange: `bytes */${stat.size}`,
+          size: 0,
+          error: "请求的文件范围无效",
+        });
+        return;
+      }
+      const response: Omit<ControlMessage<"remote_file_stream_response">, "type"> = {
         streamId,
         sessionId,
         success: true,
         path,
         mimeType: guessMimeType(resolvedPath),
-        size: stat.size,
+        size: range ? range.end - range.start + 1 : stat.size,
         fileName: basename(resolvedPath) || "download",
+        statusCode: range ? 206 : 200,
+        ...(range ? { contentRange: `bytes ${range.start}-${range.end}/${stat.size}` } : {}),
+        ...(msg.flowControl ? { flowControl: true } : {}),
+      };
+      if (msg.head || stat.size === 0) {
+        this.sendResponse(response);
+        this.complete(streamId, true);
+        return;
+      }
+      const stream = createReadStream(resolvedPath, {
+        highWaterMark: FILE_STREAM_CHUNK_BYTES,
+        ...(range ?? {}),
       });
+      const active: ActiveFileStream = {
+        stream,
+        chunkSeq: 0,
+        completed: false,
+        canceled: false,
+        flowControl: msg.flowControl === true,
+        acknowledgedSeq: -1,
+        ended: false,
+      };
+      this.activeStreams.set(streamId, active);
+
+      this.sendResponse(response);
 
       stream.on("data", (chunk) => {
         if (active.canceled) return;
         const data = chunk instanceof Buffer ? chunk : Buffer.from(chunk);
-        this.deps.relayConnection.sendBinary(
-          encodeFileStreamFrame(streamId, active.chunkSeq, data),
-        );
+        const seq = active.chunkSeq;
         active.chunkSeq += 1;
+        if (
+          active.flowControl &&
+          active.chunkSeq - active.acknowledgedSeq - 1 >= FILE_STREAM_WINDOW_CHUNKS
+        ) {
+          stream.pause();
+        }
+        this.deps.relayConnection.sendBinary(encodeFileStreamFrame(streamId, seq, data));
       });
 
       stream.on("end", () => {
-        this.complete(streamId, true);
+        active.ended = true;
+        if (!active.flowControl || active.acknowledgedSeq === active.chunkSeq - 1) {
+          this.complete(streamId, true);
+        }
       });
 
       stream.on("error", (err) => {
@@ -186,7 +228,7 @@ export class RemoteFileStreamManager {
       });
 
       stream.on("close", () => {
-        if (!active.completed && !active.canceled) {
+        if (!active.completed && !active.canceled && !active.ended) {
           this.complete(streamId, false, "文件流提前关闭");
         }
       });
@@ -219,6 +261,29 @@ export class RemoteFileStreamManager {
     this.activeStreams.delete(msg.streamId);
     active.stream.destroy();
     serviceLogger.info({ streamId: msg.streamId }, "Remote file stream canceled");
+  }
+
+  acknowledge(msg: ControlMessage<"remote_file_stream_ack">): void {
+    const active = this.activeStreams.get(msg.streamId);
+    if (
+      !active?.flowControl ||
+      msg.chunkSeq <= active.acknowledgedSeq ||
+      msg.chunkSeq >= active.chunkSeq
+    ) {
+      return;
+    }
+    active.acknowledgedSeq = msg.chunkSeq;
+    if (active.ended && active.acknowledgedSeq === active.chunkSeq - 1) {
+      this.complete(msg.streamId, true);
+    } else {
+      active.stream.resume();
+    }
+  }
+
+  cancelAll(): void {
+    for (const streamId of this.activeStreams.keys()) {
+      this.cancel({ type: "remote_file_stream_cancel", streamId });
+    }
   }
 
   private complete(streamId: string, success: boolean, error?: string): void {

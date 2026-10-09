@@ -11,7 +11,7 @@ import { ChatJsonView } from "@/components/chat/chat-json-view";
 import { PtyKeepAliveViewport } from "@/components/chat/pty-keepalive-provider";
 import { InputBar } from "@/components/chat/input-bar";
 import { FileDownloadProvider } from "@/components/chat/file-download-link";
-import { ImagePreviewProvider } from "@/components/chat/image-preview";
+import { MediaPreviewProvider } from "@/components/chat/media-preview";
 import { QuotePreviewBar } from "@/components/chat/quote-preview-bar";
 import { StatusLine } from "@/components/chat/status-line";
 import { PtyApprovalHint } from "@/components/chat/pty-approval-hint";
@@ -248,7 +248,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   }
 
   return (
-    <ImagePreviewProvider sessionId={id}>
+    <MediaPreviewProvider sessionId={id}>
       <FileDownloadProvider sessionId={id}>
         <div
           className="flex flex-col h-full transition-[padding-bottom] duration-200 ease-out motion-reduce:transition-none"
@@ -341,7 +341,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           )}
         </div>
       </FileDownloadProvider>
-    </ImagePreviewProvider>
+    </MediaPreviewProvider>
   );
 }
 

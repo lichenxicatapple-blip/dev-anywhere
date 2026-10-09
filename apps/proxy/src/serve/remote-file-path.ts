@@ -27,6 +27,10 @@ const EXT_MIME_MAP: Record<string, string> = {
   ".tar": "application/x-tar",
   ".gz": "application/gzip",
   ".mp4": "video/mp4",
+  ".m4v": "video/mp4",
+  ".webm": "video/webm",
+  ".mov": "video/quicktime",
+  ".ogv": "video/ogg",
   ".mp3": "audio/mpeg",
   ".wav": "audio/wav",
 };

@@ -6,7 +6,7 @@ import {
 import { measureXtermCellSize } from "./pty-xterm-metrics";
 import type { PtySelectionPathAction } from "./pty-selection-path-action";
 import { findFileDownloadPathMatchesInWrappedBuffer } from "./xterm-file-download-links";
-import { findImagePreviewPathMatchesInWrappedBuffer } from "./xterm-image-preview-links";
+import { findMediaPreviewPathMatchesInWrappedBuffer } from "./xterm-media-preview-links";
 import { findUrlTextRanges } from "./url-text";
 
 export interface TerminalSelectionPoint {
@@ -533,9 +533,9 @@ function resolveTerminalPathLinkAtBufferPoint({
   const lineNumber = point.row + 1;
   const column = point.column + 1;
   const candidate = [
-    ...findImagePreviewPathMatchesInWrappedBuffer(terminal, lineNumber).map((match) => ({
+    ...findMediaPreviewPathMatchesInWrappedBuffer(terminal, lineNumber).map((match) => ({
       match,
-      pathAction: { kind: "image-preview", path: match.path } as const,
+      pathAction: { kind: "media-preview", path: match.path } as const,
     })),
     ...findFileDownloadPathMatchesInWrappedBuffer(terminal, lineNumber).map((match) => ({
       match,

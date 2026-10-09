@@ -1,6 +1,46 @@
-import { test, expect } from "@playwright/test";
+import { test, expect, type Locator } from "@playwright/test";
 import { BASE_URL, gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
+import { installVisualViewportMock } from "../mobile-helpers";
 import { installWakeLockMock, wakeLockTestCount } from "../wake-lock-test-helper";
+
+const codexShortcutKeys = [
+  "Ctrl+T",
+  "Ctrl+R",
+  "Shift+←",
+  "Shift+→",
+  "Ctrl+]",
+  "Shift+↑",
+  "Shift+↓",
+  "Ctrl+/",
+];
+
+async function expectCodexShortcuts(shortcuts: Locator): Promise<void> {
+  const items = shortcuts.getByRole("menuitem");
+  await expect(items).toHaveCount(8);
+  for (const [index, key] of codexShortcutKeys.entries()) {
+    await expect(items.nth(index)).toHaveAccessibleName(`发送 ${key}`);
+  }
+}
+
+async function expectWithinVisualViewport(locator: Locator): Promise<void> {
+  await expect
+    .poll(() =>
+      locator.evaluate((node) => {
+        const box = node.getBoundingClientRect();
+        const viewport = window.visualViewport;
+        const left = viewport?.offsetLeft ?? 0;
+        const top = viewport?.offsetTop ?? 0;
+        if (box.width <= 0 || box.height <= 0) return Number.POSITIVE_INFINITY;
+        return Math.max(
+          left - box.left,
+          top - box.top,
+          box.right - left - (viewport?.width ?? window.innerWidth),
+          box.bottom - top - (viewport?.height ?? window.innerHeight),
+        );
+      }),
+    )
+    .toBeLessThanOrEqual(0);
+}
 
 test.describe("ChatHeader compact navigation controls", () => {
   test.use({ viewport: { width: 1280, height: 800 } });
@@ -165,7 +205,7 @@ test.describe("ChatHeader compact navigation controls", () => {
         const shortcuts = page.locator('[data-slot="chat-menu-shortcuts"]');
         await expect(shortcuts).toBeVisible();
         await expect(shortcuts).toHaveCSS("opacity", "1");
-        await expect(shortcuts.getByRole("menuitem")).toHaveCount(5);
+        await expectCodexShortcuts(shortcuts);
         await expect(menu).toBeVisible();
         await expect(menu.getByRole("menuitem", { name: "重命名" })).toBeVisible();
         await expect
@@ -217,6 +257,85 @@ test.describe("ChatHeader compact navigation controls", () => {
         );
         expect(inputs).toHaveLength(inputCount + 1);
         expect(inputs.at(-1)).toMatchObject({ sessionId: "codex-pty", data: "\x12" });
+      });
+    });
+  }
+
+  for (const scenario of ["short screen", "software keyboard"] as const) {
+    test.describe(`shortcut menu with ${scenario}`, () => {
+      test.use({
+        viewport: { width: 320, height: scenario === "short screen" ? 480 : 844 },
+        hasTouch: true,
+      });
+
+      test("stays within the visual viewport and sends the last shortcut once after scrolling", async ({
+        page,
+      }, testInfo) => {
+        await installVisualViewportMock(page);
+        await page.addInitScript(() => {
+          Object.defineProperty(window, "isSecureContext", { configurable: true, value: false });
+        });
+        await page.emulateMedia({ colorScheme: "dark" });
+        await page.reload();
+        await gotoWithFakeProxy(page, "/#/chat/codex-pty?mode=pty");
+        await expect(page.locator('[data-slot="chat-pty-view"]')).toHaveAttribute(
+          "data-connection-ready",
+          "true",
+        );
+        await page.locator('[data-slot="chat-overflow-trigger"]').tap();
+        const menu = page.locator('[data-slot="chat-overflow-menu"]');
+        await expect(menu).toBeVisible();
+        await expectWithinVisualViewport(menu);
+
+        if (scenario === "short screen") {
+          // The parent menu exceeds a 480px screen even when the eight shortcuts fit.
+          expect(
+            await menu.evaluate((node) => node.scrollHeight - node.clientHeight),
+          ).toBeGreaterThan(0);
+          await menu.getByRole("menuitem", { name: "恢复默认" }).scrollIntoViewIfNeeded();
+          expect(await menu.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+        }
+
+        const trigger = menu.getByRole("menuitem", { name: "发送快捷键" });
+        await trigger.tap();
+        const shortcuts = page.locator('[data-slot="chat-menu-shortcuts"]');
+        await expect(shortcuts).toBeVisible();
+        await expectCodexShortcuts(shortcuts);
+
+        if (scenario === "software keyboard") {
+          // Keep the layout viewport unchanged, like a phone keyboard opening under a menu.
+          await page.evaluate(() => window.__devAnywhereSetVisualViewport?.({ height: 260 }));
+          await expect.poll(() => page.evaluate(() => window.visualViewport?.height)).toBe(260);
+          await expect
+            .poll(() => shortcuts.evaluate((node) => node.scrollHeight - node.clientHeight))
+            .toBeGreaterThan(0);
+        }
+
+        await expectWithinVisualViewport(menu);
+        await expectWithinVisualViewport(shortcuts);
+        // Native menu keyboard navigation scrolls the final item into view without selecting it.
+        await shortcuts.getByRole("menuitem").first().press("End");
+        const lastShortcut = shortcuts.getByRole("menuitem", { name: "发送 Ctrl+/", exact: true });
+        await expect(lastShortcut).toBeFocused();
+        await expectWithinVisualViewport(lastShortcut);
+        if (scenario === "software keyboard") {
+          expect(await shortcuts.evaluate((node) => node.scrollTop)).toBeGreaterThan(0);
+        }
+        await page.screenshot({
+          path: testInfo.outputPath(`shortcuts-${scenario.replaceAll(" ", "-")}.png`),
+          animations: "disabled",
+        });
+
+        const inputCount = (await sentFakeRelayMessages(page)).filter(
+          (message) => message.type === "remote_input_raw",
+        ).length;
+        await lastShortcut.tap();
+        await expect(page.getByRole("menu")).toHaveCount(0);
+        const inputs = (await sentFakeRelayMessages(page)).filter(
+          (message) => message.type === "remote_input_raw",
+        );
+        expect(inputs).toHaveLength(inputCount + 1);
+        expect(inputs.at(-1)).toMatchObject({ sessionId: "codex-pty", data: "\x1b[47;5u" });
       });
     });
   }

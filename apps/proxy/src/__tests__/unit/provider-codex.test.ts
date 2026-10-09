@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { CODEX_PROVIDER, resolveCodexCommand } from "#src/providers/codex.js";
 
+const terminalUiOverrides = ["-c", "tui.whimsy=false", "-c", 'tui.alternate_screen="never"'];
+
 function withExecutable(name: string, test: (path: string) => void): void {
   const dir = mkdtempSync(join(tmpdir(), "dev-anywhere-codex-provider-"));
   try {
@@ -32,7 +34,7 @@ describe("Codex provider", () => {
 
       expect(command).toEqual({
         command: codexBin,
-        args: [...args, "-c", "tui.whimsy=false"],
+        args: [...args, ...terminalUiOverrides],
         env,
       });
       expect(args).toEqual(["exec", "--json", "Say OK"]);
@@ -55,7 +57,7 @@ describe("Codex provider", () => {
       );
 
       expect(command.command).toBe(codexBin);
-      expect(command.args).toEqual(["exec", "--json", "Say OK", "-c", "tui.whimsy=false"]);
+      expect(command.args).toEqual(["exec", "--json", "Say OK", ...terminalUiOverrides]);
       expect(command.env).toEqual({ CODEX_BIN: codexBin });
       expect(command.args.join(" ")).not.toContain("features.hooks");
       expect(command.args.join(" ")).not.toContain("hooks=");
@@ -66,7 +68,7 @@ describe("Codex provider", () => {
   it("maps terminal permission modes to Codex approval flags", () => {
     withExecutable("codex", (codexBin) => {
       const omitted = CODEX_PROVIDER.buildTerminalCommand({ args: [] }, { CODEX_BIN: codexBin });
-      expect(omitted.args).toEqual(["-c", "tui.whimsy=false"]);
+      expect(omitted.args).toEqual(terminalUiOverrides);
 
       expect(() =>
         CODEX_PROVIDER.buildTerminalCommand(
@@ -79,12 +81,7 @@ describe("Codex provider", () => {
         { args: [], permissionMode: "auto" },
         { CODEX_BIN: codexBin },
       );
-      expect(automatic.args).toEqual([
-        "--ask-for-approval",
-        "on-request",
-        "-c",
-        "tui.whimsy=false",
-      ]);
+      expect(automatic.args).toEqual(["--ask-for-approval", "on-request", ...terminalUiOverrides]);
 
       const bypass = CODEX_PROVIDER.buildTerminalCommand(
         { args: [], permissionMode: "bypassPermissions" },
@@ -92,8 +89,7 @@ describe("Codex provider", () => {
       );
       expect(bypass.args).toEqual([
         "--dangerously-bypass-approvals-and-sandbox",
-        "-c",
-        "tui.whimsy=false",
+        ...terminalUiOverrides,
       ]);
     });
   });
@@ -118,8 +114,7 @@ describe("Codex provider", () => {
         "on-request",
         "resume",
         "codex-session",
-        "-c",
-        "tui.whimsy=false",
+        ...terminalUiOverrides,
       ]);
     });
   });
@@ -128,17 +123,20 @@ describe("Codex provider", () => {
     ["-c", "tui.whimsy=true"],
     ["resume", "codex-session", "--config=tui.whimsy=true"],
     ["fork", "codex-session", "-ctui.whimsy=true"],
-  ])("disables sparkles after user config overrides (%s)", (...args) => {
+    ["-c", 'tui.alternate_screen="always"'],
+    ["resume", "codex-session", '--config=tui.alternate_screen="always"'],
+    ["fork", "codex-session", '-ctui.alternate_screen="always"'],
+  ])("applies terminal UI settings after user config overrides (%s)", (...args) => {
     withExecutable("codex", (codexBin) => {
       const originalArgs = [...args];
       const command = CODEX_PROVIDER.buildTerminalCommand({ args }, { CODEX_BIN: codexBin });
 
-      expect(command.args).toEqual([...originalArgs, "-c", "tui.whimsy=false"]);
+      expect(command.args).toEqual([...originalArgs, ...terminalUiOverrides]);
       expect(args).toEqual(originalArgs);
     });
   });
 
-  it("keeps the sparkle override before the literal prompt separator", () => {
+  it("keeps terminal UI overrides before the literal prompt separator", () => {
     withExecutable("codex", (codexBin) => {
       const command = CODEX_PROVIDER.buildTerminalCommand(
         { args: ["-c", "tui.whimsy=true", "--", "explain -c tui.whimsy=true"] },
@@ -148,8 +146,7 @@ describe("Codex provider", () => {
       expect(command.args).toEqual([
         "-c",
         "tui.whimsy=true",
-        "-c",
-        "tui.whimsy=false",
+        ...terminalUiOverrides,
         "--",
         "explain -c tui.whimsy=true",
       ]);
