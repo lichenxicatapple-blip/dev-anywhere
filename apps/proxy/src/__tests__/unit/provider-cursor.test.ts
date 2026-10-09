@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
   CURSOR_PROVIDER,
+  cursorAcpAutoApprovesPermissions,
   CursorPermissionModeUnsupportedError,
   resolveCursorAcpMode,
   resolveCursorCommand,
@@ -60,10 +61,13 @@ describe("Cursor provider", () => {
 
   it("maps hosted permission modes onto Cursor ACP modes", () => {
     expect(resolveCursorAcpMode("default")).toBe("agent");
-    expect(resolveCursorAcpMode("auto")).toBe("agent");
     expect(resolveCursorAcpMode("plan")).toBe("plan");
     expect(resolveCursorAcpMode("bypassPermissions")).toBe("agent");
     expect(() => resolveCursorAcpMode("acceptEdits")).toThrow(CursorPermissionModeUnsupportedError);
+    // ACP 聊天没有自动审查，auto 不能被当作全部允许。
+    expect(() => resolveCursorAcpMode("auto")).toThrow(CursorPermissionModeUnsupportedError);
+    expect(cursorAcpAutoApprovesPermissions("auto")).toBe(false);
+    expect(cursorAcpAutoApprovesPermissions("bypassPermissions")).toBe(true);
   });
 
   it("leaves local wrap argv unchanged", () => {
@@ -82,8 +86,10 @@ describe("Cursor provider", () => {
         CURSOR_PROVIDER.buildTerminalCommand({ args: [], permissionMode: "default" }, env).args,
       ).toEqual(["--trust"]);
       expect(
-        CURSOR_PROVIDER.buildTerminalCommand({ args: ["--resume", "abc"], permissionMode: "auto" }, env)
-          .args,
+        CURSOR_PROVIDER.buildTerminalCommand(
+          { args: ["--resume", "abc"], permissionMode: "auto" },
+          env,
+        ).args,
       ).toEqual(["--resume", "abc", "--trust", "--auto-review"]);
       expect(
         CURSOR_PROVIDER.buildTerminalCommand({ args: [], permissionMode: "plan" }, env).args,

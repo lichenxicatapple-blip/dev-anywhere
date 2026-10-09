@@ -141,4 +141,39 @@ describe("WorkerRegistry Cursor ACP events", () => {
     );
     expect(onTurnResult).toHaveBeenCalledWith("s1");
   });
+
+  it("completes the partial answer on interrupt and keeps the next turn in a new message", async () => {
+    const { relay } = await createConnectedRegistry();
+    const chunk = (seq: number, text: string) =>
+      serializeWorkerMsg({
+        type: "worker_event",
+        seq,
+        event: acpUpdate("agent_message_chunk", { content: { type: "text", text } }),
+      });
+
+    acceptedSocket?.write(chunk(1, "第一轮"));
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(1));
+    acceptedSocket?.write(serializeWorkerMsg({ type: "worker_interrupted" }));
+    await vi.waitFor(() => expect(relay.envelopes).toHaveLength(2));
+    // 停止后晚到的旧内容必须被丢弃。
+    acceptedSocket?.write(chunk(2, "晚到"));
+    acceptedSocket?.write(serializeWorkerMsg({ type: "worker_turn_started" }));
+    acceptedSocket?.write(chunk(3, "第二轮"));
+    await vi.waitFor(() => expect(relay.envelopes.length).toBeGreaterThanOrEqual(3));
+    expect(relay.envelopes).toHaveLength(3);
+
+    const messages = relay.envelopes.map((envelope) => MessageEnvelopeSchema.parse(envelope));
+    expect(messages[1]).toMatchObject({
+      type: "assistant_message",
+      payload: { text: "第一轮", status: "completed" },
+    });
+    expect(messages[2]).toMatchObject({
+      type: "assistant_message",
+      payload: { text: "第二轮", status: "streaming" },
+    });
+    const firstTurnId = (messages[0] as { payload: { turnId: string } }).payload.turnId;
+    const secondTurnId = (messages[2] as { payload: { turnId: string } }).payload.turnId;
+    expect(secondTurnId).not.toBe(firstTurnId);
+    expect(relay.envelopes.some((e) => JSON.stringify(e).includes("晚到"))).toBe(false);
+  });
 });

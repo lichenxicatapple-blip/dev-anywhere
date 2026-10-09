@@ -41,6 +41,16 @@ export const CURSOR_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; labe
   { value: "bypassPermissions", label: "跳过全部审批" },
 ];
 
+/**
+ * Cursor 聊天模式（ACP）的权限选项：不含“智能自动”。
+ * 终端模式的“智能自动”是 `agent --auto-review`（Cursor 服务端分类器只放行安全调用），
+ * 而 `agent acp` 不接受该参数，ACP 也没有对应模式；若在聊天里提供，实际会变成全部放行，
+ * 与选项含义不符。Proxy 端的 resolveCursorAcpMode 也会拒绝 `auto`，两边需保持一致。
+ */
+export const CURSOR_CHAT_PERMISSION_MODE_OPTIONS = CURSOR_PERMISSION_MODE_OPTIONS.filter(
+  (option) => option.value !== "auto",
+);
+
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
@@ -122,12 +132,16 @@ export function providerStatus(
   if (status.available) {
     return { label: "可用", disabled: false, title: status.command };
   }
+  if (status.notReported) {
+    return { label: "未上报", disabled: true, title: status.error };
+  }
   return { label: "未找到", disabled: true, title: status.error };
 }
 
 export function normalizePermissionModeForProvider(
   provider: ProviderId,
   permissionMode: PermissionMode,
+  mode: SessionMode = "pty",
 ): PermissionMode {
   if (provider === "codex") {
     return CODEX_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
@@ -140,9 +154,9 @@ export function normalizePermissionModeForProvider(
       : "default";
   }
   if (provider === "cursor") {
-    return CURSOR_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
-      ? permissionMode
-      : "default";
+    const options =
+      mode === "json" ? CURSOR_CHAT_PERMISSION_MODE_OPTIONS : CURSOR_PERMISSION_MODE_OPTIONS;
+    return options.some((option) => option.value === permissionMode) ? permissionMode : "default";
   }
   return permissionMode;
 }

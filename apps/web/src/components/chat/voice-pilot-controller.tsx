@@ -68,6 +68,7 @@ const SPEECH_PRE_ROLL_MS = 1200;
 const MU_LAW_BYTES_PER_SECOND = ASR_SAMPLE_RATE;
 const APPROVAL_DECISION_HINT = "当前正在等待审批，请说允许、始终允许或拒绝。";
 const DYNAMIC_APPROVAL_DECISION_HINT = "当前审批包含多个选项，请在页面审批卡中选择。";
+const QUESTION_DECISION_HINT = "当前有问题需要回答，请在页面卡片中作答。";
 
 declare global {
   interface Window {
@@ -167,11 +168,16 @@ function firstPendingApproval(approvals: ToolApprovalRequest[]): ToolApprovalReq
 }
 
 function hasDynamicApprovalOptions(approval: ToolApprovalRequest | null): boolean {
-  if (approval?.cursorPrompt?.type === "ask_question") {
-    return approval.cursorPrompt.questions.length === 1;
-  }
+  // 问答是“回答问题”，不是“批准工具”：不论几道题，一句“允许”都不能当作答案。
+  if (approval?.cursorPrompt?.type === "ask_question") return true;
   if (approval?.cursorPrompt?.type === "create_plan") return false;
   return Boolean(approval?.options?.length);
+}
+
+function dynamicApprovalHint(approval: ToolApprovalRequest | null): string {
+  return approval?.cursorPrompt?.type === "ask_question"
+    ? QUESTION_DECISION_HINT
+    : DYNAMIC_APPROVAL_DECISION_HINT;
 }
 
 function pendingApprovalQueue(approvals: ToolApprovalRequest[]): ToolApprovalRequest[] {
@@ -1200,7 +1206,7 @@ export function VoicePilotController({
           command.type === "deny_once")
       ) {
         if (hasDynamicApprovalOptions(approval)) {
-          speak(DYNAMIC_APPROVAL_DECISION_HINT);
+          speak(dynamicApprovalHint(approval));
           return true;
         }
         void sendMachineEvent({
@@ -1250,7 +1256,7 @@ export function VoicePilotController({
         discardVoicePartialBubble();
         speak(
           hasDynamicApprovalOptions(approval)
-            ? DYNAMIC_APPROVAL_DECISION_HINT
+            ? dynamicApprovalHint(approval)
             : APPROVAL_DECISION_HINT,
         );
         return;

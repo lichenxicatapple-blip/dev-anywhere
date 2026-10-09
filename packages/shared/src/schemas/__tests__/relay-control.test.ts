@@ -1172,6 +1172,37 @@ describe("RelayControlSchema", () => {
       },
     });
 
+    // 旧版 Proxy 不上报 cursor：补成“未上报”，不连累其他 Agent。
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_info",
+        requestId: "info-legacy",
+        homePath: "/home/dev",
+        agentCli: {
+          claude: { available: true, command: "/usr/local/bin/claude" },
+          codex: { available: true, command: "/usr/local/bin/codex" },
+          kimi: { available: false, error: "kimi not found" },
+        },
+      }),
+    ).toMatchObject({
+      type: "proxy_info",
+      agentCli: {
+        claude: { available: true, command: "/usr/local/bin/claude" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: false, error: "kimi not found" },
+        cursor: { available: false, notReported: true },
+      },
+    });
+    // 已上报的条目仍然严格校验。
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_info",
+        requestId: "info-bad-entry",
+        homePath: "/home/dev",
+        agentCli: { claude: { available: "yes" } },
+      }).success,
+    ).toBe(false);
+
     expect(
       RelayControlSchema.safeParse({
         type: "proxy_info_request",
@@ -1179,21 +1210,27 @@ describe("RelayControlSchema", () => {
         refreshPath: true,
       }).success,
     ).toBe(false);
-    expect(
-      RelayControlSchema.safeParse({
-        type: "proxy_info",
-        requestId: "removed-capabilities",
-        homePath: "/home/dev",
-        agentCli: {
-          claude: { available: true },
-          codex: { available: true },
-        },
-        webPreview: {
-          cloudflared: { available: false },
-          cpolar: { available: false },
-        },
-      }).success,
-    ).toBe(false);
+    // 已移除的 webPreview 能力字段不再出现在解析结果里；缺失的 Agent 条目补成“未上报”。
+    const legacy = RelayControlSchema.parse({
+      type: "proxy_info",
+      requestId: "removed-capabilities",
+      homePath: "/home/dev",
+      agentCli: {
+        claude: { available: true },
+        codex: { available: true },
+      },
+      webPreview: {
+        cloudflared: { available: false },
+        cpolar: { available: false },
+      },
+    });
+    expect(legacy).not.toHaveProperty("webPreview");
+    expect(legacy).toMatchObject({
+      agentCli: {
+        kimi: { available: false, notReported: true },
+        cursor: { available: false, notReported: true },
+      },
+    });
   });
 
   it("parses agent CLI path update request/response", () => {

@@ -119,7 +119,6 @@ describe("CursorAcpSession", () => {
   it.each([
     [undefined, "agent"],
     ["default", "agent"],
-    ["auto", "agent"],
     ["plan", "plan"],
     ["bypassPermissions", "agent"],
   ])("maps permission mode %s to ACP mode %s", async (permissionMode, expectedMode) => {
@@ -143,13 +142,15 @@ describe("CursorAcpSession", () => {
     await expect(session.waitUntilReady()).resolves.toBe("mode-session");
   });
 
-  it("falls back to session/new when session/load fails", async () => {
-    const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
+  it("fails startup instead of creating a new session when session/load fails", async () => {
+    const notifications: string[] = [];
     const session = new CursorAcpSession({
       cwd: "/tmp/project",
       resumeSessionId: "missing-session",
-      onNotification: (method, params) => notifications.push({ method, params }),
+      onNotification: (method) => notifications.push(method),
     });
+    const ready = session.waitUntilReady();
+    ready.catch(() => undefined);
     session.start();
     const initialize = readStdinLines()[0];
     writeStdout({
@@ -164,22 +165,16 @@ describe("CursorAcpSession", () => {
       id: load.id,
       error: { code: -32602, message: 'Session "missing-session" not found' },
     });
-    const created = (await waitForStdinLines())[0];
-    expect(created).toMatchObject({ method: "session/new" });
-    writeStdout({ id: created.id, result: { sessionId: "fresh-session" } });
-    const setMode = (await waitForStdinLines())[0];
-    writeStdout({ id: setMode.id, result: {} });
-    await expect(session.waitUntilReady()).resolves.toBe("fresh-session");
-    expect(notifications[0]).toMatchObject({
-      method: "cursor/session_load_failed",
-      params: { requestedSessionId: "missing-session", sessionId: "fresh-session" },
-    });
+    await expect(ready).rejects.toThrow(/无法恢复 Cursor 会话 missing-session/);
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(readStdinLines().map((line) => line.method)).not.toContain("session/new");
+    expect(notifications).not.toContain("cursor/session_load_failed");
   });
 
-  it("auto-approves tool permissions in auto mode but still forwards questions", async () => {
+  it("auto-approves tool permissions in bypassPermissions mode but still forwards questions", async () => {
     const extensions: string[] = [];
     const session = await makeReady({
-      permissionMode: "auto",
+      permissionMode: "bypassPermissions",
       onExtensionRequest: (request) => {
         extensions.push(request.prompt.type);
         return {

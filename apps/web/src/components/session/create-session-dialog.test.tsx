@@ -106,7 +106,6 @@ const sessionCreatePermissionCases = [
   ["Cursor CLI", "pty", "cursor", "只读规划", "plan"],
   ["Cursor CLI", "pty", "cursor", "跳过全部审批", "bypassPermissions"],
   ["Cursor CLI", "json", "cursor", "命令审批", "default"],
-  ["Cursor CLI", "json", "cursor", "智能自动", "auto"],
   ["Cursor CLI", "json", "cursor", "只读规划", "plan"],
   ["Cursor CLI", "json", "cursor", "跳过全部审批", "bypassPermissions"],
 ] as const;
@@ -418,6 +417,26 @@ describe("CreateSessionDialog", () => {
       });
     },
   );
+
+  it("offers 智能自动 for Cursor terminal sessions only and falls back when switching to chat", () => {
+    useFileStore.setState({
+      tree: new Map(),
+      cwd: "",
+      homePath: "/home/dev",
+      agentCli: availableAgentCli,
+    });
+
+    const { getByRole, queryByRole } = renderDialog();
+    selectAgentCli("Cursor CLI");
+    fireEvent.click(getByRole("combobox", { name: "权限模式" }));
+    fireEvent.click(getByRole("option", { name: "智能自动" }));
+    expect(getByRole("combobox", { name: "权限模式" }).textContent).toBe("智能自动");
+
+    fireEvent.click(getByRole("button", { name: /聊天模式/ }));
+    expect(getByRole("combobox", { name: "权限模式" }).textContent).toBe("命令审批");
+    fireEvent.click(getByRole("combobox", { name: "权限模式" }));
+    expect(queryByRole("option", { name: "智能自动" })).toBeNull();
+  });
 
   it("keeps chat mode available when Cursor CLI is selected", async () => {
     createSession.mockResolvedValueOnce({

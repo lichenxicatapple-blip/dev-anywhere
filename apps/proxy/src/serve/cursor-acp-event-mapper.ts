@@ -172,10 +172,16 @@ function availableCommands(update: Record<string, unknown>): CommandEntry[] {
   });
 }
 
-function cursorTodos(value: unknown): NonNullable<Extract<CursorSessionUi, { kind: "todos" }>["todos"]> {
+function cursorTodos(
+  value: unknown,
+): NonNullable<Extract<CursorSessionUi, { kind: "todos" }>["todos"]> {
   if (!Array.isArray(value)) return [];
   return value.flatMap((candidate) => {
-    if (!isRecord(candidate) || typeof candidate.id !== "string" || typeof candidate.content !== "string") {
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.id !== "string" ||
+      typeof candidate.content !== "string"
+    ) {
       return [];
     }
     const status =
@@ -263,30 +269,6 @@ export class CursorAcpEventMapper {
       ];
     }
 
-    if (method === "cursor/session_load_failed") {
-      const text =
-        typeof params.message === "string" && params.message.trim()
-          ? params.message
-          : "无法恢复 Cursor 会话，已新建会话。";
-      return [
-        {
-          kind: "envelope",
-          envelope: buildMessage(
-            "assistant_message",
-            sessionId,
-            seq,
-            {
-              turnId: `cursor-session-load-${seq}`,
-              revision: 1,
-              text,
-              status: "completed",
-            },
-            "proxy",
-          ),
-        },
-      ];
-    }
-
     if (method === "cursor/update_todos") {
       const todos = cursorTodos(params.todos);
       if (todos.length === 0 && params.merge !== false) return [];
@@ -305,7 +287,8 @@ export class CursorAcpEventMapper {
         typeof params.description === "string" && params.description.trim()
           ? params.description
           : "Cursor Task";
-      const toolId = typeof params.toolCallId === "string" ? params.toolCallId : `cursor-task-${seq}`;
+      const toolId =
+        typeof params.toolCallId === "string" ? params.toolCallId : `cursor-task-${seq}`;
       return [
         {
           kind: "envelope",
@@ -346,7 +329,8 @@ export class CursorAcpEventMapper {
         typeof params.description === "string" && params.description.trim()
           ? params.description
           : "Generated image";
-      const toolId = typeof params.toolCallId === "string" ? params.toolCallId : `cursor-image-${seq}`;
+      const toolId =
+        typeof params.toolCallId === "string" ? params.toolCallId : `cursor-image-${seq}`;
       const filePath = typeof params.filePath === "string" ? params.filePath : undefined;
       return [
         {

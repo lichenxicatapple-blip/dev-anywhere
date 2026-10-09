@@ -241,7 +241,11 @@ function advertisedAuthMethods(result: unknown): string[] {
 function parseAskQuestionPrompt(params: Record<string, unknown>): CursorPrompt | null {
   if (!Array.isArray(params.questions)) return null;
   const questions = params.questions.flatMap((candidate) => {
-    if (!isRecord(candidate) || typeof candidate.id !== "string" || typeof candidate.prompt !== "string") {
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.id !== "string" ||
+      typeof candidate.prompt !== "string"
+    ) {
       return [];
     }
     if (!Array.isArray(candidate.options)) return [];
@@ -284,13 +288,21 @@ function parseTodoStatus(value: unknown): CursorTodoStatus {
   return "pending";
 }
 
-function parseTodos(value: unknown): Array<{ id: string; content: string; status: CursorTodoStatus }> | undefined {
+function parseTodos(
+  value: unknown,
+): Array<{ id: string; content: string; status: CursorTodoStatus }> | undefined {
   if (!Array.isArray(value)) return undefined;
   const todos = value.flatMap((candidate) => {
-    if (!isRecord(candidate) || typeof candidate.id !== "string" || typeof candidate.content !== "string") {
+    if (
+      !isRecord(candidate) ||
+      typeof candidate.id !== "string" ||
+      typeof candidate.content !== "string"
+    ) {
       return [];
     }
-    return [{ id: candidate.id, content: candidate.content, status: parseTodoStatus(candidate.status) }];
+    return [
+      { id: candidate.id, content: candidate.content, status: parseTodoStatus(candidate.status) },
+    ];
   });
   return todos.length ? todos : undefined;
 }
@@ -552,32 +564,21 @@ export class CursorAcpSession {
       }
     }
 
-    let sessionId: string | null = null;
+    let sessionId: string | null;
     if (this.resumeSessionId) {
+      // 恢复失败就如实失败：静默新建会话会让页面继续显示旧历史，而模型已经没有旧上下文。
       try {
         await this.request("session/load", {
           sessionId: this.resumeSessionId,
           cwd: this.workDir,
           mcpServers: [],
         });
-        sessionId = this.resumeSessionId;
       } catch (error) {
-        const created = await this.request("session/new", {
-          cwd: this.workDir,
-          mcpServers: [],
+        throw new Error(`无法恢复 Cursor 会话 ${this.resumeSessionId}：${toError(error).message}`, {
+          cause: error,
         });
-        sessionId = this.sessionIdFromResult(created);
-        if (!sessionId) throw new Error("Cursor ACP session/new did not return a session id");
-        this.invokeCallback(
-          () =>
-            this.onNotification?.("cursor/session_load_failed", {
-              requestedSessionId: this.resumeSessionId,
-              sessionId,
-              message: `无法恢复 Cursor 会话 ${this.resumeSessionId}，已新建会话。${toError(error).message}`,
-            }),
-          "session/load fallback callback failed",
-        );
       }
+      sessionId = this.resumeSessionId;
     } else {
       const created = await this.request("session/new", {
         cwd: this.workDir,
@@ -682,7 +683,9 @@ export class CursorAcpSession {
       this.child.stdin.write(`${JSON.stringify(payload)}\n`);
       return true;
     } catch (error) {
-      this.reportProtocolError(new CursorAcpProtocolError("Failed to write Cursor ACP message", error));
+      this.reportProtocolError(
+        new CursorAcpProtocolError("Failed to write Cursor ACP message", error),
+      );
       return false;
     }
   }
@@ -730,7 +733,9 @@ export class CursorAcpSession {
       this.handleResponse(id, message);
       return;
     }
-    this.reportProtocolError(new CursorAcpProtocolError("Unrecognized Cursor ACP message", message));
+    this.reportProtocolError(
+      new CursorAcpProtocolError("Unrecognized Cursor ACP message", message),
+    );
   }
 
   private handleResponse(id: CursorAcpJsonRpcId, message: Record<string, unknown>): void {
@@ -927,7 +932,9 @@ export class CursorAcpSession {
   ): Promise<void> {
     const params = isRecord(rawParams) ? rawParams : {};
     const prompt =
-      method === "cursor/ask_question" ? parseAskQuestionPrompt(params) : parseCreatePlanPrompt(params);
+      method === "cursor/ask_question"
+        ? parseAskQuestionPrompt(params)
+        : parseCreatePlanPrompt(params);
     const cancelledResult =
       method === "cursor/ask_question"
         ? { outcome: { outcome: "cancelled" } }

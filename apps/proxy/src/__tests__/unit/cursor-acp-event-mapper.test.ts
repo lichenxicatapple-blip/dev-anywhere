@@ -63,21 +63,4 @@ describe("CursorAcpEventMapper", () => {
       payload: { toolName: "GenerateImage", toolId: "img-1" },
     });
   });
-
-  it("surfaces a load-failed notice as an assistant message", () => {
-    const mapper = new CursorAcpEventMapper();
-    const mapped = mapper.map("s1", 4, {
-      type: "cursor_acp",
-      method: "cursor/session_load_failed",
-      params: { message: "无法恢复 Cursor 会话 abc，已新建会话。" },
-    });
-    expect(mapped).toHaveLength(1);
-    const first = mapped[0];
-    expect(first?.kind).toBe("envelope");
-    if (first?.kind !== "envelope") throw new Error("expected envelope");
-    expect(MessageEnvelopeSchema.parse(first.envelope)).toMatchObject({
-      type: "assistant_message",
-      payload: { text: "无法恢复 Cursor 会话 abc，已新建会话。" },
-    });
-  });
 });

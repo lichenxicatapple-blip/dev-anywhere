@@ -54,6 +54,8 @@ describe("create-session submit model", () => {
     expect(normalizePermissionModeForProvider("kimi", "plan")).toBe("plan");
     expect(normalizePermissionModeForProvider("cursor", "acceptEdits")).toBe("default");
     expect(normalizePermissionModeForProvider("cursor", "plan")).toBe("plan");
+    expect(normalizePermissionModeForProvider("cursor", "auto", "pty")).toBe("auto");
+    expect(normalizePermissionModeForProvider("cursor", "auto", "json")).toBe("default");
   });
 
   it("reports provider availability without requiring component render", () => {
@@ -74,6 +76,14 @@ describe("create-session submit model", () => {
         cursor: { available: false, error: "cursor not found" },
       }),
     ).toEqual({ label: "未找到", disabled: true, title: "kimi not found" });
+    expect(
+      providerStatus("cursor", {
+        claude: { available: true, command: "/usr/local/bin/claude" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: true, command: "/usr/local/bin/kimi" },
+        cursor: { available: false, error: "未上报", notReported: true },
+      }),
+    ).toEqual({ label: "未上报", disabled: true, title: "未上报" });
   });
 
   it("extracts missing cwd only from the structured path error", () => {

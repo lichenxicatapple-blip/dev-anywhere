@@ -16,11 +16,20 @@ export class CursorPermissionModeUnsupportedError extends Error {
 
 export type CursorAcpMode = "agent" | "plan" | "ask";
 
+/**
+ * 聊天模式（ACP）的审批策略映射。
+ *
+ * 不支持 `auto`（智能自动）：终端模式的“智能自动”对应 `agent --auto-review`，由 Cursor
+ * 服务端分类器自动放行安全调用、其余仍询问；但 `agent acp` 不接受任何命令行参数，ACP 对外
+ * 只开放 agent / plan / ask 三种模式，没有 auto-review，因此聊天模式里选不到这项能力。
+ * 如果把 `auto` 当作“全部允许”，用户选的是“只放行安全操作”，实际却是放行所有操作，
+ * 所以必须拒绝，不能静默降级。终端模式不受影响，见 `resolveCursorPermissionFlags`。
+ * 待确认 ACP 能遵循 auto-review 配置后再恢复（例如给 acp 进程配置独立的 CURSOR_CONFIG_DIR）。
+ */
 export function resolveCursorAcpMode(permissionMode?: string): CursorAcpMode {
   switch (permissionMode) {
     case undefined:
     case "default":
-    case "auto":
     case "bypassPermissions":
       return "agent";
     case "plan":
@@ -30,8 +39,9 @@ export function resolveCursorAcpMode(permissionMode?: string): CursorAcpMode {
   }
 }
 
+/** 聊天模式下只有“跳过全部审批”才自动批准工具；`auto` 在 resolveCursorAcpMode 里已被拒绝。 */
 export function cursorAcpAutoApprovesPermissions(permissionMode?: string): boolean {
-  return permissionMode === "auto" || permissionMode === "bypassPermissions";
+  return permissionMode === "bypassPermissions";
 }
 
 const CURSOR_NOT_FOUND_MESSAGE =
@@ -65,7 +75,10 @@ export function buildCursorTerminalArgs(args: string[], permissionMode?: string)
   // Hosted PTY always sends a permissionMode (including "default"). Local wrap
   // leaves it unset so user argv stays untouched — including no `--trust`.
   if (permissionMode === undefined) return [...args];
-  return insertBeforePromptSeparator(args, ["--trust", ...resolveCursorPermissionFlags(permissionMode)]);
+  return insertBeforePromptSeparator(args, [
+    "--trust",
+    ...resolveCursorPermissionFlags(permissionMode),
+  ]);
 }
 
 export function resolveCursorCommand(env: NodeJS.ProcessEnv, cwd?: string): string {

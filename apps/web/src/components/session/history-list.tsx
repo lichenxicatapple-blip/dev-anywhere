@@ -404,7 +404,19 @@ export function HistoryList({ now }: HistoryListProps) {
         onOpenChange={(open) => {
           if (!open) setRestoreTarget(null);
         }}
-        onModeChange={setRestoreMode}
+        onModeChange={(nextMode) => {
+          setRestoreMode(nextMode);
+          // Cursor 聊天模式（ACP）没有 `--auto-review` 对应的智能自动，选项已隐藏；
+          // 从终端模式切过来时若已选“智能自动”，回落到命令审批，避免提交 Proxy 会拒绝的值。
+          if (
+            nextMode === "json" &&
+            restoreTarget &&
+            historySessionProvider(restoreTarget) === "cursor" &&
+            restorePermissionMode === "auto"
+          ) {
+            setRestorePermissionMode("default");
+          }
+        }}
         onPermissionModeChange={setRestorePermissionMode}
         onConfirm={() => {
           if (!restoreTarget) return;
@@ -522,31 +534,32 @@ function HistoryRestoreDialog({
               onClick={() => onPermissionModeChange("default")}
             />
           )}
-          <PermissionChoiceButton
-            checked={permissionMode === "auto"}
-            label={
-              isCodex ? "按需审批" : isKimi ? "自动审批" : isCursor ? "智能自动" : "自动判定"
-            }
-            description={
-              isCodex
-                ? "Codex 在需要时请求确认。"
-                : isKimi
-                  ? "Kimi Code 使用原生 yolo 模式自动审批。"
-                  : isCursor
-                    ? "Cursor CLI 自动执行判定为安全的工具，其余仍会询问。"
-                    : "交给 Agent CLI 的原生策略判断。"
-            }
-            disabled={submitting}
-            onClick={() => onPermissionModeChange("auto")}
-          />
+          {/* Cursor 聊天模式不提供“智能自动”，原因见 CURSOR_CHAT_PERMISSION_MODE_OPTIONS */}
+          {!(isCursor && mode === "json") && (
+            <PermissionChoiceButton
+              checked={permissionMode === "auto"}
+              label={
+                isCodex ? "按需审批" : isKimi ? "自动审批" : isCursor ? "智能自动" : "自动判定"
+              }
+              description={
+                isCodex
+                  ? "Codex 在需要时请求确认。"
+                  : isKimi
+                    ? "Kimi Code 使用原生 yolo 模式自动审批。"
+                    : isCursor
+                      ? "Cursor CLI 自动执行判定为安全的工具，其余仍会询问。"
+                      : "交给 Agent CLI 的原生策略判断。"
+              }
+              disabled={submitting}
+              onClick={() => onPermissionModeChange("auto")}
+            />
+          )}
           {(isKimi || isCursor) && (
             <PermissionChoiceButton
               checked={permissionMode === "plan"}
               label="只读规划"
               description={
-                isCursor
-                  ? "Cursor CLI 使用只读规划模式。"
-                  : "Kimi Code 使用只读规划模式。"
+                isCursor ? "Cursor CLI 使用只读规划模式。" : "Kimi Code 使用只读规划模式。"
               }
               disabled={submitting}
               onClick={() => onPermissionModeChange("plan")}

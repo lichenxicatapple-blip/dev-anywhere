@@ -142,6 +142,8 @@ export class WorkerRegistry {
   private assistantSnapshots = new Map<string, AssistantSnapshotState>();
   private readonly kimiAcpEventMapper = new KimiAcpEventMapper();
   private readonly cursorAcpEventMapper = new CursorAcpEventMapper();
+  /** 用户点停止后到下一轮开始前，丢弃 Cursor 晚到的旧回答，避免接进下一轮。 */
+  private interruptedCursorSessions = new Set<string>();
   private startupFailures = new Map<string, WorkerStartupError>();
   private assistantTurnCounter = 0;
 
@@ -538,6 +540,7 @@ export class WorkerRegistry {
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
     this.cursorAcpEventMapper.clearSession(sessionId);
+    this.interruptedCursorSessions.delete(sessionId);
     this.rejectReadyWaiters(
       new Error(`Worker session deleted before ready: ${sessionId}`),
       sessionId,
@@ -554,6 +557,7 @@ export class WorkerRegistry {
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
     this.cursorAcpEventMapper.clearSession(sessionId);
+    this.interruptedCursorSessions.delete(sessionId);
     this.startupFailures.delete(sessionId);
     this.children.delete(sessionId);
     this.providers.delete(sessionId);
@@ -584,6 +588,7 @@ export class WorkerRegistry {
     this.assistantSnapshots.clear();
     this.kimiAcpEventMapper.clear();
     this.cursorAcpEventMapper.clear();
+    this.interruptedCursorSessions.clear();
     this.startupFailures.clear();
     this.rejectReadyWaiters(new Error("Worker registry destroyed"));
   }
@@ -640,9 +645,20 @@ export class WorkerRegistry {
         );
         break;
 
-      case "worker_interrupted":
+      case "worker_interrupted": {
         this.kimiAcpEventMapper.finishTurn(sessionId);
         this.cursorAcpEventMapper.finishTurn(sessionId);
+        // 保留已显示的文字但封口，下一轮会用新的 turnId，不会拼进这条消息。
+        this.completeAssistantSnapshot(
+          sessionId,
+          this.deps.nextSeq?.(sessionId) ?? getSeqCounterFor(sessionId).next(),
+        );
+        if (
+          (this.providers.get(sessionId) ??
+            this.deps.sessionManager.getSession(sessionId)?.provider) === "cursor"
+        ) {
+          this.interruptedCursorSessions.add(sessionId);
+        }
         this.deps.permissionBroker.cleanupSession(sessionId, "Turn interrupted");
         this.deps.relayConnection.sendRaw(
           serializeControl({
@@ -662,8 +678,10 @@ export class WorkerRegistry {
         this.deps.jsonObserver.onTurnResult(sessionId);
         serviceLogger.info({ sessionId }, "JSON turn interrupted");
         break;
+      }
 
       case "worker_turn_started":
+        this.interruptedCursorSessions.delete(sessionId);
         this.deps.jsonObserver.onTurnStart(sessionId);
         serviceLogger.debug({ sessionId }, "Queued JSON turn started");
         break;
@@ -853,6 +871,7 @@ export class WorkerRegistry {
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
     this.cursorAcpEventMapper.clearSession(sessionId);
+    this.interruptedCursorSessions.delete(sessionId);
     if (child) this.startupFailures.set(sessionId, error);
     else this.startupFailures.delete(sessionId);
     this.rejectReadyWaiters(error, sessionId);
@@ -1109,6 +1128,7 @@ export class WorkerRegistry {
     this.deps.touchSessionActivity?.(sessionId);
     for (const mapped of this.cursorAcpEventMapper.map(sessionId, seq, event)) {
       if (mapped.kind === "assistant_text") {
+        if (this.interruptedCursorSessions.has(sessionId)) continue;
         this.appendAssistantSnapshot(sessionId, seq, mapped.text);
       } else if (mapped.kind === "envelope") {
         if (

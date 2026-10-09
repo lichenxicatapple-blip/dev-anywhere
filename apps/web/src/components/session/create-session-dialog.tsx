@@ -29,6 +29,7 @@ import { AgentCliPicker } from "./agent-cli-picker";
 import { BypassPermissionWarning } from "./bypass-permission-warning";
 import {
   CODEX_PERMISSION_MODE_OPTIONS,
+  CURSOR_CHAT_PERMISSION_MODE_OPTIONS,
   CURSOR_PERMISSION_MODE_OPTIONS,
   KIMI_PERMISSION_MODE_OPTIONS,
   normalizePermissionModeForProvider,
@@ -123,7 +124,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       : provider === "kimi"
         ? KIMI_PERMISSION_MODE_OPTIONS
         : provider === "cursor"
-          ? CURSOR_PERMISSION_MODE_OPTIONS
+          ? // 聊天模式不含“智能自动”（ACP 无 auto-review），原因见 CURSOR_CHAT_PERMISSION_MODE_OPTIONS
+            mode === "json"
+            ? CURSOR_CHAT_PERMISSION_MODE_OPTIONS
+            : CURSOR_PERMISSION_MODE_OPTIONS
           : PERMISSION_MODE_OPTIONS;
   const chatModeSupported = providerSupportsChatMode(provider);
   const selectedStatus = providerStatus(provider, agentCli);
@@ -132,8 +136,8 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     cliPathDraft.trim() !== (agentCli?.[provider]?.command ?? "");
   const createDisabled = submitting || savingCliPath || selectedStatus.disabled || cliPathChanged;
 
-  function normalizePermissionMode(nextProvider: ProviderId) {
-    const normalized = normalizePermissionModeForProvider(nextProvider, permissionMode);
+  function normalizePermissionMode(nextProvider: ProviderId, nextMode: SessionMode = mode) {
+    const normalized = normalizePermissionModeForProvider(nextProvider, permissionMode, nextMode);
     if (normalized !== permissionMode) setPermissionMode(normalized);
   }
 
@@ -237,7 +241,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   function handleModeChange(nextMode: SessionMode) {
     if (nextMode === "json" && !providerSupportsChatMode(provider)) return;
     setMode(nextMode);
-    normalizePermissionMode(provider);
+    normalizePermissionMode(provider, nextMode);
   }
 
   const form = confirmingBypass ? (
