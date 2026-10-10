@@ -378,9 +378,7 @@ See the [development guide](./docs/DEVELOPMENT.md) for the repository layout, is
 
 ## Acknowledgements
 
-- [Ryan Yeung (@Yangxulight)](https://github.com/Yangxulight): developed and contributed Cursor CLI integration, supporting native terminal and ACP chat sessions ([#20](https://github.com/lichenxicatapple-blip/dev-anywhere/pull/20)).
-
-Thank you to everyone who contributes code, documentation, testing, and feedback. [See all code contributors](https://github.com/lichenxicatapple-blip/dev-anywhere/graphs/contributors).
+- [Ryan Yeung](https://github.com/Yangxulight)
 
 ## License
 

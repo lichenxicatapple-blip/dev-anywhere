@@ -380,9 +380,7 @@ flowchart LR
 
 ## 致谢
 
-- [Ryan 老师（@Yangxulight）](https://github.com/Yangxulight)：开发并贡献 Cursor CLI 接入，支持原生终端和 ACP 聊天会话（[#20](https://github.com/lichenxicatapple-blip/dev-anywhere/pull/20)）。
-
-也感谢每一位参与代码、文档、测试和问题反馈的朋友。[查看全部代码贡献者](https://github.com/lichenxicatapple-blip/dev-anywhere/graphs/contributors)。
+- [Ryan Yeung](https://github.com/Yangxulight)
 
 ## 许可证
 
