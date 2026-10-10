@@ -26,9 +26,9 @@ DEV Anywhere 让你通过浏览器继续使用开发机上的 Claude Code、Code
 
 想让本地启动的 Claude Code、Codex、Kimi Code 或 Cursor CLI 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。启动后，你既可以在本地终端中照常操作，也可以随时随地在 DEV Anywhere 的 Web 界面里继续手头的开发工作，或创建新的 coding agent 会话。
 
-Kimi Code 和 Cursor CLI 都同时支持原生终端与 ACP 聊天会话。ACP 聊天会流式显示回复和工具调用，支持在 Web 中允许、始终允许或拒绝工具审批，也可以取消当前回合并从历史会话恢复。Cursor ACP 还支持提问、计划批准和 todo 列表。
+在 DEV Anywhere 的 Web 界面中，你可以查看 coding agent 的输出和运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。
 
-DEV Anywhere 直接围绕远程 coding agent 工作流设计。除了查看 coding agent 的输出，你还可以跟踪运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。代码仓库、coding agent CLI 和模型凭据仍然留在开发机上。
+Kimi Code 和 Cursor CLI 除了原生终端，还支持 ACP 聊天会话，可以流式查看回复和工具调用、取消当前回复或恢复历史会话。Cursor ACP 还支持提问、计划确认和待办列表。
 
 > **为什么做这个？**
 >
@@ -377,6 +377,12 @@ flowchart LR
 本地开发支持 macOS、Linux 和原生 Windows 11。在安装项目依赖、完成本地配置初始化后，运行 `pnpm dev:restart` 启动 Relay、Web 和 Proxy，再运行 `pnpm dev:health` 检查连接。默认 Web 地址是 `http://localhost:5173`；Windows 可直接在 PowerShell 或 CMD 中运行，无需 Bash 或 WSL。只启动 Web 可用 `pnpm dev:web -- --relay local --port 5173`。
 
 仓库结构、本地隔离环境、测试矩阵和发布门禁见 [开发指南](./docs/DEVELOPMENT.md)。
+
+## 致谢
+
+- [Ryan 老师（@Yangxulight）](https://github.com/Yangxulight)：开发并贡献 Cursor CLI 接入，支持原生终端和 ACP 聊天会话（[#20](https://github.com/lichenxicatapple-blip/dev-anywhere/pull/20)）。
+
+也感谢每一位参与代码、文档、测试和问题反馈的朋友。[查看全部代码贡献者](https://github.com/lichenxicatapple-blip/dev-anywhere/graphs/contributors)。
 
 ## 许可证
 

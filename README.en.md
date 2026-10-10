@@ -26,9 +26,9 @@ DEV Anywhere lets you continue using Claude Code, Codex, Kimi Code, Cursor CLI, 
 
 To continue a locally started Claude Code, Codex, Kimi Code, or Cursor CLI session from the browser, add `dev-anywhere` before the original command. Once started, you can work in your local terminal as usual or use the DEV Anywhere Web interface anytime, anywhere to continue your work or create a new coding agent session.
 
-Kimi Code and Cursor CLI both support their native terminal interface and ACP chat sessions. ACP chat streams responses and tool calls, lets you allow once, always allow, or reject tool approvals in the Web, and supports cancelling the current turn and resuming historical sessions. Cursor ACP also supports questions, plan approval, and todo lists.
+In the DEV Anywhere Web interface, you can view coding agent output and running status, handle tool approvals, upload or download files, search previous output, and receive browser notifications when work finishes.
 
-DEV Anywhere is designed around remote coding agent workflows. In addition to reading coding agent output, you can track running state, handle tool approvals, upload or download files, search previous output, and receive browser notifications when work finishes. Your repositories, coding agent CLIs, and model credentials remain on the development machine.
+Alongside their native terminal interfaces, Kimi Code and Cursor CLI support ACP chat sessions that stream responses and tool calls. You can cancel the current response or resume a previous session. Cursor ACP also supports questions, plan approval, and todo lists.
 
 > **Why build this?**
 >
@@ -375,6 +375,12 @@ Repositories and coding agent processes remain on the development machine. The R
 Local development supports macOS, Linux, and native Windows 11. After installing dependencies and initializing local configuration, run `pnpm dev:restart` to start Relay, Web, and Proxy, then `pnpm dev:health` to check the connection. The default Web URL is `http://localhost:5173`. These commands work directly in PowerShell or CMD on Windows without Bash or WSL. To start Web only, run `pnpm dev:web -- --relay local --port 5173`.
 
 See the [development guide](./docs/DEVELOPMENT.md) for the repository layout, isolated local environment, test matrix, and release gates. That document is currently maintained in Chinese only.
+
+## Acknowledgements
+
+- [Ryan Yeung (@Yangxulight)](https://github.com/Yangxulight): developed and contributed Cursor CLI integration, supporting native terminal and ACP chat sessions ([#20](https://github.com/lichenxicatapple-blip/dev-anywhere/pull/20)).
+
+Thank you to everyone who contributes code, documentation, testing, and feedback. [See all code contributors](https://github.com/lichenxicatapple-blip/dev-anywhere/graphs/contributors).
 
 ## License
 
