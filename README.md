@@ -26,7 +26,7 @@ DEV Anywhere 让你通过浏览器继续使用开发机上的 Claude Code、Code
 
 想让本地启动的 Claude Code、Codex、Kimi Code 或 Cursor CLI 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。启动后，你既可以在本地终端中照常操作，也可以随时随地在 DEV Anywhere 的 Web 界面里继续手头的开发工作，或创建新的 coding agent 会话。
 
-在 DEV Anywhere 的 Web 界面中，你可以查看 coding agent 的输出和运行状态、处理工具审批、上传或下载文件、搜索历史输出，并在任务完成时接收浏览器通知。
+在 DEV Anywhere 的 Web 界面中，你可以与 coding agent 对话、操作终端、处理工具审批、上传或下载文件。你还可以查看任务进度、搜索历史输出，并在任务完成时接收浏览器通知。
 
 Kimi Code 和 Cursor CLI 除了原生终端，还支持 ACP 聊天会话，可以流式查看回复和工具调用、取消当前回复或恢复历史会话。Cursor ACP 还支持提问、计划确认和待办列表。
 

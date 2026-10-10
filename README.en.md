@@ -26,7 +26,7 @@ DEV Anywhere lets you continue using Claude Code, Codex, Kimi Code, Cursor CLI, 
 
 To continue a locally started Claude Code, Codex, Kimi Code, or Cursor CLI session from the browser, add `dev-anywhere` before the original command. Once started, you can work in your local terminal as usual or use the DEV Anywhere Web interface anytime, anywhere to continue your work or create a new coding agent session.
 
-In the DEV Anywhere Web interface, you can view coding agent output and running status, handle tool approvals, upload or download files, search previous output, and receive browser notifications when work finishes.
+In the DEV Anywhere Web interface, you can chat with coding agents, interact with terminals, handle tool approvals, and upload or download files. You can also follow task progress, search previous output, and receive browser notifications when work finishes.
 
 Alongside their native terminal interfaces, Kimi Code and Cursor CLI support ACP chat sessions that stream responses and tool calls. You can cancel the current response or resume a previous session. Cursor ACP also supports questions, plan approval, and todo lists.
 
