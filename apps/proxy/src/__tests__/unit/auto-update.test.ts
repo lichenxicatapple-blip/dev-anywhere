@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRelayAutoUpdater } from "#src/auto-update.js";
 import type { ServiceCommandResult } from "#src/common/service-command-result.js";
 import { terminateOwnedProcessTree } from "#src/common/process-termination.js";
+import { nodeSatisfiesMinimum } from "#src/common/node-version.js";
 import {
   compareStableVersions,
   parseStableVersion,
@@ -17,7 +18,6 @@ import {
 import {
   acquireUpdateLock,
   installVersion,
-  nodeSatisfiesMinimum,
   planRelayDirectedUpdate,
   restartWithRecovery,
   runProxyServiceCommand,

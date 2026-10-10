@@ -1,3 +1,4 @@
+import "./node-runtime-guard.js";
 import { createServer, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync, writeFileSync, rmSync } from "node:fs";

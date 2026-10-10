@@ -6,12 +6,17 @@ SMOKE_STARTED_VITE_LISTENER_PIDS="${SMOKE_STARTED_VITE_LISTENER_PIDS:-}"
 
 smoke_use_stable_node() {
   # Match the production and hosted-gate Node major when it is locally available.
-  for node_bin in "$HOME"/.nvm/versions/node/v22*/bin; do
+  # Use the newest local Node 22: Proxy and Relay refuse to start below their
+  # minimum version, so an older 22.x picked by glob order would fail every test.
+  local node_bin newest=""
+  while IFS= read -r node_bin; do
     if [[ -x "$node_bin/node" ]]; then
-      export PATH="$node_bin:$PATH"
-      break
+      newest="$node_bin"
     fi
-  done
+  done < <(for dir in "$HOME"/.nvm/versions/node/v22*/bin; do [[ -d "$dir" ]] && printf '%s\n' "$dir"; done | sort -V)
+  if [[ -n "$newest" ]]; then
+    export PATH="$newest:$PATH"
+  fi
 }
 
 smoke_is_local_url() {

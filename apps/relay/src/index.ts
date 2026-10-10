@@ -1,3 +1,4 @@
+import "./node-runtime-guard.js";
 import { createLogger, flushLogger } from "@dev-anywhere/shared/logger";
 import { createRelayServer } from "./server.js";
 import { loadRelayRuntimeEnv } from "./runtime-env.js";

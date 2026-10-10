@@ -254,6 +254,8 @@ irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/in
 
 脚本默认拉取 `latest` 镜像，并复用 `/opt/dev-anywhere/.env` 中已有的 Token。通过 npm 全局安装的 Proxy 默认开启自动更新，会跟随 Relay 的新版本完成升级并重新连接。完成后刷新浏览器，并运行 `dev-anywhere serve status` 确认版本及连接状态。
 
+Proxy 和 Relay 要求 Node.js 22.22.2 或更高版本。开发机的 Node.js 低于该版本时，自动更新会失败并保留当前可用的版本，需要先自行升级 Node.js，再升级 Proxy；低于要求的 Node.js 启动 `dev-anywhere` 或 Relay 时会提示最低版本并退出。
+
 如果开发机设置了 `"autoUpdate": false`，请在该开发机上先执行 `dev-anywhere serve stop`，再运行 `npm install -g @dev-anywhere/proxy@latest` 和 `dev-anywhere serve start --relay cloud`。
 
 ### 固定版本

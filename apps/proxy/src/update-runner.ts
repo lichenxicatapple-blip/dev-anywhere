@@ -20,6 +20,7 @@ import { compareStableVersions, parseStableVersion } from "./common/stable-versi
 import { spawnCommand } from "./common/command-launch.js";
 import { terminateOwnedProcessTree } from "./common/process-termination.js";
 import { createNpmInstallBackup, type NpmInstallBackup } from "./common/npm-install-backup.js";
+import { nodeSatisfiesMinimum } from "./common/node-version.js";
 import { PROXY_PACKAGE_NAME, PROXY_PACKAGE_ROOT } from "./version.js";
 
 const LOCK_STALE_AFTER_MS = 30 * 60_000;
@@ -33,21 +34,6 @@ const LOCK_BUSY_EXIT_CODE = 75;
 const UNSUPPORTED_EXIT_CODE = 64;
 
 class UnsupportedAutoUpdateError extends Error {}
-
-/** 仅解析 `>=x[.y[.z]]` 形式的 engines.node；其他写法返回 null（无法判断，不阻止更新）。 */
-export function nodeSatisfiesMinimum(range: string, nodeVersion: string): boolean | null {
-  const match = /^>=\s*v?(\d+)(?:\.(\d+))?(?:\.(\d+))?$/.exec(range.trim());
-  const current = /^v?(\d+)\.(\d+)\.(\d+)/.exec(nodeVersion.trim());
-  if (!match || !current) return null;
-  const required = [match[1], match[2] ?? "0", match[3] ?? "0"].map(Number);
-  const actual = [current[1], current[2], current[3]].map(Number);
-  for (let index = 0; index < 3; index++) {
-    const need = required[index] ?? 0;
-    const have = actual[index] ?? 0;
-    if (have !== need) return have > need;
-  }
-  return true;
-}
 
 export interface RunnerOptions {
   targetVersion: string;

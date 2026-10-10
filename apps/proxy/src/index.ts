@@ -1,3 +1,4 @@
+import "./node-runtime-guard.js";
 import { Command } from "commander";
 import {
   SESSIONS_PATH,
