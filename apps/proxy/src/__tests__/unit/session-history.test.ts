@@ -17,6 +17,7 @@ import { randomUUID } from "node:crypto";
 import { readSessionMessagesPage, readSessionMessages } from "#src/serve/session-history.js";
 import { normalizeHistoryTitle } from "#src/serve/history/title.js";
 import { scanSessionHistory } from "#src/serve/history/catalog.js";
+import { isolateCursorHistoryEnv } from "../helpers/cursor-history-env.js";
 
 function encodeProtoBytes(field: number, data: Uint8Array): Buffer {
   const lengthBytes: number[] = [];
@@ -26,7 +27,11 @@ function encodeProtoBytes(field: number, data: Uint8Array): Buffer {
     remaining >>>= 7;
   }
   lengthBytes.push(remaining);
-  return Buffer.concat([Buffer.from([(field << 3) | 2]), Buffer.from(lengthBytes), Buffer.from(data)]);
+  return Buffer.concat([
+    Buffer.from([(field << 3) | 2]),
+    Buffer.from(lengthBytes),
+    Buffer.from(data),
+  ]);
 }
 
 function writeCursorAcpSession(
@@ -89,25 +94,23 @@ describe("scanSessionHistory", () => {
   let testDir: string;
   let originalHome: string | undefined;
   let originalKimiCodeHome: string | undefined;
-  let originalCursorAcpSessionsDir: string | undefined;
+  let restoreCursorHistoryEnv: () => void;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `session-history-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     originalHome = process.env.HOME;
     originalKimiCodeHome = process.env.KIMI_CODE_HOME;
-    originalCursorAcpSessionsDir = process.env.CURSOR_ACP_SESSIONS_DIR;
     process.env.HOME = testDir;
     delete process.env.KIMI_CODE_HOME;
-    delete process.env.CURSOR_ACP_SESSIONS_DIR;
+    restoreCursorHistoryEnv = isolateCursorHistoryEnv();
   });
 
   afterEach(() => {
     process.env.HOME = originalHome;
     if (originalKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = originalKimiCodeHome;
-    if (originalCursorAcpSessionsDir === undefined) delete process.env.CURSOR_ACP_SESSIONS_DIR;
-    else process.env.CURSOR_ACP_SESSIONS_DIR = originalCursorAcpSessionsDir;
+    restoreCursorHistoryEnv();
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -927,25 +930,23 @@ describe("readSessionMessages", () => {
   let testDir: string;
   let originalHome: string | undefined;
   let originalKimiCodeHome: string | undefined;
-  let originalCursorAcpSessionsDir: string | undefined;
+  let restoreCursorHistoryEnv: () => void;
 
   beforeEach(() => {
     testDir = join(tmpdir(), `session-messages-test-${randomUUID()}`);
     mkdirSync(testDir, { recursive: true });
     originalHome = process.env.HOME;
     originalKimiCodeHome = process.env.KIMI_CODE_HOME;
-    originalCursorAcpSessionsDir = process.env.CURSOR_ACP_SESSIONS_DIR;
     process.env.HOME = testDir;
     delete process.env.KIMI_CODE_HOME;
-    delete process.env.CURSOR_ACP_SESSIONS_DIR;
+    restoreCursorHistoryEnv = isolateCursorHistoryEnv();
   });
 
   afterEach(() => {
     process.env.HOME = originalHome;
     if (originalKimiCodeHome === undefined) delete process.env.KIMI_CODE_HOME;
     else process.env.KIMI_CODE_HOME = originalKimiCodeHome;
-    if (originalCursorAcpSessionsDir === undefined) delete process.env.CURSOR_ACP_SESSIONS_DIR;
-    else process.env.CURSOR_ACP_SESSIONS_DIR = originalCursorAcpSessionsDir;
+    restoreCursorHistoryEnv();
     try {
       rmSync(testDir, { recursive: true, force: true });
     } catch {
@@ -1135,17 +1136,20 @@ describe("readSessionMessages", () => {
       { limit: 2, before: latest.nextBefore },
       "cursor",
     );
-    expect(older.messages.map((message) => message.text)).toEqual(["看看 Always yes", "先查仓库。"]);
+    expect(older.messages.map((message) => message.text)).toEqual([
+      "看看 Always yes",
+      "先查仓库。",
+    ]);
     expect(older.hasMore).toBe(true);
   });
 
   it("does not invent Cursor history when the native store is missing", async () => {
-    await expect(readSessionMessagesPage("missing-cursor", { limit: 10 }, "cursor")).resolves.toEqual(
-      {
-        messages: [],
-        hasMore: false,
-      },
-    );
+    await expect(
+      readSessionMessagesPage("missing-cursor", { limit: 10 }, "cursor"),
+    ).resolves.toEqual({
+      messages: [],
+      hasMore: false,
+    });
     await expect(readSessionMessages("missing-cursor", "cursor")).resolves.toEqual([]);
   });
 
@@ -1155,13 +1159,16 @@ describe("readSessionMessages", () => {
       join(testDir, ".cursor", "acp-sessions", "cursor-corrupt", "meta.json"),
       JSON.stringify({ schemaVersion: 1, cwd: "/Users/dev/project", title: "Broken" }),
     );
-    writeFileSync(join(testDir, ".cursor", "acp-sessions", "cursor-corrupt", "store.db"), "not-sqlite");
-    await expect(readSessionMessagesPage("cursor-corrupt", { limit: 10 }, "cursor")).resolves.toEqual(
-      {
-        messages: [],
-        hasMore: false,
-      },
+    writeFileSync(
+      join(testDir, ".cursor", "acp-sessions", "cursor-corrupt", "store.db"),
+      "not-sqlite",
     );
+    await expect(
+      readSessionMessagesPage("cursor-corrupt", { limit: 10 }, "cursor"),
+    ).resolves.toEqual({
+      messages: [],
+      hasMore: false,
+    });
     await expect(scanSessionHistory()).resolves.toEqual([]);
   });
 
@@ -1194,7 +1201,11 @@ describe("readSessionMessages", () => {
     });
 
     const page = await readSessionMessagesPage("cursor-inline-root", { limit: 10 }, "cursor");
-    expect(page.messages.map((message) => message.text)).toEqual(["继续", "已经落盘。", "还在写。"]);
+    expect(page.messages.map((message) => message.text)).toEqual([
+      "继续",
+      "已经落盘。",
+      "还在写。",
+    ]);
   });
 
   it("restores terminal Kimi prompts from turn.prompt records", async () => {
