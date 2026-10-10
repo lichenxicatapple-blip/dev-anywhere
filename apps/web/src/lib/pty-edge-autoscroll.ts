@@ -27,6 +27,37 @@ interface EdgeAutoscrollDelta {
 export const DEFAULT_EDGE_AUTOSCROLL_PX = 28;
 export const DEFAULT_EDGE_AUTOSCROLL_MAX_SPEED_PX = 14;
 
+// Keep the existing 60 Hz speed without tying selection travel to the rendering rate.
+// Carry subpixels between frames because some browsers round scrollTop/scrollLeft writes.
+export function createEdgeAutoscrollStepper() {
+  let previousTime: number | null = null;
+  let remainderX = 0;
+  let remainderY = 0;
+  const frameMs = 1000 / 60;
+  const integrate = (delta: number, remainder: number, scale: number) =>
+    delta === 0 ? 0 : delta * scale + (Math.sign(delta) === Math.sign(remainder) ? remainder : 0);
+
+  return {
+    step({ dx, dy }: EdgeAutoscrollDelta, time: number): EdgeAutoscrollDelta {
+      // A suspended tab must not catch up all of its missed travel in one frame.
+      const elapsed =
+        previousTime === null ? frameMs : Math.min(100, Math.max(0, time - previousTime));
+      previousTime = time;
+      const x = integrate(dx, remainderX, elapsed / frameMs);
+      const y = integrate(dy, remainderY, elapsed / frameMs);
+      const result = { dx: Math.trunc(x) || 0, dy: Math.trunc(y) || 0 };
+      remainderX = x - result.dx;
+      remainderY = y - result.dy;
+      return result;
+    },
+    reset(): void {
+      previousTime = null;
+      remainderX = 0;
+      remainderY = 0;
+    },
+  };
+}
+
 function edgeSpeed(distanceToEdge: number, edgePx: number, maxSpeedPx: number): number {
   const factor = Math.min(1, Math.max(0, 1 - distanceToEdge / edgePx));
   return Math.ceil(maxSpeedPx * factor);

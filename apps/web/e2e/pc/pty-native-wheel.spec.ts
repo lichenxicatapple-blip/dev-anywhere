@@ -308,3 +308,83 @@ test("ordinary browser wheel still scrolls once and returns to live following", 
     .poll(async () => (await readPtyScrollMetrics(page)).bottomGap)
     .toBeLessThanOrEqual(2);
 });
+
+for (const focused of [false, true]) {
+  test(`dense browser wheel preserves direction with terminal input ${focused ? "focused" : "blurred"}`, async ({
+    page,
+  }) => {
+    await prepareTerminal(page, `pty-dense-wheel-${focused}`);
+    const terminal = ptyTerminal(page);
+    if (focused) await terminal.locator("textarea").focus();
+    const box = await terminal.boundingBox();
+    if (!box) throw new Error("terminal has no browser geometry");
+    await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+    await terminal.evaluate((element) => {
+      const node = element as HTMLElement;
+      const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!;
+      const audit = { samples: [node.scrollTop], writes: 0, cancelled: 0, wheels: 0, raf: 0 };
+      Object.defineProperty(node, "scrollTop", {
+        configurable: true,
+        get() {
+          return descriptor.get!.call(node);
+        },
+        set(value) {
+          audit.writes += 1;
+          descriptor.set!.call(node, value);
+        },
+      });
+      const sample = () => {
+        audit.samples.push(node.scrollTop);
+      };
+      const onWheel = (event: WheelEvent) => {
+        audit.wheels += 1;
+        setTimeout(() => {
+          if (event.defaultPrevented) audit.cancelled += 1;
+        }, 0);
+      };
+      const frame = () => {
+        sample();
+        audit.raf = requestAnimationFrame(frame);
+      };
+      node.addEventListener("scroll", sample);
+      node.addEventListener("wheel", onWheel, true);
+      audit.raf = requestAnimationFrame(frame);
+      (window as unknown as { stopWheelAudit: () => typeof audit }).stopWheelAudit = () => {
+        cancelAnimationFrame(audit.raf);
+        node.removeEventListener("scroll", sample);
+        node.removeEventListener("wheel", onWheel, true);
+        Reflect.deleteProperty(node, "scrollTop");
+        return audit;
+      };
+    });
+    // Do not wait for every event to settle: the regression appeared during dense batches,
+    // including small inertial deltas. Observe actual browser scrolling, not synthetic landings.
+    for (let i = 0; i < 20; i++) {
+      await page.mouse.wheel(0, -4.8);
+      await page.mouse.wheel(0, -3.1);
+      await page.waitForTimeout(8);
+    }
+    await expect
+      .poll(async () => (await readPtyDebugSnapshot(page))?.verticalIntent.mode)
+      .toBe("reviewing");
+    await page.waitForTimeout(300);
+    const audit = await page.evaluate(() =>
+      (
+        window as unknown as {
+          stopWheelAudit: () => {
+            samples: number[];
+            writes: number;
+            cancelled: number;
+            wheels: number;
+          };
+        }
+      ).stopWheelAudit(),
+    );
+    expect(audit.wheels).toBeGreaterThan(0);
+    expect(audit.cancelled).toBe(0);
+    expect(audit.writes, "wheel movement must not race programmatic scrollTop writes").toBe(0);
+    expect(audit.samples[0] - audit.samples.at(-1)!).toBeGreaterThan(80);
+    const reversals = audit.samples.slice(1).filter((top, i) => top > audit.samples[i] + 1);
+    expect(reversals, "upward scrolling must not jump back to older positions").toEqual([]);
+  });
+}

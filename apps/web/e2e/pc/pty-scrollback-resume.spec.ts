@@ -60,6 +60,12 @@ test.describe("PTY scrollback resume", () => {
     for (let i = 0; i < 5; i++) {
       await page.mouse.wheel(0, -120);
     }
+    // mouse.wheel returns before the browser applies its default scroll. An older,
+    // fully painted frame can already satisfy expectPtyRendered, so wait for all
+    // five native movements before measuring the position that output must preserve.
+    await expect
+      .poll(() => terminal.evaluate((node) => node.scrollTop))
+      .toBeCloseTo(Math.max(0, liveBottomBeforeReview - 5 * 120), 0);
     await expectPtyRendered(page);
     const reviewedScrollTop = await terminal.evaluate((node) => node.scrollTop);
 

@@ -389,7 +389,7 @@ test("preserves BCE-only padding around Codex prompts while scrolling native row
     .toContain("真实 Codex 历史输入");
   await expectPtyCursorAwareBottom(page);
 
-  const targetLine = await ptyTerminal(page).evaluate((container, sessionId) => {
+  const { targetLine, deltaY } = await ptyTerminal(page).evaluate((container, sessionId) => {
     const terminal = window.__ccTestPtyTerminals?.get(sessionId);
     if (!terminal) throw new Error("PTY terminal is unavailable");
     let targetLine = -1;
@@ -408,15 +408,10 @@ test("preserves BCE-only padding around Codex prompts while scrolling native row
     const renderedRow = container.querySelector<HTMLElement>(".xterm-rows > div");
     const cellHeight = renderedRow?.getBoundingClientRect().height ?? 18;
     const targetScrollTop = Math.max(0, (targetLine - 5) * cellHeight);
-    container.dispatchEvent(
-      new WheelEvent("wheel", {
-        bubbles: true,
-        cancelable: true,
-        deltaY: targetScrollTop - container.scrollTop,
-      }),
-    );
-    return targetLine;
+    return { targetLine, deltaY: targetScrollTop - container.scrollTop };
   }, SESSION_ID);
+  await ptyTerminal(page).hover();
+  await page.mouse.wheel(0, deltaY);
 
   await expect
     .poll(() =>

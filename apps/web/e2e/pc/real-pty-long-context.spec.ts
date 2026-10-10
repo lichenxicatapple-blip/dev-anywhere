@@ -179,26 +179,22 @@ test.describe("Real PTY long-context smoke", () => {
       metrics && metrics.rows > 0 ? Math.round(metrics.screenHeight / metrics.rows) : 20;
 
     const initialScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
-    // 上滚 10 次 + 下滚 10 次，每次 200 像素。dispatchEvent 是 Locator 上 wrapper，
-    // 但 wheel 事件 deltaY 需要直接 evaluate 注入。
-    for (let i = 0; i < 10; i += 1) {
-      await terminal.evaluate((el) =>
-        el.dispatchEvent(
-          new WheelEvent("wheel", { deltaY: -200, bubbles: true, cancelable: true }),
-        ),
-      );
-    }
-    for (let i = 0; i < 10; i += 1) {
-      await terminal.evaluate((el) =>
-        el.dispatchEvent(new WheelEvent("wheel", { deltaY: 200, bubbles: true, cancelable: true })),
-      );
-    }
-
-    const finalScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
-    expect(
-      Math.abs(finalScrollTop - initialScrollTop),
-      `反向滚动后 scrollTop 漂移 ${Math.abs(finalScrollTop - initialScrollTop)} > cellH ${cellH}`,
-    ).toBeLessThanOrEqual(cellH);
+    // Exercise browser-native movement in both directions, including its asynchronous landing.
+    await terminal.hover();
+    for (let i = 0; i < 10; i += 1) await page.mouse.wheel(0, -200);
+    await expect
+      .poll(() => terminal.evaluate((el) => (el as HTMLElement).scrollTop))
+      .toBeLessThan(initialScrollTop - 1_500);
+    for (let i = 0; i < 10; i += 1) await page.mouse.wheel(0, 200);
+    await expect
+      .poll(
+        async () => {
+          const finalScrollTop = await terminal.evaluate((el) => (el as HTMLElement).scrollTop);
+          return Math.abs(finalScrollTop - initialScrollTop);
+        },
+        { message: "Reverse scrolling must return within one row of its initial position" },
+      )
+      .toBeLessThanOrEqual(cellH);
   });
 });
 

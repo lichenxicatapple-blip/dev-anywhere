@@ -128,12 +128,12 @@ test.describe("PTY geometry edges", () => {
           if (!node || !term) return null;
           return {
             bottomGap: Math.round(node.scrollHeight - node.clientHeight - node.scrollTop),
-            viewportY: term.buffer.active.viewportY,
-            baseY: term.buffer.active.baseY,
+            viewportAtEnd: term.buffer.active.viewportY === term.buffer.active.baseY,
           };
         }, SESSION_ID),
       )
-      .toEqual(expect.objectContaining({ bottomGap: 0, viewportY: expect.any(Number) }));
+      // Native scrolling reaches its DOM offset before xterm paints the corresponding rows.
+      .toEqual({ bottomGap: 0, viewportAtEnd: true });
 
     const metrics = await page.evaluate((sid) => {
       const term = window.__ccTestPtyTerminals?.get(sid);

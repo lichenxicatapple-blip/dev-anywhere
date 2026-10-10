@@ -21,7 +21,6 @@ import {
   decideCursorAwareClamp,
   decideScrollToBottomAction,
   resolvePtyNativeScrollMax,
-  shouldWheelCommitPtySemanticBottom,
 } from "./pty-follow-policy";
 import { attachPtyScrollDomAdapter } from "./pty-scroll-dom-adapter";
 import { createPtyScrollTraceAdapter } from "./pty-scroll-trace-adapter";
@@ -72,7 +71,8 @@ interface PtyLiveFrameSnapshot {
 
 interface PtyLiveReviewAnchor {
   marker: IMarker;
-  fractionalRowOffset: number;
+  // Usually a fraction of the marker row; negative inside a short host's leading gap.
+  rowOffset: number;
   lastLine: number;
   rowIdentityOffset: number;
   scrollTopAtCapture: number;
@@ -186,7 +186,7 @@ export function attachPtyScrollController(
   // controller transaction。否则 bare-scroll 的 canonical follow 会接管并把 cursor-follow
   // 目标覆盖成 semantic bottom。这个 mark 只做来源归属,不保存第二份滚动位置真相。
   let pendingFollowCursorScrollTop: number | null = null;
-  // An uncancelled wheel belongs to the browser scroller, not our pixel integrator. Direction
+  // Wheel movement belongs to the browser scroller. Direction
   // survives its scroll notifications so native inertia can finish at the semantic bottom.
   // One wheel may produce several native positions, so ownership lasts through scrollend.
   // Geometry changes revoke it separately: a resize clamp is not user movement.
@@ -515,15 +515,17 @@ export function attachPtyScrollController(
       return;
     }
     const { geometryOrigin } = readReviewGeometry(cellH);
-    const logicalTop = Math.max(0, (container.scrollTop - geometryOrigin) / cellH);
+    const logicalTop = (container.scrollTop - geometryOrigin) / cellH;
     const clampedLogicalTop = Math.min(buffer.length - 1, logicalTop);
-    const row = Math.floor(clampedLogicalTop);
+    // The marker must identify a real buffer row, while its signed offset also preserves
+    // valid browser positions before row zero in a short, bottom-aligned terminal.
+    const row = Math.max(0, Math.floor(clampedLogicalTop));
     const cursorRow = buffer.baseY + buffer.cursorY;
     const marker = term.registerMarker(row - cursorRow);
     clearLiveReviewAnchor();
     liveReviewAnchor = {
       marker,
-      fractionalRowOffset: clampedLogicalTop - row,
+      rowOffset: clampedLogicalTop - row,
       lastLine: marker.line,
       rowIdentityOffset: getBufferRowIdentityOffset(),
       scrollTopAtCapture: container.scrollTop,
@@ -568,7 +570,7 @@ export function attachPtyScrollController(
 
     const desiredScrollTop = Math.max(
       0,
-      geometryOrigin + (resolvedLine + anchor.fractionalRowOffset) * cellH + userDelta,
+      geometryOrigin + (resolvedLine + anchor.rowOffset) * cellH + userDelta,
     );
     if (Math.abs(container.scrollTop - desiredScrollTop) > 0.5) {
       // xterm has already rebased its viewport for a trim. Move the outer native scroller by the
@@ -999,89 +1001,13 @@ export function attachPtyScrollController(
     syncContainerScroll();
   };
 
-  const scrollByWheelDelta = (deltaY: number): void => {
-    if (deltaY === 0) return;
-    cancelPendingPageResumeRestore("vertical-wheel");
-    trace("wheel");
-    const anchor = getCurrentAnchor();
-    const previous = container.scrollTop;
-    const reachedSemanticBottom = shouldWheelCommitPtySemanticBottom({
-      reviewing: userHasVerticalScrollIntent(),
-      deltaY,
-      currentScrollTop: previous,
-      bottomScrollTop: anchor.bottomScrollTop,
-      atBottomThreshold,
-    });
-    if (reachedSemanticBottom) {
-      trace("wheel:semantic-bottom");
-      // The semantic bottom is a coupled viewportY / host.top / scrollTop target. Reuse the
-      // canonical commit so viewport, host and browser scroll land in the same frame.
-      scrollToBottom("wheel", { force: true });
-      return;
-    }
-
-    const domMaxScrollTop = Math.max(0, container.scrollHeight - container.clientHeight);
-    const maxScrollTop = resolvePtyNativeScrollMax({
-      reviewing: userHasVerticalScrollIntent(),
-      referenceScrollTop: previous,
-      bottomScrollTop: anchor.bottomScrollTop,
-      domMaxScrollTop,
-      atBottomThreshold,
-    });
-    if (maxScrollTop <= 0) {
-      trace("wheel:max-zero");
-      return;
-    }
-    const next = Math.max(0, Math.min(maxScrollTop, previous + deltaY));
-    if (next === previous) {
-      // 已经 clamp 到边界 (顶 / 底), 真实 scrollTop 不动 — 不该把 intent 再 set 一遍,
-      // 否则用户在底反复 wheel down 会把 output 重新 pause。
-      trace("wheel:clamped");
-      notifyScroll();
-      return;
-    }
-    // Wheel is an explicit user-owned path. Establish review ownership before the DOM write so
-    // the synchronous scroll event cannot be mistaken for an ownerless browser/layout replay and
-    // canonicalized back to the live tail. Downward wheel keeps its existing post-write commit so
-    // it can release review only after the cursor-aware bottom frame has actually landed.
-    if (deltaY < 0) {
-      dispatchVerticalIntent({
-        type: "wheel",
-        deltaY,
-        previousScrollTop: previous,
-        nextScrollTop: next,
-        reachedCursorAwareBottom: false,
-      });
-    }
-    container.scrollTop = next;
-    lastSeenScrollTop = next;
-    syncContainerScroll();
-    // 向下滚到底 (next > previous 且抵达 atBottom) 释放 intent。向上滚不清, 即便
-    // longHost 模式下 cursor 仍可见 (atBottom 仍 true)。
-    if (deltaY > 0) {
-      dispatchVerticalIntent({
-        type: "wheel",
-        deltaY,
-        previousScrollTop: previous,
-        nextScrollTop: next,
-        reachedCursorAwareBottom:
-          next >= anchor.bottomScrollTop - atBottomThreshold && getCurrentAnchor().isAtBottom,
-      });
-    }
-  };
-
   const followNativeWheelAtBottom = (scrollTop: number): boolean => {
     invalidateNativeWheelOnLayoutChange();
+    if (nativeWheelDirection <= 0 || !userHasVerticalScrollIntent()) return false;
     const bottom = getCurrentAnchor().bottomScrollTop;
-    if (
-      nativeWheelDirection <= 0 ||
-      !userHasVerticalScrollIntent() ||
-      Math.abs(scrollTop - bottom) > atBottomThreshold
-    ) {
-      return false;
-    }
-    // Unlike the cancelled-wheel path, a native delta is not a prediction of where the browser
-    // has landed. Resume only from its actual position, including a wheel at an existing boundary.
+    if (Math.abs(scrollTop - bottom) > atBottomThreshold) return false;
+    // Resume only from the actual browser position, including a wheel at an existing boundary.
+    // A wheel delta is not a prediction of where native inertia will land.
     scrollToBottom("nativeWheelBottom", { force: true });
     return true;
   };
@@ -1977,53 +1903,50 @@ export function attachPtyScrollController(
   }
 
   const onWheel = (event: WheelEvent): void => {
-    if (
-      hasHorizontalOverflow() &&
-      Math.abs(event.deltaX) > 0 &&
-      Math.abs(event.deltaX) >= Math.abs(event.deltaY)
-    ) {
+    // Keep xterm from scrolling its inner viewport as well. The outer browser scroller owns
+    // both axes; writing scrollTop for each wheel races Safari's asynchronous scroll updates.
+    event.stopPropagation();
+    // Ctrl+wheel is a browser zoom gesture. An already cancelled event cannot scroll either.
+    // Neither should pause output following or replace an existing review anchor.
+    if (event.ctrlKey || event.defaultPrevented) return;
+    if (hasHorizontalOverflow() && event.deltaX !== 0) {
       markHorizontalUserInput(`site=wheel deltaX=${event.deltaX}`);
     }
     if (event.deltaY === 0) return;
-    event.preventDefault();
-    event.stopPropagation();
     trace("wheel:enter", {
-      details: `deltaY=${event.deltaY} cancelable=${event.cancelable ? 1 : 0} prevented=${event.defaultPrevented ? 1 : 0}`,
+      details: `deltaY=${event.deltaY} deltaMode=${event.deltaMode} cancelable=${event.cancelable ? 1 : 0} prevented=0`,
     });
-    if (!event.defaultPrevented) {
-      cancelPendingPageResumeRestore("native-wheel");
-      // The browser owns both axes of an uncancelled diagonal gesture. Record even its weaker
-      // horizontal component before a repaint can drag that native movement back to the cursor.
-      if (hasHorizontalOverflow() && event.deltaX !== 0) {
-        markHorizontalUserInput(`site=native-wheel deltaX=${event.deltaX}`);
-      }
-      nativeWheelScrollPending = false;
-      nativeWheelDirection = Math.sign(event.deltaY);
-      nativeWheelLayout = readNativeWheelLayout();
-      if (followNativeWheelAtBottom(container.scrollTop)) return;
-      const anchor = getCurrentAnchor();
-      const maxScrollTop = resolvePtyNativeScrollMax({
-        reviewing: userHasVerticalScrollIntent(),
-        referenceScrollTop: container.scrollTop,
-        bottomScrollTop: anchor.bottomScrollTop,
-        domMaxScrollTop: Math.max(0, container.scrollHeight - container.clientHeight),
-        atBottomThreshold,
+    cancelPendingPageResumeRestore("native-wheel");
+    invalidateNativeWheelOnLayoutChange();
+    const continuingNativeWheel = nativeWheelDirection !== 0;
+    nativeWheelDirection = Math.sign(event.deltaY);
+    nativeWheelLayout = readNativeWheelLayout();
+    if (followNativeWheelAtBottom(container.scrollTop)) return;
+    const anchor = getCurrentAnchor();
+    const maxScrollTop = resolvePtyNativeScrollMax({
+      reviewing: userHasVerticalScrollIntent(),
+      referenceScrollTop: container.scrollTop,
+      bottomScrollTop: anchor.bottomScrollTop,
+      domMaxScrollTop: Math.max(0, container.scrollHeight - container.clientHeight),
+      atBottomThreshold,
+    });
+    if (
+      (event.deltaY < 0 && container.scrollTop > 0) ||
+      (event.deltaY > 0 && container.scrollTop < maxScrollTop)
+    ) {
+      // Protect the first landing from an older queued scrollend. Once this gesture has
+      // moved, a subpixel tail may produce no new position; its scrollend must still release it.
+      if (!continuingNativeWheel) nativeWheelScrollPending = true;
+      dispatchVerticalIntent({
+        type: "native-wheel",
+        deltaY: event.deltaY,
+        scrollTop: container.scrollTop,
       });
-      if (
-        (event.deltaY < 0 && container.scrollTop > 0) ||
-        (event.deltaY > 0 && container.scrollTop < maxScrollTop)
-      ) {
-        nativeWheelScrollPending = true;
-        dispatchVerticalIntent({
-          type: "native-wheel",
-          deltaY: event.deltaY,
-          scrollTop: container.scrollTop,
-        });
-      }
-      return;
+    } else if (!continuingNativeWheel) {
+      // A wheel against a boundary did not start a gesture. The next movable wheel must
+      // still protect its first landing from an older queued scrollend.
+      clearNativeWheel();
     }
-    clearNativeWheel();
-    scrollByWheelDelta(event.deltaY);
   };
 
   const domAdapter = attachPtyScrollDomAdapter({

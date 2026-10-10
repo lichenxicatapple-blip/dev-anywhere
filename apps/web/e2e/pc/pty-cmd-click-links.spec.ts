@@ -47,20 +47,16 @@ async function scrollHistoricalPtyLineIntoView(page: Page, lineIndex: number): P
   // Parsing the history precedes the outer viewport's layout. Start the wheel gesture only
   // after that output has reached the live bottom, so a pending layout cannot undo the scroll.
   await expectPtyCursorAwareBottom(page);
-  await ptyTerminal(page).evaluate((element, targetLine) => {
+  const deltaY = await ptyTerminal(page).evaluate((element, targetLine) => {
     const term = window.__ccTestPtyTerminals?.get("claude-pty");
     const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
     if (!term || !screen) throw new Error("PTY terminal geometry is unavailable");
     const cellHeight = screen.clientHeight / term.rows;
     const targetScrollTop = Math.max(0, (targetLine - 4) * cellHeight);
-    element.dispatchEvent(
-      new WheelEvent("wheel", {
-        bubbles: true,
-        cancelable: true,
-        deltaY: targetScrollTop - (element as HTMLElement).scrollTop,
-      }),
-    );
+    return targetScrollTop - (element as HTMLElement).scrollTop;
   }, lineIndex);
+  await ptyTerminal(page).hover();
+  await page.mouse.wheel(0, deltaY);
 
   await expect
     .poll(() =>

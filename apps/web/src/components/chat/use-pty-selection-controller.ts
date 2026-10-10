@@ -7,7 +7,7 @@ import type {
 import type { IBuffer, IBufferLine, IDisposable, IMarker, Terminal } from "@xterm/xterm";
 import { toast } from "@/components/toast";
 import { copyText } from "@/lib/copy-text";
-import { getEdgeAutoscrollDelta } from "@/lib/pty-edge-autoscroll";
+import { createEdgeAutoscrollStepper, getEdgeAutoscrollDelta } from "@/lib/pty-edge-autoscroll";
 import {
   getTerminalPointAtClient,
   resolveTerminalInitialRangeAtBufferPoint,
@@ -963,6 +963,7 @@ export function usePtySelectionController(
     let gesture: DesktopSelectionGesture | null = null;
     let nextGestureId = 1;
     let autoscrollFrame: number | null = null;
+    const autoscrollStepper = createEdgeAutoscrollStepper();
     let managedCopyEventHandled = false;
     let gestureMarkerBinding: {
       terminal: Terminal;
@@ -984,6 +985,7 @@ export function usePtySelectionController(
     };
 
     const stopAutoscroll = (): void => {
+      autoscrollStepper.reset();
       if (autoscrollFrame === null) return;
       cancelAnimationFrame(autoscrollFrame);
       autoscrollFrame = null;
@@ -1119,11 +1121,14 @@ export function usePtySelectionController(
       presentDesktopState(gesture.lastX, gesture.lastY);
     };
 
-    const autoscrollTick = (): void => {
+    const autoscrollTick = (time: number): void => {
       autoscrollFrame = null;
-      if (!gesture || !canPtyManagedSelectionAutoscroll(managedStateRef.current)) return;
+      if (!gesture || !canPtyManagedSelectionAutoscroll(managedStateRef.current)) {
+        autoscrollStepper.reset();
+        return;
+      }
       const rect = containerEl.getBoundingClientRect();
-      const { dx, dy } = getEdgeAutoscrollDelta({
+      const delta = getEdgeAutoscrollDelta({
         pointerX: gesture.lastX,
         pointerY: gesture.lastY,
         rect,
@@ -1134,6 +1139,7 @@ export function usePtySelectionController(
         clientWidth: containerEl.clientWidth,
         clientHeight: containerEl.clientHeight,
       });
+      const { dx, dy } = autoscrollStepper.step(delta, time);
 
       const previousLeft = containerEl.scrollLeft;
       const previousTop = containerEl.scrollTop;

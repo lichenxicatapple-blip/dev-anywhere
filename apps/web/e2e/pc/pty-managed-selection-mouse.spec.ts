@@ -313,6 +313,17 @@ async function enterReview(page: Page, deltaY: number): Promise<TerminalDomSnaps
       page.evaluate(() => window.__devAnywherePtyDebug?.()?.verticalIntent.mode ?? "unavailable"),
     )
     .toBe("reviewing");
+  // Native scrolling lands before xterm paints the requested rows, especially at 4 fps.
+  // Choose drag coordinates from the painted live screen, not its previous viewport.
+  await expect
+    .poll(async () => {
+      const { container, screen } = await requireTerminalDom(page);
+      return (
+        Math.min(container.bottom - 36, screen.bottom - 18) >
+        Math.max(container.top + 36, screen.top + 18)
+      );
+    })
+    .toBe(true);
   return requireTerminalDom(page);
 }
 
@@ -555,51 +566,85 @@ test("a normal-buffer reset invalidates committed and in-flight managed selectio
   await expect(page.locator('[data-slot="pty-managed-selection-segment"]')).toHaveCount(0);
 });
 
-test("vertical edge selection crosses a viewport, stays committed, and clears on click", async ({
-  page,
-}) => {
-  await setupHistory(page, "gate-managed-vertical");
-  const initial = await requireTerminalDom(page);
-  await enterReview(page, -Math.ceil(initial.container.height * 3));
-  await dragSelectionAcrossVerticalViewport(page, "up");
-  await clearSelectionWithClick(page);
+for (const slowFrames of [false, true]) {
+  test(`vertical edge selection crosses a viewport, stays committed, and clears on click${slowFrames ? " at 4 fps" : ""}`, async ({
+    page,
+  }) => {
+    await setupHistory(page, "gate-managed-vertical");
+    if (slowFrames) {
+      await page.evaluate(() => {
+        const request = window.requestAnimationFrame.bind(window);
+        const cancel = window.cancelAnimationFrame.bind(window);
+        const pending = new Map<number, number>();
+        let nextId = -1;
+        window.requestAnimationFrame = (callback) => {
+          const id = nextId--;
+          const start = performance.now();
+          const tick = (time: number) => {
+            if (!pending.has(id)) return;
+            if (time - start < 250) {
+              pending.set(id, request(tick));
+              return;
+            }
+            pending.delete(id);
+            callback(time);
+          };
+          pending.set(id, request(tick));
+          return id;
+        };
+        window.cancelAnimationFrame = (id) => {
+          const frame = pending.get(id);
+          if (frame !== undefined) {
+            cancel(frame);
+            pending.delete(id);
+          } else {
+            cancel(id);
+          }
+        };
+      });
+    }
+    const initial = await requireTerminalDom(page);
+    await enterReview(page, -Math.ceil(initial.container.height * 3));
+    await dragSelectionAcrossVerticalViewport(page, "up");
+    await clearSelectionWithClick(page);
 
-  let geometry = await requireTerminalDom(page);
-  await page.mouse.move(
-    geometry.container.left + geometry.container.width / 2,
-    geometry.container.top + geometry.container.height / 2,
-  );
-  await page.mouse.wheel(0, 10_000);
-  await expect
-    .poll(async () => {
-      const current = await requireTerminalDom(page);
-      return current.maxScrollTop - current.scrollTop;
-    })
-    .toBeLessThan(2);
-  geometry = await requireTerminalDom(page);
-  await enterReview(page, -Math.ceil(geometry.container.height * 3));
-  await dragSelectionAcrossVerticalViewport(page, "down");
+    let geometry = await requireTerminalDom(page);
+    await page.mouse.move(
+      geometry.container.left + geometry.container.width / 2,
+      geometry.container.top + geometry.container.height / 2,
+    );
+    await page.mouse.wheel(0, 10_000);
+    await expect
+      .poll(async () => {
+        const current = await requireTerminalDom(page);
+        return current.maxScrollTop - current.scrollTop;
+      })
+      .toBeLessThan(2);
+    geometry = await requireTerminalDom(page);
+    await enterReview(page, -Math.ceil(geometry.container.height * 3));
+    await dragSelectionAcrossVerticalViewport(page, "down");
 
-  const committedRange = await requireOverlayRange(page);
-  const copiedBeforeWheel = await copyManagedSelection(page);
-  expect(copiedBeforeWheel).toMatch(/MANAGED gate-managed-vertical ROW \d{4}/u);
+    const committedRange = await requireOverlayRange(page);
+    const copiedBeforeWheel = await copyManagedSelection(page);
+    expect(copiedBeforeWheel).toMatch(/MANAGED gate-managed-vertical ROW \d{4}/u);
 
-  geometry = await requireTerminalDom(page);
-  const wheelDelta = geometry.scrollTop > geometry.maxScrollTop / 2 ? -320 : 320;
-  const scrollTopBeforeWheel = geometry.scrollTop;
-  await page.mouse.move(
-    geometry.container.left + geometry.container.width / 2,
-    geometry.container.top + geometry.container.height / 2,
-  );
-  await page.mouse.wheel(0, wheelDelta);
-  await expect
-    .poll(async () => Math.abs((await requireTerminalDom(page)).scrollTop - scrollTopBeforeWheel))
-    .toBeGreaterThan(40);
-  expect(await requireOverlayRange(page)).toEqual(committedRange);
-  expect(await copyManagedSelection(page)).toBe(copiedBeforeWheel);
+    geometry = await requireTerminalDom(page);
+    const wheelDelta = geometry.scrollTop > geometry.maxScrollTop / 2 ? -320 : 320;
+    const scrollTopBeforeWheel = geometry.scrollTop;
+    await page.mouse.move(
+      geometry.container.left + geometry.container.width / 2,
+      geometry.container.top + geometry.container.height / 2,
+    );
+    await page.mouse.wheel(0, wheelDelta);
+    await expect
+      .poll(async () => Math.abs((await requireTerminalDom(page)).scrollTop - scrollTopBeforeWheel))
+      .toBeGreaterThan(40);
+    expect(await requireOverlayRange(page)).toEqual(committedRange);
+    expect(await copyManagedSelection(page)).toBe(copiedBeforeWheel);
 
-  await clearSelectionWithClick(page);
-});
+    await clearSelectionWithClick(page);
+  });
+}
 
 test("horizontal edge selection autoscrolls right and left with a fixed anchor", async ({
   page,

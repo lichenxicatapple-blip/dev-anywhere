@@ -59,21 +59,17 @@ describe("pty vertical intent FSM", () => {
     expect(canPassiveFollow(result.state)).toBe(false);
   });
 
-  it("does not clear review intent on wheel down until cursor-aware bottom is reached", () => {
+  it("does not clear review intent from a downward wheel announcement before it lands", () => {
     const reviewing = reducePtyVerticalIntent(createInitialPtyVerticalIntentState(), {
-      type: "wheel",
+      type: "native-wheel",
       deltaY: -120,
-      previousScrollTop: 1600,
-      nextScrollTop: 1480,
-      reachedCursorAwareBottom: false,
+      scrollTop: 1600,
     }).state;
 
     const result = reducePtyVerticalIntent(reviewing, {
-      type: "wheel",
+      type: "native-wheel",
       deltaY: 120,
-      previousScrollTop: 1480,
-      nextScrollTop: 1600,
-      reachedCursorAwareBottom: false,
+      scrollTop: 1480,
     });
 
     expect(result.state.mode).toBe("reviewing");
@@ -237,62 +233,6 @@ describe("pty vertical intent FSM", () => {
       expectedMode: "reviewing",
       expectedSource: "wheel",
       expectedTraceAction: "set",
-    },
-    {
-      id: "wheel.clamped",
-      initial: reviewingState(),
-      event: {
-        type: "wheel",
-        deltaY: 120,
-        previousScrollTop: 1600,
-        nextScrollTop: 1600,
-        reachedCursorAwareBottom: true,
-      },
-      expectedMode: "reviewing",
-      expectedSource: "initial",
-      expectedTraceAction: "keep",
-    },
-    {
-      id: "wheel.up",
-      initial: createInitialPtyVerticalIntentState(),
-      event: {
-        type: "wheel",
-        deltaY: -120,
-        previousScrollTop: 1600,
-        nextScrollTop: 1480,
-        reachedCursorAwareBottom: false,
-      },
-      expectedMode: "reviewing",
-      expectedSource: "wheel",
-      expectedTraceAction: "set",
-    },
-    {
-      id: "wheel.down.not-bottom",
-      initial: reviewingState({ source: "wheel" }),
-      event: {
-        type: "wheel",
-        deltaY: 120,
-        previousScrollTop: 1480,
-        nextScrollTop: 1600,
-        reachedCursorAwareBottom: false,
-      },
-      expectedMode: "reviewing",
-      expectedSource: "wheel",
-      expectedTraceAction: "keep",
-    },
-    {
-      id: "wheel.down.bottom",
-      initial: reviewingState({ source: "wheel" }),
-      event: {
-        type: "wheel",
-        deltaY: 120,
-        previousScrollTop: 1480,
-        nextScrollTop: 1600,
-        reachedCursorAwareBottom: true,
-      },
-      expectedMode: "following",
-      expectedSource: "none",
-      expectedTraceAction: "clear",
     },
     {
       id: "container.programmatic-follow",

@@ -72,8 +72,8 @@ jobs:
     name: Browser smoke
     # Keep the hosted browser image reproducible across release runs.
     runs-on: ubuntu-22.04
-    # layout（45）+ pc（168）串行，约 14–15 分钟；合入新增 e2e 后超过旧的 15 分钟上限，
-    # 并非挂起（取消时已跑到 164/168）。给出余量，避免用例再增加时反复触线。
+    # Installation, layout and the full serial desktop suite share this budget.
+    # Keep per-test timeouts unchanged while allowing the entire suite to finish.
     timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
