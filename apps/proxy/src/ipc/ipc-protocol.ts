@@ -2,6 +2,8 @@ import { z } from "zod";
 import {
   ControlErrorCode,
   ApprovalOptionSchema,
+  CursorAnswerSchema,
+  CursorPromptSchema,
   encodeBinaryFrame,
   decodeBinaryFrame,
   providerValues,
@@ -268,6 +270,7 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     message: z.string().optional(),
     remember: z.boolean().optional(),
     optionId: z.string().optional(),
+    cursorAnswer: CursorAnswerSchema.optional(),
   }),
 
   // worker → serve: provider 输出事件（带序列号）
@@ -301,10 +304,11 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     toolName: z.string(),
     input: z.record(z.string(), z.unknown()),
     options: z.array(ApprovalOptionSchema).optional(),
+    cursorPrompt: CursorPromptSchema.optional(),
   }),
 
-  // worker → serve: worker 就绪。Claude 在进程启动后发送；Codex/Kimi 分别在
-  // app-server/ACP initialize + native session start|resume 完成后发送。
+  // worker → serve: worker 就绪。Claude 在进程启动后发送；Codex/Kimi/Cursor 分别在
+  // app-server/ACP initialize + native session start|resume|load 完成后发送。
   z.object({
     type: z.literal("worker_ready"),
     pid: z.number(),

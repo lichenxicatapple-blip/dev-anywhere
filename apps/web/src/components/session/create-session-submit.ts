@@ -9,7 +9,7 @@ import {
 } from "@dev-anywhere/shared";
 
 export type SessionMode = "pty" | "json";
-export type ProviderId = "claude" | "codex" | "kimi";
+export type ProviderId = "claude" | "codex" | "kimi" | "cursor";
 export type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
@@ -34,11 +34,33 @@ export const KIMI_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label:
   { value: "bypassPermissions", label: "全自动" },
 ];
 
+export const CURSOR_PERMISSION_MODE_OPTIONS: Array<{ value: PermissionMode; label: string }> = [
+  { value: "default", label: "命令审批" },
+  { value: "auto", label: "智能自动" },
+  { value: "plan", label: "只读规划" },
+  { value: "bypassPermissions", label: "跳过全部审批" },
+];
+
+/**
+ * Cursor 聊天模式（ACP）的权限选项：不含“智能自动”。
+ * 终端模式的“智能自动”是 `agent --auto-review`（Cursor 服务端分类器只放行安全调用），
+ * 而 `agent acp` 不接受该参数，ACP 也没有对应模式；若在聊天里提供，实际会变成全部放行，
+ * 与选项含义不符。Proxy 端的 resolveCursorAcpMode 也会拒绝 `auto`，两边需保持一致。
+ */
+export const CURSOR_CHAT_PERMISSION_MODE_OPTIONS = CURSOR_PERMISSION_MODE_OPTIONS.filter(
+  (option) => option.value !== "auto",
+);
+
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
   kimi: "Kimi Code",
+  cursor: "Cursor CLI",
 };
+
+export function providerSupportsChatMode(_provider: ProviderId): boolean {
+  return true;
+}
 
 type SessionCreateResponse = Extract<RelayControlMessage, { type: "session_create_response" }>;
 
@@ -110,12 +132,16 @@ export function providerStatus(
   if (status.available) {
     return { label: "可用", disabled: false, title: status.command };
   }
+  if (status.notReported) {
+    return { label: "未上报", disabled: true, title: status.error };
+  }
   return { label: "未找到", disabled: true, title: status.error };
 }
 
 export function normalizePermissionModeForProvider(
   provider: ProviderId,
   permissionMode: PermissionMode,
+  mode: SessionMode = "pty",
 ): PermissionMode {
   if (provider === "codex") {
     return CODEX_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
@@ -126,6 +152,11 @@ export function normalizePermissionModeForProvider(
     return KIMI_PERMISSION_MODE_OPTIONS.some((option) => option.value === permissionMode)
       ? permissionMode
       : "default";
+  }
+  if (provider === "cursor") {
+    const options =
+      mode === "json" ? CURSOR_CHAT_PERMISSION_MODE_OPTIONS : CURSOR_PERMISSION_MODE_OPTIONS;
+    return options.some((option) => option.value === permissionMode) ? permissionMode : "default";
   }
   return permissionMode;
 }
@@ -160,7 +191,7 @@ export async function submitSessionCreate({
     };
   }
 
-  const submittedMode = form.mode;
+  const submittedMode = providerSupportsChatMode(form.provider) ? form.mode : "pty";
   const submittedProvider = form.provider;
   const submittedName = form.name.trim();
 

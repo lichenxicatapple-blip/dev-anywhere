@@ -29,6 +29,8 @@ import { AgentCliPicker } from "./agent-cli-picker";
 import { BypassPermissionWarning } from "./bypass-permission-warning";
 import {
   CODEX_PERMISSION_MODE_OPTIONS,
+  CURSOR_CHAT_PERMISSION_MODE_OPTIONS,
+  CURSOR_PERMISSION_MODE_OPTIONS,
   KIMI_PERMISSION_MODE_OPTIONS,
   normalizePermissionModeForProvider,
   PERMISSION_MODE_OPTIONS,
@@ -36,6 +38,7 @@ import {
   type ProviderId,
   PROVIDER_LABEL,
   providerStatus,
+  providerSupportsChatMode,
   type SessionMode,
   submitSessionCreate,
 } from "./create-session-submit";
@@ -120,15 +123,21 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       ? CODEX_PERMISSION_MODE_OPTIONS
       : provider === "kimi"
         ? KIMI_PERMISSION_MODE_OPTIONS
-        : PERMISSION_MODE_OPTIONS;
+        : provider === "cursor"
+          ? // 聊天模式不含“智能自动”（ACP 无 auto-review），原因见 CURSOR_CHAT_PERMISSION_MODE_OPTIONS
+            mode === "json"
+            ? CURSOR_CHAT_PERMISSION_MODE_OPTIONS
+            : CURSOR_PERMISSION_MODE_OPTIONS
+          : PERMISSION_MODE_OPTIONS;
+  const chatModeSupported = providerSupportsChatMode(provider);
   const selectedStatus = providerStatus(provider, agentCli);
   const cliPathChanged =
     cliPathDraftProvider === provider &&
     cliPathDraft.trim() !== (agentCli?.[provider]?.command ?? "");
   const createDisabled = submitting || savingCliPath || selectedStatus.disabled || cliPathChanged;
 
-  function normalizePermissionMode(nextProvider: ProviderId) {
-    const normalized = normalizePermissionModeForProvider(nextProvider, permissionMode);
+  function normalizePermissionMode(nextProvider: ProviderId, nextMode: SessionMode = mode) {
+    const normalized = normalizePermissionModeForProvider(nextProvider, permissionMode, nextMode);
     if (normalized !== permissionMode) setPermissionMode(normalized);
   }
 
@@ -230,8 +239,9 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   }
 
   function handleModeChange(nextMode: SessionMode) {
+    if (nextMode === "json" && !providerSupportsChatMode(provider)) return;
     setMode(nextMode);
-    normalizePermissionMode(provider);
+    normalizePermissionMode(provider, nextMode);
   }
 
   const form = confirmingBypass ? (
@@ -309,7 +319,12 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       ) : null}
       <section aria-label="交互方式" className="flex min-w-0 flex-col gap-2">
         <span className="text-sm">交互方式</span>
-        <div className="grid min-w-0 grid-cols-1 gap-2 sm:grid-cols-2">
+        <div
+          className={cn(
+            "grid min-w-0 gap-2",
+            chatModeSupported ? "grid-cols-1 sm:grid-cols-2" : "grid-cols-1",
+          )}
+        >
           <button
             type="button"
             aria-pressed={mode === "pty"}
@@ -322,18 +337,20 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
             <span className="text-sm font-medium">终端模式</span>
             <span className="text-xs text-muted-foreground">像本地终端一样操作</span>
           </button>
-          <button
-            type="button"
-            aria-pressed={mode === "json"}
-            onClick={() => handleModeChange("json")}
-            className={cn(
-              "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
-              mode === "json" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
-            )}
-          >
-            <span className="text-sm font-medium">聊天模式</span>
-            <span className="text-xs text-muted-foreground">气泡式对话，支持 Voice Pilot</span>
-          </button>
+          {chatModeSupported ? (
+            <button
+              type="button"
+              aria-pressed={mode === "json"}
+              onClick={() => handleModeChange("json")}
+              className={cn(
+                "flex min-h-14 min-w-0 flex-col items-start justify-center gap-1 rounded-md border px-3 text-left outline-none focus-visible:ring-2 focus-visible:ring-ring",
+                mode === "json" ? "border-primary/70 bg-primary/10" : "border-border bg-muted/20",
+              )}
+            >
+              <span className="text-sm font-medium">聊天模式</span>
+              <span className="text-xs text-muted-foreground">气泡式对话，支持 Voice Pilot</span>
+            </button>
+          ) : null}
         </div>
       </section>
       <AgentCliPicker
@@ -344,6 +361,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         savingCliPath={savingCliPath}
         onProviderChange={(nextProvider) => {
           setProvider(nextProvider);
+          if (!providerSupportsChatMode(nextProvider)) setMode("pty");
           normalizePermissionMode(nextProvider);
           setCliPathDraftProvider(null);
           setCliPathDraft("");

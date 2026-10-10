@@ -108,7 +108,7 @@ irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/in
 
 ## 连接开发机
 
-开发机支持 macOS、Linux 和原生 Windows 11，Windows 无需安装 WSL。在运行 Claude Code、Codex、Kimi Code 或 Shell 的开发机上安装 Proxy：
+开发机支持 macOS、Linux 和原生 Windows 11，Windows 无需安装 WSL。在运行 Claude Code、Codex、Kimi Code、Cursor CLI 或 Shell 的开发机上安装 Proxy：
 
 ```bash
 npm install -g @dev-anywhere/proxy
@@ -152,14 +152,17 @@ dev-anywhere serve status
   "agentCli": {
     "claudeBin": "/absolute/path/to/claude",
     "codexBin": "/absolute/path/to/codex",
-    "kimiBin": "/absolute/path/to/kimi"
+    "kimiBin": "/absolute/path/to/kimi",
+    "cursorBin": "/absolute/path/to/agent"
   }
 }
 ```
 
-也可以分别使用 `CLAUDE_BIN`、`CODEX_BIN` 和 `KIMI_BIN` 临时覆盖这些路径。
+也可以分别使用 `CLAUDE_BIN`、`CODEX_BIN`、`KIMI_BIN` 和 `CURSOR_BIN` 临时覆盖这些路径。Cursor CLI 探测 `agent` 或 `cursor-agent`，不会使用 Cursor IDE 的 `cursor` 命令名。
 
 Kimi Code 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere kimi ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、取消当前回合和恢复历史会话。
+
+Cursor CLI 同时支持终端与 ACP 聊天会话。可以运行 `dev-anywhere cursor ...` 或 `dev-anywhere agent ...` 接管原生终端，也可以在 Web 中新建终端或聊天会话；ACP 聊天支持流式输出、工具调用与审批、提问、计划批准、取消当前回合和恢复历史会话。未登录时请先在本机运行 Cursor CLI 的 `agent login`，或设置 `CURSOR_API_KEY` / `CURSOR_AUTH_TOKEN`。
 
 ### 可选：登录后自动启动
 
@@ -250,6 +253,8 @@ irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/in
 ```
 
 脚本默认拉取 `latest` 镜像，并复用 `/opt/dev-anywhere/.env` 中已有的 Token。通过 npm 全局安装的 Proxy 默认开启自动更新，会跟随 Relay 的新版本完成升级并重新连接。完成后刷新浏览器，并运行 `dev-anywhere serve status` 确认版本及连接状态。
+
+Proxy 和 Relay 要求 Node.js 22.22.2 或更高版本。开发机的 Node.js 低于该版本时，自动更新会失败并保留当前可用的版本，需要先自行升级 Node.js，再升级 Proxy；低于要求的 Node.js 启动 `dev-anywhere` 或 Relay 时会提示最低版本并退出。
 
 如果开发机设置了 `"autoUpdate": false`，请在该开发机上先执行 `dev-anywhere serve stop`，再运行 `npm install -g @dev-anywhere/proxy@latest` 和 `dev-anywhere serve start --relay cloud`。
 

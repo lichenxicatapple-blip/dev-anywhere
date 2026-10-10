@@ -44,7 +44,9 @@ export function parseTerminalWorkerCliArgs(argv: readonly string[]): TerminalWor
   const provider = values.get("--provider");
   if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
   if (kind !== "agent" && kind !== "terminal") return null;
-  if (provider !== "claude" && provider !== "codex" && provider !== "kimi") return null;
+  if (provider !== "claude" && provider !== "codex" && provider !== "kimi" && provider !== "cursor") {
+    return null;
+  }
   if (kind === "terminal" && provider !== "claude") return null;
   return { sessionId, kind, provider };
 }
@@ -52,7 +54,7 @@ export function parseTerminalWorkerCliArgs(argv: readonly string[]): TerminalWor
 const BootstrapSchema = z
   .object({
     kind: z.enum(["agent", "terminal"]),
-    provider: z.enum(["claude", "codex", "kimi"]),
+    provider: z.enum(["claude", "codex", "kimi", "cursor"]),
     cwd: z.string().min(1),
     name: z.string().min(1),
     cols: z.number().int().min(PTY_INITIAL_MIN_COLS).max(PTY_INITIAL_MAX_COLS),

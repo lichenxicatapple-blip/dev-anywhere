@@ -12,6 +12,7 @@ describe("loadProxyRuntimeEnv", () => {
       claudeBin: undefined,
       codexBin: undefined,
       kimiBin: undefined,
+      cursorBin: undefined,
       logLevel: undefined,
       isVitest: false,
     });
@@ -28,9 +29,9 @@ describe("loadProxyRuntimeEnv", () => {
     expect(env.kimiBin).toBeUndefined();
   });
 
-  it("reads KIMI_BIN", () => {
-    expect(loadProxyRuntimeEnv({ KIMI_BIN: "/home/dev/.kimi-code/bin/kimi" }).kimiBin).toBe(
-      "/home/dev/.kimi-code/bin/kimi",
+  it("reads CURSOR_BIN", () => {
+    expect(loadProxyRuntimeEnv({ CURSOR_BIN: "/home/dev/.local/bin/agent" }).cursorBin).toBe(
+      "/home/dev/.local/bin/agent",
     );
   });
 

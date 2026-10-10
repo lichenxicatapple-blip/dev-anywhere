@@ -1,7 +1,12 @@
 // 聊天状态管理: 按 sessionId 切片, 每个 slice 含消息/审批/引用/输入草稿
 import { create } from "zustand";
 import { devtools } from "zustand/middleware";
-import type { ApprovalOption, SessionHistoryMessage } from "@dev-anywhere/shared";
+import type {
+  ApprovalOption,
+  CursorPrompt,
+  CursorTodo,
+  SessionHistoryMessage,
+} from "@dev-anywhere/shared";
 import type { ChatActivityDetail } from "@/lib/chat-activity-detail";
 import { getClaudeToolActivityDetails } from "@/lib/claude-activity-summary";
 
@@ -17,6 +22,7 @@ export interface ToolApprovalRequest {
   toolName: string;
   input: Record<string, unknown>;
   options?: ApprovalOption[];
+  cursorPrompt?: CursorPrompt;
   status: "pending" | "approved" | "denied";
 }
 
@@ -74,6 +80,7 @@ interface ChatSessionSlice {
   // workingToolName 保留：session.state 只到 working 粒度，承载不了具体工具名
   workingToolName: string;
   pendingApprovals: ToolApprovalRequest[];
+  cursorTodos: CursorTodo[];
   quotedMessage: QuotedMessage | null;
   inputDraft: string;
   draftAttachments: ChatDraftAttachment[];
@@ -89,6 +96,7 @@ export const EMPTY_SLICE: ChatSessionSlice = {
   historyLoading: false,
   workingToolName: "",
   pendingApprovals: [],
+  cursorTodos: [],
   quotedMessage: null,
   inputDraft: "",
   draftAttachments: [],
@@ -124,6 +132,7 @@ interface ChatStoreState {
   toggleToolCollapse: (sessionId: string, messageId: string, toolIndex: number) => void;
   addApprovalRequest: (sessionId: string, request: ToolApprovalRequest) => void;
   replacePendingApprovals: (sessionId: string, requests: ToolApprovalRequest[]) => void;
+  applyCursorTodos: (sessionId: string, todos: CursorTodo[], merge: boolean) => void;
   updateApprovalStatus: (
     sessionId: string,
     requestId: string,
@@ -483,6 +492,16 @@ export const useChatStore = create<ChatStoreState>()(
             ...slice,
             pendingApprovals: requests,
           })),
+        ),
+
+      applyCursorTodos: (sessionId, todos, merge) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => {
+            if (!merge) return { ...slice, cursorTodos: todos };
+            const byId = new Map(slice.cursorTodos.map((todo) => [todo.id, todo]));
+            for (const todo of todos) byId.set(todo.id, todo);
+            return { ...slice, cursorTodos: [...byId.values()] };
+          }),
         ),
 
       updateApprovalStatus: (sessionId, requestId, status) =>

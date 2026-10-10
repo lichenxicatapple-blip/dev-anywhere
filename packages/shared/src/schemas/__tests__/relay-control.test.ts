@@ -235,6 +235,55 @@ describe("RelayControlSchema", () => {
         payload: { toolId: "request-1", optionId: "reject-once" },
       }),
     ).toMatchObject({ payload: { optionId: "reject-once" } });
+
+    expect(
+      RelayControlSchema.parse({
+        type: "pending_approvals_push",
+        sessionId: "session-1",
+        approvals: [
+          {
+            requestId: "request-2",
+            toolName: "AskQuestion",
+            input: {},
+            cursorPrompt: {
+              type: "ask_question",
+              title: "Choose a mode",
+              questions: [
+                {
+                  id: "q1",
+                  prompt: "Which mode?",
+                  options: [{ id: "agent", label: "Agent" }],
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    ).toMatchObject({
+      approvals: [
+        {
+          cursorPrompt: {
+            type: "ask_question",
+            title: "Choose a mode",
+          },
+        },
+      ],
+    });
+    expect(isProxyToClientRelayControlType("cursor_session_ui")).toBe(true);
+    expect(
+      RelayControlSchema.parse({
+        type: "cursor_session_ui",
+        sessionId: "session-1",
+        payload: {
+          kind: "todos",
+          merge: true,
+          todos: [{ id: "1", content: "Setup", status: "completed" }],
+        },
+      }),
+    ).toMatchObject({
+      type: "cursor_session_ui",
+      payload: { kind: "todos", merge: true },
+    });
   });
 
   it("parses relay-local voice config controls without routing them to proxy", () => {
@@ -1089,6 +1138,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: false, error: "codex not found" },
           kimi: { available: false, error: "kimi not found" },
+          cursor: { available: false, error: "cursor not found" },
         },
       }),
     ).toEqual({
@@ -1099,6 +1149,7 @@ describe("RelayControlSchema", () => {
         claude: { available: true, command: "/usr/local/bin/claude" },
         codex: { available: false, error: "codex not found" },
         kimi: { available: false, error: "kimi not found" },
+        cursor: { available: false, error: "cursor not found" },
       },
     });
 
@@ -1111,6 +1162,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/usr/local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/home/dev/.kimi-code/bin/kimi" },
+          cursor: { available: false },
         },
       }),
     ).toMatchObject({
@@ -1120,6 +1172,37 @@ describe("RelayControlSchema", () => {
       },
     });
 
+    // 旧版 Proxy 不上报 cursor：补成“未上报”，不连累其他 Agent。
+    expect(
+      RelayControlSchema.parse({
+        type: "proxy_info",
+        requestId: "info-legacy",
+        homePath: "/home/dev",
+        agentCli: {
+          claude: { available: true, command: "/usr/local/bin/claude" },
+          codex: { available: true, command: "/usr/local/bin/codex" },
+          kimi: { available: false, error: "kimi not found" },
+        },
+      }),
+    ).toMatchObject({
+      type: "proxy_info",
+      agentCli: {
+        claude: { available: true, command: "/usr/local/bin/claude" },
+        codex: { available: true, command: "/usr/local/bin/codex" },
+        kimi: { available: false, error: "kimi not found" },
+        cursor: { available: false, notReported: true },
+      },
+    });
+    // 已上报的条目仍然严格校验。
+    expect(
+      RelayControlSchema.safeParse({
+        type: "proxy_info",
+        requestId: "info-bad-entry",
+        homePath: "/home/dev",
+        agentCli: { claude: { available: "yes" } },
+      }).success,
+    ).toBe(false);
+
     expect(
       RelayControlSchema.safeParse({
         type: "proxy_info_request",
@@ -1127,21 +1210,27 @@ describe("RelayControlSchema", () => {
         refreshPath: true,
       }).success,
     ).toBe(false);
-    expect(
-      RelayControlSchema.safeParse({
-        type: "proxy_info",
-        requestId: "removed-capabilities",
-        homePath: "/home/dev",
-        agentCli: {
-          claude: { available: true },
-          codex: { available: true },
-        },
-        webPreview: {
-          cloudflared: { available: false },
-          cpolar: { available: false },
-        },
-      }).success,
-    ).toBe(false);
+    // 已移除的 webPreview 能力字段不再出现在解析结果里；缺失的 Agent 条目补成“未上报”。
+    const legacy = RelayControlSchema.parse({
+      type: "proxy_info",
+      requestId: "removed-capabilities",
+      homePath: "/home/dev",
+      agentCli: {
+        claude: { available: true },
+        codex: { available: true },
+      },
+      webPreview: {
+        cloudflared: { available: false },
+        cpolar: { available: false },
+      },
+    });
+    expect(legacy).not.toHaveProperty("webPreview");
+    expect(legacy).toMatchObject({
+      agentCli: {
+        kimi: { available: false, notReported: true },
+        cursor: { available: false, notReported: true },
+      },
+    });
   });
 
   it("parses agent CLI path update request/response", () => {
@@ -1168,6 +1257,7 @@ describe("RelayControlSchema", () => {
           claude: { available: true, command: "/home/dev/.local/bin/claude" },
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/usr/local/bin/kimi" },
+          cursor: { available: true, command: "/usr/local/bin/agent" },
         },
       }),
     ).toEqual({
@@ -1178,6 +1268,7 @@ describe("RelayControlSchema", () => {
         claude: { available: true, command: "/home/dev/.local/bin/claude" },
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
+        cursor: { available: true, command: "/usr/local/bin/agent" },
       },
     });
 

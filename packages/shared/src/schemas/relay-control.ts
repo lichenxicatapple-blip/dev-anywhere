@@ -7,7 +7,13 @@ import {
   sessionStateValues,
   TerminalShellFamilySchema,
 } from "./session.js";
-import { ApprovalOptionSchema, ToolApprovePayloadSchema, ToolDenyPayloadSchema } from "./tool.js";
+import {
+  ApprovalOptionSchema,
+  CursorPromptSchema,
+  CursorSessionUiSchema,
+  ToolApprovePayloadSchema,
+  ToolDenyPayloadSchema,
+} from "./tool.js";
 import {
   VoiceCapabilitiesSchema,
   VoiceConfigUpdateSchema,
@@ -79,14 +85,35 @@ export const AgentCliAvailabilitySchema = z.object({
   command: z.string().optional(),
   error: z.string().optional(),
   suggestions: z.array(z.string()).optional(),
+  /** 开发机没有上报该 Agent 的状态（例如旧版 Proxy 不认识新增的 Agent）。 */
+  notReported: z.boolean().optional(),
 });
 export type AgentCliAvailability = z.infer<typeof AgentCliAvailabilitySchema>;
 
-export const AgentCliStatusSchema = z.object({
-  claude: AgentCliAvailabilitySchema,
-  codex: AgentCliAvailabilitySchema,
-  kimi: AgentCliAvailabilitySchema,
-});
+const AGENT_CLI_NOT_REPORTED_MESSAGE = "开发机未上报该 Agent 的状态，暂不可用";
+
+function notReportedAgentCli(): AgentCliAvailability {
+  return { available: false, error: AGENT_CLI_NOT_REPORTED_MESSAGE, notReported: true };
+}
+
+/**
+ * 四个 Agent 条目在协议里都是可选的：Relay 和网页先于开发机 Proxy 升级时，
+ * 旧 Proxy 不会上报新增的 Agent。缺失项补成“未上报，暂不可用”，不连累其他 Agent。
+ * 已上报的条目仍按 AgentCliAvailabilitySchema 严格校验。以后新增 Agent 也沿用这套规则。
+ */
+export const AgentCliStatusSchema = z
+  .object({
+    claude: AgentCliAvailabilitySchema.optional(),
+    codex: AgentCliAvailabilitySchema.optional(),
+    kimi: AgentCliAvailabilitySchema.optional(),
+    cursor: AgentCliAvailabilitySchema.optional(),
+  })
+  .transform((status) => ({
+    claude: status.claude ?? notReportedAgentCli(),
+    codex: status.codex ?? notReportedAgentCli(),
+    kimi: status.kimi ?? notReportedAgentCli(),
+    cursor: status.cursor ?? notReportedAgentCli(),
+  }));
 export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
 
 export const TerminalShellSchema = z.enum(["powershell", "cmd"]);
@@ -1642,8 +1669,18 @@ const relayControlDefinitions = [
           toolName: z.string(),
           input: z.record(z.string(), z.unknown()),
           options: z.array(ApprovalOptionSchema).optional(),
+          cursorPrompt: CursorPromptSchema.optional(),
         }),
       ),
+    },
+    "proxy_to_client",
+  ),
+
+  control(
+    "cursor_session_ui",
+    {
+      sessionId: IdSchema,
+      payload: CursorSessionUiSchema,
     },
     "proxy_to_client",
   ),

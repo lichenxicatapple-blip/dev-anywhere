@@ -9,7 +9,7 @@ import {
 import { RemotePathSelector } from "@/components/path/remote-path-selector";
 import { type ProviderId, PROVIDER_LABEL } from "./create-session-submit";
 
-const PROVIDERS = ["claude", "codex", "kimi"] as const satisfies readonly ProviderId[];
+const PROVIDERS = ["claude", "codex", "kimi", "cursor"] as const satisfies readonly ProviderId[];
 
 interface AgentCliPickerProps {
   agentCli: AgentCliStatus | null;

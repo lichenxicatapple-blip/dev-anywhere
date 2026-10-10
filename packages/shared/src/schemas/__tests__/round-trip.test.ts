@@ -131,6 +131,7 @@ describe("RelayControlSchema round-trip stability", () => {
         claude: { available: false },
         codex: { available: false },
         kimi: { available: false },
+        cursor: { available: false },
       },
       terminalShells: [
         { id: "powershell", label: "PowerShell 7" },

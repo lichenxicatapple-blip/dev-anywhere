@@ -1,3 +1,4 @@
+import "./node-runtime-guard.js";
 import { createServer, type Socket } from "node:net";
 import { randomUUID } from "node:crypto";
 import { existsSync, writeFileSync, rmSync } from "node:fs";
@@ -60,10 +61,14 @@ import {
   setLocalIpcEndpointPermissions,
 } from "./common/local-ipc-endpoint.js";
 
-const AGENT_CLI_PATH_FIELDS: Record<ProviderId, "claudeBin" | "codexBin" | "kimiBin"> = {
+const AGENT_CLI_PATH_FIELDS: Record<
+  ProviderId,
+  "claudeBin" | "codexBin" | "kimiBin" | "cursorBin"
+> = {
   claude: "claudeBin",
   codex: "codexBin",
   kimi: "kimiBin",
+  cursor: "cursorBin",
 };
 
 function resolveInterruptedApprovals(

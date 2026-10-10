@@ -44,6 +44,7 @@ describe("proxy config relay selection", () => {
     delete process.env.CLAUDE_BIN;
     delete process.env.CODEX_BIN;
     delete process.env.KIMI_BIN;
+    delete process.env.CURSOR_BIN;
     process.argv = ["node", "dev-anywhere"];
   });
 
@@ -168,6 +169,7 @@ describe("proxy config relay selection", () => {
         claudeBin: "/file/bin/claude",
         codexBin: "/file/bin/codex",
         kimiBin: "/file/bin/kimi",
+        cursorBin: "/file/bin/agent",
       },
     });
     process.env.CLAUDE_BIN = "/env/bin/claude";
@@ -180,15 +182,19 @@ describe("proxy config relay selection", () => {
     expect(config.claudeBin).toBe("/env/bin/claude");
     expect(config.codexBin).toBe("/file/bin/codex");
     expect(config.kimiBin).toBe("/env/bin/kimi");
+    expect(config.cursorBin).toBe("/file/bin/agent");
     expect(config.sources.claudeBin).toBe("env");
     expect(config.sources.codexBin).toBe("file");
     expect(config.sources.kimiBin).toBe("env");
+    expect(config.sources.cursorBin).toBe("file");
     expect(providerEnv.CLAUDE_BIN).toBe("/env/bin/claude");
     expect(providerEnv.CODEX_BIN).toBe("/file/bin/codex");
     expect(providerEnv.KIMI_BIN).toBe("/env/bin/kimi");
+    expect(providerEnv.CURSOR_BIN).toBe("/file/bin/agent");
     expect(config.agentCliSuggestions.claude).toEqual(["/env/bin/claude", "/file/bin/claude"]);
     expect(config.agentCliSuggestions.codex).toEqual(["/file/bin/codex"]);
     expect(config.agentCliSuggestions.kimi).toEqual(["/env/bin/kimi", "/file/bin/kimi"]);
+    expect(config.agentCliSuggestions.cursor).toEqual(["/file/bin/agent"]);
   });
 
   it("persists Kimi CLI paths and history into top-level agentCli config", async () => {
@@ -208,6 +214,31 @@ describe("proxy config relay selection", () => {
     expect(config.kimiBin).toBe("/opt/kimi/v2/kimi");
     expect(config.sources.kimiBin).toBe("file");
     expect(config.agentCliSuggestions.kimi).toEqual(["/opt/kimi/v2/kimi", "/opt/kimi/v1/kimi"]);
+  });
+
+  it("persists Cursor CLI paths and history into top-level agentCli config", async () => {
+    writeConfig(currentConfig);
+
+    const { loadConfig, saveAgentCliPath } = await importConfig();
+    saveAgentCliPath("cursor", "/opt/cursor/v1/agent");
+    saveAgentCliPath("cursor", "/opt/cursor/v2/agent");
+
+    const configFile = JSON.parse(
+      readFileSync(join(homeDir, ".dev-anywhere", "config.json"), "utf8"),
+    );
+    expect(configFile.agentCli.cursorBin).toBe("/opt/cursor/v2/agent");
+    expect(configFile.agentCli.cursorBinHistory).toEqual([
+      "/opt/cursor/v2/agent",
+      "/opt/cursor/v1/agent",
+    ]);
+
+    const config = loadConfig();
+    expect(config.cursorBin).toBe("/opt/cursor/v2/agent");
+    expect(config.sources.cursorBin).toBe("file");
+    expect(config.agentCliSuggestions.cursor).toEqual([
+      "/opt/cursor/v2/agent",
+      "/opt/cursor/v1/agent",
+    ]);
   });
 
   it("persists Agent CLI paths into top-level agentCli config", async () => {

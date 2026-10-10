@@ -9,6 +9,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createRelayAutoUpdater } from "#src/auto-update.js";
 import type { ServiceCommandResult } from "#src/common/service-command-result.js";
 import { terminateOwnedProcessTree } from "#src/common/process-termination.js";
+import { nodeSatisfiesMinimum } from "#src/common/node-version.js";
 import {
   compareStableVersions,
   parseStableVersion,
@@ -169,6 +170,27 @@ describe("Relay-directed update execution", () => {
     );
     expect(backup.dispose).toHaveBeenCalledOnce();
     expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("keeps the installed Proxy untouched when the target needs a newer Node.js", async () => {
+    const { deps, release } = runtime();
+    deps.assertNodeSupportsVersion = vi.fn(async () => {
+      throw new Error("Proxy 0.7.0 requires Node.js >=22.22.2");
+    });
+
+    await expect(runRelayDirectedUpdate(options, deps)).rejects.toThrow(/requires Node\.js/);
+    expect(deps.validateInstalledCli).not.toHaveBeenCalled();
+    expect(deps.backupInstallation).not.toHaveBeenCalled();
+    expect(deps.installVersion).not.toHaveBeenCalled();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it("compares engines.node minimums against the running Node.js", () => {
+    expect(nodeSatisfiesMinimum(">=22.22.2", "22.22.2")).toBe(true);
+    expect(nodeSatisfiesMinimum(">=22.22.2", "v22.20.0")).toBe(false);
+    expect(nodeSatisfiesMinimum(">=22.22.2", "24.1.0")).toBe(true);
+    expect(nodeSatisfiesMinimum(">=22", "20.19.0")).toBe(false);
+    expect(nodeSatisfiesMinimum("^20 || ^22", "20.19.0")).toBeNull();
   });
 
   it("restores the local package without another download when installation fails", async () => {

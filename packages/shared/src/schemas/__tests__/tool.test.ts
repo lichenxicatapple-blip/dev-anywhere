@@ -101,6 +101,24 @@ describe("ToolApprovePayloadSchema", () => {
   it("rejects missing toolId", () => {
     expect(() => ToolApprovePayloadSchema.parse({})).toThrow();
   });
+
+  it("preserves Cursor question answers", () => {
+    expect(
+      ToolApprovePayloadSchema.parse({
+        toolId: "q-1",
+        cursorAnswer: {
+          type: "ask_question",
+          outcome: "answered",
+          answers: [{ questionId: "q1", selectedOptionIds: ["agent"] }],
+        },
+      }),
+    ).toMatchObject({
+      cursorAnswer: {
+        type: "ask_question",
+        outcome: "answered",
+      },
+    });
+  });
 });
 
 describe("ToolDenyPayloadSchema", () => {

@@ -88,6 +88,7 @@ function handleToolUseRequest(
     toolName: env.payload.toolName,
     input: env.payload.parameters,
     ...(env.payload.options ? { options: env.payload.options } : {}),
+    ...(env.payload.cursorPrompt ? { cursorPrompt: env.payload.cursorPrompt } : {}),
     status: "pending",
   });
   relay?.sendControl({
@@ -134,6 +135,7 @@ function handlePendingApprovalsPush(
     toolName: appr.toolName,
     input: appr.input,
     ...(appr.options ? { options: appr.options } : {}),
+    ...(appr.cursorPrompt ? { cursorPrompt: appr.cursorPrompt } : {}),
     status: "pending" as const,
   }));
   store.replacePendingApprovals(msg.sessionId, approvals);
@@ -270,6 +272,11 @@ export function createChatMessageHandler(relay: ChatRelay | null): (msg: Inbound
         break;
       case "turn_result":
         handleTurnResult(msg, relay);
+        break;
+      case "cursor_session_ui":
+        if (msg.payload.kind === "todos") {
+          useChatStore.getState().applyCursorTodos(msg.sessionId, msg.payload.todos, msg.payload.merge);
+        }
         break;
       case "terminal_title":
         handleTerminalTitle(msg);

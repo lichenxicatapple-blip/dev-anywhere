@@ -20,6 +20,7 @@ import { compareStableVersions, parseStableVersion } from "./common/stable-versi
 import { spawnCommand } from "./common/command-launch.js";
 import { terminateOwnedProcessTree } from "./common/process-termination.js";
 import { createNpmInstallBackup, type NpmInstallBackup } from "./common/npm-install-backup.js";
+import { nodeSatisfiesMinimum } from "./common/node-version.js";
 import { PROXY_PACKAGE_NAME, PROXY_PACKAGE_ROOT } from "./version.js";
 
 const LOCK_STALE_AFTER_MS = 30 * 60_000;
@@ -68,6 +69,8 @@ export interface RelayDirectedUpdateDeps {
   resolveNpm(): string;
   verifyNpm(npm: string): Promise<void>;
   readInstalledVersion(): string;
+  /** 目标版本要求更高的 Node.js 时抛出 UnsupportedAutoUpdateError，保留当前可运行的版本。 */
+  assertNodeSupportsVersion?(npm: string, version: string): Promise<void>;
   installVersion(npm: string, version: string): Promise<void>;
   validateInstalledCli(version: string): Promise<void>;
   backupInstallation(): Promise<NpmInstallBackup>;
@@ -316,6 +319,23 @@ function parseRunnerOptions(argv: readonly string[]): RunnerOptions {
   return { targetVersion, runningVersion, relayName };
 }
 
+async function assertNodeSupportsVersion(npm: string, version: string): Promise<void> {
+  const result = await runCommand(
+    npm,
+    ["view", `${PROXY_PACKAGE_NAME}@${version}`, "engines.node", "--loglevel=error"],
+    NPM_ROOT_TIMEOUT_MS,
+    true,
+  );
+  // 查不到就交给后面的安装、校验和回滚流程处理。
+  if (result.code !== 0 || result.timedOut) return;
+  const range = result.stdout.trim().split(/\r?\n/).at(-1)?.trim().replace(/^"|"$/g, "") ?? "";
+  if (range && nodeSatisfiesMinimum(range, process.versions.node) === false) {
+    throw new UnsupportedAutoUpdateError(
+      `Proxy ${version} requires Node.js ${range}, but this machine runs ${process.version}. Upgrade Node.js first; the current Proxy was left unchanged.`,
+    );
+  }
+}
+
 export async function installVersion(npm: string, version: string): Promise<void> {
   const result = await runCommand(
     npm,
@@ -469,6 +489,7 @@ export async function runRelayDirectedUpdate(
   const runtime: RelayDirectedUpdateDeps = deps ?? {
     acquireLock: () => acquireUpdateLock(),
     resolveNpm: adjacentNpmExecutable,
+    assertNodeSupportsVersion,
     verifyNpm: async (npm) => {
       const installation = await verifyNpmManagedGlobalInstall(npm);
       binPaths = installation.binPaths;
@@ -525,6 +546,7 @@ export async function runRelayDirectedUpdate(
 
     const installedByThisRun = plan.kind === "install-and-restart";
     if (installedByThisRun) {
+      await runtime.assertNodeSupportsVersion?.(npm, plan.version);
       await runtime.validateInstalledCli(installedVersion);
       backup = await runtime.backupInstallation();
       logger.info(

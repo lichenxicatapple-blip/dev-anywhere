@@ -22,7 +22,7 @@ interface HistorySessionLike {
 }
 
 function isProviderId(value: unknown): value is ProviderId {
-  return value === "claude" || value === "codex" || value === "kimi";
+  return value === "claude" || value === "codex" || value === "kimi" || value === "cursor";
 }
 
 function isSessionMode(value: unknown): value is "pty" | "json" {
