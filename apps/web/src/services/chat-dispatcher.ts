@@ -275,7 +275,9 @@ export function createChatMessageHandler(relay: ChatRelay | null): (msg: Inbound
         break;
       case "cursor_session_ui":
         if (msg.payload.kind === "todos") {
-          useChatStore.getState().applyCursorTodos(msg.sessionId, msg.payload.todos, msg.payload.merge);
+          useChatStore
+            .getState()
+            .applyCursorTodos(msg.sessionId, msg.payload.todos, msg.payload.merge);
         }
         break;
       case "terminal_title":

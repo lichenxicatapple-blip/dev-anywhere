@@ -68,7 +68,13 @@ function readProxyProfileNameFromArgv(argv: readonly string[]): string | undefin
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === "claude" || arg === "codex" || arg === "kimi" || arg === "cursor" || arg === "agent") {
+    if (
+      arg === "claude" ||
+      arg === "codex" ||
+      arg === "kimi" ||
+      arg === "cursor" ||
+      arg === "agent"
+    ) {
       return undefined;
     }
     if (arg === "--profile") {

@@ -63,7 +63,10 @@ const agentPresets: Record<SessionProvider, PtyShortcutPreset> = {
     mobile: [ctrlT, ctrlR, "clear", ctrlK],
   },
   kimi: { menu: [ctrlO, ctrlE, ctrlT, ctrlS, ctrlB], mobile: [ctrlO, ctrlS, "clear", ctrlT] },
-  cursor: { menu: [shiftTab, ctrlR, ctrlD, ctrlT, ctrlS], mobile: [shiftTab, ctrlR, "clear", ctrlD] },
+  cursor: {
+    menu: [shiftTab, ctrlR, ctrlD, ctrlT, ctrlS],
+    mobile: [shiftTab, ctrlR, "clear", ctrlD],
+  },
 };
 
 const emacsShell: PtyShortcutPreset = {

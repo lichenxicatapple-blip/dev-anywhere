@@ -832,17 +832,11 @@ export function ChatJsonView({
           )}
           {pendingApprovalQueue.map((approval, index) =>
             approval.cursorPrompt?.type === "ask_question" ? (
-              <div
-                key={approval.requestId}
-                className="dev-message-rail mx-auto w-full min-w-0"
-              >
+              <div key={approval.requestId} className="dev-message-rail mx-auto w-full min-w-0">
                 <CursorAskQuestionCard approval={approval} sessionId={sessionId} />
               </div>
             ) : approval.cursorPrompt?.type === "create_plan" ? (
-              <div
-                key={approval.requestId}
-                className="dev-message-rail mx-auto w-full min-w-0"
-              >
+              <div key={approval.requestId} className="dev-message-rail mx-auto w-full min-w-0">
                 <CursorCreatePlanCard approval={approval} sessionId={sessionId} />
               </div>
             ) : (

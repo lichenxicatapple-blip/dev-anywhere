@@ -354,7 +354,10 @@ describe("extractOscSignals", () => {
       extractTextSignals("Answer questions (Enter to select/next, Esc to skip)", "cursor"),
     ).toBeNull();
     expect(
-      extractTextSignals("Describe how to revise the plan (Enter to submit, Esc to cancel)", "cursor"),
+      extractTextSignals(
+        "Describe how to revise the plan (Enter to submit, Esc to cancel)",
+        "cursor",
+      ),
     ).toBeNull();
     expect(extractTextSignals("Ready to build?\n1. Yes, build locally (b)", "cursor")).toBeNull();
   });

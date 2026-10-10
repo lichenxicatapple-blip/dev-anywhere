@@ -13,10 +13,9 @@ interface CursorCreatePlanCardProps {
   sessionId: string;
 }
 
-function isCreatePlan(prompt: CursorPrompt | undefined): prompt is Extract<
-  CursorPrompt,
-  { type: "create_plan" }
-> {
+function isCreatePlan(
+  prompt: CursorPrompt | undefined,
+): prompt is Extract<CursorPrompt, { type: "create_plan" }> {
   return prompt?.type === "create_plan";
 }
 

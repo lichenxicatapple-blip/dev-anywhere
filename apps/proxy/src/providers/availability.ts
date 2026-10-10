@@ -19,13 +19,15 @@ const PROVIDER_BIN_NAMES: Record<ProviderId, readonly string[]> = {
   kimi: ["kimi"],
   cursor: ["agent", "cursor-agent"],
 };
-const PROVIDER_ENV_NAME: Record<ProviderId, "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN" | "CURSOR_BIN"> =
-  {
-    claude: "CLAUDE_BIN",
-    codex: "CODEX_BIN",
-    kimi: "KIMI_BIN",
-    cursor: "CURSOR_BIN",
-  };
+const PROVIDER_ENV_NAME: Record<
+  ProviderId,
+  "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN" | "CURSOR_BIN"
+> = {
+  claude: "CLAUDE_BIN",
+  codex: "CODEX_BIN",
+  kimi: "KIMI_BIN",
+  cursor: "CURSOR_BIN",
+};
 
 function errorMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

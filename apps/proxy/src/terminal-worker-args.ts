@@ -44,7 +44,12 @@ export function parseTerminalWorkerCliArgs(argv: readonly string[]): TerminalWor
   const provider = values.get("--provider");
   if (!sessionId || !/^[A-Za-z0-9_-]+$/.test(sessionId)) return null;
   if (kind !== "agent" && kind !== "terminal") return null;
-  if (provider !== "claude" && provider !== "codex" && provider !== "kimi" && provider !== "cursor") {
+  if (
+    provider !== "claude" &&
+    provider !== "codex" &&
+    provider !== "kimi" &&
+    provider !== "cursor"
+  ) {
     return null;
   }
   if (kind === "terminal" && provider !== "claude") return null;

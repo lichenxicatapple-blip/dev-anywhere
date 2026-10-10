@@ -12,10 +12,9 @@ interface CursorAskQuestionCardProps {
   sessionId: string;
 }
 
-function isAskQuestion(prompt: CursorPrompt | undefined): prompt is Extract<
-  CursorPrompt,
-  { type: "ask_question" }
-> {
+function isAskQuestion(
+  prompt: CursorPrompt | undefined,
+): prompt is Extract<CursorPrompt, { type: "ask_question" }> {
   return prompt?.type === "ask_question";
 }
 
@@ -114,7 +113,9 @@ export function CursorAskQuestionCard({ approval, sessionId }: CursorAskQuestion
                       variant={active ? "default" : "outline"}
                       className="h-11 md:h-8"
                       disabled={acted || !transportReady}
-                      onClick={() => toggle(question.id, option.id, question.allowMultiple === true)}
+                      onClick={() =>
+                        toggle(question.id, option.id, question.allowMultiple === true)
+                      }
                     >
                       {option.label}
                     </Button>

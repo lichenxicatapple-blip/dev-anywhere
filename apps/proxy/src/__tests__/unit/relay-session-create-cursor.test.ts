@@ -17,7 +17,10 @@ describe("Cursor session create", () => {
     const handler = new RelaySessionCreateHandler({
       relaySend,
       terminalWorkerSpawner: { start: vi.fn() } as never,
-      sessionManager: { createSession: vi.fn(), listSessions: vi.fn(() => []) } as unknown as SessionManager,
+      sessionManager: {
+        createSession: vi.fn(),
+        listSessions: vi.fn(() => []),
+      } as unknown as SessionManager,
       workerRegistry: { spawn } as never,
       controlHandlers: {} as never,
       permissionBroker: {} as never,
@@ -56,7 +59,10 @@ describe("Cursor session create", () => {
     const handler = new RelaySessionCreateHandler({
       relaySend,
       terminalWorkerSpawner: { start: vi.fn() } as never,
-      sessionManager: { createSession: vi.fn(), listSessions: vi.fn(() => []) } as unknown as SessionManager,
+      sessionManager: {
+        createSession: vi.fn(),
+        listSessions: vi.fn(() => []),
+      } as unknown as SessionManager,
       workerRegistry: { spawn } as never,
       controlHandlers: {} as never,
       permissionBroker: {} as never,

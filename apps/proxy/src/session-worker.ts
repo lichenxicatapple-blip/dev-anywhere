@@ -140,7 +140,10 @@ function isAcpProvider(value: ProviderId): boolean {
 function isKimiCommandEvent(
   msg: WorkerMessage,
 ): msg is Extract<WorkerMessage, { type: "worker_event" }> {
-  if (msg.type !== "worker_event" || (msg.event.type !== "kimi_acp" && msg.event.type !== "cursor_acp")) {
+  if (
+    msg.type !== "worker_event" ||
+    (msg.event.type !== "kimi_acp" && msg.event.type !== "cursor_acp")
+  ) {
     return false;
   }
   const params = msg.event.params;
@@ -420,53 +423,53 @@ const session =
           onProcessError: (error) => console.error(`[worker] ${error.message}`),
           onExit: handleProviderExit,
         })
-    : provider === "cursor"
-      ? new CursorAcpSession({
-          cwd: workerCwd,
-          resumeSessionId: workerResume,
-          permissionMode: workerPermissionMode,
-          onUpdate: (params) => handleCursorEvent("session/update", params),
-          onNotification: (method, params) => {
-            if (method !== "session/update") handleCursorEvent(method, params);
-          },
-          onPermissionRequest: handleCursorPermissionRequest,
-          onExtensionRequest: handleCursorExtensionRequest,
-          onPromptStart: () => {
-            acpTurnActive = true;
-            sendToServe({ type: "worker_turn_started" });
-          },
-          onPromptComplete: (result) => {
-            acpTurnActive = false;
-            handleCursorEvent("session/prompt/result", { response: result });
-          },
-          onPromptError: (error) => {
-            acpTurnActive = false;
-            handleCursorEvent("session/prompt/error", {
-              message: sanitizeProviderErrorTail(error.message) || "Cursor ACP prompt failed",
-            });
-          },
-          onSessionId: (cursorSessionId) => {
-            sendToServe({
-              type: "worker_native_session_id",
-              provider: "cursor",
-              sessionId: cursorSessionId,
-            });
-          },
-          onProtocolError: (error) => console.error(`[worker] ${error.message}`),
-          onProcessError: (error) => console.error(`[worker] ${error.message}`),
-          onExit: handleProviderExit,
-        })
-      : new JsonSession({
-          claudeArgs: providerArgs,
-          cwd: workerCwd,
-          resumeSessionId: workerResume,
-          permissionMode: workerPermissionMode,
-          includePartialMessages: workerStreamDelta,
-          hook: workerHook,
-          approvalStrategy,
-          onEvent: handleProviderEvent,
-          onExit: handleProviderExit,
-        });
+      : provider === "cursor"
+        ? new CursorAcpSession({
+            cwd: workerCwd,
+            resumeSessionId: workerResume,
+            permissionMode: workerPermissionMode,
+            onUpdate: (params) => handleCursorEvent("session/update", params),
+            onNotification: (method, params) => {
+              if (method !== "session/update") handleCursorEvent(method, params);
+            },
+            onPermissionRequest: handleCursorPermissionRequest,
+            onExtensionRequest: handleCursorExtensionRequest,
+            onPromptStart: () => {
+              acpTurnActive = true;
+              sendToServe({ type: "worker_turn_started" });
+            },
+            onPromptComplete: (result) => {
+              acpTurnActive = false;
+              handleCursorEvent("session/prompt/result", { response: result });
+            },
+            onPromptError: (error) => {
+              acpTurnActive = false;
+              handleCursorEvent("session/prompt/error", {
+                message: sanitizeProviderErrorTail(error.message) || "Cursor ACP prompt failed",
+              });
+            },
+            onSessionId: (cursorSessionId) => {
+              sendToServe({
+                type: "worker_native_session_id",
+                provider: "cursor",
+                sessionId: cursorSessionId,
+              });
+            },
+            onProtocolError: (error) => console.error(`[worker] ${error.message}`),
+            onProcessError: (error) => console.error(`[worker] ${error.message}`),
+            onExit: handleProviderExit,
+          })
+        : new JsonSession({
+            claudeArgs: providerArgs,
+            cwd: workerCwd,
+            resumeSessionId: workerResume,
+            permissionMode: workerPermissionMode,
+            includePartialMessages: workerStreamDelta,
+            hook: workerHook,
+            approvalStrategy,
+            onEvent: handleProviderEvent,
+            onExit: handleProviderExit,
+          });
 
 function handleServeConnection(socket: Socket): void {
   readServeConnection(socket, sessionId, {
@@ -667,7 +670,8 @@ server.listen(sockPath, () => {
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         const diagnostic =
-          sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) || "Cursor ACP 初始化失败";
+          sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) ||
+          "Cursor ACP 初始化失败";
         sendToServe({
           type: "worker_startup_error",
           provider: "cursor",
