@@ -90,7 +90,7 @@ For regular use, deploy the Relay on a Linux VPS (cloud server) to connect brows
 
 You can deploy the Relay to a Linux VPS from a macOS, Linux, or Windows computer without cloning the repository. Set up [SSH key access](./docs/DEPLOYMENT.md#配置-ssh-免密登录) before running the commands below, or [log in to the VPS and run the installer there](./docs/DEPLOYMENT.md#直接在-vps-上运行).
 
-From a local macOS or Linux terminal, run the command below. Replace `root@203.0.113.10` with your VPS's SSH login address and `dev-anywhere.example.com` with its domain or public IPv4 address:
+Run the command below from a local macOS or Linux terminal. `203.0.113.10` is an example IP; replace it with your VPS's public IPv4 address. Replace `root` with your SSH username and `dev-anywhere.example.com` with the VPS's domain or public IPv4 address:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
@@ -127,7 +127,7 @@ Edit `~/.dev-anywhere/config.json` (`%USERPROFILE%\.dev-anywhere\config.json` on
 }
 ```
 
-When using a domain, replace `url` with `wss://your-domain`. The deployment script also prints a configuration example using the domain or IP you supplied.
+Replace `url` with `wss://YOUR_VPS_PUBLIC_IP` or `wss://your-domain`; do not use the example IP as-is. The deployment script also prints a configuration example using the domain or IP you supplied.
 
 Save the configuration, then connect the development machine to the Relay:
 
@@ -301,7 +301,7 @@ When you cannot keep watching the screen, use Voice Pilot to talk with your codi
 
 ### Access across devices
 
-DEV Anywhere works on computers, Android phones, iPhones, and iPads. The mobile interface supports touch selection, soft keyboards, and terminal helper keys, with adaptations for iPads using a Magic Keyboard or other hardware keyboards.
+DEV Anywhere works on computers, Android phones, iPhones, and iPads. The mobile interface supports touch selection, soft keyboards, and terminal helper keys. You can also use a Magic Keyboard to operate DEV Anywhere on an iPad.
 
 <table>
   <tr>

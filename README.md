@@ -90,7 +90,7 @@ dev-anywhere tunnel
 
 你可以从 macOS、Linux 或 Windows 电脑将 Relay 部署到 Linux VPS，无需克隆仓库。运行下面的命令前，请先配置 [SSH 密钥登录](./docs/DEPLOYMENT.md#配置-ssh-免密登录)；也可以选择 [直接登录 VPS 部署](./docs/DEPLOYMENT.md#直接在-vps-上运行)。
 
-在 macOS 或 Linux 本地终端执行以下命令，将 `root@203.0.113.10` 换成 VPS 的 SSH 登录地址，将 `dev-anywhere.example.com` 换成 VPS 的域名或公网 IPv4：
+在 macOS 或 Linux 本地终端执行以下命令。`203.0.113.10` 是示例 IP，请换成 VPS 的公网 IPv4；`root` 换成 SSH 登录用户名，`dev-anywhere.example.com` 换成 VPS 的域名或公网 IPv4：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
@@ -127,7 +127,7 @@ dev-anywhere init
 }
 ```
 
-使用域名时，将 `url` 换成 `wss://你的域名`。部署脚本也会根据你填写的域名或 IP 输出配置示例。
+将 `url` 换成 `wss://你的 VPS 公网 IP` 或 `wss://你的域名`，不要直接使用示例 IP。部署脚本也会根据你填写的域名或 IP 输出配置示例。
 
 保存配置后，让开发机连接 Relay：
 
@@ -301,7 +301,7 @@ Claude Code、Codex、Kimi Code 和 Cursor CLI 都支持这两种视图。其中
 
 ### 跨设备访问
 
-DEV Anywhere 可以在电脑、Android 手机、iPhone 和 iPad 上使用。移动端支持触摸选择、软键盘和终端辅助键，也适配了 iPad 搭配妙控键盘等实体键盘的操作。
+DEV Anywhere 可以在电脑、Android 手机、iPhone 和 iPad 上使用。移动端支持触摸选择、软键盘和终端辅助键，也支持在 iPad 上使用妙控键盘进行操作。
 
 <table>
   <tr>
