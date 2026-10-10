@@ -1,19 +1,22 @@
 # 更新日志
 
-## [Unreleased]
+## [0.10.0] - 2026-10-10
 
-### 新增
+**Ryan 老师特别纪念版**
 
-- Cursor CLI 支持 ACP 聊天会话：流式输出、工具调用与审批、提问、计划批准、todo 列表，以及取消当前回合。恢复时走 `session/load`，失败会如实报错，不会自动新建会话。聊天模式不提供“智能自动”审批策略；终端模式仍可使用。
+感谢 Ryan 老师开发并贡献本次 Cursor CLI 接入，让 DEV Anywhere 新增对 Cursor 的支持。
 
-### 变更
+### 新功能
 
-- Proxy 和 Relay 要求 Node.js 22.22.2 或更高版本（Cursor 历史依赖内置的 `node:sqlite`，Relay 与 Proxy 统一版本要求）。自动更新遇到 Node 版本不满足的目标版本时会保留当前版本；旧版本 Proxy 的自动更新器没有这项检查，但新版本的 `dev-anywhere`（包括 `--version`）、Proxy 服务和 Relay 在 Node 低于 22.22.2 时会提示并以非零状态退出，旧更新器因此判定校验失败并恢复旧包，原服务保持运行。
+- 支持 Cursor CLI 终端会话，可从本机命令行启动，也可从网页创建和接管。
+- 支持 Cursor ACP 聊天会话，包括流式回复、工具调用与审批、提问、计划确认、待办列表，以及停止当前回复。
+- 支持读取和恢复 Cursor ACP 历史会话；恢复失败时明确提示，不会自动创建新会话。
 
 ### 升级说明
 
-- 开发机的 Node.js 低于 22.22.2 时，自动更新会失败并保留当前版本。请自行升级 Node.js 到 22.22.2 或更高版本，再重新升级 Proxy（运行 `npm install -g @dev-anywhere/proxy@latest` 并重启服务）。
-- 旧版 Proxy 不上报 Cursor CLI 状态时，网页将其显示为“未上报”，不再影响其他 Agent。
+- Proxy 和 Relay 的最低 Node.js 版本提高到 **22.22.2**。Node.js 需要用户自行升级，DEV Anywhere 不会自动升级 Node.js；版本不足时会保留原来可运行的 Proxy。
+- 使用 Cursor 前，请在开发机上安装并登录 Cursor CLI。聊天模式不提供“智能自动”审批策略。
+- 升级后刷新网页即可使用新功能。
 
 ## [0.9.21] - 2026-10-10
 
