@@ -2,9 +2,9 @@
 
 本指南适用于已安装并配置 DEV Anywhere 的开发机。启用后，Proxy 会在开机时以你的用户账户运行，新建的 Shell 和 Agent 会话可以在退出桌面登录后继续使用。支持 macOS、使用 systemd 的 Linux，以及 Windows。
 
-> **macOS 开机解锁**：开启 FileVault（文件保险箱）时，重启后需先解锁磁盘，开发机才能上线。启用系统服务或授予“完全磁盘访问权限”都不能代替这一步。
+> **macOS 开机解锁**：如果启用了 FileVault（文件保险箱），Mac 重启后需要先输入密码解锁磁盘，DEV Anywhere 才能启动。启用系统服务或授予“完全磁盘访问权限”无法跳过这一步。
 >
-> 如需重启后无人操作自动上线，可以在 **系统设置 → 隐私与安全性 → 文件保险箱** 中关闭 FileVault，再按下文启用系统服务，无需开启桌面自动登录。这会移除“必须通过登录密码才能解锁磁盘”的额外保护。若选择保留 FileVault，每次重启后仍需先完成磁盘解锁。参见 [Apple 的关闭 FileVault 说明](https://support.apple.com/zh-cn/guide/mac-help/mchlp2560/mac)。
+> 如果希望 Mac 重启后就能远程使用，可以在 **系统设置 → 隐私与安全性 → 文件保险箱** 中关闭 FileVault，再按下文启用系统服务，无需设置桌面自动登录。关闭 FileVault 也会取消磁盘的密码解锁保护，操作步骤见 [Apple 的说明](https://support.apple.com/zh-cn/guide/mac-help/mchlp2560/mac)。
 
 ## 启用系统服务
 
@@ -47,6 +47,16 @@ dev-anywhere --profile work serve autostart enable --system --now
 输入后会验证账户能否登录服务。密码错误时会提示重新输入；看到“Windows 服务账户验证通过”后继续完成配置。取消凭据窗口可退出安装。
 
 若首次填写的密码不正确，或之后更改过账户密码，运行 `services.msc` 打开 Windows“服务”，找到 `serve autostart status --system` 输出的服务名称，在“登录”页更新密码后启动服务。
+
+## macOS 文件夹访问
+
+访问“桌面”“文稿”“下载”等受保护目录时，macOS 可能提示“node 想访问……”，需要在 Mac 上确认。为避免远程使用时被这个提示打断，可以提前为运行 DEV Anywhere 的 Node 授予“完全磁盘访问权限”：
+
+1. 在安装 DEV Anywhere 所用的终端环境中运行 `node -p 'process.execPath'`，获取 Node 的路径。
+2. 打开 **系统设置 → 隐私与安全性 → 完全磁盘访问权限**，点击“＋”。
+3. 按 `⌘⇧G`，粘贴 Node 的路径，将它添加到列表并启用权限。
+
+授权针对这个 Node 程序，其他通过它运行的脚本也可能获得相同的文件访问权限。以后更换 Node 的安装路径时，可能需要重新授权。参见 [Apple 的权限设置说明](https://support.apple.com/zh-cn/guide/mac-help/mchl211c911f/mac)。
 
 ## 平时如何启停
 

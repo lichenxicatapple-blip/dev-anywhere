@@ -108,7 +108,7 @@ irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/in
 
 ## 连接开发机
 
-开发机支持 macOS、Linux 和原生 Windows 11，Windows 无需安装 WSL。在运行 Claude Code、Codex、Kimi Code、Cursor CLI 或 Shell 的开发机上安装 Proxy：
+开发机支持 macOS、Linux 和原生 Windows 11，Windows 无需安装 WSL。先确认开发机已安装 Node.js 22.22.2 或更高版本，再安装 Proxy：
 
 ```bash
 npm install -g @dev-anywhere/proxy
@@ -145,7 +145,7 @@ dev-anywhere serve status
 
 `status` 应显示 Relay 已连接。默认 profile 的服务日志位于 `~/.dev-anywhere/logs/service.log`。
 
-如果 DEV Anywhere 没有自动识别某个 CLI，可以在新建会话时选择它的可执行文件，也可以将对应路径写入配置顶层：
+如果已经安装了 coding agent，但 Web 新建会话窗口仍提示“未找到”，可以在“CLI 路径”中填写或浏览选择开发机上的启动程序路径，然后点击“保存”。也可以直接将路径写入配置顶层：
 
 ```json
 {
@@ -191,7 +191,9 @@ dev-anywhere serve autostart status --system
 dev-anywhere serve status
 ```
 
-安装时请求管理员权限，服务使用你的用户账户运行。`--now` 会重启 Proxy 并立即生效；省略时只设置下一次开机启动。Windows 首次安装还需要账户密码。退出桌面后需要继续使用的会话，请在启用服务后新建。配置、验证和取消方式见[系统服务指南](./SYSTEM-SERVICE.md)。
+请在平时使用 DEV Anywhere 的账户下执行，并按提示完成管理员授权。服务会以这个账户运行；Windows 首次设置还需要该账户的密码，不能使用 PIN。
+
+`--now` 会立即重启 Proxy，省略时只设置下一次开机启动。需要在退出桌面后继续使用的会话，请在启用服务后新建。配置、验证和取消方式见[系统服务指南](./SYSTEM-SERVICE.md)。
 
 ## 连接浏览器
 

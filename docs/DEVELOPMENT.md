@@ -156,6 +156,14 @@ docs/       长期维护的中文文档和 README 媒体资源
 
 配置由 Zod schema 校验。新增字段时应同时修改 schema、默认配置、相关测试和用户文档。
 
+## Agent CLI 兼容处理
+
+通过本地 `dev-anywhere` 命令或网页创建、恢复 Codex 终端会话时，DEV Anywhere 会关闭星芒特效（`tui.whimsy=false`），以避免终端显示问题。直接运行 `codex` 时仍使用用户自己的设置。已有 Codex 进程需要退出并重新启动或恢复会话，才能应用这个设置；刷新网页不会生效。
+
+Codex 的 `Action Required` 标题也用于普通提问，不能用来可靠识别权限审批。为避免误提交普通提问，Codex 终端会话不提供 `Always yes` 自动回车。用户仍可在终端内确认，或在启动会话时选择审批策略。
+
+Cursor ACP 聊天模式不支持“智能自动”审批，因此创建会话时不提供该选项。
+
 ## 测试
 
 开发启动工具和 Vite 连接容错回归可直接在 Windows、macOS 或 Linux 运行：

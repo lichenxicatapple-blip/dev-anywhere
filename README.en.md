@@ -22,13 +22,9 @@
 
 ## What it is
 
-DEV Anywhere lets you continue using Claude Code, Codex, Kimi Code, Cursor CLI, and Shell on your development machine from a browser. From another computer, phone, or tablet, you can continue your current session, resume a previous session, or start a new one. You can also preview web apps and interact with running iOS Simulators and Android Emulators on the development machine.
+DEV Anywhere lets you use Claude Code, Codex, Kimi Code, Cursor CLI, and Shell on your development machine remotely from a computer, phone, or tablet. In the Web interface, you can chat with coding agents, interact with terminals, handle tool approvals, transfer files, preview web apps, and operate iOS Simulators and Android Emulators already running on the development machine.
 
 To continue a locally started Claude Code, Codex, Kimi Code, or Cursor CLI session from the browser, add `dev-anywhere` before the original command. Once started, you can work in your local terminal as usual or use the DEV Anywhere Web interface anytime, anywhere to continue your work or create a new coding agent session.
-
-In the DEV Anywhere Web interface, you can chat with coding agents, interact with terminals, handle tool approvals, and upload or download files. You can also follow task progress, search previous output, and receive browser notifications when work finishes.
-
-Alongside their native terminal interfaces, Kimi Code and Cursor CLI support ACP chat sessions that stream responses and tool calls. You can cancel the current response or resume a previous session. Cursor ACP also supports questions, plan approval, and todo lists.
 
 > **Why build this?**
 >
@@ -38,7 +34,7 @@ Alongside their native terminal interfaces, Kimi Code and Cursor CLI support ACP
 
 ### Prerequisites
 
-Development machines can run macOS, Linux, or native Windows 11. WSL is not required on Windows.
+Use a development machine running macOS, Linux, or Windows 11. Windows works natively without WSL.
 
 Install [Node.js 22.22.2 or later](https://nodejs.org/en/download) on the development machine. npm is included with Node.js. Verify the environment with:
 
@@ -47,11 +43,11 @@ node --version
 npm --version
 ```
 
-To create coding agent sessions, install and authenticate Claude Code, Codex, Kimi Code, or Cursor CLI first. You can skip this step if you only need Shell sessions.
+Install and sign in to the coding agent you want to use: Claude Code, Codex, Kimi Code, or Cursor CLI. You can skip this step if you only need Shell sessions.
 
-### 1. Install the local Proxy
+### 1. Install DEV Anywhere
 
-Install DEV Anywhere on the development machine:
+Install DEV Anywhere's local program (the Proxy) on the development machine:
 
 ```bash
 npm install -g @dev-anywhere/proxy
@@ -59,7 +55,7 @@ npm install -g @dev-anywhere/proxy
 
 ### 2. Establish a connection
 
-DEV Anywhere supports two ways to connect. A VPS (virtual private server) is a cloud server that can be reached over the public internet.
+Choose one of the following ways to connect to your development machine:
 
 | Option                            | Best for                     | Requirements                       |
 | --------------------------------- | ---------------------------- | ---------------------------------- |
@@ -68,7 +64,7 @@ DEV Anywhere supports two ways to connect. A VPS (virtual private server) is a c
 
 #### Option 1: Quick Tunnel for evaluation
 
-Quick Tunnel is for people who do not have a VPS but still want to run the project before making a deployment decision. It starts a temporary Relay, Web server, and Proxy on the development machine, then uses Cloudflare to create a random HTTPS address without requiring an account.
+Quick Tunnel lets you try DEV Anywhere without a VPS or Cloudflare account. It generates a temporary HTTPS address for remote access to your development machine.
 
 On macOS, install `cloudflared` with Homebrew:
 
@@ -78,35 +74,33 @@ brew install cloudflared
 
 For other platforms, follow Cloudflare's [`cloudflared` installation guide](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/).
 
-Start the temporary connection on the development machine:
+Once installed, run this on the development machine:
 
 ```bash
 dev-anywhere tunnel
 ```
 
-The first run initializes `~/.dev-anywhere` automatically, so no manual Relay configuration is required.
+The first run configures everything automatically. When the terminal prints an access URL, open it in a browser on another device to use DEV Anywhere. The URL includes an access credential, so keep it private.
 
-After the public-connectivity check succeeds, the command prints an access URL containing a temporary Client Token. Keep the command running and open the URL in a browser. Pressing `Ctrl+C` stops the Proxy, Relay, and tunnel together.
-
-The random domain changes between runs, the URL stops working when the process exits, and there is no availability guarantee. Quick Tunnel is useful for evaluation, not as infrastructure to depend on.
+Keep the command running while you use it. Pressing `Ctrl+C` ends the connection and invalidates the URL. Each run generates a random address, and the connection may be unreliable; for regular use, choose VPS Relay below.
 
 #### Option 2: VPS Relay for regular use
 
-For long-term use, deploy the Relay to a Linux VPS with a public IP. You can use the VPS's public IPv4 address directly or a domain pointing to it; the deployment script detects either form and configures the matching HTTPS certificate automatically. Public deployments serve the application only over HTTPS/WSS. Port 80 is used only for certificate validation and redirects. One Relay container serves the Web interface, HTTP API, files, voice endpoints, and WebSockets.
+For regular use, deploy the Relay on a Linux VPS (cloud server) to connect browsers with your development machine. You can use the VPS's public IPv4 address or a domain pointing to it; the deployment script configures HTTPS automatically.
 
-No repository clone is needed. From a local macOS or Linux terminal, replace the SSH target and public domain/IP:
+You can deploy the Relay to a Linux VPS from a macOS, Linux, or Windows computer without cloning the repository. Set up [SSH key access](./docs/DEPLOYMENT.md#配置-ssh-免密登录) before running the commands below, or [log in to the VPS and run the installer there](./docs/DEPLOYMENT.md#直接在-vps-上运行).
+
+From a local macOS or Linux terminal, run the command below. Replace `root@203.0.113.10` with your VPS's SSH login address and `dev-anywhere.example.com` with its domain or public IPv4 address:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
 ```
 
-On Windows, run this in native PowerShell and enter the SSH target and public domain/IP when prompted. Bash, WSL, and Git are not required:
+On Windows, run this in PowerShell, then enter the VPS's SSH login address and domain or public IPv4 address when prompted:
 
 ```powershell
 irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
-
-Local deployment requires [SSH key access](./docs/DEPLOYMENT.md#配置-ssh-免密登录). You can also [run the installer directly on the VPS](./docs/DEPLOYMENT.md#直接在-vps-上运行). All three local platforms deploy to a Linux VPS.
 
 After deploying the Relay, initialize DEV Anywhere on the development machine:
 
@@ -133,51 +127,34 @@ Edit `~/.dev-anywhere/config.json` (`%USERPROFILE%\.dev-anywhere\config.json` on
 }
 ```
 
-When using a domain, replace `url` with `wss://your-domain`. The deployment script prints a configuration example matching the selected public entry point.
+When using a domain, replace `url` with `wss://your-domain`. The deployment script also prints a configuration example using the domain or IP you supplied.
 
-If an agent CLI is not detected automatically, select its executable when creating a session.
-
-Connect the development machine to the Relay:
+Save the configuration, then connect the development machine to the Relay:
 
 ```bash
 dev-anywhere serve start --relay cloud
 dev-anywhere serve status
 ```
 
-Open the Web URL printed by the deployment script. On first access, enter `RELAY_CLIENT_TOKEN` under Settings → Relay Token.
+Once the status shows that the Relay is connected, open the Web URL printed by the deployment script and enter `RELAY_CLIENT_TOKEN` under Settings → Relay Token to complete the initial connection.
 
 See the [VPS deployment guide](./docs/DEPLOYMENT.md) for deployment, upgrades, and troubleshooting. The guide is currently maintained in Chinese only.
 
-#### Optional: start automatically at login
+### 3. Start a session
 
-After configuring the Relay, enable automatic connection when you log in:
+Once connected, you can start a session from a terminal on the development machine or from the DEV Anywhere Web interface.
 
-```bash
-dev-anywhere serve autostart enable
-dev-anywhere serve autostart status
-```
+#### Start from the Web interface
 
-Use `dev-anywhere serve autostart disable` to turn it off. Enabling or disabling autostart only affects future logins; it does not start, restart, or stop the current Proxy. This is available on macOS, Linux with systemd user services, and Windows for the current user.
+Select a development machine, click New, choose a coding agent or Shell, and set the working directory. Coding agent sessions also let you choose a permission mode and a terminal or chat view.
 
-For startup before desktop login, use `dev-anywhere serve autostart enable --system --now` on macOS, systemd Linux, or Windows. Installation requires administrator authorization, and the service runs as your user account. `--now` restarts Proxy immediately; sessions created afterward can continue after desktop logout. See the [system service guide](./docs/SYSTEM-SERVICE.md) (Chinese) for setup, verification, and switching back.
+If a coding agent is installed but reported as not found, enter or browse for its executable path on the development machine under **CLI 路径** (CLI path) in the new-session dialog, then click **保存** (Save).
 
-> **macOS startup unlock:** With FileVault enabled, the disk must be unlocked after a restart before the development machine can come online. Full Disk Access does not unlock the disk.
->
-> For unattended startup after a restart, you can turn off FileVault under **System Settings → Privacy & Security → FileVault** and enable the `--system` mode above. Desktop automatic login is not required. Turning off FileVault removes the additional protection that requires your login password to unlock the disk. Once FileVault is off, keep the network available, restart, stay at the login screen, and check from another device that the development machine comes online automatically. See [Apple’s FileVault guide](https://support.apple.com/en-ie/guide/deployment/dep82064ec40/web).
+> **macOS folder permissions:** Accessing Desktop, Documents, Downloads, and other protected folders may require approval on the Mac. Grant access before working remotely; see [folder access settings](./docs/SYSTEM-SERVICE.md#macos-文件夹访问) (Chinese).
 
-> **macOS folder access:** Selecting protected locations such as Desktop, Documents, or Downloads may trigger a “node would like to access…” prompt that needs approval on the development machine. For unattended access to these folders, add the `node` executable running DEV Anywhere under **System Settings → Privacy & Security → Full Disk Access** and enable it beforehand.
->
-> Run `node -p 'process.execPath'` in the Node environment used to install DEV Anywhere to find its path. Click **+**, then press `⌘⇧G` and paste that path. The permission applies to this Node executable, so other scripts running through it may also gain access. If the Node path changes, you may need to grant access again. See [Apple’s privacy settings guide](https://support.apple.com/guide/mac-help/change-privacy-security-settings-on-mac-mchl211c911f/mac).
+#### Start from a terminal on the development machine
 
-### 3. Start or take over a session
-
-Once connected, use the browser to take over a coding agent session started in a terminal on the development machine or start a new session directly.
-
-#### Take over a development-machine terminal session from the browser
-
-When starting Claude Code, Codex, Kimi Code, or Cursor CLI, add `dev-anywhere` before the original command:
-
-For example, change `claude --permission-mode plan` to `dev-anywhere claude --permission-mode plan`. The CLI arguments and local terminal experience stay the same. The session also appears in DEV Anywhere, where you can take it over from a browser at any time. For Cursor CLI, use `dev-anywhere cursor ...`, or `dev-anywhere agent ...` to match the native `agent` binary.
+Add `dev-anywhere` before the original command to start a session. For example, write `claude --permission-mode plan` as `dev-anywhere claude --permission-mode plan`, keeping the original arguments.
 
 **With a VPS Relay deployment**
 
@@ -187,6 +164,8 @@ dev-anywhere codex
 dev-anywhere kimi
 dev-anywhere cursor
 ```
+
+You can also launch Cursor CLI with `dev-anywhere agent ...`.
 
 **With Quick Tunnel**
 
@@ -199,15 +178,40 @@ dev-anywhere --profile quick-tunnel kimi
 dev-anywhere --profile quick-tunnel cursor
 ```
 
-#### Start a new session from the browser
+Once the session starts, you can keep working in your local terminal or open the DEV Anywhere Web interface and select that session from the session list to continue your work.
 
-Open DEV Anywhere, select a development machine, and click New to start Claude Code, Codex, Kimi Code, Cursor CLI, or Shell in a directory on that machine. Claude Code, Codex, Kimi Code, and Cursor CLI all offer terminal and chat modes; Kimi Code and Cursor CLI chat run over ACP.
+## Automatic startup
 
-For terminal compatibility, DEV Anywhere forces the sparkle effect off (`tui.whimsy=false`) for Codex terminal sessions started or resumed through its local CLI or Web interface; running `codex` directly still follows your own settings. Existing Codex processes must exit before you restart or resume the session to apply this setting; refreshing the browser does not apply it.
+After connecting successfully through a VPS Relay, you can set the development machine to connect automatically. Keep it powered on, connected to the network, and awake.
 
-Codex also uses the `Action Required` title for ordinary questions, so it cannot reliably identify permission approvals. Codex terminal sessions therefore do not offer `Always yes` automatic Enter. Handle permission prompts in the terminal, or choose the appropriate approval policy when starting the session.
+### Start at login
+
+Run these commands on the development machine:
+
+```bash
+dev-anywhere serve autostart enable
+dev-anywhere serve autostart status
+```
+
+DEV Anywhere will connect to the Relay the next time you log in. To disable this, run `dev-anywhere serve autostart disable`. These commands change future startup behavior without starting or stopping the current Proxy. Supported on macOS, Linux with systemd user services, and Windows.
+
+### Start at boot, before login
+
+To connect to the Relay at boot without logging in to the desktop, enable the system service. Run this from the account you normally use for DEV Anywhere and approve the administrator authorization prompt:
+
+```bash
+dev-anywhere serve autostart enable --system --now
+```
+
+The service runs under that account, and `--now` restarts the Proxy immediately. Create new sessions after enabling the service if you need them to remain available after logout. Supported on macOS, Linux with systemd, and Windows. Initial setup on Windows also requires the account password, not a PIN.
+
+See the [system service guide](./docs/SYSTEM-SERVICE.md) (Chinese) for disabling the service, verification, and troubleshooting.
+
+> **macOS startup unlock:** With FileVault enabled, you must enter a password to unlock the disk after restarting your Mac before DEV Anywhere can start. To connect automatically after a restart, turn off FileVault and enable the system service; automatic login is not required. Turning off FileVault removes the disk protection provided by your login password. See the [system service guide](./docs/SYSTEM-SERVICE.md) (Chinese) for instructions.
 
 ## Upgrading
+
+Before upgrading, check that Node.js on the development machine meets the required version. DEV Anywhere's automatic updater does not upgrade Node.js.
 
 ### Quick Tunnel
 
@@ -232,7 +236,7 @@ On Windows PowerShell:
 irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
 
-Use the same SSH target and public domain/IP as the initial deployment. The installer reuses the existing tokens on the VPS. Globally npm-installed Proxies with automatic updates enabled follow the Relay version and reconnect automatically. Refresh the browser after the update.
+Use the same SSH login address and domain or public IPv4 address as the initial deployment. The installer preserves existing tokens. Globally npm-installed Proxies with automatic updates enabled follow new Relay releases and reconnect after updating. Refresh the page once the update finishes.
 
 Verify the version and connection on the development machine:
 
@@ -247,17 +251,18 @@ For pinned versions, disabled automatic updates, or migration from a release old
 
 ### Session management
 
-- Create terminal or chat sessions for Claude Code, Codex, Kimi Code, and Cursor CLI, plus Shell sessions, directly from the browser.
-- Choose the working directory, permission mode, and terminal or chat interaction for Claude Code, Codex, Kimi Code, or Cursor CLI sessions.
-- Attach sessions started from a local terminal, or resume Claude Code, Codex, Kimi Code, and Cursor CLI historical sessions.
+- Create coding agent or Shell sessions in a directory of your choice; coding agent sessions also offer permission and interaction modes.
+- Continue interacting with sessions started locally through `dev-anywhere` in the Web interface, or resume previous coding agent sessions.
 - Rename, terminate, or detach sessions; sessions started from a local terminal can reconnect after a Proxy restart.
-- Switch between development machines, and inspect or disconnect clients currently connected to the Relay. Remove an unused offline machine by swiping left on mobile or using its desktop overflow menu; it will appear again if it reconnects.
+- Switch between development machines and manage connected clients and offline machines.
 
 ![Creating a real coding agent session from the browser](./docs/assets/readme-create-session.gif)
 
 ### Terminal and chat views
 
-The **terminal view** presents the original CLI interface and preserves colors, cursor behavior, keyboard interaction, and full-screen programs. The **chat view** organizes coding agent output, tool calls, approvals, and final responses into messages that are easier to read and operate by touch. Kimi Code and Cursor CLI chat use ACP and support streaming output, tool calls and approvals, cancelling the current turn, and resuming historical sessions. Cursor ACP also supports questions, plan approval, and todo lists.
+The **terminal view** preserves the CLI interface and keyboard controls for users comfortable with a terminal. The **chat view** presents responses, tool calls, and approvals as messages that are easier to read and operate by touch.
+
+Claude Code, Codex, Kimi Code, and Cursor CLI all support both views. Kimi Code and Cursor CLI chat use ACP, with streaming responses, tool calls, cancellation of the current response, and history resumption. Cursor ACP also supports questions, plan approval, and todo lists.
 
 ![DEV Anywhere terminal and chat views](./docs/assets/readme-session-modes.gif)
 
@@ -267,8 +272,10 @@ Select Preview from the New menu to view a web app on the development machine or
 
 ![Creating a preview and opening the web app](./docs/assets/readme-previews.gif)
 
-- **Web previews** turn a website that is only available on the development machine (for example at `http://localhost` or `http://127.0.0.1`), an HTML file, or a directory containing web pages into a temporary HTTPS link. You can copy the link or, when supported, send it through your browser's system share feature. The link stops working as soon as you stop the preview.
+- **Web previews** create a temporary HTTPS link for a local website (such as `http://localhost`), an HTML file, or a web directory on the development machine. Open the link on another device or share it with others. Stopping the preview invalidates the link.
 - **Mobile device simulator previews** let you view and operate a simulator directly in the browser. They support basic touch actions such as tap, long-press, and swipe, as well as rotation, Home, Android Back, and pasting text.
+
+Updating or restarting the Proxy preserves web-preview links, and simulator video resumes after reconnection. To end sharing, stop the preview itself; stopping only the Proxy does not invalidate the shared link.
 
 ![Creating an iPhone simulator preview and launching Settings](./docs/assets/readme-ios-simulator.gif)
 
@@ -278,8 +285,8 @@ Select Preview from the New menu to view a web app on the development machine or
 
 ### Approvals, search, and files
 
-- See working, idle, awaiting-approval, and connection states in real time.
-- Handle tool approvals in the page; `Always Yes` can automatically confirm later approvals for a specific session.
+- See whether a session is working, awaiting approval, or idle, along with the development machine's connection status.
+- Handle tool approvals in the page, or enable `Always Yes` for sessions that support it. Codex terminal sessions require manual confirmation or an approval policy chosen at creation.
 - Enable session idle notifications to receive a browser alert when a coding agent finishes work and becomes idle.
 - Search terminal and chat history with `Cmd/Ctrl + F` or the menu, then jump to a match.
 - Upload images and files through the file picker, drag and drop, or the clipboard. Click a file path in coding agent output to preview the image or download the file directly in the browser.
@@ -288,13 +295,13 @@ Select Preview from the New menu to view a web app on the development machine or
 
 ### Voice Pilot
 
-Voice Pilot is for times when watching or operating the screen continuously is inconvenient. Once enabled, it listens to your voice. After you finish speaking, the recognized text is sent to the coding agent automatically; when the coding agent replies, Voice Pilot reads the response aloud automatically. You can also use voice commands to handle permission approvals, generate progress summaries, or repeat the previous response. Say a natural phrase such as “exit Voice Pilot” to leave voice mode; keyboard and touch controls remain available for precise editing.
+When you cannot keep watching the screen, use Voice Pilot to talk with your coding agent. It turns your speech into text, sends it to the agent, and reads replies aloud. You can also approve actions, request a progress summary, or hear the last reply again. Say “exit Voice Pilot” to leave voice mode; keyboard and touch controls remain available throughout.
 
 ![A real Voice Pilot interaction](./docs/assets/readme-voice-pilot.gif)
 
 ### Access across devices
 
-DEV Anywhere supports desktop, Android, iPhone, and iPad. The mobile interface includes adaptations for touch selection, soft keyboards, terminal helper keys, file operations, and session creation. The iPad experience is also specifically adapted for use with a Magic Keyboard and other hardware keyboards.
+DEV Anywhere works on computers, Android phones, iPhones, and iPads. The mobile interface supports touch selection, soft keyboards, and terminal helper keys, with adaptations for iPads using a Magic Keyboard or other hardware keyboards.
 
 <table>
   <tr>
@@ -341,14 +348,15 @@ flowchart LR
   relay <-->|"sessions, files, and device-preview data"| proxy
 ```
 
-- **Web client**: provides session lists, terminal and chat interfaces, web and simulator previews, approvals, file operations, and Voice Pilot.
-- **Relay**: serves the Web application, authenticates browsers and development machines, and forwards session and device-preview data.
-- **Proxy**: runs on the development machine, manages coding agents, terminals, session history, and file access, and provides web and simulator previews.
-- **Coding agent / Shell**: keeps using the CLI, environment variables, repositories, and local permissions on the development machine.
+- The **Web interface** is where you interact with sessions, files, and previews remotely.
+- The **Relay** serves the Web interface, authenticates connections, and forwards data between browsers and development machines.
+- The **Proxy** runs on the development machine, starts coding agents and Shells, manages sessions, and handles file and preview operations.
 
-Repositories and coding agent processes remain on the development machine. The Relay forwards and can read terminal, message, file, voice, and device-preview data, so it must run on infrastructure you trust. Web-preview pages and assets bypass the Relay and are served through Cloudflare Tunnel or Cpolar; preview commands and metadata still pass through the Relay. The current release does not provide end-to-end encryption.
+Coding agents and Shells run on the development machine using its local environment and files. Web previews use Cloudflare Tunnel or Cpolar for access, so their pages and assets bypass the Relay; preview creation and status updates still go through it.
 
-## Platform support
+## Browser platform support
+
+The table below covers devices used to access the Web interface. Development machines running coding agents support macOS, Linux, and Windows 11.
 
 | Platform | OS version | Browsers                                       |
 | -------- | ---------- | ---------------------------------------------- |
@@ -360,21 +368,18 @@ Repositories and coding agent processes remain on the development machine. The R
 
 ## Security boundaries
 
-- Coding agents and Shells run as the system user who started the Proxy. They can access the files and processes available to that user. DEV Anywhere does not add another sandbox around them.
-- `RELAY_PROXY_TOKEN` authenticates a development machine and is stored in the matching Relay's `proxyToken` field in `~/.dev-anywhere/config.json`. `RELAY_CLIENT_TOKEN` authenticates a browser and is entered under Settings → Relay Token on first access. The VPS deployment script generates both; see the [deployment guide](./docs/DEPLOYMENT.md#连接开发机).
-- Removing an offline development machine from the list only deletes its saved Relay record. It does not invalidate the Proxy Token stored on that machine. If a machine is lost, transferred, or sold with its DEV Anywhere configuration possibly intact, replace the Relay's Proxy Token and update the machines you still use with the new Token.
-- A public Relay must use HTTPS/WSS. A Token is an access credential; anyone who obtains it may be able to connect to DEV Anywhere as the corresponding identity. Replace it immediately if it leaks.
-- The Relay can read the terminal, message, file, voice, and device-preview data that it forwards, as well as web-preview settings and status, so deploy it only on infrastructure you trust.
+- Coding agents and Shells use the permissions of the account running the Proxy and can access its files and processes. DEV Anywhere does not add a sandbox.
+- Public access must use HTTPS/WSS, but the application does not provide end-to-end encryption. The Relay can read forwarded sessions, files, voice, simulator video and interactions, and web-preview settings and status. Deploy it on infrastructure you trust.
+- `RELAY_PROXY_TOKEN` and `RELAY_CLIENT_TOKEN` authenticate development machines and browsers respectively. Keep both private: do not share token-bearing links or commit `~/.dev-anywhere/config.json` to a project repository. Replace credentials if they leak.
+- Removing an offline machine from the list does not revoke its access. If a machine is lost, sold, or transferred, replace the Relay's Proxy Token and update the other development machines.
 - Tool approvals ask for confirmation before an operation that needs authorization. Enabling `Always Yes` or bypassing approvals reduces those confirmations and may increase the impact of mistakes.
 - Web preview links are not protected by the Relay Token. Anyone with a link can access it. When you select an HTML file, other non-hidden files in its folder may also be available through the preview link; when you select a directory, every file that the preview server can serve from that directory may be accessible. Preview only content you are willing to expose, and stop the preview when you are done.
-- Do not share token-bearing access URLs with people you do not trust.
-- `~/.dev-anywhere/config.json` may contain a Proxy Token. Do not put it in a project directory or upload it to GitHub, GitLab, or another code-hosting service.
 
 ## Development
 
-Local development supports macOS, Linux, and native Windows 11. After installing dependencies and initializing local configuration, run `pnpm dev:restart` to start Relay, Web, and Proxy, then `pnpm dev:health` to check the connection. The default Web URL is `http://localhost:5173`. These commands work directly in PowerShell or CMD on Windows without Bash or WSL. To start Web only, run `pnpm dev:web -- --relay local --port 5173`.
+If you want to work on the project itself, follow the [development guide](./docs/DEVELOPMENT.md) to install dependencies and set up local configuration. Then run `pnpm dev:restart` to start the development environment and `pnpm dev:health` to check the connection.
 
-See the [development guide](./docs/DEVELOPMENT.md) for the repository layout, isolated local environment, test matrix, and release gates. That document is currently maintained in Chinese only.
+Local development supports macOS, Linux, and native Windows 11. The default Web URL is `http://localhost:5173`. The development guide also covers the repository layout, debugging, tests, and releases, and is currently maintained in Chinese only.
 
 ## Acknowledgements
 

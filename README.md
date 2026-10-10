@@ -22,13 +22,9 @@
 
 ## 这是什么
 
-DEV Anywhere 让你通过浏览器继续使用开发机上的 Claude Code、Codex、Kimi Code、Cursor CLI 和 Shell。无论手边是另一台电脑、手机还是平板，都能继续当前会话、恢复历史会话或启动新会话。你还可以预览网页效果，并查看和操控开发机上已经启动的 iOS Simulator 与 Android Emulator。
+DEV Anywhere 让你在电脑、手机或平板上远程使用开发机上的 Claude Code、Codex、Kimi Code、Cursor CLI 和 Shell。打开 Web 界面，就能与 coding agent 对话、操作终端、处理工具审批和传输文件，也能预览网页、操控开发机上已启动的 iOS Simulator 与 Android Emulator。
 
 想让本地启动的 Claude Code、Codex、Kimi Code 或 Cursor CLI 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。启动后，你既可以在本地终端中照常操作，也可以随时随地在 DEV Anywhere 的 Web 界面里继续手头的开发工作，或创建新的 coding agent 会话。
-
-在 DEV Anywhere 的 Web 界面中，你可以与 coding agent 对话、操作终端、处理工具审批、上传或下载文件。你还可以查看任务进度、搜索历史输出，并在任务完成时接收浏览器通知。
-
-Kimi Code 和 Cursor CLI 除了原生终端，还支持 ACP 聊天会话，可以流式查看回复和工具调用、取消当前回复或恢复历史会话。Cursor ACP 还支持提问、计划确认和待办列表。
 
 > **为什么做这个？**
 >
@@ -38,7 +34,7 @@ Kimi Code 和 Cursor CLI 除了原生终端，还支持 ACP 聊天会话，可�
 
 ### 前置条件
 
-开发机支持 macOS、Linux 和原生 Windows 11；Windows 无需安装 WSL。
+准备一台运行 macOS、Linux 或 Windows 11 的开发机。Windows 可以直接使用，无需安装 WSL。
 
 在开发机上安装 [Node.js 22.22.2 或更高版本](https://nodejs.org/zh-cn/download)，npm 会随 Node.js 一起安装。可以用以下命令确认环境：
 
@@ -47,11 +43,11 @@ node --version
 npm --version
 ```
 
-如果要创建 coding agent 会话，还需要提前安装并登录 Claude Code、Codex、Kimi Code 或 Cursor CLI。只使用 Shell 时可以跳过这一步。
+在开发机上安装并登录你要使用的 coding agent：Claude Code、Codex、Kimi Code 或 Cursor CLI。只使用 Shell 时可以跳过这一步。
 
-### 1. 安装本地 Proxy
+### 1. 安装 DEV Anywhere
 
-在开发机上安装 DEV Anywhere：
+在开发机上安装 DEV Anywhere 的本地程序（Proxy）：
 
 ```bash
 npm install -g @dev-anywhere/proxy
@@ -59,7 +55,7 @@ npm install -g @dev-anywhere/proxy
 
 ### 2. 建立连接
 
-DEV Anywhere 提供两种部署方式：
+根据使用需求，选择下面一种方式连接开发机：
 
 | 方式                              | 适合场景           | 需要准备                        |
 | --------------------------------- | ------------------ | ------------------------------- |
@@ -68,7 +64,7 @@ DEV Anywhere 提供两种部署方式：
 
 #### 方式一：Quick Tunnel（体验）
 
-Quick Tunnel 是给没有 VPS、又想先实际跑起来看一眼的用户准备的。它会在开发机上启动临时 Relay、Web 和 Proxy，再通过 Cloudflare 生成一个无需账号的随机 HTTPS 地址。
+Quick Tunnel 适合先体验功能：无需 VPS 或 Cloudflare 账号，就能生成一个临时 HTTPS 地址，用来远程访问开发机。
 
 macOS 可以使用 Homebrew 安装 `cloudflared`：
 
@@ -78,35 +74,33 @@ brew install cloudflared
 
 其他平台参见 Cloudflare 的 [`cloudflared` 安装说明](https://developers.cloudflare.com/cloudflare-one/networks/connectors/cloudflare-tunnel/downloads/)。
 
-在开发机上启动临时链路：
+安装完成后，在开发机上运行：
 
 ```bash
 dev-anywhere tunnel
 ```
 
-首次运行会自动初始化 `~/.dev-anywhere`，不需要手动配置 Relay。
+首次运行会自动完成配置。等终端显示访问地址后，在另一台设备的浏览器中打开它，即可进入 DEV Anywhere。这个地址包含访问凭据，请妥善保管。
 
-公网连通性检查通过后，命令会打印一个包含临时 Client Token 的访问地址。保持命令运行，在浏览器中打开该地址即可。按 `Ctrl+C` 会同时停止 Proxy、Relay 和隧道。
-
-Quick Tunnel 的随机域名会变化，进程退出后地址立即失效，也没有可用性承诺。它适合体验，不适合长期依赖。
+使用期间请保持命令运行；按 `Ctrl+C` 结束后，地址就会失效。每次启动都会生成随机地址，连接也可能不稳定，长期使用建议选择下面的 VPS Relay。
 
 #### 方式二：VPS Relay（推荐）
 
-VPS 是 Virtual Private Server 的缩写，通常就是一台可以通过公网访问的云服务器。长期使用时，推荐在 Linux VPS 上部署 Relay。你可以直接使用 VPS 的公网 IPv4，也可以使用指向该 VPS 的域名；部署脚本会识别两种入口并自动配置对应的 HTTPS 证书。公网环境只通过 HTTPS/WSS 提供服务，HTTP 端口仅用于证书验证和跳转。一个 Relay 容器会同时托管 Web、HTTP API、文件、语音和 WebSocket 服务。
+长期使用时，推荐在 Linux VPS（云服务器）上部署 Relay，由它连接浏览器与开发机。你可以直接使用 VPS 的公网 IPv4，也可以使用指向 VPS 的域名，部署脚本会自动配置 HTTPS。
 
-无需克隆仓库。在 macOS 或 Linux 本地终端执行，替换 SSH 目标和公网域名/IP：
+你可以从 macOS、Linux 或 Windows 电脑将 Relay 部署到 Linux VPS，无需克隆仓库。运行下面的命令前，请先配置 [SSH 密钥登录](./docs/DEPLOYMENT.md#配置-ssh-免密登录)；也可以选择 [直接登录 VPS 部署](./docs/DEPLOYMENT.md#直接在-vps-上运行)。
+
+在 macOS 或 Linux 本地终端执行以下命令，将 `root@203.0.113.10` 换成 VPS 的 SSH 登录地址，将 `dev-anywhere.example.com` 换成 VPS 的域名或公网 IPv4：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.sh | bash -s -- --ssh root@203.0.113.10 dev-anywhere.example.com
 ```
 
-Windows 在原生 PowerShell 中执行，并按提示填写 SSH 目标和公网域名/IP，无需 Bash、WSL 或 Git：
+Windows 用户在 PowerShell 中执行以下命令，再按提示填写 VPS 的 SSH 登录地址和域名或公网 IPv4：
 
 ```powershell
 irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
-
-从本地部署需要先配置 [SSH 密钥登录](./docs/DEPLOYMENT.md#配置-ssh-免密登录)。也可以 [直接登录 VPS 部署](./docs/DEPLOYMENT.md#直接在-vps-上运行)。三种本地平台都部署到 Linux VPS。
 
 部署 Relay 后，在开发机上初始化 DEV Anywhere：
 
@@ -133,51 +127,34 @@ dev-anywhere init
 }
 ```
 
-使用域名时，将 `url` 换成 `wss://你的域名`。部署脚本会输出与当前入口匹配的配置示例。
+使用域名时，将 `url` 换成 `wss://你的域名`。部署脚本也会根据你填写的域名或 IP 输出配置示例。
 
-如果没有自动找到 Agent CLI，可以在新建会话时选择它的可执行文件。
-
-让开发机连接 Relay：
+保存配置后，让开发机连接 Relay：
 
 ```bash
 dev-anywhere serve start --relay cloud
 dev-anywhere serve status
 ```
 
-打开部署脚本输出的 Web 地址，首次访问时在“设置 → Relay Token”中填写 `RELAY_CLIENT_TOKEN`。
+确认状态显示 Relay 已连接后，打开部署脚本输出的 Web 地址，在“设置 → Relay Token”中填写 `RELAY_CLIENT_TOKEN`，完成首次连接。
 
 部署、升级和排障步骤见 [VPS 部署指南](./docs/DEPLOYMENT.md)。
 
-#### 可选：登录后自动启动
+### 3. 启动会话
 
-配置好 Relay 后，可以让开发机在登录系统后自动连接：
+连接成功后，你可以从开发机的终端或 DEV Anywhere 的 Web 界面启动会话。
 
-```bash
-dev-anywhere serve autostart enable
-dev-anywhere serve autostart status
-```
+#### 从 Web 界面启动
 
-使用 `dev-anywhere serve autostart disable` 取消。开启或取消只影响之后的登录，不会启动、重启或停止当前 Proxy。支持 macOS、提供 systemd 用户服务的 Linux，以及 Windows 当前用户。
+选择开发机，点击“新建”，选择 coding agent 或 Shell，并指定工作目录。创建 coding agent 会话时，还可以选择权限模式，以及终端或聊天视图。
 
-需要开机后无需桌面登录即可运行时，使用 `dev-anywhere serve autostart enable --system --now`。支持 macOS、systemd Linux 和 Windows；安装时请求管理员权限，运行时使用原用户账户。`--now` 会重启 Proxy 并立即切换，新建会话可在退出桌面后继续使用。配置、验证和切回步骤见[系统服务指南](./docs/SYSTEM-SERVICE.md)。
+如果已经安装了 coding agent，但仍提示“未找到”，请在新建会话窗口的“CLI 路径”中填写或浏览选择开发机上的启动程序路径，然后点击“保存”。
 
-> **macOS 开机解锁**：开启 FileVault（文件保险箱）时，重启后需先解锁磁盘，开发机才能上线。“完全磁盘访问权限”不能代替磁盘解锁。
->
-> 如需重启后无人操作自动上线，可以在 **系统设置 → 隐私与安全性 → 文件保险箱** 中关闭 FileVault，并启用上述 `--system` 模式，无需开启桌面自动登录。这会移除“必须通过登录密码才能解锁磁盘”的额外保护。关闭完成后，保持网络可用，重启并停在登录界面，从另一台设备确认开发机自动上线。参见 [Apple 的关闭 FileVault 说明](https://support.apple.com/zh-cn/guide/mac-help/mchlp2560/mac)。
+> **macOS 文件夹权限**：访问“桌面”“文稿”“下载”等目录时，可能需要在 Mac 上确认访问权限。远程使用前可以提前授权，具体步骤见[文件夹访问设置](./docs/SYSTEM-SERVICE.md#macos-文件夹访问)。
 
-> **macOS 文件夹访问提醒**：选择“桌面”“文稿”“下载”等受保护目录时，macOS 可能弹出“node 想访问……”的提示，需要在开发机上确认。需要无人值守访问这些目录时，请提前在 **系统设置 → 隐私与安全性 → 完全磁盘访问权限** 中添加并允许运行 DEV Anywhere 的 `node`。
->
-> 在安装 DEV Anywhere 所用的 Node 环境中运行 `node -p 'process.execPath'` 查看路径，点击“＋”后按 `⌘⇧G` 粘贴该路径。授权对象是这个 Node，其他通过它运行的脚本也可能获得相同权限；以后更换 Node 路径，可能需要重新授权。参见 [Apple 的权限设置说明](https://support.apple.com/zh-cn/guide/mac-help/mchl211c911f/mac)。
+#### 从开发机的终端启动
 
-### 3. 启动或接管会话
-
-连接建立后，可以在浏览器中接管开发机终端里启动的 coding agent 会话，或直接启动新会话。
-
-#### 从浏览器接管开发机终端中的会话
-
-启动 Claude Code、Codex、Kimi Code 或 Cursor CLI 时，只需在原命令前加上 `dev-anywhere`：
-
-例如，将 `claude --permission-mode plan` 改为 `dev-anywhere claude --permission-mode plan`。CLI 参数和本地终端体验都不变。该会话也会出现在 DEV Anywhere 的 Web 界面中，随时可以从浏览器接管。Cursor CLI 使用 `dev-anywhere cursor ...`，也可以用 `dev-anywhere agent ...`（与原生二进制 `agent` 一致）。
+在原命令前加上 `dev-anywhere` 即可启动会话。例如，将 `claude --permission-mode plan` 写成 `dev-anywhere claude --permission-mode plan`，原有参数照常传入。
 
 **使用 VPS Relay 部署时**
 
@@ -187,6 +164,8 @@ dev-anywhere codex
 dev-anywhere kimi
 dev-anywhere cursor
 ```
+
+Cursor CLI 也可以使用 `dev-anywhere agent ...` 启动。
 
 **使用 Quick Tunnel 时**
 
@@ -199,15 +178,40 @@ dev-anywhere --profile quick-tunnel kimi
 dev-anywhere --profile quick-tunnel cursor
 ```
 
-#### 从浏览器启动新会话
+启动后，你可以继续在本地终端操作，也可以打开 DEV Anywhere 的 Web 界面，在会话列表中选择刚启动的会话，继续手头的开发工作。
 
-打开 DEV Anywhere，选择开发机后点击“新建”，即可在该开发机的指定目录中启动 Claude Code、Codex、Kimi Code、Cursor CLI 或 Shell。Claude Code、Codex、Kimi Code 和 Cursor CLI 都可以选择终端或聊天模式；Kimi Code 和 Cursor CLI 的聊天模式通过 ACP 工作。
+## 自动启动
 
-作为终端兼容处理，DEV Anywhere 会为通过本地命令或网页新建、恢复的 Codex 终端会话强制关闭星芒特效（`tui.whimsy=false`），直接运行 `codex` 时仍遵循用户自己的设置。已有 Codex 进程需要退出并重新启动或恢复会话后才会应用此设置，刷新网页不会生效。
+使用 VPS Relay 并确认连接正常后，可以设置开发机自动连接。开发机需要保持开机、联网，且不进入睡眠。
 
-Codex 的 `Action Required` 标题也用于普通提问，不能可靠识别权限审批。因此 Codex 终端会话不提供 `Always yes` 自动回车；请在终端中处理权限提示，或在启动会话时选择所需的审批策略。
+### 登录后启动
+
+在开发机上运行：
+
+```bash
+dev-anywhere serve autostart enable
+dev-anywhere serve autostart status
+```
+
+下次登录系统时，DEV Anywhere 会自动连接 Relay。取消时运行 `dev-anywhere serve autostart disable`；这些命令只修改自启动设置，不会启停当前运行的 Proxy。支持 macOS、提供 systemd 用户服务的 Linux 和 Windows。
+
+### 开机后启动，无需登录
+
+如果希望开发机开机后就能连接 Relay，无需登录桌面，可以启用系统服务。请在平时使用 DEV Anywhere 的账户下运行，并按提示完成管理员授权：
+
+```bash
+dev-anywhere serve autostart enable --system --now
+```
+
+服务会以这个账户运行，`--now` 会立即重启 Proxy。需要在退出桌面后继续使用的会话，请在启用服务后新建。此方式支持 macOS、使用 systemd 的 Linux 和 Windows；Windows 首次设置还需要账户密码，不能使用 PIN。
+
+取消、验证和排障步骤见[系统服务指南](./docs/SYSTEM-SERVICE.md)。
+
+> **macOS 开机解锁**：如果启用了 FileVault（文件保险箱），Mac 重启后需要先输入密码解锁磁盘，DEV Anywhere 才能启动。若希望重启后自动连接，需要关闭 FileVault 并启用系统服务，不必设置自动登录；关闭 FileVault 后，磁盘将不再受登录密码保护。操作步骤见[系统服务指南](./docs/SYSTEM-SERVICE.md)。
 
 ## 升级
+
+升级前请确认开发机的 Node.js 版本满足要求。DEV Anywhere 的自动更新不会替你升级 Node.js。
 
 ### Quick Tunnel
 
@@ -232,7 +236,7 @@ Windows PowerShell：
 irm https://raw.githubusercontent.com/lichenxicatapple-blip/dev-anywhere/main/install.ps1 | iex
 ```
 
-SSH 目标和公网域名/IP 应与首次部署一致。脚本会复用 VPS 上已有的 Token。通过 npm 全局安装且开启自动更新的 Proxy 会自动跟随 Relay 升级并重新连接；更新后刷新浏览器。
+使用首次部署时的 SSH 登录地址和域名或公网 IPv4，脚本会保留已有的 Token。通过 npm 全局安装、且开启自动更新的 Proxy 会跟随 Relay 的新版本自动升级并重新连接。完成后刷新网页即可。
 
 在开发机确认版本和连接状态：
 
@@ -247,17 +251,18 @@ dev-anywhere serve status
 
 ### 会话管理
 
-- 直接从浏览器创建 Claude Code、Codex、Kimi Code、Cursor CLI 的终端或聊天会话，以及 Shell 会话。
-- 创建 Claude Code、Codex、Kimi Code 或 Cursor CLI 会话时，可以选择工作目录、权限模式，以及终端或聊天交互方式。
-- 接入从本地终端启动的会话，也可以恢复 Claude Code、Codex、Kimi Code 与 Cursor CLI 的历史会话。
+- 在指定目录创建 coding agent 或 Shell 会话；coding agent 会话还可以选择权限模式和交互方式。
+- 在 Web 界面中继续操作通过 `dev-anywhere` 从本地终端启动的会话，或恢复 coding agent 的历史会话。
 - 重命名、终止或分离会话；从本地终端启动的会话在 Proxy 重启后可以重新连接。
-- 在多台开发机之间切换，并查看、断开当前连接到 Relay 的客户端；不再使用的离线开发机可在手机上左滑移除，或从桌面端的更多菜单移除，重新连接后会再次出现。
+- 在多台开发机之间切换，管理已连接的客户端和离线开发机。
 
 ![从浏览器创建真实 coding agent 会话](./docs/assets/readme-create-session.gif)
 
 ### 终端与聊天视图
 
-**终端视图**直接呈现 CLI 的原始界面，保留颜色、光标、键盘交互和全屏程序。**聊天视图**将 coding agent 输出、工具调用、审批和最终回复整理为更易阅读和触摸操作的消息。Kimi Code 和 Cursor CLI 的聊天视图使用 ACP，支持流式输出、工具调用与审批、取消当前回合和恢复历史会话；Cursor ACP 还支持提问、计划批准和 todo 列表。
+**终端视图**保留 CLI 的界面和键盘操作，适合熟悉终端的用户。**聊天视图**将回复、工具调用和审批整理成消息，方便阅读和触摸操作。
+
+Claude Code、Codex、Kimi Code 和 Cursor CLI 都支持这两种视图。其中 Kimi Code 和 Cursor CLI 的聊天模式使用 ACP，支持流式回复、工具调用、取消当前回复和恢复历史会话；Cursor ACP 还支持提问、计划确认和待办列表。
 
 ![DEV Anywhere 的终端与聊天视图](./docs/assets/readme-session-modes.gif)
 
@@ -267,10 +272,10 @@ dev-anywhere serve status
 
 ![从新建预览到打开网页效果](./docs/assets/readme-previews.gif)
 
-- **网页预览**：把只能在开发机上打开的网站（例如通过 `http://localhost` 或 `http://127.0.0.1` 访问）、HTML 文件或包含网页文件的目录变成一个临时 HTTPS 链接。你可以复制链接；浏览器支持系统分享时，也可以直接发送给别人。停止预览后，链接立即失效。
+- **网页预览**：为开发机上的本地网站（如 `http://localhost`）、HTML 文件或网页目录生成临时 HTTPS 链接，方便在其他设备上打开或分享给别人。停止预览后，链接立即失效。
 - **移动设备模拟器预览**：直接在浏览器中查看和操作模拟器。支持点击、长按、滑动等基本触控操作，也可以旋转画面、返回主屏幕、使用 Android 返回键和粘贴文字。
 
-正常更新或重启 Proxy 会保留预览。网页分享链接继续有效，模拟器画面会在重新连接后恢复。要结束分享，请关闭对应的预览；仅停止 Proxy 不会让链接失效。
+更新或重启 Proxy 时，网页预览链接会保留，模拟器画面会在重新连接后恢复。要结束分享，请停止对应的预览；仅停止 Proxy 不会让分享链接失效。
 
 ![从新建预览到在 iPhone 模拟器中打开“设置”](./docs/assets/readme-ios-simulator.gif)
 
@@ -280,8 +285,8 @@ dev-anywhere serve status
 
 ### 审批、搜索与文件
 
-- 实时显示会话的工作、空闲、等待审批和连接状态。
-- 在页面中处理工具审批；`Always Yes` 可以为指定会话自动确认后续审批。
+- 查看会话是否正在工作、等待审批或已经空闲，以及开发机的连接状态。
+- 在页面中处理工具审批，也可为支持的会话开启 `Always Yes` 自动确认。Codex 终端会话需手动确认，或在创建时选择审批策略。
 - 开启“会话空闲通知”后，coding agent 完成工作并进入空闲状态时，浏览器会发送提醒。
 - 使用 `Cmd/Ctrl + F` 或菜单入口搜索终端与聊天记录，并定位到命中位置。
 - 通过文件选择器、拖放或剪贴板上传图片和文件；点击 coding agent 输出中的文件路径，可以直接在浏览器中预览图片或下载文件。
@@ -290,13 +295,13 @@ dev-anywhere serve status
 
 ### Voice Pilot
 
-Voice Pilot 面向不方便持续盯着或操作屏幕的场景。开启后，它会监听你的语音；你说完后，识别结果会自动发送给 coding agent，coding agent 回复后，Voice Pilot 会自动播报回复内容。你还可以通过语音处理权限审批、生成阶段性总结或复述上一条回复。说“退出语音助手”等自然表达即可退出，需要精细编辑时仍可使用键盘或触摸操作。
+不方便一直看屏幕时，可以开启 Voice Pilot，用语音与 coding agent 对话。它会把你说的话转成文字发送出去，并朗读 coding agent 的回复。你还可以用语音处理审批、听取进度总结或重听上一条回复；说“退出语音助手”即可退出，期间也可以继续使用键盘和触摸操作。
 
 ![Voice Pilot 真实交互](./docs/assets/readme-voice-pilot.gif)
 
 ### 跨设备访问
 
-DEV Anywhere 支持桌面、Android、iPhone 和 iPad。移动端界面针对触摸选择、软键盘、终端辅助键、文件操作和会话创建进行了适配；针对 iPad 搭配妙控键盘等实体键盘的使用场景，也做了专门适配。
+DEV Anywhere 可以在电脑、Android 手机、iPhone 和 iPad 上使用。移动端支持触摸选择、软键盘和终端辅助键，也适配了 iPad 搭配妙控键盘等实体键盘的操作。
 
 <table>
   <tr>
@@ -343,14 +348,15 @@ flowchart LR
   relay <-->|"会话、文件与设备预览数据"| proxy
 ```
 
-- **Web 客户端**：提供会话列表、终端与聊天界面、网页与移动设备模拟器预览、审批、文件操作和 Voice Pilot。
-- **Relay**：托管 Web，验证浏览器和开发机的身份，并转发会话及设备预览数据。
-- **Proxy**：运行在开发机上，管理 coding agent、终端、会话历史和文件访问，并提供网页及模拟器预览。
-- **Coding agent / Shell**：继续使用开发机上的 CLI、环境变量、仓库和本地权限。
+- **Web 界面**是你远程操作会话、文件和预览的入口。
+- **Relay** 提供 Web 界面，验证连接身份，并在浏览器与开发机之间转发数据。
+- **Proxy** 运行在开发机上，负责启动 coding agent 和 Shell、管理会话，并处理文件和预览操作。
 
-代码仓库和 coding agent 进程都留在开发机上。Relay 会转发并能读取终端、消息、文件、语音和设备预览数据，因此必须部署在受信任的服务器上。网页预览的页面和资源不经过 Relay，而是由 Cloudflare Tunnel 或 Cpolar 提供临时访问链接；创建预览、同步状态等控制信息仍会经过 Relay。当前版本不提供端到端加密。
+Coding agent 和 Shell 都运行在开发机上，使用本机的环境和文件。网页预览通过 Cloudflare Tunnel 或 Cpolar 提供访问链接，页面和资源不经过 Relay；预览的创建和状态同步仍通过 Relay 完成。
 
-## 平台支持
+## 浏览器端平台支持
+
+下表列出访问 Web 界面时支持的平台和浏览器；运行 coding agent 的开发机支持 macOS、Linux 和 Windows 11。
 
 | 平台    | 系统版本   | 浏览器                       |
 | ------- | ---------- | ---------------------------- |
@@ -362,21 +368,18 @@ flowchart LR
 
 ## 安全边界
 
-- Coding agent 和 Shell 以启动 Proxy 的系统用户身份运行，可以访问该用户有权访问的文件和进程。DEV Anywhere 不会额外提供沙箱隔离。
-- `RELAY_PROXY_TOKEN` 用于验证开发机身份，保存在 `~/.dev-anywhere/config.json` 对应 Relay 的 `proxyToken` 字段中。`RELAY_CLIENT_TOKEN` 用于验证浏览器身份，首次访问时在“设置 → Relay Token”中填写。VPS 部署脚本会生成这两个 Token，配置方法见 [部署指南](./docs/DEPLOYMENT.md#连接开发机)。
-- 从列表中移除离线开发机，只会删除 Relay 保存的列表记录，不会让该开发机保存的 Proxy Token 失效。如果开发机丢失、转让或出售，并且可能仍保留 DEV Anywhere 配置，请更换 Relay 的 Proxy Token，再把新 Token 更新到仍在使用的开发机上。
-- 公网 Relay 必须使用 HTTPS/WSS。Token 相当于访问凭证，拿到 Token 的人就可能以对应身份接入 DEV Anywhere；一旦泄露，请立即更换。
-- Relay 能读取经其转发的终端、消息、文件、语音、设备预览画面与操作数据，以及网页预览的设置和状态，因此请只将它部署在你信任的服务器上。
+- Coding agent 和 Shell 使用运行 Proxy 的账户权限，可以访问该账户有权使用的文件和进程；DEV Anywhere 不提供额外的沙箱隔离。
+- 公网访问必须使用 HTTPS/WSS，但当前不提供端到端加密。Relay 能读取经它转发的会话、文件、语音、模拟器画面和操作，以及网页预览的设置和状态，因此应部署在你信任的服务器上。
+- `RELAY_PROXY_TOKEN` 和 `RELAY_CLIENT_TOKEN` 分别用于开发机和浏览器连接，都是访问凭据。不要分享含 Token 的链接，也不要将 `~/.dev-anywhere/config.json` 放进项目仓库；凭据泄露后请及时更换。
+- 从列表移除离线开发机不会撤销它的连接权限。如果设备丢失、出售或转让，请更换 Relay 的 Proxy Token，并更新其他开发机的配置。
 - 工具审批会在需要授权的操作执行前让你确认。启用 `Always Yes` 或跳过审批后，确认会减少，误操作的影响也可能更大。
 - 网页预览链接不受 Relay Token 保护，任何拿到链接的人都能访问。选择 HTML 文件时，其所在文件夹中的其他非隐藏文件也可能通过预览链接访问；选择目录时，目录中可提供的文件都可能被访问。请只预览可以公开的内容，并在使用后及时停止预览。
-- 不要把包含 Token 的访问链接发给不信任的人。
-- `~/.dev-anywhere/config.json` 可能保存着 Proxy Token。不要把它放进项目文件夹，也不要上传到 GitHub、GitLab 等代码托管平台。
 
 ## 开发
 
-本地开发支持 macOS、Linux 和原生 Windows 11。在安装项目依赖、完成本地配置初始化后，运行 `pnpm dev:restart` 启动 Relay、Web 和 Proxy，再运行 `pnpm dev:health` 检查连接。默认 Web 地址是 `http://localhost:5173`；Windows 可直接在 PowerShell 或 CMD 中运行，无需 Bash 或 WSL。只启动 Web 可用 `pnpm dev:web -- --relay local --port 5173`。
+如果你想修改项目代码，请先阅读[开发指南](./docs/DEVELOPMENT.md)，完成依赖安装和本地配置，再运行 `pnpm dev:restart` 启动开发环境，用 `pnpm dev:health` 检查连接。
 
-仓库结构、本地隔离环境、测试矩阵和发布门禁见 [开发指南](./docs/DEVELOPMENT.md)。
+本地开发支持 macOS、Linux 和原生 Windows 11，默认网页地址为 `http://localhost:5173`。仓库结构、调试、测试和发布说明也在开发指南中。
 
 ## 致谢
 
