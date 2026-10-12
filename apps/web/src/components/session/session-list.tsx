@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import type { SessionInfo, TerminalShell, TerminalShellOption } from "@dev-anywhere/shared";
 import { compareProvider, providerLabel, type SessionProvider } from "@/lib/session-provider";
 import { SessionRow } from "./session-row";
+import { TerminalShellIcon } from "./terminal-shell-icon";
 import { HistoryList } from "./history-list";
 import { CreateSessionDialog } from "./create-session-dialog";
 import { submitTerminalCreate } from "./create-session-submit";
@@ -826,7 +827,7 @@ function CreateTerminalShellDialog({
             disabled={creatingTerminal || !canCreate}
             onClick={() => onCreate(option.id)}
           >
-            <Terminal className="size-4 text-muted-foreground" aria-hidden="true" />
+            <TerminalShellIcon shell={option.id} label={option.label} />
             {creatingShell === (option.id ?? "default") ? "正在创建 Shell 会话..." : option.label}
           </Button>
         ))
