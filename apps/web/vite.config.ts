@@ -133,6 +133,9 @@ function voiceFixturePlugin(): Plugin {
 }
 
 export default defineConfig({
+  // The optional worker is not discovered by Vite's initial dependency scan.
+  // Prebundle it at startup so the first HEIC preview does not reload the page.
+  optimizeDeps: { include: ["heic-to/next"] },
   plugins: [
     browserStateDumpPlugin(),
     voiceFixturePlugin(),
