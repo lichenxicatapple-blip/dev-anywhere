@@ -87,6 +87,37 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     page: import("@playwright/test").Page,
     options: { sid: string; kind: "file-download" | "image-preview"; needle: string },
   ): Promise<void> {
+    // Buffer writes precede DOM rendering and short-content bottom alignment.
+    // Wait for the painted link and stable geometry before choosing a screen point.
+    await expect
+      .poll(() =>
+        page.evaluate(async ({ sid, needle }) => {
+          const term = window.__ccTestPtyTerminals?.get(sid);
+          const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+          if (!term || !screen) return false;
+          let previousGeometry = "";
+          for (let frame = 0; frame < 3; frame += 1) {
+            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
+            const debug = window.__devAnywherePtyDebug?.();
+            if (!debug || debug.frame.pendingNewFrame) return false;
+            if (!screen.querySelector(".xterm-rows")?.textContent?.includes(needle)) return false;
+            const rect = screen.getBoundingClientRect();
+            const geometry = JSON.stringify([
+              rect.x,
+              rect.y,
+              rect.width,
+              rect.height,
+              term.cols,
+              term.rows,
+              term.buffer.active.viewportY,
+            ]);
+            if (previousGeometry && geometry !== previousGeometry) return false;
+            previousGeometry = geometry;
+          }
+          return true;
+        }, options),
+      )
+      .toBe(true);
     const point = await expect
       .poll(() => findPtyLinkTapPoint(page, options), { timeout: 10_000 })
       .not.toBeNull()
