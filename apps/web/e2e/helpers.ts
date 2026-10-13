@@ -65,7 +65,7 @@ declare global {
       holdImagePreviews(): void;
       releaseImagePreviews(): void;
       setImagePreviewDelay(ms: number): void;
-      setImagePreviewDataBase64(value: string): void;
+      setImagePreviewDataBase64(value: string, mimeType?: string): void;
       setProxySelectDelay(ms: number): void;
       setSessionListDelay(ms: number): void;
       setSessionHistoryDelay(ms: number): void;
@@ -150,6 +150,7 @@ export async function installFakeRelay(
     const initializedKey = "__dev_anywhere_e2e_initialized";
     let imagePreviewDataBase64 =
       "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/p9sAAAAASUVORK5CYII=";
+    let imagePreviewMimeType = "image/png";
     const initialized = sessionStorage.getItem(initializedKey) === "1";
     if (!initialized) {
       localStorage.clear();
@@ -893,7 +894,7 @@ export async function installFakeRelay(
                 path: String(msg.path),
                 url:
                   msg.disposition === "inline"
-                    ? `data:image/png;base64,${imagePreviewDataBase64}`
+                    ? `data:${imagePreviewMimeType};base64,${imagePreviewDataBase64}`
                     : "data:text/plain;base64,QUJD",
                 expiresAt: Date.now() + 60_000,
               });
@@ -1383,8 +1384,9 @@ export async function installFakeRelay(
       setImagePreviewDelay(ms: number) {
         imagePreviewDelayMs = Math.max(0, ms);
       },
-      setImagePreviewDataBase64(value: string) {
+      setImagePreviewDataBase64(value: string, mimeType = "image/png") {
         imagePreviewDataBase64 = value;
+        imagePreviewMimeType = mimeType;
       },
       setProxySelectDelay(ms: number) {
         proxySelectDelayMs = Math.max(0, ms);

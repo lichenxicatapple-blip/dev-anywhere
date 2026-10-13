@@ -18,6 +18,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { relayClientRef } from "@/hooks/use-relay-setup";
+import { useImagePreviewSource } from "@/hooks/use-image-preview-source";
 import { copyLoadedImageToClipboard } from "@/lib/copy-image";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
 import { cn } from "@/lib/utils";
@@ -46,17 +47,18 @@ export function ImagePreviewDialog({
   state: MediaPreviewState;
 }) {
   const [loadedSrc, setLoadedSrc] = useState("");
-  const [decodeError, setDecodeError] = useState<{ src: string; message: string } | null>(null);
   const [stageSize, setStageSize] = useState<ImagePreviewSize | null>(null);
   const [naturalSize, setNaturalSize] = useState<ImagePreviewNaturalSize | null>(null);
   const [copyingImage, setCopyingImage] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
-  const src = state.status === "ready" && state.url ? state.url : "";
+  const source = open && state.status === "ready" && state.url ? state.url : "";
+  const preview = useImagePreviewSource(source, state.path);
+  const src = preview.src;
   const imageLoaded = src !== "" && loadedSrc === src;
   const currentNaturalSize = naturalSize?.src === src ? naturalSize : null;
   const fitScale = getImagePreviewFitScale(stageSize, currentNaturalSize);
-  const decodeErrorMessage = decodeError?.src === src ? decodeError.message : "";
+  const decodeErrorMessage = preview.error;
   const showDecodeError = state.status === "ready" && decodeErrorMessage !== "";
   const showLoading =
     state.status === "loading" || (state.status === "ready" && !imageLoaded && !showDecodeError);
@@ -188,7 +190,7 @@ export function ImagePreviewDialog({
           )}
           {state.status === "error" && <ImagePreviewError error={state.error ?? "图片预览失败"} />}
           {showDecodeError && <ImagePreviewError error={decodeErrorMessage} />}
-          {state.status === "ready" && !showDecodeError && (
+          {state.status === "ready" && src && !showDecodeError && (
             // wheel / pinch / drag 一起承担缩放 + 平移; doubleClick reset 回 fit。
             // 初始 scale 按图片自然尺寸和 stage 尺寸计算，避免移动端宽图以 1:1
             // 内容尺寸进入 transform 后被裁切且无法横向移动。
@@ -226,12 +228,7 @@ export function ImagePreviewDialog({
                     event.currentTarget.dataset.loaded = "true";
                     setLoadedSrc(src);
                   }}
-                  onError={() => {
-                    setDecodeError({
-                      src,
-                      message: "浏览器无法读取或解码这张图片，请确认路径和文件内容",
-                    });
-                  }}
+                  onError={preview.onError}
                 />
               </TransformComponent>
             </TransformWrapper>
@@ -254,7 +251,7 @@ export function ImagePreviewDialog({
               size="sm"
               className="w-full"
               onClick={() => void downloadImage()}
-              disabled={!src || showDecodeError}
+              disabled={!source}
               data-slot="image-preview-download"
             >
               <Download aria-hidden="true" />

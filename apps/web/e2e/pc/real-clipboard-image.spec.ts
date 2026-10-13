@@ -333,6 +333,20 @@ async function readDownload(download: Download): Promise<Buffer> {
   return Buffer.concat(chunks);
 }
 
+async function expectDecodedHeicImage(image: Locator): Promise<void> {
+  await expect(image).toBeVisible();
+  await expect
+    .poll(
+      () =>
+        image.evaluate((element: HTMLImageElement) => ({
+          width: element.naturalWidth,
+          height: element.naturalHeight,
+        })),
+      { timeout: 20_000 },
+    )
+    .toEqual({ width: 96, height: 64 });
+}
+
 async function downloadJsonFilePath(page: Page, filePath: string): Promise<Download> {
   const input = page.getByLabel("输入聊天消息");
   await input.fill(`download ${filePath}`);
@@ -469,6 +483,79 @@ test.describe("real clipboard image chain", () => {
         cleanupSessionData(config, ptySessionId);
       }
       rmSync(ptyCwd, { recursive: true, force: true });
+    }
+  });
+
+  test("previews and uploads HEIC through real relay/proxy without changing the original bytes", async ({
+    page,
+  }, testInfo) => {
+    const config = backendConfig ?? requireE2ERelayRestartConfig();
+    const jsonCwd = join(smokeRoot, `json-heic-${Date.now()}`);
+    const fileBytes = readFileSync(join(fixtureRoot, "media/quadrants.heic"));
+    const filePath = join(jsonCwd, "four-colors.heic");
+    mkdirSync(jsonCwd, { recursive: true });
+    writeFileSync(filePath, fileBytes);
+    let jsonSessionId: string | undefined;
+    let uploadedAbs: string | undefined;
+
+    try {
+      jsonSessionId = await createSession(page, { mode: "json", cwd: jsonCwd });
+      const input = page.getByLabel("输入聊天消息");
+      await expect(input).toBeVisible({ timeout: 20_000 });
+
+      // This path exists only on the development machine: no HTTP or Relay mocks.
+      const inlineResponse = page.waitForResponse(
+        (response) =>
+          new URL(response.url()).pathname.startsWith("/api/remote-files/") &&
+          response.status() === 200 &&
+          response.headers()["content-type"]?.startsWith("image/heic") === true,
+      );
+      await input.fill(`inspect @${filePath}`);
+      await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+      const thumbnail = page.locator('[data-slot="user-image-attachment"]').last();
+      await expectDecodedHeicImage(thumbnail.locator("img"));
+      expect(await (await inlineResponse).body()).toEqual(fileBytes);
+      await thumbnail.click();
+
+      const preview = page.locator('[data-slot="image-preview-img"]');
+      await expect(preview).toHaveAttribute("data-loaded", "true", { timeout: 20_000 });
+      await expectDecodedHeicImage(preview);
+      await testInfo.attach("real-heic-preview", {
+        body: await page.locator('[data-slot="image-preview-dialog"]').screenshot(),
+        contentType: "image/png",
+      });
+      const downloadPromise = page.waitForEvent("download");
+      await page.locator('[data-slot="image-preview-download"]').click();
+      const download = await downloadPromise;
+      expect(download.suggestedFilename()).toBe(basename(filePath));
+      expect(await readDownload(download)).toEqual(fileBytes);
+      await page.keyboard.press("Escape");
+
+      const before = snapshotUploadRoot();
+      await input.fill("inspect uploaded image");
+      await page.locator('input[data-slot="input-attach-file-input"]').setInputFiles({
+        name: "uploaded-four-colors.heic",
+        mimeType: "image/heic",
+        buffer: fileBytes,
+      });
+      uploadedAbs = await waitForNewUploadedFile(before, "up-", ".heic");
+      expectUploadedBytes(uploadedAbs, fileBytes);
+      await expectDecodedHeicImage(page.locator('[data-slot="input-image-attachment-preview"]'));
+      await expect(input).toHaveValue("inspect uploaded image");
+      await page.locator('[data-slot="send-button"][data-variant="send"]').click();
+      await expect(page.locator('[data-slot="user-image-attachment"]')).toHaveCount(2);
+      await expectDecodedHeicImage(thumbnail.locator("img"));
+      await thumbnail.click();
+      await expect(preview).toHaveAttribute("data-loaded", "true", { timeout: 20_000 });
+      await expectDecodedHeicImage(preview);
+      await page.keyboard.press("Escape");
+    } finally {
+      cleanupUploadedFile(uploadedAbs);
+      if (jsonSessionId) {
+        await terminateSession(page, jsonSessionId).catch(() => undefined);
+        cleanupSessionData(config, jsonSessionId);
+      }
+      rmSync(jsonCwd, { recursive: true, force: true });
     }
   });
 

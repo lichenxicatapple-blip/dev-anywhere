@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { test, expect, type Locator, type Page } from "@playwright/test";
 import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
@@ -173,6 +174,122 @@ test.describe("image preview", () => {
 
   test.describe("desktop", () => {
     test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
+
+    for (const extension of ["heic", "HEIF"]) {
+      test(`decodes a real ${extension} image, copies PNG, and downloads the original path`, async ({
+        page,
+      }, testInfo) => {
+        const path = `C:/Photos/four-colors.${extension}`;
+        const base64 = readFileSync(
+          new URL("../fixtures/media/quadrants.heic", import.meta.url),
+        ).toString("base64");
+        await page.addInitScript(() => {
+          Object.defineProperty(navigator, "clipboard", {
+            configurable: true,
+            value: {
+              write: async (items: ClipboardItem[]) => {
+                const images = await Promise.all(
+                  items.flatMap((item) =>
+                    item.types.map(async (type) => {
+                      const blob = await item.getType(type);
+                      const bitmap = await createImageBitmap(blob);
+                      const image = { type, width: bitmap.width, height: bitmap.height };
+                      bitmap.close();
+                      return image;
+                    }),
+                  ),
+                );
+                Object.defineProperty(window, "__copiedHeicImages", {
+                  configurable: true,
+                  value: images,
+                });
+              },
+            },
+          });
+        });
+        await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+        await page.evaluate(
+          ({ value, mimeType }) =>
+            window.__devAnywhereE2E?.setImagePreviewDataBase64(value, mimeType),
+          { value: base64, mimeType: `image/${extension.toLowerCase()}` },
+        );
+
+        await openJsonPreview(page, path);
+        await expectPreviewReady(page, path);
+        await expect
+          .poll(() =>
+            page.locator('[data-slot="user-image-attachment"] img').evaluate((el) => {
+              const image = el as HTMLImageElement;
+              return { width: image.naturalWidth, height: image.naturalHeight };
+            }),
+          )
+          .toEqual({ width: 96, height: 64 });
+        await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
+        await expect(page.locator('[data-slot="image-preview-meta"]')).toHaveText("图片已加载");
+        const decoded = await page.locator('[data-slot="image-preview-img"]').evaluate((el) => {
+          const image = el as HTMLImageElement;
+          const canvas = document.createElement("canvas");
+          canvas.width = image.naturalWidth;
+          canvas.height = image.naturalHeight;
+          const context = canvas.getContext("2d");
+          if (!context) throw new Error("Canvas 2D context is unavailable");
+          context.drawImage(image, 0, 0);
+          return {
+            width: image.naturalWidth,
+            height: image.naturalHeight,
+            pixels: [
+              [24, 16],
+              [72, 16],
+              [24, 48],
+              [72, 48],
+            ].map(([x, y]) => [...context.getImageData(x!, y!, 1, 1).data].slice(0, 3)),
+          };
+        });
+        expect(decoded.width).toBe(96);
+        expect(decoded.height).toBe(64);
+        const expectedColors = [
+          [230, 30, 30],
+          [30, 210, 45],
+          [30, 60, 230],
+          [230, 210, 30],
+        ];
+        for (const [index, expected] of expectedColors.entries()) {
+          for (const [channel, value] of expected.entries()) {
+            expect(Math.abs(decoded.pixels[index]![channel]! - value)).toBeLessThan(30);
+          }
+        }
+        await testInfo.attach(`decoded-${extension.toLowerCase()}-preview`, {
+          body: await page.locator('[data-slot="image-preview-dialog"]').screenshot(),
+          contentType: "image/png",
+        });
+
+        await expect(page.locator('[data-slot="image-preview-copy-image"]')).toBeEnabled();
+        await page.locator('[data-slot="image-preview-copy-image"]').click();
+        await expect(page.getByText("图片已复制到剪贴板")).toBeVisible();
+        expect(
+          await page.evaluate(
+            () =>
+              (
+                window as typeof window & {
+                  __copiedHeicImages?: Array<{ type: string; width: number; height: number }>;
+                }
+              ).__copiedHeicImages,
+          ),
+        ).toEqual([{ type: "image/png", width: 96, height: 64 }]);
+
+        await page.locator('[data-slot="image-preview-download"]').click();
+        await expect
+          .poll(async () =>
+            (await sentFakeRelayMessages(page)).some(
+              (message) =>
+                message.type === "remote_file_url_request" &&
+                message.path === path &&
+                message.disposition === "download",
+            ),
+          )
+          .toBe(true);
+      });
+    }
 
     test("JSON mode opens local image paths with a loading transition", async ({ page }) => {
       const path = ".dev-anywhere/clipboard/test-sess/preview.png";

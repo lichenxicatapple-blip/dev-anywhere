@@ -49,6 +49,14 @@ describe("remote-file-path", () => {
     expect(guessMimeType("/tmp/archive.unknown")).toBe("application/octet-stream");
   });
 
+  it.each([
+    ["heic", "image/heic"],
+    ["heif", "image/heif"],
+  ])("reports %s images without changing the file representation", (ext, mimeType) => {
+    expect(guessMimeType(join(dir, `photo.${ext}`))).toBe(mimeType);
+    expect(guessMimeType(join(dir, `photo.${ext.toUpperCase()}`))).toBe(mimeType);
+  });
+
   it.skipIf(process.platform !== "win32")(
     "expands Windows home paths independently of the session cwd",
     () => {

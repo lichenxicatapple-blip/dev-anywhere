@@ -47,6 +47,13 @@ describe("file-download-path extraction", () => {
     expect(isFileDownloadPath("./pic.webp")).toBe(false);
   });
 
+  it.each(["heic", "heif"])("leaves %s images exclusively to the media preview provider", (ext) => {
+    expect(
+      extractFileDownloadPaths(`./photo.${ext} C:\\Photos\\photo.${ext.toUpperCase()} ./notes.txt`),
+    ).toEqual(["./notes.txt"]);
+    expect(isFileDownloadPath(`photo.${ext}`, { allowBare: true })).toBe(false);
+  });
+
   it.each(["mp4", "webm", "mov", "m4v", "ogv"])(
     "leaves %s videos exclusively to the media preview provider",
     (extension) => {

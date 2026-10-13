@@ -168,6 +168,8 @@ export default defineConfig({
       },
       workbox: {
         maximumFileSizeToCacheInBytes: 3 * 1024 * 1024,
+        // HEIC decoding is optional and large; fetch it only when native decoding fails.
+        globIgnores: ["**/heic-preview.worker-*.js"],
         importScripts: ["notification-sw.js"],
         navigateFallback: "/index.html",
         // relay 接口不进 SPA 兜底, 避免 SW 把 WS 握手/API 错导到 index.html

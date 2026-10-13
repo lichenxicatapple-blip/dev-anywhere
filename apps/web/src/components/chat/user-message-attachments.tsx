@@ -11,6 +11,7 @@ import {
   Play,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useImagePreviewSource } from "@/hooks/use-image-preview-source";
 import type { UserMessageAttachment } from "@/lib/user-message-attachments";
 import { useFileDownload } from "./file-download-link";
 import { useMediaPreview } from "./media-preview";
@@ -124,6 +125,7 @@ function RemoteImageCard({
 }) {
   const { openMediaPreview, requestMediaPreviewUrl } = useMediaPreview();
   const [state, setState] = useState<{ url?: string; error?: boolean }>({});
+  const preview = useImagePreviewSource(state.url ?? "", path);
 
   useEffect(() => {
     let cancelled = false;
@@ -153,16 +155,16 @@ function RemoteImageCard({
       aria-label={label}
       onClick={() => openMediaPreview(path)}
     >
-      {state.url ? (
+      {preview.src && !preview.error ? (
         <img
-          src={state.url}
+          src={preview.src}
           alt=""
           className="size-full object-cover transition-transform duration-200 ease-out group-hover:scale-[1.015]"
           draggable={false}
           onLoad={onSettled}
-          onError={() => setState({ error: true })}
+          onError={preview.onError}
         />
-      ) : state.error ? (
+      ) : state.error || preview.error ? (
         <span className="flex size-full flex-col items-center justify-center gap-1.5 text-primary-foreground/70">
           <ImageOff className="size-5" aria-hidden="true" />
           <span className="text-xs">无法载入图片</span>

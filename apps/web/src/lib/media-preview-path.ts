@@ -8,10 +8,10 @@ import { isScpLikeRemotePath } from "./scp-like-remote";
 // 路径主干用 ASCII 路径字符严格白名单, 不放行中文 / 全宽标点 / @: 否则
 // "中文@./...png" lazy 扩展会从中文 ASCII (logo) 起点啃到尾部 .png, 把整段框成 link。
 const MEDIA_PATH_RE =
-  /(?<![\p{L}\p{N}@:/.-])(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif|mp4|webm|mov|m4v|ogv)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/giu;
+  /(?<![\p{L}\p{N}@:/.-])(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif|heic|heif|mp4|webm|mov|m4v|ogv)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/giu;
 const EXPLICIT_MEDIA_PATH_RE =
-  /(?<![A-Za-z0-9._+-])@(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif|mp4|webm|mov|m4v|ogv)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/giu;
-const MEDIA_EXT_RE = /\.(?:png|jpe?g|webp|gif|mp4|webm|mov|m4v|ogv)$/i;
+  /(?<![A-Za-z0-9._+-])@(?:~\/|[^\s`"'<>，。；：！？、@])[^\s`"'<>，。；：！？、@]*?\.(?:png|jpe?g|webp|gif|heic|heif|mp4|webm|mov|m4v|ogv)(?=$|[\s`"'<>),;:!?，。；：！？、]|\.(?:$|[\s`"'<>),;:!?，。；：！？、]))/giu;
+const MEDIA_EXT_RE = /\.(?:png|jpe?g|webp|gif|heic|heif|mp4|webm|mov|m4v|ogv)$/i;
 
 export type MediaPreviewKind = "image" | "video";
 

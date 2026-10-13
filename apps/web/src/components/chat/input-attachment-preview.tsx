@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
-import { File, ImageIcon, X } from "lucide-react";
+import { File, ImageIcon, ImageOff, LoaderCircle, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useImagePreviewSource } from "@/hooks/use-image-preview-source";
 import type { ChatDraftAttachment } from "@/stores/chat-store";
 
 interface InputAttachmentPreviewProps {
@@ -36,6 +37,7 @@ function ImageAttachment({
   onRemove: (attachmentId: string) => void;
 }) {
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+  const preview = useImagePreviewSource(previewUrl ?? "", attachment.file.name);
 
   useEffect(() => {
     if (typeof URL.createObjectURL !== "function") return;
@@ -50,16 +52,28 @@ function ImageAttachment({
       data-slot="input-image-attachment"
       title={attachment.file.name}
     >
-      {previewUrl ? (
+      {preview.error ? (
+        <div
+          className="flex size-full items-center justify-center text-muted-foreground"
+          title={preview.error}
+        >
+          <ImageOff className="size-5" aria-label="无法预览图片" />
+        </div>
+      ) : preview.src ? (
         <img
-          src={previewUrl}
+          src={preview.src}
           alt={attachment.file.name}
           className="size-full object-contain"
           data-slot="input-image-attachment-preview"
+          onError={preview.onError}
         />
       ) : (
         <div className="flex size-full items-center justify-center text-muted-foreground">
-          <ImageIcon className="size-5" aria-hidden="true" />
+          {preview.loading ? (
+            <LoaderCircle className="size-5 animate-spin" aria-label="正在加载图片" />
+          ) : (
+            <ImageIcon className="size-5" aria-hidden="true" />
+          )}
         </div>
       )}
       <RemoveAttachmentButton attachment={attachment} onRemove={onRemove} />

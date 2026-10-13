@@ -26,6 +26,24 @@ describe("media preview path detection", () => {
     expect(getMediaPreviewKind(`./shot.${ext}`)).toBe("image");
   });
 
+  it.each(["heic", "heif"])("recognizes local %s image paths across platforms", (extension) => {
+    for (const path of [
+      `photo.${extension}`,
+      `./照片/photo.${extension}`,
+      `~/Pictures/photo.${extension}`,
+      `/tmp/photo.${extension}`,
+      `C:\\照片\\photo.${extension.toUpperCase()}`,
+      `\\\\server\\share\\photo.${extension}`,
+    ]) {
+      expect(getMediaPreviewKind(path)).toBe("image");
+      expect(isMediaPreviewPath(path)).toBe(true);
+      expect(extractMediaPreviewPaths(`查看 @${path}。`)).toEqual([path]);
+      expect(extractMediaPreviewPaths(`查看 ${path}。`)).toEqual([path]);
+    }
+    expect(getMediaPreviewKind(`https://example.com/photo.${extension}`)).toBeNull();
+    expect(extractMediaPreviewPaths(`archive.${extension}.bak`)).toEqual([]);
+  });
+
   it("keeps video paths intact across Windows, home, and explicit local path forms", () => {
     for (const path of [String.raw`C:\录屏\demo.mp4`, "~/Movies/demo.webm", "clips/demo.mov"]) {
       expect(extractMediaPreviewPaths(`查看 @${path}`)).toEqual([path]);
