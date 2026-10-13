@@ -455,7 +455,12 @@ test.describe("real clipboard image chain", () => {
     let uploadedAbs: string | undefined;
     try {
       ptySessionId = await createSession(page, { mode: "pty", provider: "codex", cwd: ptyCwd });
-      await expect(page.locator('[data-slot="chat-pty-view"]')).toBeVisible({ timeout: 20_000 });
+      await expectActivePtyReady(page, ptySessionId);
+      // A visible terminal can precede its worker handshake; wait for actual PTY output
+      // before bypassing the file picker and submitting a file immediately.
+      await expect
+        .poll(() => terminalText(page, ptySessionId!), { timeout: 20_000 })
+        .toContain("DEV Anywhere local PTY ready");
 
       // setInputFiles 直接打到 hidden input,绕过 Radix Portal 在 e2e 下的 pointer 不稳定。
       // 真实链路: input.change → relay.uploadFile → Relay HTTP PUT → proxy 落盘 → "@<path> " sendRaw。
