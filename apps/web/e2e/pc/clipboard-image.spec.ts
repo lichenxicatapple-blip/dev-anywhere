@@ -1,9 +1,15 @@
 import { test, expect, type Locator } from "@playwright/test";
 import { gotoWithFakeProxy, installFakeRelay, sentFakeRelayMessages } from "../helpers";
 
+const pngBytes = [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 4, 0, 0,
+  0, 181, 28, 12, 2, 0, 0, 0, 11, 73, 68, 65, 84, 120, 218, 99, 252, 255, 31, 0, 3, 3, 2, 0, 239,
+  191, 167, 219, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130,
+];
+
 async function dispatchImagePaste(target: Locator): Promise<void> {
-  await target.evaluate((node) => {
-    const file = new File([new Uint8Array([1, 2, 3])], "shot.png", { type: "image/png" });
+  await target.evaluate((node, bytes) => {
+    const file = new File([new Uint8Array(bytes)], "shot.png", { type: "image/png" });
     const data = new DataTransfer();
     data.items.add(file);
     const event = new ClipboardEvent("paste", {
@@ -12,7 +18,7 @@ async function dispatchImagePaste(target: Locator): Promise<void> {
       clipboardData: data,
     });
     node.dispatchEvent(event);
-  });
+  }, pngBytes);
 }
 
 async function dispatchLargeImagePaste(target: Locator): Promise<number> {
@@ -70,7 +76,16 @@ test.describe("clipboard image paste", () => {
 
     const expectedPath = ".dev-anywhere/clipboard/test-sess/pasted-e2e.png";
     await expect(page.locator('[data-slot="input-image-attachment"]')).toBeVisible();
-    await expect(page.getByRole("img", { name: "shot.png" })).toBeVisible();
+    const preview = page.getByRole("img", { name: "shot.png" });
+    await expect(preview).toBeVisible();
+    await expect
+      .poll(() =>
+        preview.evaluate((image: HTMLImageElement) => ({
+          width: image.naturalWidth,
+          height: image.naturalHeight,
+        })),
+      )
+      .toEqual({ width: 1, height: 1 });
     await expect(input).toHaveValue("inspect ");
     await expect(input).not.toHaveValue(new RegExp(expectedPath));
 
@@ -82,7 +97,7 @@ test.describe("clipboard image paste", () => {
         kind: "clipboard_image",
         mimeType: "image/png",
         fileName: "shot.png",
-        size: 3,
+        size: pngBytes.length,
       }),
     );
     expect(sent.some((msg) => msg.type === "user_input")).toBe(false);
@@ -136,7 +151,7 @@ test.describe("clipboard image paste", () => {
         kind: "clipboard_image",
         mimeType: "image/png",
         fileName: "shot.png",
-        size: 3,
+        size: pngBytes.length,
       }),
     );
   });
