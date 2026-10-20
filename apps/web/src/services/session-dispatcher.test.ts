@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import type { MessageEnvelope, SessionInfo } from "@dev-anywhere/shared";
+import type { MessageEnvelope, SessionExitInfo, SessionInfo } from "@dev-anywhere/shared";
 import { useAppStore } from "@/stores/app-store";
 import { useChatStore } from "@/stores/chat-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -38,6 +38,7 @@ describe("session-dispatcher lifecycle reconciliation", () => {
     useAppStore.setState({ selectedProxyId: "proxy-1" });
     useSessionStore.setState({
       sessions: [],
+      recentExitsBySessionId: {},
       sessionListLoaded: false,
       codexActiveWriterConflict: null,
     });
@@ -65,6 +66,54 @@ describe("session-dispatcher lifecycle reconciliation", () => {
       "reconnected",
     ]);
     expect(useChatStore.getState().bySessionId.reconnected.inputDraft).toBe("keep");
+  });
+
+  it("receives exits with the active list and keeps them after chat slices are pruned", () => {
+    const exit: SessionExitInfo = {
+      sessionId: "ended",
+      endedAt: 100,
+      kind: "agent",
+      provider: "codex",
+      reason: "process-exit",
+      exitCode: 1,
+      details: "startup failed",
+    };
+    useChatStore.getState().setInputDraft("ended", "discard");
+    const handler = createSessionMessageHandler();
+    handler(envelope("session_list", { sessions: [], recentExits: [exit] }, 200));
+
+    expect(useChatStore.getState().bySessionId.ended).toBeUndefined();
+    expect(useSessionStore.getState().recentExitsBySessionId.ended).toEqual(exit);
+
+    handler(envelope("session_list", { sessions: [], recentExits: [] }, 100));
+    expect(useSessionStore.getState().recentExitsBySessionId.ended).toEqual(exit);
+
+    // A fresh authoritative list clears diagnostics when the process channel recovers.
+    handler(envelope("session_list", { sessions: [session("ended")], recentExits: [] }, 300));
+    expect(useSessionStore.getState().recentExitsBySessionId).toEqual({});
+  });
+
+  it("restores server-provided exit details after a fresh page load", () => {
+    createSessionMessageHandler()(
+      envelope("session_list", {
+        sessions: [],
+        recentExits: [
+          {
+            sessionId: "from-before-refresh",
+            endedAt: 100,
+            kind: "agent",
+            provider: "codex",
+            reason: "process-exit",
+            exitCode: 1,
+          },
+        ],
+      }),
+    );
+    expect(useSessionStore.getState().sessionListLoaded).toBe(true);
+    expect(useSessionStore.getState().recentExitsBySessionId["from-before-refresh"]).toMatchObject({
+      exitCode: 1,
+      reason: "process-exit",
+    });
   });
 
   it("accepts an older clock after an explicit proxy switch reset", () => {

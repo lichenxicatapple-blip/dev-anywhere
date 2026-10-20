@@ -47,7 +47,7 @@ describe("file-download-path extraction", () => {
     expect(isFileDownloadPath("./pic.webp")).toBe(false);
   });
 
-  it.each(["heic", "heif"])("leaves %s images exclusively to the media preview provider", (ext) => {
+  it.each(["heic", "heif", "bmp"])("reserves %s images for media preview", (ext) => {
     expect(
       extractFileDownloadPaths(`./photo.${ext} C:\\Photos\\photo.${ext.toUpperCase()} ./notes.txt`),
     ).toEqual(["./notes.txt"]);

@@ -6,6 +6,7 @@ import type { PtyGeometry } from "@/lib/pty-fit-geometry";
 import type {
   AgentStatusPayload,
   SessionInfo,
+  SessionExitInfo,
   HistorySession,
   PtyStatePayload,
 } from "@dev-anywhere/shared";
@@ -59,6 +60,8 @@ function writePtyAutoYesBySessionKey(value: Record<string, boolean>): void {
 
 interface SessionStoreState {
   sessions: SessionInfo[];
+  // 最近退出信息独立于活跃列表，由开发机随 session_list 提供，刷新后也可查看。
+  recentExitsBySessionId: Record<string, SessionExitInfo>;
   // 首次 session_list envelope 到达前为 false; WS 断开或切换 proxy 时回退 false, 区分"加载中"与"真的没有会话"
   sessionListLoaded: boolean;
   // 已绑定新开发机但 session_list 尚未返回时保留目标名称，避免退化成无上下文的加载态。
@@ -80,7 +83,7 @@ interface SessionStoreState {
   ptyAutoYesBySessionKey: Record<string, boolean>;
   codexActiveWriterConflict: CodexActiveWriterConflict | null;
 
-  setSessions: (sessions: SessionInfo[]) => void;
+  setSessions: (sessions: SessionInfo[], recentExits?: SessionExitInfo[]) => void;
   addSession: (session: SessionInfo) => void;
   removeSession: (sessionId: string) => void;
   // lastActive 可选：envelope session_status 会一并写入；agent_status 不修改主生命周期时间。
@@ -107,6 +110,7 @@ export const useSessionStore = create<SessionStoreState>()(
   devtools(
     (set, get) => ({
       sessions: [],
+      recentExitsBySessionId: {},
       sessionListLoaded: false,
       loadingProxyName: null,
       historySessions: [],
@@ -119,11 +123,18 @@ export const useSessionStore = create<SessionStoreState>()(
       ptyAutoYesBySessionKey: readPtyAutoYesBySessionKey(),
       codexActiveWriterConflict: null,
 
-      setSessions: (sessions) =>
+      setSessions: (sessions, recentExits) =>
         set((state) => {
           const activeSessionIds = new Set(sessions.map((session) => session.sessionId));
           return {
             sessions,
+            ...(recentExits !== undefined
+              ? {
+                  recentExitsBySessionId: Object.fromEntries(
+                    recentExits.map((exit) => [exit.sessionId, exit]),
+                  ),
+                }
+              : {}),
             sessionListLoaded: true,
             loadingProxyName: null,
             agentStatusBySessionId: Object.fromEntries(
@@ -279,6 +290,7 @@ export const useSessionStore = create<SessionStoreState>()(
       prepareForProxySwitch: (loadingProxyName) =>
         set((state) => ({
           sessions: [],
+          recentExitsBySessionId: {},
           sessionListLoaded: false,
           loadingProxyName,
           historySessions: [],
@@ -308,6 +320,7 @@ export const useSessionStore = create<SessionStoreState>()(
           writePtyAutoYesBySessionKey(ptyAutoYesBySessionKey);
           return {
             sessions: [],
+            recentExitsBySessionId: {},
             sessionListLoaded: false,
             loadingProxyName: null,
             historySessions: [],

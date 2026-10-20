@@ -52,6 +52,7 @@ describe("remote-file-path", () => {
   it.each([
     ["heic", "image/heic"],
     ["heif", "image/heif"],
+    ["bmp", "image/bmp"],
   ])("reports %s images without changing the file representation", (ext, mimeType) => {
     expect(guessMimeType(join(dir, `photo.${ext}`))).toBe(mimeType);
     expect(guessMimeType(join(dir, `photo.${ext.toUpperCase()}`))).toBe(mimeType);

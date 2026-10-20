@@ -586,6 +586,19 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
                 </DropdownMenuCheckboxItem>
               )}
               <DropdownMenuSeparator />
+              {session?.mode === "pty" && session.ptyOwner === "local-terminal" && (
+                <>
+                  <DropdownMenuLabel className={menuLabelClass}>终端尺寸</DropdownMenuLabel>
+                  <div
+                    role="note"
+                    data-slot="chat-menu-local-terminal-size-hint"
+                    className="max-w-52 whitespace-normal px-2 pb-2 text-xs leading-relaxed text-muted-foreground"
+                  >
+                    本会话为本地终端会话，请在开发机上调整窗口大小。
+                  </div>
+                  <DropdownMenuSeparator />
+                </>
+              )}
               {session?.mode === "pty" &&
                 session.ptyOwner === "proxy-hosted" &&
                 onResizeTerminal && (

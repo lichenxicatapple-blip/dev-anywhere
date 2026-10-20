@@ -102,7 +102,10 @@ export function broadcastSessionList(relay: RelayConnection, sessionManager: Ses
     "session_list",
     null,
     0,
-    { sessions: sessionManager.listSessions().map(toSessionListPayload) },
+    {
+      sessions: sessionManager.listSessions().map(toSessionListPayload),
+      recentExits: sessionManager.listRecentExits(),
+    },
     "proxy",
   );
   relay.sendEnvelope(envelope);
@@ -130,7 +133,13 @@ export function changeSessionState(
 ): boolean {
   if (!sessionManager.getSession(sessionId)) return false;
   const changed = sessionManager.updateState(sessionId, next);
-  if (changed) pushSessionStatus(relay, sessionManager, sessionId);
+  if (changed) {
+    pushSessionStatus(relay, sessionManager, sessionId);
+    const diagnosticChanged =
+      next === SessionState.ERROR &&
+      sessionManager.recordSessionExit(sessionId, { reason: "connection-lost" });
+    if (diagnosticChanged) broadcastSessionList(relay, sessionManager);
+  }
   return changed;
 }
 

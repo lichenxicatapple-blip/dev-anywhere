@@ -18,8 +18,7 @@ import { PtyApprovalHint } from "@/components/chat/pty-approval-hint";
 import { VoicePilotController } from "@/components/chat/voice-pilot-controller";
 import { VoicePilotStatus } from "@/components/chat/voice-pilot-status";
 import { EmptyState } from "@/components/shell/empty-state";
-import { Button } from "@/components/ui/button";
-import { ArrowLeft } from "lucide-react";
+import { SessionExitPanel } from "@/components/chat/session-exit-panel";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useAppStore } from "@/stores/app-store";
 import { ptyAutoYesSessionKey, useSessionStore } from "@/stores/session-store";
@@ -69,6 +68,7 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
   const proxyOnline = useAppStore((s) => s.proxyOnline);
   const selectedProxyId = useAppStore((s) => s.selectedProxyId);
   const session = useSessionStore((s) => s.sessions.find((x) => x.sessionId === id));
+  const sessionExit = useSessionStore((s) => s.recentExitsBySessionId[id]);
   const isTerminalSession = session?.kind === "terminal";
   const isCodexPty = mode === "pty" && session?.provider === "codex";
   const sessionListLoaded = useSessionStore((s) => s.sessionListLoaded);
@@ -211,14 +211,14 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
     if (routeSessionEnded) clearLastChatRoute();
   }, [routeSessionEnded]);
 
-  // auto-restore 拽过来 + session 已死 → silent 退到 /sessions, 替换历史记录。
-  // 用户手敲 URL / 直接 refresh 的不走这条, 让他们看到 TerminatedSessionPanel 不被静默打断。
+  // 自动恢复到已结束会话时，保留被动退出说明；无诊断或主动终止的旧会话返回列表。
+  // 用户直接打开会话链接或刷新时，始终留在当前页面。
   useEffect(() => {
     if (!wasAutoRestoredRef.current) return;
-    if (!routeSessionEnded) return;
+    if (!routeSessionEnded || (sessionExit && sessionExit.reason !== "user-terminated")) return;
     toast.info("上次会话已结束");
     navigate("/sessions", { replace: true });
-  }, [routeSessionEnded, navigate]);
+  }, [routeSessionEnded, sessionExit, navigate]);
 
   // 生命周期由 session.state / 活跃列表负责；provider 语义阶段优先读 agent_status，不再从 PTY 字节推断。
   // 当前路由 session 从活跃列表消失时，本页进入 terminated，避免残留审批/working 状态压过退出态。
@@ -287,12 +287,22 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
           )}
           <div className="flex-1 min-h-0 relative">
             {presentation === "session-ended" ? (
-              // wasAutoRestored 时副作用马上跳走, 这里渲染空白避免一帧 TerminatedSessionPanel 闪烁
-              wasAutoRestoredRef.current ? null : (
-                <TerminatedSessionPanel mode={mode} />
+              // 保留被动退出原因；只有无诊断或主动终止的旧会话才自动返回列表。
+              wasAutoRestoredRef.current &&
+              (!sessionExit || sessionExit.reason === "user-terminated") ? null : (
+                <SessionExitPanel
+                  exit={sessionExit}
+                  mode={mode}
+                  onBack={() => navigate("/sessions")}
+                />
               )
             ) : presentation === "session-error" ? (
-              <FailedSessionPanel mode={mode} onBack={() => navigate("/sessions")} />
+              <SessionExitPanel
+                exit={sessionExit}
+                mode={mode}
+                channelFailed
+                onBack={() => navigate("/sessions")}
+              />
             ) : mode === "pty" ? (
               <PtyKeepAliveViewport
                 sessionId={id}
@@ -342,45 +352,6 @@ function ChatPageInner({ id, mode }: { id: string; mode: "json" | "pty" }) {
         </div>
       </FileDownloadProvider>
     </MediaPreviewProvider>
-  );
-}
-
-function FailedSessionPanel({ mode, onBack }: { mode: "json" | "pty"; onBack: () => void }) {
-  return (
-    <div
-      className="flex h-full w-full flex-col items-center justify-center gap-3 bg-background px-6 text-center"
-      data-slot="failed-session-panel"
-      role="alert"
-    >
-      <div className="space-y-1">
-        <h2 className="text-lg font-semibold">
-          {mode === "pty" ? "终端连接异常" : "会话连接异常"}
-        </h2>
-        <p className="max-w-sm text-sm text-muted-foreground">
-          与开发机上的进程通道已中断。请返回会话列表，终止后重新创建。
-        </p>
-      </div>
-      <Button type="button" variant="outline" onClick={onBack}>
-        <ArrowLeft aria-hidden="true" />
-        返回会话列表
-      </Button>
-    </div>
-  );
-}
-
-function TerminatedSessionPanel({ mode }: { mode: "json" | "pty" }) {
-  return (
-    <div
-      className="flex h-full w-full flex-col items-center justify-center gap-2 px-6 text-center bg-background"
-      data-slot="terminated-session-panel"
-      role="status"
-      aria-live="polite"
-    >
-      <h2 className="text-lg font-semibold">{mode === "pty" ? "终端连接已断开" : "会话已终止"}</h2>
-      <p className="max-w-sm text-sm text-muted-foreground">
-        {mode === "pty" ? "页面已停止接收终端画面和输入。" : "当前会话已经结束，输入已停止。"}
-      </p>
-    </div>
   );
 }
 

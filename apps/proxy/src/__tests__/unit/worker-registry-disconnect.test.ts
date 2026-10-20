@@ -131,6 +131,40 @@ describe("WorkerRegistry onDisconnect", () => {
     expect(registry.send("s1", { type: "worker_input", content: "after handshake" })).toBe(true);
   });
 
+  it.each([0, 1])("passes a confirmed worker exit (%i) to the common exit record", async (code) => {
+    const sessionManager = createSessionManagerFake([currentJsonSession]);
+    const registry = new WorkerRegistry({
+      sessionManager,
+      permissionBroker: new PermissionBroker(),
+      relayConnection: createRelayConnectionFake().relayConnection,
+      jsonObserver: createJsonObserverFake(),
+      getProviderEnv: () => ({}),
+    });
+    const ready = registry.waitForReady("s1", 1000);
+    await registry.connect("s1", sockPath);
+    acceptedSocket?.write(
+      serializeWorkerHandshake("s1", 1, "claude", { type: "worker_ready", pid: 1 }),
+    );
+    await ready;
+    acceptedSocket?.write(
+      serializeWorkerMsg({
+        type: "worker_exit",
+        code,
+        ...(code === 1 ? { errorTail: "Error: provider connection timed out" } : {}),
+      }),
+    );
+    await vi.waitFor(() =>
+      expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+        exit: {
+          reason: "process-exit",
+          exitCode: code,
+          ...(code === 1 ? { details: "Error: provider connection timed out" } : {}),
+        },
+      }),
+    );
+    expect(registry.has("s1")).toBe(false);
+  });
+
   it.each([
     [
       "missing-version",
@@ -191,7 +225,9 @@ describe("WorkerRegistry onDisconnect", () => {
     acceptedSocket?.write(`${JSON.stringify(hello)}\n`);
 
     await expect(readyResult).rejects.toThrow(/protocol handshake rejected/i);
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "connection-lost", details: "Worker IPC protocol handshake rejected" },
+    });
     expect(registry.has("s1")).toBe(false);
   });
 
@@ -218,7 +254,9 @@ describe("WorkerRegistry onDisconnect", () => {
     acceptedSocket?.write(`${JSON.stringify(message)}\n`);
 
     await expect(readyResult).rejects.toThrow(/protocol handshake rejected/i);
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "connection-lost", details: "Worker IPC protocol handshake rejected" },
+    });
     expect(registry.has("s1")).toBe(false);
   });
 
@@ -285,7 +323,9 @@ describe("WorkerRegistry onDisconnect", () => {
     );
 
     await expect(readyResult).rejects.toThrow(/protocol handshake rejected/i);
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "connection-lost", details: "Worker IPC protocol handshake rejected" },
+    });
   });
 
   it("rejects worker business messages before provider readiness", async () => {
@@ -314,7 +354,9 @@ describe("WorkerRegistry onDisconnect", () => {
     );
 
     await expect(readyResult).rejects.toThrow(/protocol handshake rejected/i);
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "connection-lost", details: "Worker IPC protocol handshake rejected" },
+    });
   });
 
   it("rejects a second protocol hello on the same socket", async () => {
@@ -340,7 +382,9 @@ describe("WorkerRegistry onDisconnect", () => {
     acceptedSocket?.write(hello);
 
     await expect(readyResult).rejects.toThrow(/protocol handshake rejected/i);
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "connection-lost", details: "Worker IPC protocol handshake rejected" },
+    });
     expect(registry.has("s1")).toBe(false);
   });
 

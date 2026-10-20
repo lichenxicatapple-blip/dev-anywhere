@@ -68,9 +68,22 @@ export const SessionInfoSchema = createSessionIdentitySchema({
 });
 export type SessionInfo = z.infer<typeof SessionInfoSchema>;
 
+// A bounded diagnostic record, separate from the list of running sessions.
+export const SessionExitInfoSchema = z.object({
+  sessionId: IdSchema,
+  endedAt: z.number().int().nonnegative(),
+  reason: z.enum(["process-exit", "connection-lost", "user-terminated"]),
+  kind: z.enum(["agent", "terminal"]),
+  provider: z.enum(providerValues),
+  exitCode: z.number().int().optional(),
+  details: z.string().max(2048).optional(),
+});
+export type SessionExitInfo = z.infer<typeof SessionExitInfoSchema>;
+
 // 会话列表
 export const SessionListPayloadSchema = z.object({
   sessions: z.array(SessionInfoSchema),
+  recentExits: z.array(SessionExitInfoSchema).max(50).optional(),
 });
 
 export type SessionListPayload = z.infer<typeof SessionListPayloadSchema>;

@@ -2,6 +2,34 @@ import { describe, it, expect } from "vitest";
 import { SessionListPayloadSchema, SessionStatusPayloadSchema } from "../session.js";
 
 describe("SessionListPayloadSchema", () => {
+  it("keeps recent exit diagnostics separate from active sessions", () => {
+    const exit = {
+      sessionId: "codex-session",
+      endedAt: 123,
+      reason: "process-exit",
+      kind: "agent",
+      provider: "codex",
+      exitCode: 1,
+      details: "Error: workspace routing discovery timed out",
+    };
+    expect(SessionListPayloadSchema.parse({ sessions: [], recentExits: [exit] })).toEqual({
+      sessions: [],
+      recentExits: [exit],
+    });
+    expect(() =>
+      SessionListPayloadSchema.parse({
+        sessions: [],
+        recentExits: [{ ...exit, details: "x".repeat(2049) }],
+      }),
+    ).toThrow();
+    expect(() =>
+      SessionListPayloadSchema.parse({
+        sessions: [],
+        recentExits: Array.from({ length: 51 }, () => exit),
+      }),
+    ).toThrow();
+  });
+
   it.each([
     { kind: "agent", mode: "json", provider: "codex" },
     { kind: "agent", mode: "pty", provider: "kimi", ptyOwner: "local-terminal" },

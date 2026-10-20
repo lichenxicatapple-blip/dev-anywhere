@@ -26,7 +26,7 @@ describe("media preview path detection", () => {
     expect(getMediaPreviewKind(`./shot.${ext}`)).toBe("image");
   });
 
-  it.each(["heic", "heif"])("recognizes local %s image paths across platforms", (extension) => {
+  it.each(["heic", "heif", "bmp"])("recognizes local %s paths across platforms", (extension) => {
     for (const path of [
       `photo.${extension}`,
       `./照片/photo.${extension}`,

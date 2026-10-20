@@ -14,6 +14,97 @@ import { handleTerminalConnection } from "#src/serve/terminal-ipc.js";
 import { SessionManager, type SessionInfo } from "#src/serve/session-manager.js";
 
 describe("local terminal IPC state ownership", () => {
+  it("retains a provider exit code and diagnostic after a registered PTY ends", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "terminal-exit-test-"));
+    const manager = new SessionManager({
+      persistPath: join(dir, "sessions.json"),
+      allowSessionRuntimeHandover: { terminal: true, worker: true },
+    });
+    const session = manager.claimPtySession({
+      kind: "agent",
+      provider: "codex",
+      ptyOwner: "proxy-hosted",
+      cwd: "/tmp",
+      pid: process.pid,
+    }).session;
+    const terminalSockets = new Map<string, Socket>();
+    const socket = new Duplex({
+      read() {},
+      write(_chunk, _encoding, done) {
+        done();
+      },
+    }) as unknown as Socket;
+    const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
+    handleTerminalConnection(
+      socket,
+      {
+        sessionManager: manager,
+        terminalSockets,
+        terminalClaims: new Map(),
+        terminalSubscriptionBacklog: { take: () => [], delete: vi.fn() },
+        relayConnection: {
+          sendRaw: vi.fn(),
+          sendBinary: vi.fn(),
+          sendEnvelope: vi.fn(),
+          getStatus: () => ({ connected: true }),
+        },
+        permissionBroker: { listSession: () => [] },
+        hookEventRouter: {},
+        createHookContext: () => undefined,
+        emitAgentStatus: vi.fn(),
+        updateTerminalCwd: () => false,
+        resolveInterruptedApprovals: vi.fn(),
+      } as never,
+      { clientKind: "terminal-worker", sessionId: session.id },
+    );
+    try {
+      socket.push(
+        serializeIpc({
+          type: "session_create_request",
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+          kind: "agent",
+          mode: "pty",
+          provider: "codex",
+          cwd: session.cwd,
+          pid: session.pid,
+          sessionId: session.id,
+        }),
+      );
+      await tick();
+      socket.push(serializeIpc({ type: "pty_register", sessionId: session.id, pid: session.pid }));
+      await tick();
+      socket.push(
+        serializeIpc({
+          type: "pty_deregister",
+          sessionId: session.id,
+          exitCode: 1,
+          errorTail:
+            "Error: account/read failed during TUI bootstrap: workspace routing discovery timed out",
+        }),
+      );
+      await tick();
+      socket.destroy();
+      await tick();
+      expect(manager.getSession(session.id)).toBeUndefined();
+      expect(terminalSockets.has(session.id)).toBe(false);
+      expect(manager.listRecentExits()).toEqual([
+        expect.objectContaining({
+          sessionId: session.id,
+          kind: "agent",
+          provider: "codex",
+          reason: "process-exit",
+          exitCode: 1,
+          details:
+            "Error: account/read failed during TUI bootstrap: workspace routing discovery timed out",
+        }),
+      ]);
+    } finally {
+      socket.destroy();
+      manager.stopReaper();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it.each([
     { oldRegistered: false, newRegistered: false },
     { oldRegistered: false, newRegistered: true },
@@ -73,6 +164,7 @@ describe("local terminal IPC state ownership", () => {
       };
       const oldSocket = createSocket();
       const newSocket = createSocket();
+      let recoveredSocket: Socket | undefined;
       const tick = () => new Promise<void>((resolve) => setImmediate(resolve));
       const createRequest = serializeIpc({
         type: "session_create_request",
@@ -111,6 +203,7 @@ describe("local terminal IPC state ownership", () => {
         oldSocket.destroy();
         await tick();
         expect(manager.getSession(session.id)).toBeDefined();
+        expect(manager.listRecentExits()).toEqual([]);
         expect(onSessionRemoved).not.toHaveBeenCalled();
         if (!newRegistered) {
           newSocket.push(register);
@@ -126,9 +219,42 @@ describe("local terminal IPC state ownership", () => {
         expect(manager.getSession(session.id)).toBeUndefined();
         expect(manager.getRuntimeSession(session.id)).toBeDefined();
         expect(terminalClaims.size).toBe(0);
+        expect(manager.listRecentExits()).toEqual([
+          expect.objectContaining({ sessionId: session.id, reason: "connection-lost" }),
+        ]);
+        expect(deps.relayConnection.sendEnvelope).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            type: "session_list",
+            payload: {
+              sessions: [],
+              recentExits: [
+                expect.objectContaining({ sessionId: session.id, reason: "connection-lost" }),
+              ],
+            },
+          }),
+        );
+        recoveredSocket = createSocket();
+        recoveredSocket.push(createRequest);
+        await tick();
+        expect(manager.listRecentExits()).toEqual([
+          expect.objectContaining({ sessionId: session.id, reason: "connection-lost" }),
+        ]);
+        recoveredSocket.push(register);
+        await tick();
+        expect(manager.listRecentExits()).toEqual([]);
+        expect(deps.relayConnection.sendEnvelope).toHaveBeenLastCalledWith(
+          expect.objectContaining({
+            type: "session_list",
+            payload: {
+              sessions: [expect.objectContaining({ sessionId: session.id })],
+              recentExits: [],
+            },
+          }),
+        );
       } finally {
         oldSocket.destroy();
         newSocket.destroy();
+        recoveredSocket?.destroy();
         await tick();
         manager.stopReaper();
         rmSync(dir, { recursive: true, force: true });
@@ -159,7 +285,7 @@ describe("local terminal IPC state ownership", () => {
         terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: {},
-        relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn() },
+        relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: {},
         hookEventRouter: {},
         createHookContext: vi.fn(),
@@ -216,6 +342,10 @@ describe("local terminal IPC state ownership", () => {
       {
         sessionManager: {
           releasePtyBinding: vi.fn(),
+          recordSessionExit: vi.fn(),
+          clearSessionConnectionLoss: vi.fn(),
+          listSessions: vi.fn(() => []),
+          listRecentExits: vi.fn(() => []),
           getSession: vi.fn(),
           claimPtySession,
           terminateSession: vi.fn(),
@@ -223,7 +353,7 @@ describe("local terminal IPC state ownership", () => {
         terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: {},
-        relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn() },
+        relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
         createHookContext,
@@ -285,6 +415,9 @@ describe("local terminal IPC state ownership", () => {
           getSession: vi.fn(() => session),
           claimPtySession: vi.fn(() => ({ session, source: "active" })),
           listSessions: vi.fn(() => [session]),
+          listRecentExits: vi.fn(() => []),
+          recordSessionExit: vi.fn(),
+          clearSessionConnectionLoss: vi.fn(),
           updateState,
           touchSession: vi.fn(() => false),
         },
@@ -375,6 +508,9 @@ describe("local terminal IPC state ownership", () => {
           getSession: vi.fn(() => session),
           claimPtySession: vi.fn(() => ({ session, source: "active" })),
           listSessions: vi.fn(() => [session]),
+          listRecentExits: vi.fn(() => []),
+          recordSessionExit: vi.fn(),
+          clearSessionConnectionLoss: vi.fn(),
         },
         terminalClaims: new Map(),
         terminalSockets,
@@ -440,6 +576,9 @@ describe("local terminal IPC state ownership", () => {
       {
         sessionManager: {
           releasePtyBinding: vi.fn(),
+          recordSessionExit: vi.fn(),
+          listSessions: vi.fn(() => []),
+          listRecentExits: vi.fn(() => []),
           getSession: vi.fn(),
           claimPtySession,
         },
@@ -652,33 +791,30 @@ describe("local terminal IPC state ownership", () => {
     socket.destroy();
   });
 
-  it("returns a half-registered claim to pending without terminating its runtime", async () => {
+  it("reports channel loss for a half-registered claim while retaining its runtime", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "terminal-half-registered-"));
     const socket = new PassThrough() as unknown as Socket;
-    const session: SessionInfo = {
-      id: "pending-session",
+    const manager = new SessionManager({
+      persistPath: join(dir, "sessions.json"),
+      allowSessionRuntimeHandover: { terminal: true, worker: true },
+    });
+    const session = manager.claimPtySession({
       kind: "agent",
-      mode: "pty",
       provider: "kimi",
       ptyOwner: "local-terminal",
-      state: SessionState.IDLE,
-      createdAt: 1,
-      updatedAt: 1,
       cwd: "/tmp",
-      pid: 4242,
-    };
-    const releasePtyBinding = vi.fn(() => ({ success: true, pid: session.pid }));
-
+      pid: process.pid,
+    }).session;
+    manager.releasePtyBinding(session.id, session.pid);
+    const sendEnvelope = vi.fn();
     handleTerminalConnection(
       socket,
       {
-        sessionManager: {
-          claimPtySession: vi.fn(() => ({ session, source: "pending" as const })),
-          releasePtyBinding,
-        },
+        sessionManager: manager,
         terminalClaims: new Map(),
         terminalSockets: new Map(),
         terminalSubscriptionBacklog: { take: vi.fn(() => []), delete: vi.fn() },
-        relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope: vi.fn() },
+        relayConnection: { sendRaw: vi.fn(), sendBinary: vi.fn(), sendEnvelope },
         permissionBroker: { listSession: vi.fn(() => []) },
         hookEventRouter: {},
         createHookContext: vi.fn(),
@@ -688,23 +824,43 @@ describe("local terminal IPC state ownership", () => {
       } as never,
       { clientKind: "local-terminal", sessionId: session.id },
     );
-
-    socket.write(
-      serializeIpc({
-        type: "session_create_request",
-        protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
-        kind: "agent",
-        mode: "pty",
-        provider: "kimi",
-        cwd: session.cwd,
-        pid: session.pid,
-        sessionId: session.id,
-      }),
-    );
-    await new Promise((resolve) => setImmediate(resolve));
-    socket.destroy();
-
-    await vi.waitFor(() => expect(releasePtyBinding).toHaveBeenCalledWith(session.id, session.pid));
+    try {
+      socket.write(
+        serializeIpc({
+          type: "session_create_request",
+          protocolVersion: TERMINAL_IPC_PROTOCOL_VERSION,
+          kind: "agent",
+          mode: "pty",
+          provider: "kimi",
+          cwd: session.cwd,
+          pid: session.pid,
+          sessionId: session.id,
+        }),
+      );
+      await new Promise((resolve) => setImmediate(resolve));
+      socket.destroy();
+      await new Promise((resolve) => setImmediate(resolve));
+      expect(manager.getSession(session.id)).toBeUndefined();
+      expect(manager.getRuntimeSession(session.id)).toBeDefined();
+      expect(sendEnvelope).toHaveBeenLastCalledWith(
+        expect.objectContaining({
+          type: "session_list",
+          payload: {
+            sessions: [],
+            recentExits: [
+              expect.objectContaining({
+                sessionId: session.id,
+                reason: "connection-lost",
+              }),
+            ],
+          },
+        }),
+      );
+    } finally {
+      socket.destroy();
+      manager.stopReaper();
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("does not accept reverse-direction mutation messages from a terminal socket", async () => {

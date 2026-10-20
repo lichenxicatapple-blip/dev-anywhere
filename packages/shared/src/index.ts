@@ -41,6 +41,7 @@ export type {
 export {
   TerminalShellFamilySchema,
   SessionInfoSchema,
+  SessionExitInfoSchema,
   SessionListPayloadSchema,
   SessionStatusPayloadSchema,
   PtyStatePayloadSchema,
@@ -49,6 +50,7 @@ export {
 export type {
   TerminalShellFamily,
   SessionInfo,
+  SessionExitInfo,
   SessionListPayload,
   SessionStatusPayload,
   PtyStatePayload,

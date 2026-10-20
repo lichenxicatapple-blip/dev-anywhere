@@ -53,7 +53,9 @@ export function terminateSessionByOwnership(
       }
     }
     deps.terminalSockets.delete(sessionId);
-    const result = deps.sessionManager.terminateSession(sessionId);
+    const result = deps.sessionManager.terminateSession(sessionId, {
+      exit: { reason: "user-terminated" },
+    });
     serviceLogger.info(
       { sessionId, success: result.success },
       "Terminal worker session terminated",
@@ -69,6 +71,7 @@ export function terminateSessionByOwnership(
     deps.terminalSockets.delete(sessionId);
     const result = deps.sessionManager.terminateSession(sessionId, {
       preserveProviderHooks: true,
+      exit: { reason: "user-terminated" },
     });
     serviceLogger.info(
       { sessionId, success: result.success },
@@ -84,7 +87,9 @@ export function terminateSessionByOwnership(
     } else {
       deps.workerRegistry.terminateProcess(sessionId);
     }
-    const result = deps.sessionManager.terminateSession(sessionId);
+    const result = deps.sessionManager.terminateSession(sessionId, {
+      exit: { reason: "user-terminated" },
+    });
     serviceLogger.info(
       { sessionId, success: result.success, stopDelivered },
       "JSON worker session terminated",

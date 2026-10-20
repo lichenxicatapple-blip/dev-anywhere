@@ -28,6 +28,56 @@ describe("session broadcast state source", () => {
     manager = undefined;
   });
 
+  it("replays the last exit reason after browser refresh without advertising a dead session", () => {
+    manager = makeSessionManager();
+    const session = manager.createSession("agent", "json", "codex", "/tmp", process.pid);
+    manager.terminateSession(session.id, {
+      exit: {
+        reason: "process-exit",
+        exitCode: 1,
+        details: "Error: workspace routing discovery timed out",
+      },
+    });
+    const envelopes: unknown[] = [];
+    const relay = {
+      sendEnvelope: (envelope: unknown) => envelopes.push(envelope),
+    } as unknown as RelayConnection;
+    broadcastSessionList(relay, manager);
+    broadcastSessionList(relay, manager);
+    expect(envelopes[1]).toMatchObject({
+      type: "session_list",
+      payload: {
+        sessions: [],
+        recentExits: [
+          {
+            sessionId: session.id,
+            reason: "process-exit",
+            exitCode: 1,
+            details: "Error: workspace routing discovery timed out",
+          },
+        ],
+      },
+    });
+  });
+
+  it("reports loss of observation without claiming the process has exited", () => {
+    manager = makeSessionManager();
+    const session = manager.createSession("agent", "json", "codex", "/tmp", process.pid);
+    const envelopes: unknown[] = [];
+    const relay = {
+      sendEnvelope: (envelope: unknown) => envelopes.push(envelope),
+    } as unknown as RelayConnection;
+    changeSessionState(manager, relay, session.id, SessionState.ERROR);
+    expect(manager.getSession(session.id)?.state).toBe(SessionState.ERROR);
+    expect(manager.listRecentExits()).toEqual([
+      expect.objectContaining({ sessionId: session.id, reason: "connection-lost" }),
+    ]);
+    expect(envelopes.at(-1)).toMatchObject({
+      type: "session_list",
+      payload: { recentExits: [expect.objectContaining({ reason: "connection-lost" })] },
+    });
+  });
+
   it("sends the complete authoritative session snapshot after a session is added or removed", () => {
     manager = makeSessionManager();
     const first = manager.createSession(

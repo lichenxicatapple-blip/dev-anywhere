@@ -175,13 +175,16 @@ test.describe("image preview", () => {
   test.describe("desktop", () => {
     test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
 
-    for (const extension of ["heic", "HEIF"]) {
+    for (const extension of ["heic", "HEIF", "bmp", "BMP"]) {
       test(`decodes a real ${extension} image, copies PNG, and downloads the original path`, async ({
         page,
       }, testInfo) => {
         const path = `C:/Photos/four-colors.${extension}`;
         const base64 = readFileSync(
-          new URL("../fixtures/media/quadrants.heic", import.meta.url),
+          new URL(
+            `../fixtures/media/quadrants.${extension.toLowerCase() === "bmp" ? "bmp" : "heic"}`,
+            import.meta.url,
+          ),
         ).toString("base64");
         await page.addInitScript(() => {
           Object.defineProperty(navigator, "clipboard", {
@@ -199,7 +202,7 @@ test.describe("image preview", () => {
                     }),
                   ),
                 );
-                Object.defineProperty(window, "__copiedHeicImages", {
+                Object.defineProperty(window, "__copiedPreviewImages", {
                   configurable: true,
                   value: images,
                 });
@@ -271,9 +274,9 @@ test.describe("image preview", () => {
             () =>
               (
                 window as typeof window & {
-                  __copiedHeicImages?: Array<{ type: string; width: number; height: number }>;
+                  __copiedPreviewImages?: Array<{ type: string; width: number; height: number }>;
                 }
-              ).__copiedHeicImages,
+              ).__copiedPreviewImages,
           ),
         ).toEqual([{ type: "image/png", width: 96, height: 64 }]);
 

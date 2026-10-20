@@ -109,6 +109,8 @@ export function createSessionManagerFake(sessions: SessionInfo[] = []): SessionM
   return {
     getSession: vi.fn((id: string) => currentSessions.find((session) => session.id === id)),
     listSessions: vi.fn(() => currentSessions),
+    listRecentExits: vi.fn(() => []),
+    recordSessionExit: vi.fn(() => false),
     terminateSession: vi.fn(() => ({ success: true })),
     setClaudeSessionId: vi.fn(),
     setHistorySessionId: vi.fn(),

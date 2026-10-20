@@ -7,6 +7,7 @@ describe("session-store agent status", () => {
     sessionStorage.clear();
     useSessionStore.setState({
       sessions: [],
+      recentExitsBySessionId: {},
       sessionListLoaded: false,
       loadingProxyName: null,
       historySessions: [],
@@ -35,6 +36,32 @@ describe("session-store agent status", () => {
     });
 
     expect(useSessionStore.getState().agentStatusBySessionId.s1.phase).toBe("thinking");
+  });
+
+  it("keeps exit diagnostics separate from active session cleanup and clears them on proxy changes", () => {
+    const exit = {
+      sessionId: "exited",
+      endedAt: 100,
+      kind: "agent" as const,
+      provider: "codex" as const,
+      reason: "process-exit" as const,
+      exitCode: 1,
+    };
+    useSessionStore.getState().setSessions([], [exit]);
+    useSessionStore.getState().removeSession("exited");
+    expect(useSessionStore.getState().recentExitsBySessionId.exited).toEqual(exit);
+
+    // Connection state can reset while reconnecting to the same developer machine.
+    useSessionStore.setState({ sessionListLoaded: false });
+    expect(useSessionStore.getState().recentExitsBySessionId.exited).toEqual(exit);
+    useSessionStore.getState().setSessions([], [exit]);
+    expect(useSessionStore.getState().recentExitsBySessionId.exited).toEqual(exit);
+
+    useSessionStore.getState().prepareForProxySwitch("Other developer machine");
+    expect(useSessionStore.getState().recentExitsBySessionId).toEqual({});
+    useSessionStore.getState().setSessions([], [exit]);
+    useSessionStore.getState().clearForProxyRemoval("proxy-1");
+    expect(useSessionStore.getState().recentExitsBySessionId).toEqual({});
   });
 
   it("prunes agent status when replacing the session list", () => {

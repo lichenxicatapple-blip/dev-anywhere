@@ -510,6 +510,103 @@ describe("SessionManager", () => {
   });
 
   describe("terminateSession", () => {
+    it("retains a sanitized exit reason after cleanup without letting duplicate cleanup overwrite it", () => {
+      const s = manager.createSession("agent", "json", "codex", "/tmp/test", ALIVE_PID);
+      manager.recordSessionExit(s.id, { reason: "connection-lost" });
+      manager.terminateSession(s.id, {
+        exit: {
+          reason: "process-exit",
+          exitCode: 1,
+          details:
+            "user prompt\nError: account/read failed: workspace routing discovery timed out\nError: api_key=sk-private123456",
+        },
+      });
+      manager.terminateSession(s.id, { exit: { reason: "user-terminated" } });
+
+      expect(manager.getSession(s.id)).toBeUndefined();
+      expect(manager.listRecentExits()).toEqual([
+        {
+          sessionId: s.id,
+          endedAt: expect.any(Number),
+          reason: "process-exit",
+          kind: "agent",
+          provider: "codex",
+          exitCode: 1,
+          details:
+            "Error: account/read failed: workspace routing discovery timed out\nError: api_key=[REDACTED]",
+        },
+      ]);
+    });
+
+    it("distinguishes a user termination from an unexpected exit", () => {
+      const s = manager.createSession("agent", "json", "kimi", "/tmp/test", ALIVE_PID);
+      manager.recordSessionExit(s.id, { reason: "connection-lost" });
+      manager.terminateSession(s.id, { exit: { reason: "user-terminated" } });
+      expect(manager.listRecentExits()).toEqual([
+        expect.objectContaining({ sessionId: s.id, reason: "user-terminated" }),
+      ]);
+    });
+
+    it("retains at most 50 recent exit reasons and expires them after 24 hours", () => {
+      vi.useFakeTimers();
+      for (let index = 0; index < 51; index++) {
+        const s = manager.createSession(
+          "agent",
+          "json",
+          "claude",
+          "/tmp/test",
+          ALIVE_PID,
+          undefined,
+          `exit-${index}`,
+        );
+        manager.terminateSession(s.id);
+      }
+      expect(manager.listRecentExits()).toHaveLength(50);
+      expect(manager.listRecentExits()[0].sessionId).toBe("exit-1");
+      vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+      expect(manager.listRecentExits()).toEqual([]);
+    });
+
+    it("does not report a process exit during a live PTY handover", () => {
+      const s = manager.claimPtySession({
+        kind: "agent",
+        provider: "codex",
+        ptyOwner: "proxy-hosted",
+        cwd: "/tmp/test",
+        pid: ALIVE_PID,
+      }).session;
+      manager.releasePtyBinding(s.id, s.pid);
+      expect(manager.listRecentExits()).toEqual([]);
+      manager.claimPtySession({
+        kind: "agent",
+        provider: "codex",
+        ptyOwner: "proxy-hosted",
+        cwd: s.cwd,
+        pid: s.pid,
+        sessionId: s.id,
+      });
+      expect(manager.listRecentExits()).toEqual([]);
+    });
+
+    it("keeps the connection diagnostic when a pending reconnect claim rolls back", () => {
+      const claim = {
+        kind: "agent" as const,
+        provider: "codex" as const,
+        ptyOwner: "proxy-hosted" as const,
+        cwd: "/tmp/test",
+        pid: ALIVE_PID,
+      };
+      const session = manager.claimPtySession(claim).session;
+      manager.recordSessionExit(session.id, { reason: "connection-lost" });
+      manager.releasePtyBinding(session.id, session.pid);
+      const originalExit = manager.listRecentExits();
+      manager.claimPtySession({ ...claim, sessionId: session.id });
+      // A rejected create handshake must not erase the earlier loss of a live channel.
+      manager.releasePtyBinding(session.id, session.pid);
+      expect(manager.listRecentExits()).toEqual(originalExit);
+      expect(manager.getRuntimeSession(session.id)).toBeDefined();
+    });
+
     it("removes PTY session from registry", () => {
       const s = manager.createSession(
         "agent",

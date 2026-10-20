@@ -141,7 +141,9 @@ describe("WorkerRegistry reconnect protocol handshake", () => {
 
     await registry.reconnectAll();
 
-    expect(terminateSession).toHaveBeenCalledWith(sessionId);
+    expect(terminateSession).toHaveBeenCalledWith(sessionId, {
+      exit: { reason: "connection-lost", details: "Worker IPC protocol handshake rejected" },
+    });
     expect(registry.has(sessionId)).toBe(false);
   });
 
@@ -166,7 +168,9 @@ describe("WorkerRegistry reconnect protocol handshake", () => {
     await registry.reconnectAll();
 
     expect(sessionManager.terminateSession).toHaveBeenCalledOnce();
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId);
+    expect(sessionManager.terminateSession).toHaveBeenCalledWith(sessionId, {
+      exit: { reason: "connection-lost", details: "Worker connection failed before ready" },
+    });
     expect(isManagedSessionProcessMock).toHaveBeenCalledWith(4242, {
       id: sessionId,
       mode: "json",

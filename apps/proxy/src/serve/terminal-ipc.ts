@@ -95,12 +95,21 @@ export function handleTerminalConnection(
     if (terminalSockets.has(sessionId) || terminalClaims.has(sessionId)) return;
     sessionManager.releasePtyBinding(sessionId, claim.session.pid);
   };
-  const discardUnregisteredClaim = (): void => {
+  const discardUnregisteredClaim = (channelLost = false): void => {
     if (acceptedRegistration === null || registeredSessionId !== null) return;
     const { sessionId, pid } = acceptedRegistration;
     if (terminalClaims.get(sessionId) === socket) {
       terminalClaims.delete(sessionId);
-      if (!terminalSockets.has(sessionId)) sessionManager.releasePtyBinding(sessionId, pid);
+      if (!terminalSockets.has(sessionId)) {
+        if (channelLost) {
+          sessionManager.recordSessionExit(sessionId, { reason: "connection-lost" });
+        }
+        sessionManager.releasePtyBinding(sessionId, pid);
+        if (channelLost) {
+          broadcastSessionSync(relayConnection, sessionManager);
+          broadcastSessionList(relayConnection, sessionManager);
+        }
+      }
     }
     acceptedRegistration = null;
   };
@@ -311,6 +320,7 @@ export function handleTerminalConnection(
           terminalClaims.delete(msg.sessionId);
           registeredSessionId = msg.sessionId;
           acceptedRegistration = null;
+          sessionManager.clearSessionConnectionLoss(msg.sessionId);
           socket.write(
             serializeIpc({
               type: "pty_approval_context",
@@ -380,7 +390,13 @@ export function handleTerminalConnection(
               }),
             );
           }
-          sessionManager.terminateSession(msg.sessionId);
+          sessionManager.terminateSession(msg.sessionId, {
+            exit: {
+              reason: "process-exit",
+              ...(msg.exitCode !== undefined ? { exitCode: msg.exitCode } : {}),
+              ...(msg.errorTail ? { details: msg.errorTail } : {}),
+            },
+          });
           terminalSockets.delete(msg.sessionId);
           registeredSessionId = null;
           serviceLogger[msg.exitCode === undefined || msg.exitCode === 0 ? "info" : "warn"](
@@ -451,7 +467,7 @@ export function handleTerminalConnection(
   );
 
   socket.on("close", () => {
-    discardUnregisteredClaim();
+    discardUnregisteredClaim(true);
     for (const [sessionId, terminalSocket] of terminalSockets) {
       if (terminalSocket === socket) {
         terminalSockets.delete(sessionId);
@@ -463,7 +479,10 @@ export function handleTerminalConnection(
         }
         if (session.mode === "pty" && session.pid && isProcessAlive(session.pid)) {
           if (!terminalClaims.has(sessionId)) {
+            sessionManager.recordSessionExit(sessionId, { reason: "connection-lost" });
             sessionManager.releasePtyBinding(sessionId, session.pid);
+            broadcastSessionSync(relayConnection, sessionManager);
+            broadcastSessionList(relayConnection, sessionManager);
           }
           serviceLogger.info(
             { sessionId, pid: session.pid },

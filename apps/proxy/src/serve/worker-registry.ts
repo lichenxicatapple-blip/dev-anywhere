@@ -259,7 +259,16 @@ export class WorkerRegistry {
       const activeSession = this.deps.sessionManager.getSession(sessionId);
       this.delete(sessionId);
       if (!activeSession) return;
-      const result = this.deps.sessionManager.terminateSession(sessionId);
+      const result = this.deps.sessionManager.terminateSession(sessionId, {
+        exit: {
+          reason: "process-exit",
+          // The wrapper exits with 0 after forwarding worker_exit, even when the provider
+          // failed. Without that IPC message its exit code cannot describe the provider.
+          details: signal
+            ? `Session worker exited after signal ${signal}; provider exit status unavailable`
+            : "Session worker exited without reporting provider exit status",
+        },
+      });
       serviceLogger.warn(
         { sessionId, workerPid, code, signal, removed: result.success },
         "JSON worker process exited without worker_exit IPC",
@@ -633,7 +642,13 @@ export class WorkerRegistry {
         break;
 
       case "worker_exit":
-        this.deps.sessionManager.terminateSession(sessionId);
+        this.deps.sessionManager.terminateSession(sessionId, {
+          exit: {
+            reason: "process-exit",
+            exitCode: msg.code,
+            ...(msg.errorTail ? { details: msg.errorTail } : {}),
+          },
+        });
         this.delete(sessionId);
         serviceLogger[msg.code === 0 ? "info" : "warn"](
           {
@@ -815,7 +830,9 @@ export class WorkerRegistry {
     const session = this.deps.sessionManager.getSession(sessionId);
     if (!session || session.mode !== "json") return;
     const child = this.children.get(sessionId);
-    const result = this.deps.sessionManager.terminateSession(sessionId);
+    const result = this.deps.sessionManager.terminateSession(sessionId, {
+      exit: { reason: "connection-lost", details: "Worker connection failed before ready" },
+    });
     const pid = result.pid ?? session.pid;
     this.delete(sessionId);
     this.startupFailures.delete(sessionId);
@@ -876,7 +893,9 @@ export class WorkerRegistry {
     else this.startupFailures.delete(sessionId);
     this.rejectReadyWaiters(error, sessionId);
 
-    const result = this.deps.sessionManager.terminateSession(sessionId);
+    const result = this.deps.sessionManager.terminateSession(sessionId, {
+      exit: { reason: "connection-lost", details: error.message },
+    });
     socket?.destroy();
 
     let terminated = false;

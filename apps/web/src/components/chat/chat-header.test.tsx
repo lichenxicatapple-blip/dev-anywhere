@@ -254,10 +254,14 @@ describe("ChatHeader PTY upload menu", () => {
     expect(fit).toHaveBeenCalledExactlyOnceWith("fit");
   });
 
-  it("does not offer manual fit for a locally owned PTY", async () => {
+  it("explains local terminal sizing instead of offering manual fit", async () => {
     render(<ChatHeader sessionId="s1" mode="pty" onFind={() => {}} onResizeTerminal={vi.fn()} />);
     fireEvent.keyDown(screen.getByRole("button", { name: "会话操作" }), { key: "Enter" });
     await screen.findByRole("menuitem", { name: "重命名" });
+    expect(screen.getByText("终端尺寸")).toBeVisible();
+    expect(screen.getByRole("note")).toHaveTextContent(
+      "本会话为本地终端会话，请在开发机上调整窗口大小。",
+    );
     expect(screen.queryByRole("menuitem", { name: "按窗口调整终端尺寸" })).toBeNull();
     expect(screen.queryByRole("group", { name: "列数" })).toBeNull();
     expect(screen.queryByRole("group", { name: "行数" })).toBeNull();

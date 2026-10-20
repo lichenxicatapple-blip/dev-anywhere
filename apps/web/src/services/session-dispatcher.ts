@@ -30,7 +30,7 @@ function handleSessionList(env: Extract<MessageEnvelope, { type: "session_list" 
   for (const sessionId of Object.keys(chatStore.bySessionId)) {
     if (!activeSessionIds.has(sessionId)) chatStore.clearSession(sessionId);
   }
-  sessionStore.setSessions(env.payload.sessions);
+  sessionStore.setSessions(env.payload.sessions, env.payload.recentExits ?? []);
 }
 
 function handleSessionStatus(env: Extract<MessageEnvelope, { type: "session_status" }>): void {

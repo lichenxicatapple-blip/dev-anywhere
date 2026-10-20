@@ -5,6 +5,7 @@ const ROOTS = ["apps", "packages"];
 const EXTENSIONS = new Set([".js", ".jsx", ".mjs", ".cjs", ".ts", ".tsx"]);
 const BANNED_REF = /\b(?:D|F)-\d{2,}\b|\bPhase\s+\d+(?:[-.]\d+[a-z]?)?\b/g;
 const SKIP_DIRS = new Set(["node_modules", "dist", "build", "coverage", ".turbo"]);
+const SKIP_PATHS = new Set(["apps/relay/assets/web"]);
 
 function extensionOf(path) {
   const lastDot = path.lastIndexOf(".");
@@ -15,6 +16,7 @@ function* walk(dir) {
   for (const entry of readdirSync(dir)) {
     if (SKIP_DIRS.has(entry)) continue;
     const fullPath = join(dir, entry);
+    if (SKIP_PATHS.has(fullPath.replaceAll("\\", "/"))) continue;
     const stat = statSync(fullPath);
     if (stat.isDirectory()) {
       yield* walk(fullPath);

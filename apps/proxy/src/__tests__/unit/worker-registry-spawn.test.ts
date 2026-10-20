@@ -86,33 +86,54 @@ describe("WorkerRegistry spawn", () => {
     );
   });
 
-  it("removes an active session when the worker exits without worker_exit IPC", () => {
-    const child = createChildProcessFake();
-    spawnScriptMock.mockReturnValue(child);
-    const sessionManager = createSessionManagerFake([
-      {
-        id: "s1",
-        kind: "agent",
-        mode: "json",
-        provider: "claude",
-        state: "idle",
-        createdAt: 1,
-        updatedAt: 1,
-        cwd: "/tmp",
-        pid: 1,
-      },
-    ]);
-    const registry = new WorkerRegistry({
-      sessionManager,
-      permissionBroker: new PermissionBroker(),
-      relayConnection: createRelayConnectionFake().relayConnection,
-      jsonObserver: createJsonObserverFake(),
-      getProviderEnv: () => ({}),
-    });
+  it.each([
+    {
+      code: null,
+      signal: "SIGKILL",
+      details: "Session worker exited after signal SIGKILL; provider exit status unavailable",
+    },
+    {
+      code: 0,
+      signal: null,
+      details: "Session worker exited without reporting provider exit status",
+    },
+    {
+      code: 1,
+      signal: null,
+      details: "Session worker exited without reporting provider exit status",
+    },
+  ])(
+    "keeps the provider exit code unknown when only wrapper exit $code/$signal is observed",
+    ({ code, signal, details }) => {
+      const child = createChildProcessFake();
+      spawnScriptMock.mockReturnValue(child);
+      const sessionManager = createSessionManagerFake([
+        {
+          id: "s1",
+          kind: "agent",
+          mode: "json",
+          provider: "claude",
+          state: "idle",
+          createdAt: 1,
+          updatedAt: 1,
+          cwd: "/tmp",
+          pid: 1,
+        },
+      ]);
+      const registry = new WorkerRegistry({
+        sessionManager,
+        permissionBroker: new PermissionBroker(),
+        relayConnection: createRelayConnectionFake().relayConnection,
+        jsonObserver: createJsonObserverFake(),
+        getProviderEnv: () => ({}),
+      });
 
-    registry.spawn("s1", { provider: "claude" });
-    child.emit("exit", null, "SIGKILL");
+      registry.spawn("s1", { provider: "claude" });
+      child.emit("exit", code, signal);
 
-    expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1");
-  });
+      expect(sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+        exit: { reason: "process-exit", details },
+      });
+    },
+  );
 });

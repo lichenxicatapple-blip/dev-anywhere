@@ -47,7 +47,7 @@ describe("xterm media preview links", () => {
     ]);
   });
 
-  it.each(["png", "mp4", "webm"])("provides every wrapped segment of a %s path", (extension) => {
+  it.each(["png", "bmp", "mp4", "webm"])("provides each wrapped %s path segment", (extension) => {
     const providerRef: {
       current?: { provideLinks: (line: number, cb: (links: unknown) => void) => void };
     } = {};

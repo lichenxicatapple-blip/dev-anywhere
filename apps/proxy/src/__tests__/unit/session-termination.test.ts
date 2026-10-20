@@ -40,6 +40,7 @@ describe("terminateSessionByOwnership", () => {
     expect(result).toEqual({ success: true, action: "detach_local_terminal" });
     expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
       preserveProviderHooks: true,
+      exit: { reason: "user-terminated" },
     });
     expect(deps.workerRegistry.send).not.toHaveBeenCalled();
     expect(deps.terminalSockets.has("s1")).toBe(false);
@@ -64,7 +65,9 @@ describe("terminateSessionByOwnership", () => {
     const result = terminateSessionByOwnership(deps as never, "s1");
 
     expect(result).toEqual({ success: true, action: "terminate_terminal_worker" });
-    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "user-terminated" },
+    });
     expect(deps.terminalSockets.has("s1")).toBe(false);
     expect(IpcMessageSchema.parse(JSON.parse(terminalWrite.mock.calls[0][0].trim()))).toEqual({
       type: "pty_terminate",
@@ -98,7 +101,9 @@ describe("terminateSessionByOwnership", () => {
       ptyOwner: "proxy-hosted",
     });
     expect(kill).not.toHaveBeenCalled();
-    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "user-terminated" },
+    });
     kill.mockRestore();
   });
 
@@ -121,7 +126,9 @@ describe("terminateSessionByOwnership", () => {
 
     expect(result).toEqual({ success: true, action: "terminate_terminal_worker" });
     expect(kill).toHaveBeenCalledWith(4242, "SIGTERM");
-    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "user-terminated" },
+    });
     kill.mockRestore();
   });
 
@@ -139,7 +146,9 @@ describe("terminateSessionByOwnership", () => {
       type: "pty_terminate",
       sessionId: "s1",
     });
-    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "user-terminated" },
+    });
   });
 
   it("terminates JSON workers through worker_stop", () => {
@@ -154,7 +163,9 @@ describe("terminateSessionByOwnership", () => {
     expect(deps.workerRegistry.send).toHaveBeenCalledWith("s1", { type: "worker_stop" });
     expect(deps.workerRegistry.delete).toHaveBeenCalledWith("s1");
     expect(deps.workerRegistry.terminateProcess).not.toHaveBeenCalled();
-    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "user-terminated" },
+    });
   });
 
   it("kills a JSON worker when its control channel is already unavailable", () => {
@@ -170,6 +181,8 @@ describe("terminateSessionByOwnership", () => {
     expect(deps.workerRegistry.send).toHaveBeenCalledWith("s1", { type: "worker_stop" });
     expect(deps.workerRegistry.delete).not.toHaveBeenCalled();
     expect(deps.workerRegistry.terminateProcess).toHaveBeenCalledWith("s1");
-    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1");
+    expect(deps.sessionManager.terminateSession).toHaveBeenCalledWith("s1", {
+      exit: { reason: "user-terminated" },
+    });
   });
 });

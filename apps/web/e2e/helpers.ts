@@ -1,6 +1,7 @@
 import type { Page } from "@playwright/test";
 import { expect } from "@playwright/test";
 import { MESSAGE_ENVELOPE_VERSION, RELAY_CONTROL_PROTOCOL_VERSION } from "@dev-anywhere/shared";
+import type { SessionExitInfo } from "@dev-anywhere/shared";
 
 // 本地 Vite 默认端口 5173；CI 或外部 relay-served 部署可通过 WEB_BASE_URL 覆盖
 export const BASE_URL = process.env.WEB_BASE_URL ?? "http://localhost:5173";
@@ -87,7 +88,10 @@ declare global {
 // relay/proxy 的真实控制消息，让测试像用户一样点 UI，同时避免依赖本机真实 CLI。
 export async function installFakeRelay(
   page: Page,
-  options: { fileSystemRoots?: Array<{ name: string; path: string }> } = {},
+  options: {
+    fileSystemRoots?: Array<{ name: string; path: string }>;
+    recentExits?: SessionExitInfo[];
+  } = {},
 ): Promise<void> {
   await page.route("**/health", async (route) => {
     await route.fulfill({
@@ -132,10 +136,12 @@ export async function installFakeRelay(
     currentControlProtocolVersion,
     currentEnvelopeVersion,
     fileSystemRoots,
+    recentExits,
   }: {
     currentControlProtocolVersion: number;
     currentEnvelopeVersion: string;
     fileSystemRoots: Array<{ name: string; path: string }>;
+    recentExits: SessionExitInfo[];
   }) => {
     if (window.__devAnywhereFakeRelayInstalled) return;
     Object.defineProperty(window, "__devAnywhereFakeRelayInstalled", {
@@ -357,7 +363,7 @@ export async function installFakeRelay(
         source: "proxy",
         version: currentEnvelopeVersion,
         type: "session_list",
-        payload: { sessions },
+        payload: { sessions, recentExits },
       };
     }
 
@@ -1455,6 +1461,7 @@ export async function installFakeRelay(
     currentControlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
     currentEnvelopeVersion: MESSAGE_ENVELOPE_VERSION,
     fileSystemRoots: options.fileSystemRoots ?? [{ name: "/", path: "/" }],
+    recentExits: options.recentExits ?? [],
   });
 }
 

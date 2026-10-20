@@ -1,8 +1,14 @@
 import { readFileSync, existsSync } from "node:fs";
 import { isAbsolute, normalize } from "node:path";
 import { nanoid } from "nanoid";
-import { defineFSM, SessionState, type TerminalShellFamily } from "@dev-anywhere/shared";
+import {
+  defineFSM,
+  SessionState,
+  type SessionExitInfo,
+  type TerminalShellFamily,
+} from "@dev-anywhere/shared";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
+import { sanitizeProviderErrorTail } from "../common/codex-session-conflict.js";
 import { serviceLogger } from "../common/logger.js";
 import {
   isManagedSessionProcess,
@@ -93,7 +99,11 @@ interface SessionManagerOptions {
 
 interface SessionRemoveContext {
   preserveProviderHooks?: boolean;
+  exit?: Pick<SessionExitInfo, "reason" | "exitCode" | "details">;
 }
+
+const MAX_RECENT_EXITS = 50;
+const RECENT_EXIT_MAX_AGE_MS = 24 * 60 * 60 * 1000;
 
 // 两个观察通道的合法转换表分离：PTY 看 OSC 信号、JSON 看 stream-json 事件，各自的状态空间和规则不同。
 // terminated 是终态，不允许任何转出。
@@ -194,6 +204,7 @@ function isProviderId(value: unknown): value is ProviderId {
 
 export class SessionManager {
   private sessions: Map<string, SessionInfo> = new Map();
+  private recentExits: Map<string, SessionExitInfo> = new Map();
   private pendingPtyReconnectMetadata: Map<string, PersistedPtySessionRecord> = new Map();
   private reaperTimer: NodeJS.Timeout | null = null;
   private readonly persistPath: string;
@@ -353,6 +364,9 @@ export class SessionManager {
       };
     }
     this.sessions.set(info.id, info);
+    // A pending PTY claim is only an attempted reconnect. Keep its diagnostic until
+    // pty_register confirms the replacement channel, including when hook setup fails.
+    if (pendingPtyMetadata === undefined) this.recentExits.delete(info.id);
     this.pendingPtyReconnectMetadata.delete(info.id);
     this.save();
     serviceLogger.info(
@@ -502,6 +516,7 @@ export class SessionManager {
       return { success: false };
     }
     const pid = session.pid;
+    this.recordSessionExit(id, context?.exit ?? { reason: "process-exit" });
     this.sessions.delete(id);
     this.pendingPtyReconnectMetadata.delete(id);
     this.save();
@@ -522,6 +537,52 @@ export class SessionManager {
       );
     }
     return { success: true, pid };
+  }
+
+  recordSessionExit(
+    id: string,
+    exit: Pick<SessionExitInfo, "reason" | "exitCode" | "details">,
+  ): boolean {
+    const session = this.sessions.get(id) ?? this.pendingPtyReconnectMetadata.get(id);
+    if (!session) return false;
+    const existing = this.recentExits.get(id);
+    // Socket close, child exit and reaper cleanup can all observe the same failure.
+    // Preserve the original exit details; a confirmed exit supersedes transport loss.
+    if (existing && (existing.reason !== "connection-lost" || exit.reason === "connection-lost")) {
+      return false;
+    }
+    const details = exit.details ? sanitizeProviderErrorTail(exit.details) : "";
+    this.recentExits.set(id, {
+      sessionId: id,
+      endedAt: Date.now(),
+      reason: exit.reason,
+      kind: session.kind,
+      provider: session.provider,
+      ...(exit.exitCode !== undefined ? { exitCode: exit.exitCode } : {}),
+      ...(details ? { details } : {}),
+    });
+    this.pruneRecentExits();
+    return true;
+  }
+
+  listRecentExits(): SessionExitInfo[] {
+    this.pruneRecentExits();
+    return Array.from(this.recentExits.values(), (exit) => ({ ...exit }));
+  }
+
+  clearSessionConnectionLoss(id: string): boolean {
+    if (this.recentExits.get(id)?.reason !== "connection-lost") return false;
+    return this.recentExits.delete(id);
+  }
+
+  private pruneRecentExits(): void {
+    const cutoff = Date.now() - RECENT_EXIT_MAX_AGE_MS;
+    for (const [id, exit] of this.recentExits) {
+      if (exit.endedAt <= cutoff) this.recentExits.delete(id);
+    }
+    while (this.recentExits.size > MAX_RECENT_EXITS) {
+      this.recentExits.delete(this.recentExits.keys().next().value!);
+    }
   }
 
   terminateAll(): number[] {
