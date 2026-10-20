@@ -65,12 +65,14 @@ describe("WorkerRegistry Kimi ACP events", () => {
     const onTurnResult = vi.fn();
     const onApprovalRequested = vi.fn();
     const setProviderCommands = vi.fn();
+    const touchSessionActivity = vi.fn(() => true);
     const sessionManager = createSessionManagerFake(sessions);
     const registry = new WorkerRegistry({
       sessionManager,
       permissionBroker,
       relayConnection: relay.relayConnection,
       jsonObserver: createJsonObserverFake({ onTurnStart, onTurnResult, onApprovalRequested }),
+      touchSessionActivity,
       getProviderEnv: () => ({}),
       setProviderCommands,
     });
@@ -96,11 +98,12 @@ describe("WorkerRegistry Kimi ACP events", () => {
       onTurnResult,
       onApprovalRequested,
       setProviderCommands,
+      touchSessionActivity,
     };
   }
 
   it("streams Kimi text as growing assistant snapshots and completes the turn", async () => {
-    const { relay, onTurnResult } = await createConnectedRegistry();
+    const { relay, onTurnResult, touchSessionActivity } = await createConnectedRegistry();
 
     acceptedSocket?.write(
       serializeWorkerMsg({
@@ -157,6 +160,29 @@ describe("WorkerRegistry Kimi ACP events", () => {
       isError: false,
     });
     expect(onTurnResult).toHaveBeenCalledWith("s1");
+    expect(touchSessionActivity).toHaveBeenCalledTimes(3);
+  });
+
+  it("does not count ignored or unknown ACP updates as activity", async () => {
+    const { relay, onTurnResult, touchSessionActivity } = await createConnectedRegistry();
+    const events = [
+      acpUpdate("usage_update", {}),
+      acpUpdate("session_info_update", {}),
+      acpUpdate("future_update", {}),
+      acpUpdate("agent_message_chunk", { content: { type: "text", text: "" } }),
+      {
+        type: "kimi_acp",
+        method: "session/prompt/result",
+        params: { response: { stopReason: "end_turn" } },
+      },
+    ];
+    for (const [seq, event] of events.entries()) {
+      acceptedSocket?.write(serializeWorkerMsg({ type: "worker_event", seq, event }));
+    }
+
+    await vi.waitFor(() => expect(onTurnResult).toHaveBeenCalledWith("s1"));
+    expect(relay.envelopes).toHaveLength(0);
+    expect(touchSessionActivity).toHaveBeenCalledExactlyOnceWith("s1");
   });
 
   it("marks each queued Kimi prompt working when ACP actually starts it", async () => {
@@ -183,7 +209,7 @@ describe("WorkerRegistry Kimi ACP events", () => {
   });
 
   it("forwards Kimi tool lifecycle updates and thought chunks", async () => {
-    const { relay } = await createConnectedRegistry();
+    const { relay, touchSessionActivity } = await createConnectedRegistry();
 
     acceptedSocket?.write(
       serializeWorkerMsg({
@@ -220,6 +246,7 @@ describe("WorkerRegistry Kimi ACP events", () => {
     );
 
     await vi.waitFor(() => expect(relay.envelopes).toHaveLength(3));
+    expect(touchSessionActivity).toHaveBeenCalledTimes(3);
     expect(relay.envelopes).toEqual([
       expect.objectContaining({ type: "thinking", payload: { text: "检查文件" } }),
       expect.objectContaining({
@@ -289,7 +316,8 @@ describe("WorkerRegistry Kimi ACP events", () => {
   });
 
   it("maps available commands and captures the native Kimi session id", async () => {
-    const { relay, sessionManager, setProviderCommands } = await createConnectedRegistry();
+    const { relay, sessionManager, setProviderCommands, touchSessionActivity } =
+      await createConnectedRegistry();
 
     acceptedSocket?.write(
       serializeWorkerMsg({
@@ -338,5 +366,6 @@ describe("WorkerRegistry Kimi ACP events", () => {
     await vi.waitFor(() =>
       expect(sessionManager.setHistorySessionId).toHaveBeenCalledWith("s1", "kimi-native-1"),
     );
+    expect(touchSessionActivity).not.toHaveBeenCalled();
   });
 });

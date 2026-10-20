@@ -8,6 +8,7 @@ import {
   SessionState,
   type ControlErrorCode as ControlErrorCodeType,
   type CommandEntry,
+  type MessageEnvelope,
 } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
 import {
@@ -84,6 +85,19 @@ interface AssistantSnapshotState {
 }
 
 const RECONNECT_WORKER_HANDSHAKE_TIMEOUT_MS = 1_000;
+
+function isConversationActivityEnvelope(envelope: MessageEnvelope): boolean {
+  switch (envelope.type) {
+    case "assistant_message":
+    case "thinking":
+    case "assistant_tool_use":
+    case "tool_result":
+    case "user_input":
+      return true;
+    default:
+      return false;
+  }
+}
 
 export class WorkerStartupError extends Error {
   constructor(
@@ -1035,7 +1049,6 @@ export class WorkerRegistry {
       return;
     }
     const ev = parsed.data;
-    this.deps.touchSessionActivity?.(sessionId);
     // Claude worker 始终以 --stream-delta 启动；aggregated assistant text 会与
     // delta 重复，因此只消费增量内容。
     const isStreamDeltaSession = true;
@@ -1056,6 +1069,8 @@ export class WorkerRegistry {
       }
     }
 
+    // Metadata and ignored events do not represent conversation activity.
+    let forwardedActivity = false;
     for (const mapped of mapClaudeStreamEvent(sessionId, seq, {
       event: ev,
       isStreamDeltaSession,
@@ -1063,14 +1078,17 @@ export class WorkerRegistry {
     })) {
       if (mapped.kind === "assistant_text") {
         this.appendAssistantSnapshot(sessionId, seq, mapped.text, mapped.turnId);
+        forwardedActivity = true;
       } else if (mapped.kind === "envelope") {
         if (mapped.envelope.type === "assistant_tool_use") {
           this.completeAssistantSnapshot(sessionId, seq);
         }
         relay.sendEnvelope(mapped.envelope);
+        forwardedActivity ||= isConversationActivityEnvelope(mapped.envelope);
       } else if (mapped.kind === "control") {
         this.completeAssistantSnapshot(sessionId, seq);
         relay.sendRaw(mapped.raw);
+        forwardedActivity ||= mapped.notifyTurnResult;
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       } else {
         serviceLogger.warn(
@@ -1079,6 +1097,7 @@ export class WorkerRegistry {
         );
       }
     }
+    if (forwardedActivity) this.deps.touchSessionActivity?.(sessionId);
   }
 
   private forwardCodexAppServerEvent(
@@ -1087,21 +1106,25 @@ export class WorkerRegistry {
     event: Record<string, unknown>,
   ): void {
     const relay = this.deps.relayConnection;
-    this.deps.touchSessionActivity?.(sessionId);
+    let forwardedActivity = false;
     for (const mapped of mapCodexAppServerEvent(sessionId, seq, event)) {
       if (mapped.kind === "assistant_text") {
         this.appendAssistantSnapshot(sessionId, seq, mapped.text, mapped.turnId);
+        forwardedActivity = true;
       } else if (mapped.kind === "envelope") {
         if (mapped.envelope.type === "assistant_tool_use") {
           this.completeAssistantSnapshot(sessionId, seq);
         }
         relay.sendEnvelope(mapped.envelope);
+        forwardedActivity ||= isConversationActivityEnvelope(mapped.envelope);
       } else {
         this.completeAssistantSnapshot(sessionId, seq);
         relay.sendRaw(mapped.raw);
+        forwardedActivity ||= mapped.notifyTurnResult;
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       }
     }
+    if (forwardedActivity) this.deps.touchSessionActivity?.(sessionId);
   }
 
   private forwardKimiAcpEvent(
@@ -1110,10 +1133,11 @@ export class WorkerRegistry {
     event: Record<string, unknown>,
   ): void {
     const relay = this.deps.relayConnection;
-    this.deps.touchSessionActivity?.(sessionId);
+    let forwardedActivity = false;
     for (const mapped of this.kimiAcpEventMapper.map(sessionId, seq, event)) {
       if (mapped.kind === "assistant_text") {
         this.appendAssistantSnapshot(sessionId, seq, mapped.text);
+        forwardedActivity = true;
       } else if (mapped.kind === "envelope") {
         if (
           mapped.envelope.type === "assistant_tool_use" ||
@@ -1122,12 +1146,14 @@ export class WorkerRegistry {
           this.completeAssistantSnapshot(sessionId, seq);
         }
         relay.sendEnvelope(mapped.envelope);
+        forwardedActivity ||= isConversationActivityEnvelope(mapped.envelope);
       } else if (mapped.kind === "control") {
         if (mapped.providerCommands) {
           this.deps.setProviderCommands?.(sessionId, mapped.providerCommands);
         }
         if (mapped.completeAssistant !== false) this.completeAssistantSnapshot(sessionId, seq);
         relay.sendRaw(mapped.raw);
+        forwardedActivity ||= mapped.notifyTurnResult;
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       } else {
         serviceLogger.warn(
@@ -1136,6 +1162,7 @@ export class WorkerRegistry {
         );
       }
     }
+    if (forwardedActivity) this.deps.touchSessionActivity?.(sessionId);
   }
 
   private forwardCursorAcpEvent(
@@ -1144,11 +1171,12 @@ export class WorkerRegistry {
     event: Record<string, unknown>,
   ): void {
     const relay = this.deps.relayConnection;
-    this.deps.touchSessionActivity?.(sessionId);
+    let forwardedActivity = false;
     for (const mapped of this.cursorAcpEventMapper.map(sessionId, seq, event)) {
       if (mapped.kind === "assistant_text") {
         if (this.interruptedCursorSessions.has(sessionId)) continue;
         this.appendAssistantSnapshot(sessionId, seq, mapped.text);
+        forwardedActivity = true;
       } else if (mapped.kind === "envelope") {
         if (
           mapped.envelope.type === "assistant_tool_use" ||
@@ -1158,12 +1186,14 @@ export class WorkerRegistry {
           this.completeAssistantSnapshot(sessionId, seq);
         }
         relay.sendEnvelope(mapped.envelope);
+        forwardedActivity ||= isConversationActivityEnvelope(mapped.envelope);
       } else if (mapped.kind === "control") {
         if (mapped.providerCommands) {
           this.deps.setProviderCommands?.(sessionId, mapped.providerCommands);
         }
         if (mapped.completeAssistant !== false) this.completeAssistantSnapshot(sessionId, seq);
         relay.sendRaw(mapped.raw);
+        forwardedActivity ||= mapped.notifyTurnResult;
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       } else {
         serviceLogger.warn(
@@ -1172,6 +1202,7 @@ export class WorkerRegistry {
         );
       }
     }
+    if (forwardedActivity) this.deps.touchSessionActivity?.(sessionId);
   }
 
   private nextAssistantTurnId(sessionId: string): string {

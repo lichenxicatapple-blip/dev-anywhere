@@ -1,6 +1,7 @@
 import type { Socket } from "node:net";
 import {
   ControlErrorCode,
+  SessionState,
   encodeBinaryFrame,
   serializeControl,
   type AgentStatusPayload,
@@ -439,8 +440,19 @@ export function handleTerminalConnection(
     },
     (sessionId, data, outputSeq) => {
       if (protocolRejected) return;
-      if (!ownsRegisteredSession(sessionId) || !sessionManager.getSession(sessionId)) return;
-      touchSessionActivity(sessionManager, relayConnection, sessionId);
+      if (!ownsRegisteredSession(sessionId)) return;
+      const session = sessionManager.getSession(sessionId);
+      if (!session) return;
+      // Agent TUIs also redraw while idle (for example, account usage in the footer).
+      // Only output during a task counts as activity; accepted lifecycle transitions
+      // already record task submission, completion and approval changes. Shell output
+      // remains activity because shells do not emit agent lifecycle events.
+      if (
+        data.length > 0 &&
+        (session.kind === "terminal" || session.state === SessionState.WORKING)
+      ) {
+        touchSessionActivity(sessionManager, relayConnection, sessionId);
+      }
       // Local-terminal lifecycle is owned by pty_semantic_event. Codex and Claude can emit
       // redraw/cursor output while waiting for input; promoting every byte frame to working
       // would reopen an already completed turn without a matching future turn_complete event.

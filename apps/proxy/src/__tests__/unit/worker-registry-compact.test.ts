@@ -36,9 +36,10 @@ describe("WorkerRegistry compact command events", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  function createRegistry() {
+  function createRegistry(state: SessionState = SessionState.COMPACTING) {
     const relay = createRelayConnectionFake();
     const onTurnResult = vi.fn();
+    const touchSessionActivity = vi.fn(() => true);
     const registry = new WorkerRegistry({
       sessionManager: createSessionManagerFake([
         {
@@ -46,7 +47,7 @@ describe("WorkerRegistry compact command events", () => {
           kind: "agent",
           mode: "json",
           provider: "claude",
-          state: SessionState.COMPACTING,
+          state,
           createdAt: 1,
           updatedAt: 1,
           cwd: "/tmp",
@@ -56,9 +57,10 @@ describe("WorkerRegistry compact command events", () => {
       permissionBroker: new PermissionBroker(),
       relayConnection: relay.relayConnection,
       jsonObserver: createJsonObserverFake({ onTurnResult }),
+      touchSessionActivity,
       getProviderEnv: () => ({}),
     });
-    return { registry, relay, onTurnResult };
+    return { registry, relay, onTurnResult, touchSessionActivity };
   }
 
   async function connectAndWrite(registry: WorkerRegistry, event: Record<string, unknown>) {
@@ -100,6 +102,46 @@ describe("WorkerRegistry compact command events", () => {
       result: "上下文压缩失败：API Error: 502 upstream disconnected",
     });
     expect(onTurnResult).toHaveBeenCalledWith("s1");
+  });
+
+  it("ignores Claude metadata and empty content while counting a real reply and result", async () => {
+    const { registry, relay, onTurnResult, touchSessionActivity } = createRegistry(
+      SessionState.IDLE,
+    );
+    await connectAndWrite(registry, { type: "system", subtype: "init" });
+    const events = [
+      { type: "system", subtype: "status", status: "idle" },
+      { type: "rate_limit_event" },
+      { type: "stream_event", event: { type: "message_start" } },
+      {
+        type: "assistant",
+        message: { content: [{ type: "future_block" }] },
+      },
+      {
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "" },
+        },
+      },
+      {
+        type: "stream_event",
+        event: {
+          type: "content_block_delta",
+          index: 0,
+          delta: { type: "text_delta", text: "完成" },
+        },
+      },
+      { type: "result", subtype: "success" },
+    ];
+    for (const [seq, event] of events.entries()) {
+      acceptedSocket?.write(serializeWorkerMsg({ type: "worker_event", seq: seq + 8, event }));
+    }
+
+    await vi.waitFor(() => expect(onTurnResult).toHaveBeenCalledWith("s1"));
+    expect(relay.envelopes).toHaveLength(2);
+    expect(touchSessionActivity).toHaveBeenCalledTimes(2);
   });
 
   it("aggregates Claude text deltas into growing full snapshots", async () => {

@@ -44,6 +44,7 @@ describe("WorkerRegistry Codex app-server events", () => {
   ) {
     const relay = createRelayConnectionFake();
     const onTurnResult = vi.fn();
+    const touchSessionActivity = vi.fn(() => true);
     const sessionManager = createSessionManagerFake([
       {
         id: "s1",
@@ -62,17 +63,18 @@ describe("WorkerRegistry Codex app-server events", () => {
       permissionBroker: new PermissionBroker(),
       relayConnection: relay.relayConnection,
       jsonObserver: createJsonObserverFake({ onTurnResult }),
+      touchSessionActivity,
       getProviderEnv: () => ({}),
     });
     const sock = await registry.connect("s1", sockPath);
     expect(sock).not.toBeNull();
     acceptedSocket?.write(serializeWorkerHandshake("s1", 1, "codex", ready));
     await registry.waitForReady("s1", 1_000);
-    return { relay, onTurnResult, sessionManager };
+    return { relay, onTurnResult, sessionManager, touchSessionActivity };
   }
 
   it("forwards Codex agent message deltas as assistant messages", async () => {
-    const { relay } = await createConnectedRegistry();
+    const { relay, touchSessionActivity } = await createConnectedRegistry();
 
     acceptedSocket?.write(
       serializeWorkerMsg({
@@ -87,6 +89,7 @@ describe("WorkerRegistry Codex app-server events", () => {
     );
 
     await vi.waitFor(() => expect(relay.envelopes).toHaveLength(1));
+    expect(touchSessionActivity).toHaveBeenCalledExactlyOnceWith("s1");
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_message",
       sessionId: "s1",
@@ -98,6 +101,31 @@ describe("WorkerRegistry Codex app-server events", () => {
         status: "streaming",
       },
     });
+  });
+
+  it("does not count rate limits, unknown notifications, or empty deltas as activity", async () => {
+    const { relay, onTurnResult, touchSessionActivity } = await createConnectedRegistry();
+    const notifications = [
+      { method: "account/rateLimits/updated", params: { rateLimits: { weekly: 79 } } },
+      { method: "thread/tokenUsage/updated", params: { threadId: "cx-1" } },
+      { method: "future/notification", params: {} },
+      { method: "item/agentMessage/delta", params: { delta: "" } },
+      { method: "turn/completed", params: { turn: { status: "completed" } } },
+    ];
+    for (const [seq, notification] of notifications.entries()) {
+      acceptedSocket?.write(
+        serializeWorkerMsg({
+          type: "worker_event",
+          seq,
+          event: { type: "codex_app_server", ...notification },
+        }),
+      );
+    }
+
+    // The final result proves all preceding notifications have been processed.
+    await vi.waitFor(() => expect(onTurnResult).toHaveBeenCalledWith("s1"));
+    expect(relay.envelopes).toHaveLength(0);
+    expect(touchSessionActivity).toHaveBeenCalledExactlyOnceWith("s1");
   });
 
   it("sends growing full snapshots for the same Codex message", async () => {
@@ -155,7 +183,7 @@ describe("WorkerRegistry Codex app-server events", () => {
   });
 
   it("maps Codex commandExecution items to tool use and tool result envelopes", async () => {
-    const { relay } = await createConnectedRegistry();
+    const { relay, touchSessionActivity } = await createConnectedRegistry();
 
     const item = {
       type: "commandExecution",
@@ -190,6 +218,7 @@ describe("WorkerRegistry Codex app-server events", () => {
     );
 
     await vi.waitFor(() => expect(relay.envelopes).toHaveLength(2));
+    expect(touchSessionActivity).toHaveBeenCalledTimes(2);
     expect(relay.envelopes[0]).toMatchObject({
       type: "assistant_tool_use",
       sessionId: "s1",

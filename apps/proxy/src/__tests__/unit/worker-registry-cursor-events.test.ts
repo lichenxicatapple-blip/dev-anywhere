@@ -48,6 +48,7 @@ describe("WorkerRegistry Cursor ACP events", () => {
     const relay = createRelayConnectionFake();
     const permissionBroker = new PermissionBroker();
     const onTurnResult = vi.fn();
+    const touchSessionActivity = vi.fn(() => true);
     const sessionManager = createSessionManagerFake([
       {
         id: "s1",
@@ -66,6 +67,7 @@ describe("WorkerRegistry Cursor ACP events", () => {
       permissionBroker,
       relayConnection: relay.relayConnection,
       jsonObserver: createJsonObserverFake({ onTurnResult }),
+      touchSessionActivity,
       getProviderEnv: () => ({}),
     });
     expect(await registry.connect("s1", sockPath)).not.toBeNull();
@@ -81,11 +83,11 @@ describe("WorkerRegistry Cursor ACP events", () => {
       serializeWorkerHandshake("s1", 1, "cursor", { type: "worker_ready", pid: 321 }),
     );
     await registry.waitForReady("s1", 1_000);
-    return { relay, onTurnResult };
+    return { relay, onTurnResult, touchSessionActivity };
   }
 
   it("streams Cursor text and forwards todo UI updates", async () => {
-    const { relay, onTurnResult } = await createConnectedRegistry();
+    const { relay, onTurnResult, touchSessionActivity } = await createConnectedRegistry();
 
     acceptedSocket?.write(
       serializeWorkerMsg({
@@ -140,10 +142,39 @@ describe("WorkerRegistry Cursor ACP events", () => {
       ]),
     );
     expect(onTurnResult).toHaveBeenCalledWith("s1");
+    expect(touchSessionActivity).toHaveBeenCalledTimes(2);
+  });
+
+  it("does not count ACP metadata, commands, or unknown notifications as activity", async () => {
+    const { relay, onTurnResult, touchSessionActivity } = await createConnectedRegistry();
+    const events = [
+      acpUpdate("usage_update", {}),
+      acpUpdate("session_info_update", {}),
+      acpUpdate("future_update", {}),
+      acpUpdate("available_commands_update", { availableCommands: [] }),
+      acpUpdate("agent_message_chunk", { content: { type: "text", text: "" } }),
+      { type: "cursor_acp", method: "future/notification", params: {} },
+      {
+        type: "cursor_acp",
+        method: "session/prompt/result",
+        params: { response: { stopReason: "end_turn" } },
+      },
+    ];
+    for (const [seq, event] of events.entries()) {
+      acceptedSocket?.write(serializeWorkerMsg({ type: "worker_event", seq, event }));
+    }
+
+    await vi.waitFor(() => expect(onTurnResult).toHaveBeenCalledWith("s1"));
+    expect(relay.envelopes).toHaveLength(0);
+    expect(relay.raw.map((raw) => JSON.parse(raw).type)).toEqual([
+      "command_list_push",
+      "turn_result",
+    ]);
+    expect(touchSessionActivity).toHaveBeenCalledExactlyOnceWith("s1");
   });
 
   it("completes the partial answer on interrupt and keeps the next turn in a new message", async () => {
-    const { relay } = await createConnectedRegistry();
+    const { relay, touchSessionActivity } = await createConnectedRegistry();
     const chunk = (seq: number, text: string) =>
       serializeWorkerMsg({
         type: "worker_event",
@@ -175,5 +206,6 @@ describe("WorkerRegistry Cursor ACP events", () => {
     const secondTurnId = (messages[2] as { payload: { turnId: string } }).payload.turnId;
     expect(secondTurnId).not.toBe(firstTurnId);
     expect(relay.envelopes.some((e) => JSON.stringify(e).includes("晚到"))).toBe(false);
+    expect(touchSessionActivity).toHaveBeenCalledTimes(2);
   });
 });
