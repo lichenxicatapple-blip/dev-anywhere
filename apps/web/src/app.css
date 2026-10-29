@@ -922,6 +922,23 @@ code.hljs,
   -webkit-text-fill-color: #f5f5f5 !important;
 }
 
+/* Native edit menus need an editable hit target even outside the clipped xterm screen. Keep it
+   at the pointer while the menu is open; remote cursor updates may still change inline styles. */
+[data-slot="pty-terminal"] .xterm-helpers:has(> [data-pty-context-menu]) {
+  position: fixed !important;
+  left: var(--pty-context-menu-x) !important;
+  top: var(--pty-context-menu-y) !important;
+  z-index: 1000 !important;
+}
+
+[data-slot="pty-terminal"] .xterm-helper-textarea[data-pty-context-menu] {
+  left: 0 !important;
+  top: 0 !important;
+  width: 20px !important;
+  height: 20px !important;
+  z-index: 1000 !important;
+}
+
 /* 用户开启“减少动态效果”时，关掉循环动画和过渡。 */
 @media (prefers-reduced-motion: reduce) {
   *,

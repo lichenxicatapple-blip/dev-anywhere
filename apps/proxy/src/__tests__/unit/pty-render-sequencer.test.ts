@@ -8,6 +8,58 @@ function snapshot(sequencer: PtyRenderSequencer): Promise<PtySnapshot> {
 }
 
 describe("PtyRenderSequencer", () => {
+  it("answers hosted default-color queries locally once across chunk boundaries", async () => {
+    const replies: string[] = [];
+    const sequencer = new PtyRenderSequencer({
+      cols: 80,
+      rows: 24,
+      onDefaultColorResponse: (data) => replies.push(data),
+    });
+    try {
+      for (const chunk of ["before\x1b", "]10;", "?\x1b", "\\\x1b]11;?", "\x07after"]) {
+        sequencer.write(chunk);
+      }
+      const first = await snapshot(sequencer);
+      expect(replies).toEqual([
+        "\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\",
+        "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
+      ]);
+      expect(first.data).toContain("beforeafter");
+      await snapshot(sequencer);
+      expect(replies).toHaveLength(2);
+      // No other terminal reports are forwarded through this local-response callback.
+      sequencer.write("\x1b[6n\x1b[c\x1b]12;?\x07\x1b]4;1;?\x07");
+      await snapshot(sequencer);
+      expect(replies).toHaveLength(2);
+    } finally {
+      sequencer.dispose();
+    }
+  });
+
+  it("reports current OSC colors and restores the shared defaults after reset", async () => {
+    const replies: string[] = [];
+    const sequencer = new PtyRenderSequencer({
+      cols: 80,
+      rows: 24,
+      onDefaultColorResponse: (data) => replies.push(data),
+    });
+    try {
+      sequencer.write("\x1b]10;#ffcc00;rgb:1/2/3\x07\x1b]10;?\x07\x1b]11;?\x07");
+      sequencer.write("\x1b]11;not-a-color\x07\x1b]11;?\x07");
+      sequencer.write("\x1b]110\x07\x1b]111\x1b\\\x1b]10;?\x07\x1b]11;?\x07");
+      await snapshot(sequencer);
+      expect(replies).toEqual([
+        "\x1b]10;rgb:ffff/cccc/0000\x1b\\",
+        "\x1b]11;rgb:1111/2222/3333\x1b\\",
+        "\x1b]11;rgb:1111/2222/3333\x1b\\",
+        "\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\",
+        "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\",
+      ]);
+    } finally {
+      sequencer.dispose();
+    }
+  });
+
   it("orders write -> snapshot -> resize -> write without leaking later state into the snapshot", async () => {
     const sequencer = new PtyRenderSequencer({ cols: 80, rows: 24 });
 

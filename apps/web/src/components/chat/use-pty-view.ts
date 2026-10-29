@@ -788,9 +788,11 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         event.preventDefault();
         return;
       }
+      // Native-menu paste has no keydown to dismiss the previous terminal selection.
+      clearPtySelection();
       handleTerminalPasteCapture(event);
     },
-    [canAcceptInput, handleTerminalPasteCapture],
+    [canAcceptInput, clearPtySelection, handleTerminalPasteCapture],
   );
 
   // 拖拽任意文件到终端容器: 上传后把 "@<path> " 写到 PTY stdin, 与 chat-header

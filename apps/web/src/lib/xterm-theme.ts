@@ -1,5 +1,6 @@
 import type { ITheme } from "@xterm/xterm";
 import type { ISearchOptions } from "@xterm/addon-search";
+import { PTY_DEFAULT_BACKGROUND, PTY_DEFAULT_FOREGROUND } from "@dev-anywhere/shared";
 
 export const XTERM_TERMINAL_PROFILE = "fixed-dark";
 export const XTERM_ANSI16_COLOR_PROFILE = "vscode-dark-plus";
@@ -9,11 +10,11 @@ export const XTERM_ANSI16_COLOR_PROFILE = "vscode-dark-plus";
 // SGR 30-37/90-97 这类索引颜色映射成 RGB。远端进程输出 truecolor 或
 // ANSI background 时, 仍按远端自己的转义序列渲染。
 export const xtermFixedDarkTheme: ITheme = {
-  background: "#1E1E1E",
-  foreground: "#D4D4D4",
+  background: PTY_DEFAULT_BACKGROUND,
+  foreground: PTY_DEFAULT_FOREGROUND,
   // PTY 模式已支持逐键输入，光标必须可见；未聚焦时由 xterm 的 outline 样式表达焦点状态。
-  cursor: "#D4D4D4",
-  cursorAccent: "#1E1E1E",
+  cursor: PTY_DEFAULT_FOREGROUND,
+  cursorAccent: PTY_DEFAULT_BACKGROUND,
   selectionBackground: "#264F78",
   selectionForeground: undefined,
   black: "#000000",

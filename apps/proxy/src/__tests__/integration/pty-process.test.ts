@@ -5,6 +5,7 @@ import { fileURLToPath } from "node:url";
 import { stripVTControlCharacters } from "node:util";
 import { spawn } from "node-pty";
 import { expect, it } from "vitest";
+import { PtyRuntime } from "#src/common/pty-runtime.js";
 
 it("starts a real PTY, accepts input, resizes its child and exits normally", async () => {
   const root = mkdtempSync(join(tmpdir(), "dev-anywhere-pty-"));
@@ -56,3 +57,50 @@ it("starts a real PTY, accepts input, resizes its child and exits normally", asy
     rmSync(root, { recursive: true, force: true });
   }
 }, 30_000);
+
+it("answers hosted startup color probes inside the CLI deadline without a Web viewer", async () => {
+  const root = mkdtempSync(join(tmpdir(), "dev-anywhere-pty-colors-"));
+  const fixture = join(root, "pty-color-probe-child.mjs");
+  copyFileSync(
+    fileURLToPath(new URL("./fixtures/pty-color-probe-child.ts", import.meta.url)),
+    fixture,
+  );
+  let output = "";
+  let exit: { exitCode: number } | undefined;
+  const runtime = new PtyRuntime(
+    {
+      sessionId: "native-color-probe",
+      kind: "agent",
+      provider: "codex",
+      args: [fixture],
+      cwd: root,
+      cols: 80,
+      rows: 24,
+      env: { ...process.env, NODE_OPTIONS: "", CODEX_BIN: process.execPath },
+    },
+    {
+      output: (data) => (output = `${output}${data}`.slice(-16_384)),
+      resize: () => {},
+      title: () => {},
+      cwd: () => {},
+      semantic: () => {},
+      exit: (event) => (exit = event),
+    },
+  );
+  try {
+    runtime.start();
+    await expect
+      .poll(() => stripVTControlCharacters(output), { timeout: 8_000 })
+      .toMatch(/PTY_COLOR_READY:\d+/);
+    // Ordinary input uses the same PTY and remains byte-for-byte intact after terminal probing.
+    runtime.write("user input\r");
+    await expect.poll(() => exit?.exitCode, { timeout: 5_000 }).toBe(0);
+    expect(stripVTControlCharacters(output)).toContain('"error":null');
+  } catch (error) {
+    console.error("PTY color probe output before failure:", JSON.stringify(output.slice(-2_048)));
+    throw error;
+  } finally {
+    await runtime.terminate();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 20_000);

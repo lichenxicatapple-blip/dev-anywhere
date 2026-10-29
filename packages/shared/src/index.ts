@@ -1,4 +1,5 @@
 // schemas
+export { PTY_DEFAULT_FOREGROUND, PTY_DEFAULT_BACKGROUND } from "./constants/terminal-colors.js";
 export { IdSchema } from "./schemas/id.js";
 export { MessageEnvelopeSchema } from "./schemas/envelope.js";
 export type { MessageEnvelope, MessageType, MessageSource } from "./schemas/envelope.js";

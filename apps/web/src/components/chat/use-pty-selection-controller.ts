@@ -7,6 +7,7 @@ import type {
 import type { IBuffer, IBufferLine, IDisposable, IMarker, Terminal } from "@xterm/xterm";
 import { toast } from "@/components/toast";
 import { copyText } from "@/lib/copy-text";
+import { preparePtyContextMenu } from "@/lib/pty-context-menu";
 import { createEdgeAutoscrollStepper, getEdgeAutoscrollDelta } from "@/lib/pty-edge-autoscroll";
 import {
   getTerminalPointAtClient,
@@ -965,6 +966,7 @@ export function usePtySelectionController(
     let autoscrollFrame: number | null = null;
     const autoscrollStepper = createEdgeAutoscrollStepper();
     let managedCopyEventHandled = false;
+    let resetContextMenu: (() => void) | undefined;
     let gestureMarkerBinding: {
       terminal: Terminal;
       buffer: IBuffer;
@@ -1466,7 +1468,8 @@ export function usePtySelectionController(
       const target = event.target;
       const point = getPointAtClient(event.clientX, event.clientY, false);
       if (!terminal || !(target instanceof Element)) return;
-      if (!target.closest(".xterm") && !point) return;
+      if (target.closest('[data-slot="pty-selection-handle"]')) return;
+      resetContextMenu?.();
       const currentRange = getPtyManagedSelectionRange(managedStateRef.current);
       if (point && (!currentRange || !managedRangeContainsPoint(currentRange, point))) {
         const previousSelectionLines = selectionLinesRef.current;
@@ -1494,29 +1497,17 @@ export function usePtySelectionController(
         } else selectionLinesRef.current = previousSelectionLines;
       }
 
-      const range = getPtyManagedSelectionRange(managedStateRef.current);
-      if (!range) return;
       const selected = refreshCurrentSelection()?.text ?? "";
       const textarea =
         terminal.element?.querySelector<HTMLTextAreaElement>(".xterm-helper-textarea");
-      const screen = terminal.element?.querySelector<HTMLElement>(".xterm-screen");
-      if (!textarea || !screen) return;
+      if (!textarea) return;
 
       // xterm's native context-menu path reads its private SelectionService. Feed the browser's
       // Copy action from the managed range instead and stop that later handler from replacing the
-      // helper value with an empty native selection.
+      // helper value with an empty native selection. Blank surface clicks also need an editable
+      // target: focusing the offscreen helper alone produces an ordinary page menu without Paste.
       event.stopImmediatePropagation();
-      const screenRect = screen.getBoundingClientRect();
-      Object.assign(textarea.style, {
-        width: "20px",
-        height: "20px",
-        left: `${event.clientX - screenRect.left - 10}px`,
-        top: `${event.clientY - screenRect.top - 10}px`,
-        zIndex: "1000",
-      });
-      textarea.value = selected;
-      textarea.focus({ preventScroll: true });
-      textarea.select();
+      resetContextMenu = preparePtyContextMenu(textarea, event, selected);
     };
 
     containerEl.addEventListener("mousedown", onMouseDown, true);
@@ -1530,6 +1521,7 @@ export function usePtySelectionController(
     window.addEventListener("blur", onWindowBlur);
     window.addEventListener("pagehide", onPageHide);
     return () => {
+      resetContextMenu?.();
       if (gesture) {
         effectTerminal?.clearSelection();
         finishDesktopGesture("cancel", gesture.lastX, gesture.lastY);

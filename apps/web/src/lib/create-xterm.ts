@@ -87,6 +87,13 @@ export async function createXtermTerminal(
   }
 
   const terminal = new Terminal(buildXtermTerminalOptions(options));
+  // The owning terminal answers default-color queries: the Proxy does so locally for hosted
+  // sessions, and the physical terminal handles CLI-owned sessions. A mirrored browser response
+  // can arrive after the application's startup probe expires and become literal user input.
+  // Keep color setters and all other terminal queries on xterm's normal path.
+  const colorQueryHandlers = [10, 11].map((identifier) =>
+    terminal.parser.registerOscHandler(identifier, (data) => data === "?"),
+  );
 
   const serializeAddon = new SerializeAddon();
   const webLinksAddon = new WebLinksAddon();
@@ -128,6 +135,7 @@ export async function createXtermTerminal(
       document.removeEventListener("visibilitychange", onVisibilityChange);
       window.removeEventListener("pageshow", onPageShow);
       window.removeEventListener("focus", onWindowFocus);
+      for (const handler of colorQueryHandlers) handler.dispose();
       terminal.dispose();
     },
   };

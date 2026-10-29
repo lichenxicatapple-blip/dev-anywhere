@@ -91,6 +91,22 @@ const snapshot = (runtime: PtyRuntime) =>
   new Promise<PtySnapshot>((resolve) => runtime.snapshot(resolve));
 
 describe("PTY runtime", () => {
+  it("answers startup color probes without a viewer or a user-input state transition", async () => {
+    const { runtime, child, data, events } = createRuntime({
+      kind: "agent",
+      provider: "codex",
+      args: [],
+    });
+    data("\x1b]10;?\x1b\\\x1b]11;?\x1b\\");
+    await snapshot(runtime);
+    expect(child.write).toHaveBeenCalledTimes(2);
+    expect(child.write).toHaveBeenNthCalledWith(1, "\x1b]10;rgb:d4d4/d4d4/d4d4\x1b\\");
+    expect(child.write).toHaveBeenNthCalledWith(2, "\x1b]11;rgb:1e1e/1e1e/1e1e\x1b\\");
+    expect(events.semantic).not.toHaveBeenCalled();
+    runtime.write("normal input");
+    expect(child.write).toHaveBeenLastCalledWith("normal input");
+  });
+
   it("builds provider-specific resume args", () => {
     expect(buildHostedPtyArgs("claude", "native")).toEqual(["--resume", "native"]);
     expect(buildHostedPtyArgs("codex", "native")).toEqual(["resume", "native"]);

@@ -133,7 +133,12 @@ export class PtyRuntime {
     this.inputCompat = createPtyInputCompat(
       options.kind === "agent" ? options.provider : undefined,
     );
-    this.renderSequencer = new PtyRenderSequencer(options);
+    this.renderSequencer = new PtyRenderSequencer({
+      ...options,
+      onDefaultColorResponse: (data) => {
+        if (!this.closed) this.child?.write(data);
+      },
+    });
     this.xtermHistoryCompat = createCodexXtermHistoryCompat(
       options.kind === "agent" ? options.provider : null,
       options.rows,

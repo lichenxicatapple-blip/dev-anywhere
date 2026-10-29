@@ -1,6 +1,7 @@
 import pkg from "@xterm/headless";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
+import { attachPtyDefaultColorResponder } from "./pty-default-color-responder.js";
 
 const { Terminal: HeadlessTerminal } = pkg;
 
@@ -15,6 +16,7 @@ interface PtyRenderSequencerOptions {
   cols: number;
   rows: number;
   scrollback?: number;
+  onDefaultColorResponse?: (data: string) => void;
 }
 
 /**
@@ -40,6 +42,9 @@ export class PtyRenderSequencer {
     });
     this.terminal.loadAddon(this.serializeAddon);
     this.terminal.loadAddon(new UnicodeGraphemesAddon());
+    if (options.onDefaultColorResponse) {
+      attachPtyDefaultColorResponder(this.terminal, options.onDefaultColorResponse);
+    }
   }
 
   get cols(): number {
