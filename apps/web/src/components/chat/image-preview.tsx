@@ -7,7 +7,11 @@ import {
   LoaderCircle,
   XIcon,
 } from "lucide-react";
-import { TransformComponent, TransformWrapper } from "react-zoom-pan-pinch";
+import {
+  TransformComponent,
+  TransformWrapper,
+  type ReactZoomPanPinchRef,
+} from "react-zoom-pan-pinch";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -25,6 +29,9 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/components/toast";
 
 import type { MediaPreviewState } from "./media-preview";
+import { useImagePreviewGesture } from "./use-image-preview-gesture";
+
+const MAX_IMAGE_SCALE = 8;
 
 type ImagePreviewSize = {
   width: number;
@@ -51,6 +58,7 @@ export function ImagePreviewDialog({
   const [naturalSize, setNaturalSize] = useState<ImagePreviewNaturalSize | null>(null);
   const [copyingImage, setCopyingImage] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
+  const transformRef = useRef<ReactZoomPanPinchRef | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const source = open && state.status === "ready" && state.url ? state.url : "";
   const preview = useImagePreviewSource(source, state.path);
@@ -68,6 +76,14 @@ export function ImagePreviewDialog({
   const imageContentStyle = currentNaturalSize
     ? { width: currentNaturalSize.width, height: currentNaturalSize.height }
     : undefined;
+
+  useImagePreviewGesture({
+    stageRef,
+    transformRef,
+    enabled: open && imageLoaded && !showDecodeError,
+    minScale: fitScale,
+    maxScale: MAX_IMAGE_SCALE,
+  });
 
   useEffect(() => {
     setLoadedSrc((current) => (current === src ? current : ""));
@@ -196,9 +212,10 @@ export function ImagePreviewDialog({
             // 内容尺寸进入 transform 后被裁切且无法横向移动。
             <TransformWrapper
               key={transformKey}
+              ref={transformRef}
               initialScale={fitScale}
               minScale={fitScale}
-              maxScale={8}
+              maxScale={MAX_IMAGE_SCALE}
               centerOnInit
               centerZoomedOut
               limitToBounds
