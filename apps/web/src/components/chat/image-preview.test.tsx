@@ -23,6 +23,9 @@ vi.mock("@/components/toast", () => ({
 }));
 
 vi.mock("react-zoom-pan-pinch", () => ({
+  useControls: () => ({ instance: { wrapperComponent: null } }),
+  useTransformComponent: (select: (context: { state: { scale: number } }) => unknown) =>
+    select({ state: { scale: 1 } }),
   TransformWrapper: ({ children }: { children?: ReactNode }) => (
     <div data-slot="mock-transform-wrapper">{children}</div>
   ),

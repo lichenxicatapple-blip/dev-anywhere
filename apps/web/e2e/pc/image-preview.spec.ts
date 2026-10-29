@@ -99,29 +99,6 @@ async function getTransformScale(transform: Locator): Promise<number> {
   return transform.evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).a);
 }
 
-// These are Safari-shaped DOM events, not physical trackpad input. Chromium's
-// trusted wheel/touch tests below cover the existing input paths separately.
-async function dispatchSafariGesture(
-  target: Locator,
-  type: "gesturestart" | "gesturechange" | "gestureend",
-  scale: number,
-  point: { x: number; y: number },
-): Promise<boolean> {
-  return target.evaluate(
-    (element, gesture) => {
-      const event = new Event(gesture.type, { bubbles: true, cancelable: true });
-      Object.defineProperties(event, {
-        scale: { value: gesture.scale },
-        clientX: { value: gesture.point.x },
-        clientY: { value: gesture.point.y },
-      });
-      element.dispatchEvent(event);
-      return event.defaultPrevented;
-    },
-    { type, scale, point },
-  );
-}
-
 async function waitForPreviewOpeningAnimation(page: Page): Promise<void> {
   await page.locator('[data-slot="image-preview-dialog"]').evaluate(async (dialog) => {
     await Promise.all(dialog.getAnimations().map((animation) => animation.finished));
@@ -200,6 +177,90 @@ test.describe("image preview", () => {
   test.beforeEach(async ({ page }) => {
     await installFakeRelay(page);
   });
+
+  for (const display of [
+    { name: "desktop", viewport: { width: 1280, height: 800 }, hasTouch: false },
+    { name: "tablet", viewport: { width: 1210, height: 702 }, hasTouch: true },
+    { name: "phone", viewport: { width: 390, height: 844 }, hasTouch: true },
+  ]) {
+    test.describe(`zoom buttons on ${display.name}`, () => {
+      test.use({ viewport: display.viewport, hasTouch: display.hasTouch });
+
+      test("zooms only the image, permits dragging, and keeps controls in the stage", async ({
+        page,
+      }, testInfo) => {
+        const path = ".dev-anywhere/clipboard/test-sess/zoom-controls.png";
+        await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+        await setWideImagePreviewData(page);
+        await openJsonPreview(page, path);
+        await expectPreviewReady(page, path);
+        await waitForPreviewOpeningAnimation(page);
+
+        const dialog = page.locator('[data-slot="image-preview-dialog"]');
+        const stage = page.locator('[data-slot="image-preview-stage"]');
+        const controls = page.locator('[data-slot="image-preview-zoom-controls"]');
+        const transform = stage.locator(".react-transform-component");
+        const zoomIn = page.getByRole("button", { name: "放大图片", exact: true });
+        const zoomOut = page.getByRole("button", { name: "缩小图片", exact: true });
+        await waitForTransformToSettle(transform);
+        const fitScale = await getTransformScale(transform);
+        const dialogBefore = (await dialog.boundingBox())!;
+        const controlsBefore = (await controls.boundingBox())!;
+        const pageScaleBefore = await page.evaluate(() => window.visualViewport?.scale ?? 1);
+        await expect(zoomOut).toBeDisabled();
+        await expect(zoomIn).toBeEnabled();
+        for (const button of [zoomIn, zoomOut]) {
+          const box = (await button.boundingBox())!;
+          expect(box.width).toBeGreaterThanOrEqual(32);
+          expect(box.height).toBeGreaterThanOrEqual(32);
+        }
+        await expectInside(stage, controls, "zoom controls");
+
+        // Real browser clicks and pointer dragging exercise the fallback the
+        // user can use even when Safari owns the hardware pinch gesture.
+        await zoomIn.click();
+        await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(fitScale);
+        await waitForTransformToSettle(transform);
+        await expect(zoomOut).toBeEnabled();
+        const zoomedScale = await getTransformScale(transform);
+        const beforePan = await transform.evaluate(
+          (el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).e,
+        );
+        const stageBox = (await stage.boundingBox())!;
+        const x = stageBox.x + stageBox.width / 2;
+        const y = stageBox.y + stageBox.height / 2;
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(x + 60, y, { steps: 10 });
+        await page.mouse.up();
+        await waitForTransformToSettle(transform);
+        expect(
+          await transform.evaluate((el) => new DOMMatrixReadOnly(getComputedStyle(el).transform).e),
+        ).toBeGreaterThan(beforePan + 10);
+        expect(await getTransformScale(transform)).toBeCloseTo(zoomedScale, 3);
+
+        const controlsAfter = (await controls.boundingBox())!;
+        const dialogAfter = (await dialog.boundingBox())!;
+        for (const key of ["x", "y", "width", "height"] as const) {
+          expect(controlsAfter[key]).toBeCloseTo(controlsBefore[key], 0);
+          expect(dialogAfter[key]).toBeCloseTo(dialogBefore[key], 0);
+        }
+        expect(await page.evaluate(() => window.visualViewport?.scale ?? 1)).toBe(pageScaleBefore);
+        await expectInside(stage, controls, "zoom controls after panning");
+        const screenshotPath = testInfo.outputPath(`${display.name}-zoom-controls.png`);
+        await dialog.screenshot({ path: screenshotPath });
+        await testInfo.attach(`${display.name}-zoom-controls`, {
+          path: screenshotPath,
+          contentType: "image/png",
+        });
+
+        await zoomOut.click();
+        await expect.poll(() => getTransformScale(transform)).toBeCloseTo(fitScale, 3);
+        await expect(zoomOut).toBeDisabled();
+        await expect(zoomIn).toBeEnabled();
+      });
+    });
+  }
 
   test.describe("desktop", () => {
     test.use({ viewport: { width: 1280, height: 800 }, hasTouch: false });
@@ -480,192 +541,28 @@ test.describe("image preview", () => {
       await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale, 3);
     });
 
-    test("simulated Safari trackpad gestures zoom cumulatively around the pointer and stay inside the preview", async ({
-      page,
-    }) => {
-      const path = ".dev-anywhere/clipboard/test-sess/safari-trackpad.png";
+    test("zoom buttons stop at maximum size and re-enable after zooming out", async ({ page }) => {
+      const path = ".dev-anywhere/clipboard/test-sess/zoom-button-limits.png";
       await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-      await setWideImagePreviewData(page);
       await openJsonPreview(page, path);
       await expectPreviewReady(page, path);
       await waitForPreviewOpeningAnimation(page);
-
-      const stage = page.locator('[data-slot="image-preview-stage"]');
-      const transform = stage.locator(".react-transform-component");
-      await waitForTransformToSettle(transform);
-      const box = (await stage.boundingBox())!;
-      const point = { x: box.x + box.width * 0.4, y: box.y + box.height / 2 };
-      const initialScale = await getTransformScale(transform);
-      const initialBox = (await transform.boundingBox())!;
-      const anchoredImageX = (point.x - initialBox.x) / initialScale;
-
-      // TouchEvent.touches is page-wide: a touch whose target is outside this
-      // preview must not make its trackpad path think a touchscreen pinch owns it.
-      await stage.evaluate((element, cursor) => {
-        const footer = document.querySelector('[data-slot="image-preview-footer"]');
-        if (!footer) throw new Error("image preview footer unavailable");
-        const outsideTouch = {
-          identifier: 1,
-          target: footer,
-          clientX: cursor.x,
-          clientY: cursor.y,
-        };
-        // This only exercises touch ownership bookkeeping, not browser touch
-        // handling; WebKit does not expose a constructible Touch on desktop.
-        const event = new Event("touchstart", { bubbles: true });
-        Object.defineProperties(event, {
-          touches: { value: [outsideTouch] },
-          changedTouches: { value: [outsideTouch] },
-          targetTouches: { value: [] },
-        });
-        element.dispatchEvent(event);
-      }, point);
-      expect(await dispatchSafariGesture(transform, "gesturestart", 1, point)).toBe(true);
-      expect(await dispatchSafariGesture(transform, "gesturechange", 1.5, point)).toBe(true);
-      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale * 1.5, 3);
-      expect(await dispatchSafariGesture(transform, "gesturechange", 2, point)).toBe(true);
-      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale * 2, 3);
-      const zoomedBox = (await transform.boundingBox())!;
-      expect((point.x - zoomedBox.x) / (initialScale * 2)).toBeCloseTo(anchoredImageX, 0);
-      expect(await dispatchSafariGesture(transform, "gestureend", 2, point)).toBe(true);
-
-      // A later gesture starts from the current zoom, not the original fit size.
-      expect(await dispatchSafariGesture(transform, "gesturestart", 1, point)).toBe(true);
-      expect(await dispatchSafariGesture(transform, "gesturechange", 1.5, point)).toBe(true);
-      expect(await dispatchSafariGesture(transform, "gestureend", 1.5, point)).toBe(true);
-      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale * 3, 3);
-
-      for (const type of ["gesturestart", "gesturechange", "gestureend"] as const) {
-        expect(
-          await dispatchSafariGesture(
-            page.locator('[data-slot="image-preview-footer"]'),
-            type,
-            2,
-            point,
-          ),
-        ).toBe(false);
-      }
-      await closePreview(page);
-      for (const type of ["gesturestart", "gesturechange", "gestureend"] as const) {
-        expect(await dispatchSafariGesture(page.locator("body"), type, 2, point)).toBe(false);
-      }
-    });
-
-    test("simulated Safari gestures respect zoom limits, avoid duplicate wheel zoom, and release normal controls", async ({
-      page,
-    }) => {
-      const path = ".dev-anywhere/clipboard/test-sess/safari-trackpad-limits.png";
-      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-      await setWideImagePreviewData(page);
-      await openJsonPreview(page, path);
-      await expectPreviewReady(page, path);
-      await waitForPreviewOpeningAnimation(page);
-
-      const stage = page.locator('[data-slot="image-preview-stage"]');
-      const transform = stage.locator(".react-transform-component");
-      await waitForTransformToSettle(transform);
-      const box = (await stage.boundingBox())!;
-      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-      const initialScale = await getTransformScale(transform);
-      await dispatchSafariGesture(transform, "gesturestart", 1, point);
-      await dispatchSafariGesture(transform, "gesturechange", 2, point);
-      const wheelPrevented = await transform.evaluate((element, cursor) => {
-        const event = new WheelEvent("wheel", {
-          bubbles: true,
-          cancelable: true,
-          ctrlKey: true,
-          deltaY: -120,
-          clientX: cursor.x,
-          clientY: cursor.y,
-        });
-        element.dispatchEvent(event);
-        return event.defaultPrevented;
-      }, point);
-      expect(wheelPrevented).toBe(true);
-      await waitForTransformToSettle(transform);
-      expect(await getTransformScale(transform)).toBeCloseTo(initialScale * 2, 3);
-
-      await dispatchSafariGesture(transform, "gesturechange", 100, point);
-      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(8, 3);
-      await dispatchSafariGesture(transform, "gesturechange", 0.01, point);
-      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale, 3);
-      await dispatchSafariGesture(transform, "gestureend", 0.01, point);
-
-      await page.mouse.move(point.x, point.y);
-      await page.mouse.wheel(0, -120);
-      await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(initialScale);
-      await waitForTransformToSettle(transform);
-      const beforePan = await transform.evaluate((el) => getComputedStyle(el).transform);
-      await dragUntilTransformChanges(page, transform, beforePan, point.x, point.y);
-      await transform.dispatchEvent("dblclick", { clientX: point.x, clientY: point.y });
-      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(initialScale, 3);
-    });
-
-    test("a simulated Safari gesture takes over an in-progress double-click reset animation", async ({
-      page,
-    }) => {
-      const path = ".dev-anywhere/clipboard/test-sess/safari-reset-animation.png";
-      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-      await setWideImagePreviewData(page);
-      await openJsonPreview(page, path);
-      await expectPreviewReady(page, path);
-      await waitForPreviewOpeningAnimation(page);
-      const stage = page.locator('[data-slot="image-preview-stage"]');
-      const transform = stage.locator(".react-transform-component");
-      await waitForTransformToSettle(transform);
-      const box = (await stage.boundingBox())!;
-      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-      const fitScale = await getTransformScale(transform);
-      await dispatchSafariGesture(transform, "gesturestart", 1, point);
-      await dispatchSafariGesture(transform, "gesturechange", 3, point);
-      await dispatchSafariGesture(transform, "gestureend", 3, point);
-
-      const result = await transform.evaluate(
-        async (element, { cursor, fit }) => {
-          const getScale = () => new DOMMatrixReadOnly(getComputedStyle(element).transform).a;
-          const zoomed = getScale();
-          element.dispatchEvent(
-            new MouseEvent("dblclick", {
-              bubbles: true,
-              cancelable: true,
-              clientX: cursor.x,
-              clientY: cursor.y,
-            }),
-          );
-          const deadline = performance.now() + 500;
-          while (getScale() >= zoomed && performance.now() < deadline) {
-            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          }
-          const startScale = getScale();
-          if (startScale <= fit || startScale >= zoomed) {
-            throw new Error(`reset did not enter an intermediate animation frame: ${startScale}`);
-          }
-          for (const [type, scale] of [
-            ["gesturestart", 1],
-            ["gesturechange", 1.5],
-            ["gestureend", 1.5],
-          ] as const) {
-            const event = new Event(type, { bubbles: true, cancelable: true });
-            Object.defineProperties(event, {
-              scale: { value: scale },
-              clientX: { value: cursor.x },
-              clientY: { value: cursor.y },
-            });
-            element.dispatchEvent(event);
-          }
-          const samples: number[] = [];
-          // Wait past the library's 200 ms reset duration so a stale animation
-          // callback cannot silently restore fit after the gesture has finished.
-          const until = performance.now() + 350;
-          while (performance.now() < until) {
-            await new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-            samples.push(getScale());
-          }
-          return { expected: startScale * 1.5, samples };
-        },
-        { cursor: point, fit: fitScale },
+      const transform = page.locator(
+        '[data-slot="image-preview-stage"] .react-transform-component',
       );
-      for (const scale of result.samples) expect(scale).toBeCloseTo(result.expected, 3);
+      const zoomIn = page.getByRole("button", { name: "放大图片", exact: true });
+      const zoomOut = page.getByRole("button", { name: "缩小图片", exact: true });
+      for (let click = 0; click < 20 && (await zoomIn.isEnabled()); click += 1) {
+        const previousScale = await getTransformScale(transform);
+        await zoomIn.click();
+        await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(previousScale);
+        await waitForTransformToSettle(transform);
+      }
+      await expect(zoomIn).toBeDisabled();
+      expect(await getTransformScale(transform)).toBeCloseTo(8, 3);
+      await zoomOut.click();
+      await expect.poll(() => getTransformScale(transform)).toBeLessThan(8);
+      await expect(zoomIn).toBeEnabled();
     });
 
     test("PTY mode links image paths from terminal output after CJK text", async ({ page }) => {
@@ -712,46 +609,6 @@ test.describe("image preview", () => {
 
   test.describe("mobile", () => {
     test.use({ viewport: { width: 390, height: 844 }, hasTouch: true });
-
-    test("simulated Safari gesture events do not double-scale a touchscreen pinch", async ({
-      page,
-    }) => {
-      const path = ".dev-anywhere/clipboard/test-sess/safari-touchscreen.png";
-      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
-      await setWideImagePreviewData(page);
-      await openJsonPreview(page, path);
-      await expectPreviewReady(page, path);
-      await waitForPreviewOpeningAnimation(page);
-
-      const stage = page.locator('[data-slot="image-preview-stage"]');
-      const transform = stage.locator(".react-transform-component");
-      await waitForTransformToSettle(transform);
-      const box = (await stage.boundingBox())!;
-      const point = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
-      const initialScale = await getTransformScale(transform);
-      const cdp = await page.context().newCDPSession(page);
-      const points = (offset: number) => [
-        { x: point.x - offset, y: point.y, id: 1 },
-        { x: point.x + offset, y: point.y, id: 2 },
-      ];
-      await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: points(20) });
-      expect(await dispatchSafariGesture(transform, "gesturestart", 1, point)).toBe(true);
-      for (const offset of [40, 60, 80]) {
-        await cdp.send("Input.dispatchTouchEvent", {
-          type: "touchMove",
-          touchPoints: points(offset),
-        });
-        const touchScale = await getTransformScale(transform);
-        expect(await dispatchSafariGesture(transform, "gesturechange", offset / 20, point)).toBe(
-          true,
-        );
-        expect(await getTransformScale(transform)).toBeCloseTo(touchScale, 3);
-      }
-      await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
-      expect(await dispatchSafariGesture(transform, "gestureend", 4, point)).toBe(true);
-      await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(initialScale);
-      await cdp.detach();
-    });
 
     test("two-finger pinch increases scale; double-tap dispatch resets", async ({ page }) => {
       const path = ".dev-anywhere/clipboard/test-sess/pinch.png";

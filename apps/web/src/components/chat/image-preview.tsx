@@ -5,12 +5,15 @@ import {
   Download,
   Image as ImageIcon,
   LoaderCircle,
+  Minus,
+  Plus,
   XIcon,
 } from "lucide-react";
 import {
   TransformComponent,
   TransformWrapper,
-  type ReactZoomPanPinchRef,
+  useControls,
+  useTransformComponent,
 } from "react-zoom-pan-pinch";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,7 +32,7 @@ import { cn } from "@/lib/utils";
 import { toast } from "@/components/toast";
 
 import type { MediaPreviewState } from "./media-preview";
-import { useImagePreviewGesture } from "./use-image-preview-gesture";
+import { applyImagePreviewTransform } from "./image-preview-transform";
 
 const MAX_IMAGE_SCALE = 8;
 
@@ -58,7 +61,6 @@ export function ImagePreviewDialog({
   const [naturalSize, setNaturalSize] = useState<ImagePreviewNaturalSize | null>(null);
   const [copyingImage, setCopyingImage] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
-  const transformRef = useRef<ReactZoomPanPinchRef | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
   const source = open && state.status === "ready" && state.url ? state.url : "";
   const preview = useImagePreviewSource(source, state.path);
@@ -76,14 +78,6 @@ export function ImagePreviewDialog({
   const imageContentStyle = currentNaturalSize
     ? { width: currentNaturalSize.width, height: currentNaturalSize.height }
     : undefined;
-
-  useImagePreviewGesture({
-    stageRef,
-    transformRef,
-    enabled: open && imageLoaded && !showDecodeError,
-    minScale: fitScale,
-    maxScale: MAX_IMAGE_SCALE,
-  });
 
   useEffect(() => {
     setLoadedSrc((current) => (current === src ? current : ""));
@@ -212,7 +206,6 @@ export function ImagePreviewDialog({
             // 内容尺寸进入 transform 后被裁切且无法横向移动。
             <TransformWrapper
               key={transformKey}
-              ref={transformRef}
               initialScale={fitScale}
               minScale={fitScale}
               maxScale={MAX_IMAGE_SCALE}
@@ -224,7 +217,7 @@ export function ImagePreviewDialog({
               doubleClick={{ mode: "reset" }}
             >
               <TransformComponent
-                wrapperClass="!h-full !w-full"
+                wrapperClass="!h-full !w-full cursor-grab active:cursor-grabbing"
                 contentClass="flex items-center justify-center"
                 contentStyle={imageContentStyle}
               >
@@ -248,6 +241,7 @@ export function ImagePreviewDialog({
                   onError={preview.onError}
                 />
               </TransformComponent>
+              {imageLoaded && <ImagePreviewZoomControls minScale={fitScale} />}
             </TransformWrapper>
           )}
         </div>
@@ -304,6 +298,64 @@ export function ImagePreviewDialog({
         </div>
       </DialogContent>
     </Dialog>
+  );
+}
+
+function ImagePreviewZoomControls({ minScale }: { minScale: number }) {
+  const transform = useControls();
+  const scale = useTransformComponent(({ state }) => state.scale);
+  const zoom = (direction: "in" | "out") => {
+    const wrapper = transform.instance.wrapperComponent;
+    if (!wrapper) return;
+    const { scale: currentScale, positionX, positionY } = transform.state;
+    const nextScale = Math.min(
+      MAX_IMAGE_SCALE,
+      Math.max(minScale, currentScale * Math.exp(direction === "in" ? 0.35 : -0.35)),
+    );
+    const centerX = wrapper.offsetWidth / 2;
+    const centerY = wrapper.offsetHeight / 2;
+    const duration = window.matchMedia("(prefers-reduced-motion: reduce)").matches ? 0 : 160;
+    applyImagePreviewTransform(
+      transform,
+      centerX - ((centerX - positionX) * nextScale) / currentScale,
+      centerY - ((centerY - positionY) * nextScale) / currentScale,
+      nextScale,
+      duration,
+    );
+  };
+
+  return (
+    <div
+      className="absolute right-3 bottom-3 z-20 flex items-center gap-0.5 rounded-full border border-border/40 bg-background/75 p-0.5 shadow-sm backdrop-blur-md"
+      data-slot="image-preview-zoom-controls"
+      role="group"
+      aria-label="图片缩放"
+    >
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 rounded-full"
+        aria-label="缩小图片"
+        title="缩小图片"
+        disabled={scale <= minScale + 0.0001}
+        onClick={() => zoom("out")}
+      >
+        <Minus className="size-4" aria-hidden="true" />
+      </Button>
+      <Button
+        type="button"
+        variant="ghost"
+        size="icon"
+        className="size-8 rounded-full"
+        aria-label="放大图片"
+        title="放大图片"
+        disabled={scale >= MAX_IMAGE_SCALE}
+        onClick={() => zoom("in")}
+      >
+        <Plus className="size-4" aria-hidden="true" />
+      </Button>
+    </div>
   );
 }
 
