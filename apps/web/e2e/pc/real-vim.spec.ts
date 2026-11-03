@@ -62,7 +62,7 @@ test("real Vim keeps rendering edits and command input after querying terminal m
     socket.on("framereceived", ({ payload }) => {
       if (typeof payload === "string") return;
       const frame = decodeBinaryFrame(payload);
-      if (frame?.sessionId === session?.sessionId) {
+      if (frame && session && frame.sessionId === session.sessionId) {
         terminalOutput += decoder.decode(frame.data, { stream: true });
       }
     });
