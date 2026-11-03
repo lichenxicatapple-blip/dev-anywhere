@@ -1,6 +1,6 @@
 import { expect, test, type Page } from "@playwright/test";
 import { expectPtyTerminalMounted, readRawPtyInput, setupPtyChat } from "../pty-fixture";
-import { ptyInput } from "../pty-scroll-helpers";
+import { ptyInput, readVisiblePtyRow, sendPtyOutput } from "../pty-scroll-helpers";
 
 async function parseRemoteOutput(page: Page, sessionId: string, data: string): Promise<void> {
   // Wait through xterm's public parser event so split sequences really span separate writes.
@@ -86,4 +86,83 @@ test.describe("PTY terminal query ownership", () => {
       await expect.poll(() => readRawPtyInput(page)).toBe("\x1b[4;6Rtypedfirst\rsecond");
     });
   }
+
+  test("renders Vim edits and returns to Shell after mode queries in a long-history terminal", async ({
+    page,
+  }) => {
+    // Run this case against production preview too: Vite's development transform did not
+    // reproduce the minifier bug in xterm's DECRQM handler. Deliberately avoid DEV-only hooks.
+    await page.setViewportSize({ width: 1920, height: 1024 });
+    const pageErrors: string[] = [];
+    page.on("pageerror", (error) => pageErrors.push(error.message));
+    await setupPtyChat(page, {
+      sessionId: "pty-vim-mode-query-rendering",
+      sessionKind: "terminal",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 175,
+      rows: 43,
+      snapshotData: Array.from({ length: 1500 }, (_, row) => `HISTORY_${row}\r\n`).join("") + "$ ",
+    });
+    await expectPtyTerminalMounted(page);
+    await expect.poll(() => readVisiblePtyRow(page, "HISTORY_1499")).not.toBeNull();
+
+    // Reduced from a real macOS Vim recording at 175x43. Its startup mode query must receive
+    // a reply, and output in later frames must keep reaching the rendered terminal.
+    await sendPtyOutput(
+      page,
+      "\x1b[?1049h\x1b[?1h\x1b=\x1b[?2004h\x1b[1;43r" + "\x1b[?12h\x1b[?12l\x1b[?12$p",
+    );
+    const modeReply = "\x1b[?12;2$y";
+    await expect
+      .poll(async () => ({ input: await readRawPtyInput(page), pageErrors }))
+      .toEqual({ input: modeReply, pageErrors: [] });
+
+    await sendPtyOutput(page, "\x1b[2J\x1b[1;1HVIM_FIXTURE_LINE_001\x1b[1;1H\x1b[?25h");
+    await expect.poll(() => readVisiblePtyRow(page, "VIM_FIXTURE_LINE_001")).not.toBeNull();
+    await ptyInput(page).focus();
+    await page.keyboard.type("i");
+    await expect.poll(() => readRawPtyInput(page)).toBe(`${modeReply}i`);
+    await sendPtyOutput(
+      page,
+      "\x1b[?25l\x1b[43;1H\x1b[1m-- INSERT --\x1b[m\x1b[K\x1b[1;1H\x1b[?25h",
+    );
+    await expect.poll(() => readVisiblePtyRow(page, "-- INSERT --")).not.toBeNull();
+
+    await page.keyboard.type("VIM_INPUT_VISIBLE");
+    await expect.poll(() => readRawPtyInput(page)).toBe(`${modeReply}iVIM_INPUT_VISIBLE`);
+    await sendPtyOutput(
+      page,
+      "\x1b[?25l\x1b[1;1HVIM_INPUT_VISIBLEVIM_FIXTURE_LINE_001\x1b[1;18H\x1b[?25h",
+    );
+    await expect
+      .poll(() => readVisiblePtyRow(page, "VIM_INPUT_VISIBLEVIM_FIXTURE_LINE_001"))
+      .not.toBeNull();
+    const editCursor = page
+      .locator('[data-slot="pty-host"] .xterm-rows > div')
+      .filter({ hasText: "VIM_INPUT_VISIBLEVIM_FIXTURE_LINE_001" })
+      .locator(".xterm-cursor");
+    await expect(editCursor).toBeVisible();
+    await expect(editCursor).toBeInViewport({ ratio: 1 });
+
+    await page.keyboard.press("Escape");
+    await sendPtyOutput(page, "\x1b[43;1H\x1b[K\x1b[1;17H");
+    await page.keyboard.type(":q!");
+    await expect.poll(() => readRawPtyInput(page)).toBe(`${modeReply}iVIM_INPUT_VISIBLE\x1b:q!`);
+    await sendPtyOutput(page, "\x1b[?25l\x1b[43;1H:q!\x1b[?25h");
+    await expect.poll(() => readVisiblePtyRow(page, ":q!")).not.toBeNull();
+
+    await page.keyboard.press("Enter");
+    await expect.poll(() => readRawPtyInput(page)).toBe(`${modeReply}iVIM_INPUT_VISIBLE\x1b:q!\r`);
+    await sendPtyOutput(
+      page,
+      "\x1b[43;1H\x1b[K\x1b[?2004l\x1b[?1l\x1b>\x1b[?1049l\x1b[?25h" + "\r\nAFTER_VIM_SHELL\r\n$ ",
+    );
+    await expect.poll(() => readVisiblePtyRow(page, "AFTER_VIM_SHELL")).not.toBeNull();
+    await expect.poll(() => readVisiblePtyRow(page, "HISTORY_1499")).not.toBeNull();
+    await expect(
+      page.locator('[data-slot="pty-host"] .xterm-rows').filter({ hasText: "VIM_INPUT_VISIBLE" }),
+    ).toHaveCount(0);
+    expect(pageErrors).toEqual([]);
+  });
 });

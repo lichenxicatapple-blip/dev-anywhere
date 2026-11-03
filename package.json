@@ -68,7 +68,8 @@
     ],
     "overrides": {
       "@types/react": "^19.1.6",
-      "@types/react-dom": "^19.1.6"
+      "@types/react-dom": "^19.1.6",
+      "vite@6.4.2>esbuild": "0.28.2"
     }
   }
 }

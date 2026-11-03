@@ -9,6 +9,9 @@ import { VitePWA } from "vite-plugin-pwa";
 const BROWSER_STATE_DUMP_ENDPOINT = "/__dev_anywhere_debug/browser-state-dumps";
 const BROWSER_STATE_DUMP_LIMIT_BYTES = 20 * 1024 * 1024;
 const VOICE_FIXTURE_ENDPOINT = "/__dev_anywhere_debug/voice-fixture";
+// Keep Vite 6's targets, correcting Safari's destructuring support to 14.1.
+// https://github.com/evanw/esbuild/issues/4436
+const BROWSER_TARGETS = ["es2020", "edge88", "firefox78", "chrome87", "safari14.1"];
 
 function normalizeRelayTarget(target: string | undefined): { http: string; ws: string } {
   const raw = (target || "http://localhost:3100").trim().replace(/\/$/, "");
@@ -133,9 +136,15 @@ function voiceFixturePlugin(): Plugin {
 }
 
 export default defineConfig({
+  build: {
+    target: BROWSER_TARGETS,
+  },
   // The optional worker is not discovered by Vite's initial dependency scan.
   // Prebundle it at startup so the first HEIC preview does not reload the page.
-  optimizeDeps: { include: ["heic-to/next"] },
+  optimizeDeps: {
+    include: ["heic-to/next"],
+    esbuildOptions: { target: BROWSER_TARGETS },
+  },
   plugins: [
     browserStateDumpPlugin(),
     voiceFixturePlugin(),
