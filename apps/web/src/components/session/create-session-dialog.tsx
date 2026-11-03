@@ -1,10 +1,11 @@
 // 新建会话入口：选择工作目录、交互方式和开发机上的 Agent CLI。
 // 终端模式由开发机 proxy 托管真实 CLI；聊天模式保留结构化消息流。
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useNavigate } from "react-router";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { useSessionStore } from "@/stores/session-store";
 import { useFileStore } from "@/stores/file-store";
+import { useAppStore } from "@/stores/app-store";
 import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 import {
@@ -48,7 +49,27 @@ interface CreateSessionDialogProps {
   onOpenChange: (open: boolean) => void;
 }
 
-export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogProps) {
+export function CreateSessionDialog(props: CreateSessionDialogProps) {
+  const proxyId = useAppStore((s) => s.selectedProxyId);
+  const relayUrl = useAppStore((s) => s.relayUrl);
+  // Draft paths belong to one machine. Closing/reopening on that machine preserves the
+  // draft, while switching machines also resets nested path pickers and CLI path edits.
+  return (
+    <CreateSessionForm
+      key={JSON.stringify([relayUrl, proxyId])}
+      {...props}
+      proxyId={proxyId}
+      relayUrl={relayUrl}
+    />
+  );
+}
+
+function CreateSessionForm({
+  open,
+  onOpenChange,
+  proxyId,
+  relayUrl,
+}: CreateSessionDialogProps & { proxyId: string | null; relayUrl: string }) {
   const [name, setName] = useState("");
   const [cwd, setCwd] = useState("");
   const [provider, setProvider] = useState<ProviderId>("claude");
@@ -68,6 +89,17 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
   const homePath = useFileStore((s) => s.homePath);
   const agentCli = useFileStore((s) => s.agentCli);
   const isDesktop = useMediaQuery("(min-width: 768px)");
+  const mounted = useRef(true);
+  useEffect(() => {
+    mounted.current = true;
+    return () => {
+      mounted.current = false;
+    };
+  }, []);
+  const isCurrentMachine = useCallback(() => {
+    const app = useAppStore.getState();
+    return mounted.current && app.selectedProxyId === proxyId && app.relayUrl === relayUrl;
+  }, [proxyId, relayUrl]);
 
   // 打开对话框时, 若 CWD 还没被用户改过, 用 homePath 作为默认起点
   useEffect(() => {
@@ -81,16 +113,22 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     if (homePath && agentCli) return;
     const request = relayClientRef?.requestProxyInfo();
     if (!request) return;
+    let active = true;
     void request
       .then((info) => {
+        if (!active || !isCurrentMachine()) return;
         const store = useFileStore.getState();
         store.setHomePath(info.homePath);
         store.setAgentCli(info.agentCli);
       })
       .catch((err: unknown) => {
+        if (!active || !isCurrentMachine()) return;
         console.error("[create-session-dialog] requestProxyInfo failed", err);
       });
-  }, [open, homePath, agentCli]);
+    return () => {
+      active = false;
+    };
+  }, [open, homePath, agentCli, isCurrentMachine]);
 
   function resetForm() {
     setName("");
@@ -115,7 +153,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
 
   async function handleConfirmBypass() {
     await handleSubmitSessionCreate();
-    if (latestOpen.current) setConfirmingBypass(false);
+    if (isCurrentMachine() && latestOpen.current) setConfirmingBypass(false);
   }
 
   const permissionOptions =
@@ -156,6 +194,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
           mode,
         },
       });
+      if (!isCurrentMachine()) return;
       if (result.type === "success") {
         useSessionStore.getState().addSession(result.session);
         // session 已建好就该入 store（其他地方刷新会看到），但若用户已关闭弹窗就别再
@@ -177,7 +216,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
         return;
       }
     } finally {
-      setSubmitting(false);
+      if (isCurrentMachine()) setSubmitting(false);
     }
   }
 
@@ -189,6 +228,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     }
     try {
       const result = await relay.createDirectory(path);
+      if (!isCurrentMachine()) return null;
       if (!result.success) {
         toast.error(`目录创建失败：${result.error ?? "未知错误"}`);
         return null;
@@ -197,6 +237,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       toast.success("目录已创建");
       return result.path;
     } catch (err) {
+      if (!isCurrentMachine()) return null;
       toast.error(err instanceof Error ? err.message : String(err));
       return null;
     }
@@ -223,6 +264,7 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
     setSavingCliPath(true);
     try {
       const result = await relay.updateAgentCliPath(targetProvider, path);
+      if (!isCurrentMachine()) return;
       if (result.error || !result.agentCli) {
         toast.error(`路径保存失败：${result.error ?? "未知错误"}`);
         return;
@@ -232,9 +274,10 @@ export function CreateSessionDialog({ open, onOpenChange }: CreateSessionDialogP
       setCliPathDraftProvider(null);
       setCliPathDraft("");
     } catch (err) {
+      if (!isCurrentMachine()) return;
       toast.error(err instanceof Error ? err.message : String(err));
     } finally {
-      setSavingCliPath(false);
+      if (isCurrentMachine()) setSavingCliPath(false);
     }
   }
 

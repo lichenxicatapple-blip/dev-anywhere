@@ -202,7 +202,10 @@ test.describe("CreateSessionDialog — 字段校验", () => {
 
     const row = page.locator('[data-slot="session-row"]').filter({ hasText: "~/workspace" });
     await expect(row.locator('[data-slot="session-mode-icon"][data-mode="pty"]')).toBeVisible();
-    await expect(row).toContainText("运行中");
+    await expect(row.getByRole("status")).toHaveCount(0);
+    await expect(row).not.toContainText(/运行中|工作中|空闲|已断开|已终止/);
+    await expect(row).toContainText("刚刚");
+    await expect(row.locator('span[aria-hidden="true"]').filter({ hasText: /^·$/ })).toHaveCount(1);
   });
 
   test("桌面侧边栏可以显式收起和展开", async ({ page }) => {

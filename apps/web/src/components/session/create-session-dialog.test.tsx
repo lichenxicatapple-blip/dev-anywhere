@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { MemoryRouter } from "react-router";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
@@ -56,6 +56,7 @@ vi.mock("@/components/toast", () => ({
 
 import { useFileStore } from "@/stores/file-store";
 import { useSessionStore } from "@/stores/session-store";
+import { useAppStore } from "@/stores/app-store";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { CreateSessionDialog } from "./create-session-dialog";
 
@@ -132,14 +133,18 @@ function testMatchMedia(query: string): MediaQueryList {
   } as MediaQueryList;
 }
 
-function renderDialog() {
-  return render(
+function dialogElement(open = true) {
+  return (
     <MemoryRouter>
       <TooltipProvider>
-        <CreateSessionDialog open onOpenChange={vi.fn()} />
+        <CreateSessionDialog open={open} onOpenChange={vi.fn()} />
       </TooltipProvider>
-    </MemoryRouter>,
+    </MemoryRouter>
   );
+}
+
+function renderDialog() {
+  return render(dialogElement());
 }
 
 function selectAgentCli(label: "Claude Code" | "Codex" | "Kimi Code" | "Cursor CLI"): void {
@@ -175,6 +180,7 @@ describe("CreateSessionDialog", () => {
     toastError.mockClear();
     toastSuccess.mockClear();
     navigateMock.mockClear();
+    useAppStore.setState({ selectedProxyId: "proxy-1", relayUrl: "ws://relay.test" });
     useFileStore.setState({
       tree: new Map(),
       treeWithHidden: new Map([["/home/dev/.local/bin", [{ name: "claude", isDir: false }]]]),
@@ -236,6 +242,149 @@ describe("CreateSessionDialog", () => {
     await waitFor(() => {
       expect((getByLabelText("工作目录") as HTMLInputElement).value).toBe("/home/dev");
     });
+  });
+
+  it.each([
+    ["C:/Users/dev", "/Users/dev", "C:/Users/dev"],
+    ["/Users/dev", "C:/Users/dev", "/Users/dev"],
+    ["/home/dev", "/home/dev", "/home/dev/project-on-first-machine"],
+  ])(
+    "resets an abandoned draft when switching from %s to %s",
+    async (firstHome, nextHome, draft) => {
+      useFileStore.setState({ homePath: firstHome, agentCli: availableAgentCli });
+      const { rerender } = renderDialog();
+      await waitFor(() => expect(screen.getByLabelText("工作目录")).toHaveValue(firstHome));
+      fireEvent.change(screen.getByLabelText("工作目录"), { target: { value: draft } });
+      fireEvent.change(screen.getByLabelText("CLI 路径"), {
+        target: { value: `${firstHome}/custom/claude` },
+      });
+      rerender(dialogElement(false));
+
+      act(() => {
+        useFileStore.getState().prepareForProxySwitch();
+        useAppStore.getState().setProxy("proxy-2", "Second machine");
+        useFileStore.setState({ homePath: nextHome, agentCli: availableAgentCli });
+      });
+      rerender(dialogElement());
+
+      await waitFor(() => expect(screen.getByLabelText("工作目录")).toHaveValue(nextHome));
+      expect(screen.getByLabelText("CLI 路径")).toHaveValue(availableAgentCli.claude.command);
+      expect(screen.getByRole("button", { name: "创建" })).toBeEnabled();
+      expect(createSession).not.toHaveBeenCalled();
+    },
+  );
+
+  it("preserves a draft when reopening on the same machine", async () => {
+    useFileStore.setState({ homePath: "/home/dev", agentCli: availableAgentCli });
+    const { rerender } = renderDialog();
+    fireEvent.change(screen.getByLabelText("工作目录"), {
+      target: { value: "/home/dev/my-project" },
+    });
+    rerender(dialogElement(false));
+    rerender(dialogElement());
+    expect(screen.getByLabelText("工作目录")).toHaveValue("/home/dev/my-project");
+  });
+
+  it("resets a draft when the Relay changes even if the proxy ID is reused", async () => {
+    useFileStore.setState({ homePath: "/home/dev", agentCli: availableAgentCli });
+    const { rerender } = renderDialog();
+    fireEvent.change(screen.getByLabelText("工作目录"), {
+      target: { value: "/home/dev/old-relay-project" },
+    });
+    rerender(dialogElement(false));
+    act(() => useAppStore.getState().setRelayUrl("ws://other-relay.test"));
+    rerender(dialogElement());
+    await waitFor(() => expect(screen.getByLabelText("工作目录")).toHaveValue("/home/dev"));
+  });
+
+  it("ignores old machine info arriving after switching away and back", async () => {
+    let resolveInfo!: (info: { homePath: string; agentCli: typeof availableAgentCli }) => void;
+    requestProxyInfo.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveInfo = resolve;
+      }),
+    );
+    const { rerender } = renderDialog();
+    await waitFor(() => expect(requestProxyInfo).toHaveBeenCalledTimes(1));
+    rerender(dialogElement(false));
+    act(() => useAppStore.getState().setProxy("proxy-2", "Second machine"));
+    act(() => {
+      useAppStore.getState().setProxy("proxy-1", "First machine");
+      useFileStore.setState({ homePath: "/current-home", agentCli: availableAgentCli });
+    });
+    rerender(dialogElement());
+    await act(async () => resolveInfo({ homePath: "/stale-home", agentCli: availableAgentCli }));
+    expect(useFileStore.getState().homePath).toBe("/current-home");
+    expect(screen.getByLabelText("工作目录")).toHaveValue("/current-home");
+  });
+
+  it("does not overwrite the current machine's CLI paths with a late save response", async () => {
+    let resolveSave!: (value: unknown) => void;
+    updateAgentCliPath.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveSave = resolve;
+      }),
+    );
+    useFileStore.setState({ homePath: "/home/dev", agentCli: availableAgentCli });
+    const { rerender } = renderDialog();
+    fireEvent.change(screen.getByLabelText("CLI 路径"), {
+      target: { value: "/home/dev/custom/claude" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "保存" }));
+    await waitFor(() => expect(updateAgentCliPath).toHaveBeenCalledTimes(1));
+    rerender(dialogElement(false));
+    act(() => {
+      useAppStore.getState().setProxy("proxy-2", "Second machine");
+      useFileStore.setState({ homePath: "/Users/dev", agentCli: availableAgentCli });
+    });
+    rerender(dialogElement());
+    await act(async () =>
+      resolveSave({
+        provider: "claude",
+        agentCli: {
+          ...availableAgentCli,
+          claude: { available: true, command: "/home/dev/custom/claude" },
+        },
+      }),
+    );
+    expect(useFileStore.getState().agentCli).toEqual(availableAgentCli);
+    expect(screen.getByLabelText("CLI 路径")).toHaveValue(availableAgentCli.claude.command);
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
+  it("does not add a late creation response to another machine's session list", async () => {
+    let resolveCreate!: (value: unknown) => void;
+    createSession.mockReturnValueOnce(
+      new Promise((resolve) => {
+        resolveCreate = resolve;
+      }),
+    );
+    useFileStore.setState({ homePath: "/home/dev", agentCli: availableAgentCli });
+    const { rerender } = renderDialog();
+    fireEvent.click(screen.getByRole("button", { name: "创建" }));
+    await waitFor(() => expect(createSession).toHaveBeenCalledTimes(1));
+    rerender(dialogElement(false));
+    act(() => {
+      useAppStore.getState().setProxy("proxy-2", "Second machine");
+      useFileStore.setState({ homePath: "/Users/dev", agentCli: availableAgentCli });
+    });
+    rerender(dialogElement());
+    await act(async () =>
+      resolveCreate({
+        type: "session_create_response",
+        success: true,
+        sessionId: "old-machine-session",
+        cwd: "/home/dev",
+        lastActive: 1,
+        kind: "agent",
+        mode: "pty",
+        provider: "claude",
+        ptyOwner: "proxy-hosted",
+      }),
+    );
+    expect(useSessionStore.getState().sessions).toEqual([]);
+    expect(navigateMock).not.toHaveBeenCalled();
+    expect(screen.getByLabelText("工作目录")).toHaveValue("/Users/dev");
   });
 
   it("lets the user create a Codex chat session", async () => {

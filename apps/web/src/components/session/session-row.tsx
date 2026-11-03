@@ -60,25 +60,8 @@ const STATE_STYLE: Record<SessionInfo["state"], { dot: string; text: string; lab
   },
 };
 
-function stateStyleForSession(session: SessionInfo): { dot: string; text: string; label: string } {
-  if (session.kind !== "terminal") return STATE_STYLE[session.state];
-  if (session.state === "terminated") return STATE_STYLE.terminated;
-  if (session.state === "error") {
-    return {
-      dot: "bg-[var(--color-status-error)]",
-      text: "text-[var(--color-status-error)]",
-      label: "已断开",
-    };
-  }
-  return {
-    dot: "bg-[var(--color-status-success)]",
-    text: "text-[var(--color-status-success)]",
-    label: "运行中",
-  };
-}
-
 function SessionStateDot({ session }: { session: SessionInfo }) {
-  const style = stateStyleForSession(session);
+  const style = STATE_STYLE[session.state];
   return (
     <span
       className={cn("inline-block size-2 rounded-full shrink-0", style.dot)}
@@ -159,29 +142,29 @@ export function SessionRow({
         aria-pressed={selected}
       >
         <span className="flex items-center gap-2 min-w-0">
-          <SessionStateDot session={session} />
+          {session.kind !== "terminal" && <SessionStateDot session={session} />}
           <span className="text-sm font-normal truncate flex-1" title={rawName}>
             {displayName}
           </span>
         </span>
         <span className="flex items-center gap-1.5 text-xs leading-5 h-5">
           <SessionModeIcon mode={session.mode} />
-          <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
-            ·
-          </span>
           {session.kind !== "terminal" && (
             <>
+              <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
+                ·
+              </span>
               <span className="font-mono text-muted-foreground shrink-0">
                 {providerLabel(session.provider)}
               </span>
               <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                 ·
               </span>
+              <span className={cn("shrink-0", STATE_STYLE[session.state].text)}>
+                {STATE_STYLE[session.state].label}
+              </span>
             </>
           )}
-          <span className={cn("shrink-0", stateStyleForSession(session).text)}>
-            {stateStyleForSession(session).label}
-          </span>
           {lastActiveLabel && (
             <>
               <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">

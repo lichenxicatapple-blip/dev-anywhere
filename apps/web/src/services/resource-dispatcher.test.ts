@@ -23,7 +23,7 @@ describe("resource-dispatcher", () => {
     useAppStore.setState(useAppStore.getInitialState(), true);
   });
 
-  it("updates shell capabilities from a current proxy push and clears omitted capabilities", () => {
+  it("updates machine info from a current proxy push and clears omitted shell capabilities", () => {
     useAppStore.setState({ selectedProxyId: "windows", proxyOnline: true });
     dispatchResourceMessage({
       type: "proxy_info",
@@ -31,6 +31,8 @@ describe("resource-dispatcher", () => {
       agentCli: unavailableAgentCli,
       terminalShells: [{ id: "cmd", label: "CMD" }],
     });
+    expect(useFileStore.getState().homePath).toBe("C:/Users/dev");
+    expect(useFileStore.getState().agentCli).toEqual(unavailableAgentCli);
     expect(useAppStore.getState().terminalShells).toEqual([{ id: "cmd", label: "CMD" }]);
     dispatchResourceMessage({
       type: "proxy_info",
@@ -40,8 +42,13 @@ describe("resource-dispatcher", () => {
     expect(useAppStore.getState().terminalShells).toBeNull();
   });
 
-  it("leaves requested shell snapshots to binding-scoped callers", () => {
+  it("leaves requested machine snapshots to binding-scoped callers", () => {
     useAppStore.setState({ selectedProxyId: "linux", proxyOnline: true });
+    const currentAgentCli = {
+      ...unavailableAgentCli,
+      codex: { available: true, command: "/usr/local/bin/codex" },
+    };
+    useFileStore.setState({ homePath: "/home/dev", agentCli: currentAgentCli });
     dispatchResourceMessage({
       type: "proxy_info",
       requestId: "old-windows-request",
@@ -49,6 +56,30 @@ describe("resource-dispatcher", () => {
       agentCli: unavailableAgentCli,
       terminalShells: [{ id: "cmd", label: "CMD" }],
     });
+    expect(useFileStore.getState().homePath).toBe("/home/dev");
+    expect(useFileStore.getState().agentCli).toEqual(currentAgentCli);
+    expect(useAppStore.getState().terminalShells).toBeNull();
+  });
+
+  it.each([
+    { selectedProxyId: null, proxyOnline: false, proxySwitchTarget: null },
+    { selectedProxyId: "linux", proxyOnline: false, proxySwitchTarget: null },
+    {
+      selectedProxyId: "linux",
+      proxyOnline: true,
+      proxySwitchTarget: { proxyId: "windows", name: "Windows" },
+    },
+  ])("ignores machine pushes without an active stable binding: %j", (binding) => {
+    useAppStore.setState(binding);
+    const currentFileState = useFileStore.getState();
+    dispatchResourceMessage({
+      type: "proxy_info",
+      homePath: "C:/Users/dev",
+      agentCli: unavailableAgentCli,
+      terminalShells: [{ id: "cmd", label: "CMD" }],
+    });
+    expect(useFileStore.getState().homePath).toBe(currentFileState.homePath);
+    expect(useFileStore.getState().agentCli).toBe(currentFileState.agentCli);
     expect(useAppStore.getState().terminalShells).toBeNull();
   });
 

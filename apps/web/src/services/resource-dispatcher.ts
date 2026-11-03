@@ -39,12 +39,13 @@ export function dispatchResourceMessage(msg: InboundMessage): void {
       handleFileTreePush(msg);
       break;
     case "proxy_info":
-      useFileStore.getState().setHomePath(msg.homePath);
-      useFileStore.getState().setAgentCli(msg.agentCli);
       // 请求响应由带 binding scope 校验的调用方写入，避免旧开发机响应污染新绑定。
       if (!msg.requestId) {
         const app = useAppStore.getState();
         if (app.selectedProxyId && app.proxyOnline && !app.proxySwitchTarget) {
+          const fileStore = useFileStore.getState();
+          fileStore.setHomePath(msg.homePath);
+          fileStore.setAgentCli(msg.agentCli);
           app.setTerminalShells(msg.terminalShells);
         }
       }

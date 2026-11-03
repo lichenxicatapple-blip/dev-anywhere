@@ -32,17 +32,55 @@ describe("SessionRow", () => {
     );
   });
 
-  it("shows pure terminal cwd when it has not been renamed", () => {
+  it.each(["idle", "working", "compacting", "waiting_approval", "error", "terminated"] as const)(
+    "keeps terminal details without an agent task status when state is %s",
+    (state) => {
+      const now = Date.UTC(2026, 10, 3);
+      render(
+        <SessionRow
+          session={{
+            sessionId: "term-1",
+            kind: "terminal",
+            mode: "pty",
+            provider: "claude",
+            state,
+            name: "Terminal",
+            cwd: "/Users/dev/MyApps/dev-anywhere",
+            ptyOwner: "proxy-hosted",
+            lastActive: now - 60_000,
+          }}
+          selected={false}
+          now={now}
+          onClick={vi.fn()}
+        />,
+      );
+
+      expect(screen.getByText("~/MyApps/dev-anywhere").getAttribute("title")).toBe(
+        "/Users/dev/MyApps/dev-anywhere",
+      );
+      expect(screen.queryByRole("status")).toBeNull();
+      expect(
+        screen.queryByText(/^(运行中|空闲|工作中|压缩中|等待审批|出错|已断开|已终止)$/),
+      ).toBeNull();
+      expect(screen.getByRole("img", { name: "终端视图" })).toBeTruthy();
+      expect(screen.getByText("1 分钟前")).toBeTruthy();
+      expect(screen.getAllByText("·")).toHaveLength(1);
+    },
+  );
+
+  it.each([
+    { state: "idle", label: "空闲", color: "success" },
+    { state: "working", label: "工作中", color: "working" },
+  ] as const)("preserves the agent $state status and color", ({ state, label, color }) => {
     render(
       <SessionRow
         session={{
-          sessionId: "term-1",
-          kind: "terminal",
+          sessionId: "agent-1",
+          kind: "agent",
           mode: "pty",
-          provider: "claude",
-          state: "idle",
-          name: "Terminal",
-          cwd: "/Users/dev/MyApps/dev-anywhere",
+          provider: "codex",
+          state,
+          cwd: "/Users/dev/project",
           ptyOwner: "proxy-hosted",
           lastActive: 1,
         }}
@@ -51,9 +89,12 @@ describe("SessionRow", () => {
       />,
     );
 
-    expect(screen.getByText("~/MyApps/dev-anywhere").getAttribute("title")).toBe(
-      "/Users/dev/MyApps/dev-anywhere",
+    expect(screen.getByRole("status", { name: `会话状态：${label}` }).className).toContain(
+      `bg-[var(--color-status-${color})]`,
     );
+    expect(screen.getByText(label).className).toContain(`text-[var(--color-status-${color})]`);
+    expect(screen.getByText("Codex")).toBeTruthy();
+    expect(screen.getAllByText("·")).toHaveLength(3);
   });
 
   it("renders sidebar menu items as text-only and marks remote disconnect as destructive", async () => {
