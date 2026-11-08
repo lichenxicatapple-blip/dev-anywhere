@@ -9,6 +9,7 @@ import {
 } from "node:fs";
 import { join, win32 } from "node:path";
 import { tmpdir } from "node:os";
+import { stripVTControlCharacters } from "node:util";
 import { describe, expect, it } from "vitest";
 import { findExecutableCandidates } from "#src/common/executable.js";
 import { PtyRuntime } from "#src/common/pty-runtime.js";
@@ -45,7 +46,7 @@ function directoryIdentity(path: string): string | undefined {
 
 describe.skipIf(process.platform !== "win32")("native Windows Shell working directory", () => {
   it.each(nativeShells)(
-    "follows cd in $name and resolves the file from the new directory",
+    "follows cd in $name and preserves Chinese filenames and input",
     async ({ name, path }) => {
       const root = mkdtempSync(join(tmpdir(), "dev-anywhere-shell-cwd-"));
       const destination = join(root, "项目 space");
@@ -53,6 +54,24 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
       writeFileSync(join(root, "result.txt"), "OLD_DIRECTORY");
       writeFileSync(join(destination, "result.txt"), "CURRENT_DIRECTORY");
       writeFileSync(join(destination, "only-current.txt"), "NEW_FILE");
+      const chineseFilename = "微信图片_2026-06-19.jpg";
+      writeFileSync(join(destination, chineseFilename), "中文文件内容");
+      const inputProbe = join(root, "unicode-input.cjs");
+      const inputResult = join(destination, "unicode-input.json");
+      writeFileSync(
+        inputProbe,
+        `const fs = require('node:fs');
+const [filename, text, edited] = process.argv.slice(2);
+fs.writeFileSync('unicode-input.json', JSON.stringify({
+  filename, text, edited, contents: fs.readFileSync(filename, 'utf8')
+}));
+`,
+      );
+      const env = Object.fromEntries(
+        Object.entries(process.env).filter(
+          ([key]) => key.toUpperCase() !== "LANG" && !key.toUpperCase().startsWith("LC_"),
+        ),
+      );
       let cwd = "";
       let directoryReports = 0;
       let output = "";
@@ -64,7 +83,7 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
           cwd: root,
           cols: 120,
           rows: 24,
-          env: { ...process.env, PROMPT: "custom $P$G" },
+          env: { ...env, PROMPT: "custom $P$G" },
         },
         {
           cwd: (value) => {
@@ -120,6 +139,32 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
             "utf8",
           ),
         ).toBe("CURRENT_DIRECTORY");
+
+        // The command contains no filename, so its input echo cannot satisfy this check.
+        output = "";
+        const beforeListing = directoryReports;
+        runtime.write(name === "CMD" ? "dir /b /a-d\r" : "Get-ChildItem -Name -File\r");
+        await expect
+          .poll(() => directoryReports, { timeout: 10000 })
+          .toBeGreaterThan(beforeListing);
+        expect(stripVTControlCharacters(output)).toContain(chineseFilename);
+
+        const quote = (value: string) =>
+          name === "CMD" ? `"${value}"` : `'${value.replaceAll("'", "''")}'`;
+        const probeCommand = [process.execPath, inputProbe, chineseFilename, "中文输入"]
+          .map(quote)
+          .join(" ");
+        // Send the same DEL byte as the Web terminal's Backspace key. The result must
+        // come from the child process's actual argv, not the Shell's input echo.
+        runtime.write(`${name === "CMD" ? "" : "& "}${probeCommand} ${quote("中文\x7f字")}\r`);
+        await expect.poll(() => existsSync(inputResult), { timeout: 10000 }).toBe(true);
+        expect(JSON.parse(readFileSync(inputResult, "utf8"))).toEqual({
+          filename: chineseFilename,
+          text: "中文输入",
+          edited: "中字",
+          contents: "中文文件内容",
+        });
+
         if (name === "CMD") expect(output).toContain("custom ");
         else {
           const beforeNativeCommand = directoryReports;
@@ -134,7 +179,10 @@ describe.skipIf(process.platform !== "win32")("native Windows Shell working dire
           await expect.poll(() => existsSync(exitCodeFile), { timeout: 10000 }).toBe(true);
           expect(readFileSync(exitCodeFile, "utf8")).toBe("23");
         }
-        console.info(`${name}: current directory and relative file contents verified`);
+        console.info(`${name}: current directory, Chinese filenames, input and Backspace verified`);
+      } catch (error) {
+        console.error(`${name} Shell output:`, JSON.stringify(output.slice(-4096)));
+        throw error;
       } finally {
         await runtime.terminate();
         rmSync(root, { recursive: true, force: true, maxRetries: 20, retryDelay: 100 });

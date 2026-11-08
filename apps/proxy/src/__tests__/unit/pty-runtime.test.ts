@@ -134,6 +134,31 @@ describe("PTY runtime", () => {
     expect(env).not.toHaveProperty("UNDEFINED_VALUE");
   });
 
+  it.each(["terminal", "agent"] as const)(
+    "supplies a UTF-8 locale to a hosted macOS %s PTY",
+    (kind) => {
+      const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+      const env = Object.freeze({ CODEX_BIN: "codex-fixture.exe", KEEP_ME: "yes" });
+      const options: Partial<PtyRuntimeOptions> =
+        kind === "terminal" ? { kind } : { kind, provider: "codex", args: [] };
+      try {
+        Object.defineProperty(process, "platform", { value: "darwin" });
+        createRuntime({ ...options, env });
+
+        expect(spawnMock).toHaveBeenCalledWith(
+          expect.any(String),
+          expect.any(Array),
+          expect.objectContaining({
+            env: expect.objectContaining({ LANG: "en_US.UTF-8", KEEP_ME: "yes" }),
+          }),
+        );
+        expect(env).not.toHaveProperty("LANG");
+      } finally {
+        Object.defineProperty(process, "platform", platformDescriptor);
+      }
+    },
+  );
+
   it.each([
     ["claude", "plan", ["--permission-mode", "plan", "--resume", "native"]],
     [

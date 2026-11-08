@@ -4,6 +4,7 @@ import type { ProviderAdapter, ProviderHookContext } from "../providers/index.js
 import { readTtySize, restoreHostTerminalModes } from "./tty.js";
 import { prepareCommandLaunch } from "../common/command-launch.js";
 import { createPtyInputCompat } from "../common/pty-input-compat.js";
+import { withPtyLocaleFallback } from "../common/pty-locale.js";
 
 interface PtyManagerOptions {
   provider: ProviderAdapter;
@@ -75,7 +76,7 @@ export class PtyManager {
       cols,
       rows,
       cwd: this.cwd,
-      env: launch.env as Record<string, string>,
+      env: withPtyLocaleFallback(launch.env) as Record<string, string>,
     });
     this.child = child;
 

@@ -24,6 +24,7 @@ import {
 } from "./codex-xterm-history-compat.js";
 import { PtySynchronizedOutputCoalescer } from "./pty-synchronized-output-coalescer.js";
 import { createPtyInputCompat } from "./pty-input-compat.js";
+import { withPtyLocaleFallback } from "./pty-locale.js";
 import { createIdleChecker, type IdleChecker } from "./pty-idle-checker.js";
 import {
   CLAUDE_PROVIDER,
@@ -93,7 +94,9 @@ export function buildHostedPtyArgs(provider: ProviderId, resumeSessionId?: strin
 
 export function normalizePtyEnv(env: NodeJS.ProcessEnv): Record<string, string> {
   const result: Record<string, string> = {};
-  for (const [key, value] of Object.entries(normalizeProcessEnvironment(env))) {
+  for (const [key, value] of Object.entries(
+    withPtyLocaleFallback(normalizeProcessEnvironment(env)),
+  )) {
     if (value !== undefined) result[key] = value;
   }
   delete result.NO_COLOR;

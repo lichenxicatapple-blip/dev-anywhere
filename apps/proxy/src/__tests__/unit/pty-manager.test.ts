@@ -50,6 +50,7 @@ describe("PtyManager", () => {
     overrides: {
       providerId?: "claude" | "codex";
       providerArgs?: string[];
+      providerEnv?: NodeJS.ProcessEnv;
       cwd?: string;
       tap?: (data: string) => void;
       onInput?: (data: string) => void;
@@ -80,7 +81,7 @@ describe("PtyManager", () => {
       buildTerminalCommand: vi.fn(({ args }) => ({
         command: "claude",
         args,
-        env: process.env,
+        env: overrides.providerEnv ?? process.env,
       })),
     };
 
@@ -114,6 +115,26 @@ describe("PtyManager", () => {
       ["--help"],
       expect.objectContaining({ cols: 120, rows: 40, cwd: "/tmp/project" }),
     );
+  });
+
+  it("supplies a UTF-8 locale to a local macOS PTY without changing terminal preferences", async () => {
+    const platformDescriptor = Object.getOwnPropertyDescriptor(process, "platform")!;
+    const env = Object.freeze({ TERM: "screen", NO_COLOR: "1", CLICOLOR: "0" });
+    const { manager, pty } = await createManager({ providerEnv: env });
+    try {
+      Object.defineProperty(process, "platform", { value: "darwin" });
+      manager.start();
+
+      expect(pty.spawn).toHaveBeenCalledWith(
+        expect.any(String),
+        expect.any(Array),
+        expect.objectContaining({ env: { ...env, LANG: "en_US.UTF-8" } }),
+      );
+      expect(env).not.toHaveProperty("LANG");
+    } finally {
+      Object.defineProperty(process, "platform", platformDescriptor);
+      manager.cleanup(0);
+    }
   });
 
   it.each([
