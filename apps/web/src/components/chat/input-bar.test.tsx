@@ -160,7 +160,10 @@ describe("InputBar clipboard image paste", () => {
     dispatchImagePaste(textarea, file);
 
     await waitFor(() =>
-      expect(toastError).toHaveBeenCalledWith("network broken", { id: "loading-id" }),
+      expect(toastError).toHaveBeenCalledWith("已上传 0/1 个文件", {
+        id: "loading-id",
+        description: "shot.png：network broken",
+      }),
     );
     expect(toastDismiss).not.toHaveBeenCalled();
   });
@@ -308,6 +311,94 @@ describe("InputBar attach file picker", () => {
       }),
     );
     expect(queryByLabelText("已上传附件")).toBeNull();
+  });
+
+  it.each(["idle", "working"] as const)(
+    "waits for the complete batch before sending or queueing while %s",
+    async (state) => {
+      useSessionStore.setState({
+        sessions: [{ ...useSessionStore.getState().sessions[0]!, state }],
+      });
+      const slow = deferred<{ success: boolean; path: string }>();
+      uploadFile
+        .mockResolvedValueOnce({ success: true, path: "/uploads/first.txt" })
+        .mockReturnValueOnce(slow.promise);
+      const { container, getByLabelText, getByText } = render(<InputBar sessionId="s1" />);
+      const input = container.querySelector('input[data-slot="input-attach-file-input"]')!;
+      const files = [new File(["one"], "first.txt"), new File(["two"], "second.txt")];
+      fireEvent.change(input, { target: { files } });
+
+      await waitFor(() => expect(getByText("first.txt")).toBeTruthy());
+      expect(getByLabelText("发送")).toBeDisabled();
+      fireEvent.change(getByLabelText("输入聊天消息"), { target: { value: "both files" } });
+      fireEvent.submit(container.querySelector("form")!);
+      expect(sendEnvelope).not.toHaveBeenCalled();
+      expect(useChatStore.getState().bySessionId.s1?.messages).toHaveLength(0);
+
+      slow.resolve({ success: true, path: "/uploads/second.txt" });
+      await waitFor(() => expect(getByLabelText("发送")).toBeEnabled());
+      fireEvent.click(getByLabelText("发送"));
+      const expectedText = "both files @/uploads/first.txt @/uploads/second.txt";
+      if (state === "idle") {
+        expect(sendEnvelope).toHaveBeenCalledWith(
+          expect.objectContaining({ payload: expect.objectContaining({ text: expectedText }) }),
+        );
+      } else {
+        expect(sendEnvelope).not.toHaveBeenCalled();
+        expect(useChatStore.getState().bySessionId.s1?.messages).toEqual([
+          expect.objectContaining({ text: expectedText, deliveryStatus: "queued" }),
+        ]);
+      }
+    },
+  );
+
+  it("keeps successful dropped attachments in order when a middle file fails", async () => {
+    uploadFile
+      .mockResolvedValueOnce({ success: true, path: "/uploads/first.txt" })
+      .mockRejectedValueOnce(new Error("磁盘满"))
+      .mockResolvedValueOnce({ success: true, path: "/uploads/last.txt" });
+    const { container, getByLabelText } = render(<InputBar sessionId="s1" />);
+    const files = ["first.txt", "broken.txt", "last.txt"].map((name) => new File([name], name));
+    fireEvent.drop(container.querySelector("form")!, { dataTransfer: { files } });
+
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(3));
+    await waitFor(() => expect(getByLabelText("发送")).toBeEnabled());
+    expect(
+      useChatStore.getState().bySessionId.s1?.draftAttachments.map((a) => a.file.name),
+    ).toEqual(["first.txt", "last.txt"]);
+    expect(toastError).toHaveBeenCalledWith("已上传 2/3 个文件", {
+      id: "loading-id",
+      description: "broken.txt：磁盘满",
+    });
+    fireEvent.click(getByLabelText("发送"));
+    expect(sendEnvelope).toHaveBeenCalledWith(
+      expect.objectContaining({
+        payload: expect.objectContaining({ text: "see @/uploads/first.txt @/uploads/last.txt" }),
+      }),
+    );
+  });
+
+  it("keeps both overlapping uploads pending across an input bar remount", async () => {
+    const first = deferred<{ success: boolean; path: string }>();
+    const second = deferred<{ success: boolean; path: string }>();
+    uploadFile.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise);
+    const initial = render(<InputBar sessionId="s1" />);
+    const input = initial.container.querySelector('input[data-slot="input-attach-file-input"]')!;
+    fireEvent.change(input, { target: { files: [new File(["a"], "a.txt")] } });
+    fireEvent.change(input, { target: { files: [new File(["b"], "b.txt")] } });
+    await waitFor(() => expect(uploadFile).toHaveBeenCalledTimes(2));
+    initial.unmount();
+    const { getByLabelText } = render(<InputBar sessionId="s1" />);
+    expect(getByLabelText("发送")).toBeDisabled();
+
+    first.resolve({ success: true, path: "/uploads/a.txt" });
+    await waitFor(() =>
+      expect(useChatStore.getState().bySessionId.s1?.pendingAttachmentUploads).toBe(1),
+    );
+    expect(getByLabelText("发送")).toBeDisabled();
+    second.resolve({ success: true, path: "/uploads/b.txt" });
+    await waitFor(() => expect(getByLabelText("发送")).toBeEnabled());
+    expect(useChatStore.getState().bySessionId.s1?.pendingAttachmentUploads).toBe(0);
   });
 
   it("removes uploaded files without adding their path to the outgoing message", async () => {

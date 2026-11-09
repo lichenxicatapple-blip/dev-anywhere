@@ -48,7 +48,7 @@ import {
   type XtermLinkActivationPoint,
 } from "@/lib/xterm-touch-link-activation";
 import { triggerFileDownload } from "@/lib/file-download-trigger";
-import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
+import { uploadFilesAndShowToast } from "@/lib/file-upload-payload";
 import { toast } from "@/components/toast";
 import { createRafScheduler } from "@/lib/raf-scheduler";
 import type { RafScheduler } from "@/lib/raf-scheduler";
@@ -809,8 +809,8 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   }, []);
   const handlePtyDrop = useCallback(
     async (event: ReactDragEvent<HTMLDivElement>): Promise<void> => {
-      const file = event.dataTransfer.files?.[0];
-      if (!file) return;
+      const files = Array.from(event.dataTransfer.files);
+      if (files.length === 0) return;
       event.preventDefault();
       setIsPtyDragOver(false);
       if (!canAcceptInput()) return;
@@ -819,11 +819,14 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
         toast.error("请先连接开发机");
         return;
       }
-      const path = await uploadFileAndShowToast({ relay, sessionId, file });
-      if (path) {
-        sendRemoteInputRaw(sessionId, `@${path} `);
-        scrollControllerRef.current?.resumeHorizontalCursorFollow("dropUpload");
-        scheduleRawInputFollow("dropUpload");
+      const targetTerminal = terminalRef.current;
+      const uploaded = await uploadFilesAndShowToast({ relay, sessionId, files });
+      if (uploaded.length > 0) {
+        sendRemoteInputRaw(sessionId, uploaded.map(({ path }) => `@${path} `).join(""));
+        if (targetTerminal && terminalRef.current === targetTerminal) {
+          scrollControllerRef.current?.resumeHorizontalCursorFollow("dropUpload");
+          scheduleRawInputFollow("dropUpload");
+        }
       }
     },
     [canAcceptInput, scheduleRawInputFollow, sessionId],

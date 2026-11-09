@@ -912,6 +912,7 @@ describe("phase-machine explicit proxy removal", () => {
           quotedMessage: null,
           inputDraft: "draft",
           draftAttachments: [],
+          pendingAttachmentUploads: 0,
         },
       },
     });

@@ -51,7 +51,7 @@ import { useFileStore } from "@/stores/file-store";
 import { useMediaQuery } from "@/hooks/use-media-query";
 import { useScreenWakeLockScope } from "@/hooks/use-screen-wake-lock";
 import { toast } from "@/components/toast";
-import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
+import { uploadFilesAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { SessionRenameDialog } from "@/components/session/session-rename-dialog";
 import { TerminalDimensionInput } from "./terminal-dimension-input";
@@ -366,16 +366,18 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
   const [renameOpen, setRenameOpen] = useState(false);
 
   async function handleFilePicked(event: ChangeEvent<HTMLInputElement>): Promise<void> {
-    const file = event.target.files?.[0];
+    const files = Array.from(event.target.files ?? []);
     event.target.value = "";
-    if (!file) return;
+    if (files.length === 0) return;
     const relay = relayClientRef;
     if (!relay) {
       toast.error("请先连接开发机");
       return;
     }
-    const path = await uploadFileAndShowToast({ relay, sessionId, file });
-    if (path) sendRemoteInputRaw(sessionId, `@${path} `);
+    const uploaded = await uploadFilesAndShowToast({ relay, sessionId, files });
+    if (uploaded.length > 0) {
+      sendRemoteInputRaw(sessionId, uploaded.map(({ path }) => `@${path} `).join(""));
+    }
   }
 
   async function handleRename(targetSessionId: string, name: string): Promise<void> {
@@ -875,6 +877,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
           <input
             ref={imageInputRef}
             type="file"
+            multiple
             accept={uploadPickerPolicy.mediaAccept}
             className="hidden"
             data-slot="chat-menu-upload-image-input"
@@ -885,6 +888,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
           <input
             ref={fileInputRef}
             type="file"
+            multiple
             accept={uploadPickerPolicy.fileAccept}
             className="hidden"
             data-slot="chat-menu-upload-file-input"

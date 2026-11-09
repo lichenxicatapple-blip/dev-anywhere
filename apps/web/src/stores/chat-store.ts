@@ -84,6 +84,7 @@ interface ChatSessionSlice {
   quotedMessage: QuotedMessage | null;
   inputDraft: string;
   draftAttachments: ChatDraftAttachment[];
+  pendingAttachmentUploads: number;
 }
 
 export const EMPTY_SLICE: ChatSessionSlice = {
@@ -100,6 +101,7 @@ export const EMPTY_SLICE: ChatSessionSlice = {
   quotedMessage: null,
   inputDraft: "",
   draftAttachments: [],
+  pendingAttachmentUploads: 0,
 };
 
 interface ChatStoreState {
@@ -144,6 +146,7 @@ interface ChatStoreState {
   addDraftAttachment: (sessionId: string, attachment: ChatDraftAttachment) => void;
   removeDraftAttachment: (sessionId: string, attachmentId: string) => void;
   clearDraftAttachments: (sessionId: string) => void;
+  changePendingAttachmentUploads: (sessionId: string, delta: number) => void;
   requestFollowLatest: (sessionId: string) => void;
   loadHistory: (sessionId: string, messages: SessionHistoryMessage[]) => void;
   loadHistoryPage: (
@@ -548,6 +551,14 @@ export const useChatStore = create<ChatStoreState>()(
       clearDraftAttachments: (sessionId) =>
         set((state) =>
           updateSlice(state, sessionId, (slice) => ({ ...slice, draftAttachments: [] })),
+        ),
+
+      changePendingAttachmentUploads: (sessionId, delta) =>
+        set((state) =>
+          updateSlice(state, sessionId, (slice) => ({
+            ...slice,
+            pendingAttachmentUploads: Math.max(0, slice.pendingAttachmentUploads + delta),
+          })),
         ),
 
       requestFollowLatest: (sessionId) =>

@@ -1,16 +1,14 @@
 import type { ClipboardEvent, RefObject } from "react";
-import { useCallback } from "react";
+import { useCallback, useLayoutEffect, useRef } from "react";
 import type { Terminal } from "@xterm/xterm";
 import { sendRemoteInputRaw } from "@/lib/ansi-keys";
-import { getClipboardImageFile } from "@/lib/clipboard-image";
-import { uploadClipboardImageFromPaste } from "@/lib/clipboard-image-upload";
-import { uploadFileAndShowToast } from "@/lib/file-upload-payload";
+import { clipboardImagePathMention, getClipboardFiles } from "@/lib/clipboard-image";
+import { uploadFilesAndShowToast } from "@/lib/file-upload-payload";
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { toast } from "@/components/toast";
 
 // PTY 视图剪贴板粘贴:
-//   - 图片 (任意来源 Finder / 截屏 / 浏览器): 走 image upload, 写入 "@<path> " 提及文本
-//   - 其它任意文件: 走通用 file upload, 同样写入 "@<path> " 提及文本
+//   - 图片和文件: 按剪贴板顺序上传, 一次写入所有成功的 "@<path> " 提及文本
 //   - 纯文本 / 无 file: 不拦截, 由 xterm 默认 paste 流程接管 (含 bracketed paste)
 
 interface UseTerminalPasteOptions {
@@ -20,25 +18,23 @@ interface UseTerminalPasteOptions {
   onAfterPaste?: () => void;
 }
 
-function getFirstNonImageFile(data: DataTransfer | null): File | null {
-  if (!data?.files || data.files.length === 0) return null;
-  for (const f of data.files) {
-    if (!f.type.startsWith("image/")) return f;
-  }
-  return null;
-}
-
 export function useTerminalPaste({
   sessionId,
   terminalRef,
   onAfterPaste,
 }: UseTerminalPasteOptions): (event: ClipboardEvent<HTMLDivElement>) => Promise<void> {
+  const activeTargetRef = useRef<UseTerminalPasteOptions | null>(null);
+  useLayoutEffect(() => {
+    activeTargetRef.current = { sessionId, terminalRef, onAfterPaste };
+    return () => {
+      activeTargetRef.current = null;
+    };
+  }, [sessionId, terminalRef, onAfterPaste]);
+
   return useCallback(
     async (event: ClipboardEvent<HTMLDivElement>): Promise<void> => {
-      const data = event.clipboardData;
-      const hasImage = Boolean(getClipboardImageFile(data));
-      const otherFile = hasImage ? null : getFirstNonImageFile(data);
-      if (!hasImage && !otherFile) return;
+      const files = getClipboardFiles(event.clipboardData);
+      if (files.length === 0) return;
       event.preventDefault();
       event.stopPropagation();
 
@@ -48,29 +44,25 @@ export function useTerminalPaste({
         return;
       }
 
-      if (hasImage) {
-        const uploadToastId = toast.loading("图片上传中...");
-        try {
-          const result = await uploadClipboardImageFromPaste({
-            clipboardData: data,
-            relay,
-            sessionId,
-          });
-          toast.dismiss(uploadToastId);
-          if (!result) return;
-          sendRemoteInputRaw(sessionId, result.pathMention);
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : String(err), { id: uploadToastId });
-          return;
-        }
-      } else if (otherFile) {
-        const path = await uploadFileAndShowToast({ relay, sessionId, file: otherFile });
-        if (!path) return;
-        sendRemoteInputRaw(sessionId, `@${path} `);
+      const terminal = terminalRef.current;
+      const uploaded = await uploadFilesAndShowToast({ relay, sessionId, files, clipboard: true });
+      if (uploaded.length === 0) return;
+      sendRemoteInputRaw(
+        sessionId,
+        uploaded.map(({ path }) => clipboardImagePathMention(path)).join(""),
+      );
+
+      // 文件仍写入发起粘贴的会话, 但切换会话或重建终端后不能抢焦点/滚动新画面。
+      const activeTarget = activeTargetRef.current;
+      if (
+        terminal &&
+        activeTarget?.sessionId === sessionId &&
+        activeTarget.terminalRef.current === terminal
+      ) {
+        activeTarget.onAfterPaste?.();
+        terminal.focus();
       }
-      onAfterPaste?.();
-      terminalRef.current?.focus();
     },
-    [sessionId, terminalRef, onAfterPaste],
+    [sessionId, terminalRef],
   );
 }

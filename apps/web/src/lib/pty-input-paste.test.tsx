@@ -11,11 +11,15 @@ const { sendRawInput, uploadImage, uploadFile } = vi.hoisted(() => ({
 }));
 
 vi.mock("./ansi-keys", () => ({ sendRemoteInputRaw: sendRawInput }));
-vi.mock("@/lib/clipboard-image-upload", () => ({ uploadClipboardImageFromPaste: uploadImage }));
-vi.mock("@/lib/file-upload-payload", () => ({ uploadFileAndShowToast: uploadFile }));
-vi.mock("@/hooks/use-relay-setup", () => ({ relayClientRef: {} }));
+vi.mock("@/lib/image-upload-compression", () => ({
+  compressLargeImageForUpload: async (file: File) => file,
+  shouldCompressImageForUpload: () => false,
+}));
+vi.mock("@/hooks/use-relay-setup", () => ({
+  relayClientRef: { uploadClipboardImage: uploadImage, uploadFile },
+}));
 vi.mock("@/components/toast", () => ({
-  toast: { loading: vi.fn(), dismiss: vi.fn(), error: vi.fn() },
+  toast: { loading: vi.fn(() => "upload-id"), success: vi.fn(), dismiss: vi.fn(), error: vi.fn() },
 }));
 
 const CLIENTS = {
@@ -50,6 +54,16 @@ describe("PTY browser clipboard and xterm keyboard routing", () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    uploadImage.mockReset();
+    uploadImage.mockImplementation(async (_sessionId: string, file: File) => ({
+      success: true,
+      path: `clipboard/${file.name}`,
+    }));
+    uploadFile.mockReset();
+    uploadFile.mockImplementation(async (_sessionId: string, file: File) => ({
+      success: true,
+      path: `uploads/${file.name}`,
+    }));
   });
 
   afterEach(() => {
@@ -84,7 +98,7 @@ describe("PTY browser clipboard and xterm keyboard routing", () => {
     return event;
   }
 
-  function paste(terminal: Terminal, text: string, files: File[] = []): void {
+  function paste(terminal: Terminal, text: string, files: File[] = []): Event {
     const event = new Event("paste", { bubbles: true, cancelable: true });
     Object.defineProperty(event, "clipboardData", {
       value: {
@@ -98,6 +112,7 @@ describe("PTY browser clipboard and xterm keyboard routing", () => {
       },
     });
     terminal.textarea!.dispatchEvent(event);
+    return event;
   }
 
   it.each([true, false])(
@@ -169,15 +184,40 @@ describe("PTY browser clipboard and xterm keyboard routing", () => {
   it("uploads an actual Windows clipboard image instead of sending a remote clipboard shortcut", async () => {
     const terminal = openTerminal("windows");
     const image = new File(["image bytes"], "browser.png", { type: "image/png" });
-    uploadImage.mockResolvedValueOnce({ pathMention: "@uploads/browser.png " });
+    uploadImage.mockResolvedValueOnce({ success: true, path: "uploads/browser.png" });
     pressKey(terminal, { key: "v", code: "KeyV", keyCode: 86, ctrlKey: true });
-    paste(terminal, "", [image]);
+    const event = paste(terminal, "clipboard image text must not enter the terminal", [image]);
+    expect(event.defaultPrevented).toBe(true);
+    expect(sendRawInput).not.toHaveBeenCalled();
     await vi.waitFor(() => {
       expect(sendRawInput).toHaveBeenCalledExactlyOnceWith("s1", "@uploads/browser.png ");
     });
-    expect(uploadImage).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ clipboardData: expect.objectContaining({ files: [image] }) }),
-    );
+    expect(uploadImage).toHaveBeenCalledExactlyOnceWith("s1", image);
+    expect(uploadFile).not.toHaveBeenCalled();
+  });
+
+  it("intercepts a mixed clipboard batch before xterm and sends only the ordered file mentions", async () => {
+    const terminal = openTerminal("windows");
+    await new Promise<void>((resolve) => terminal.write("\x1b[?2004h", resolve));
+    const document = new File(["notes"], "notes.txt", { type: "text/plain" });
+    const image = new File(["image bytes"], "browser.png", { type: "image/png" });
+    const archive = new File(["archive bytes"], "source.zip", { type: "application/zip" });
+    pressKey(terminal, { key: "v", code: "KeyV", keyCode: 86, ctrlKey: true });
+
+    const event = paste(terminal, "clipboard fallback text", [document, image, archive]);
+
+    expect(event.defaultPrevented).toBe(true);
+    expect(sendRawInput).not.toHaveBeenCalled();
+    await vi.waitFor(() => {
+      expect(sendRawInput).toHaveBeenCalledExactlyOnceWith(
+        "s1",
+        "@uploads/notes.txt @clipboard/browser.png @uploads/source.zip ",
+      );
+    });
+    expect(uploadImage).toHaveBeenCalledExactlyOnceWith("s1", image);
+    expect(uploadFile).toHaveBeenCalledTimes(2);
+    expect(uploadFile).toHaveBeenNthCalledWith(1, "s1", document);
+    expect(uploadFile).toHaveBeenNthCalledWith(2, "s1", archive);
   });
 
   it.each(["android", "ipad"] as const)(

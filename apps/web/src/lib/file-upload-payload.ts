@@ -5,41 +5,68 @@ import {
   shouldCompressImageForUpload,
 } from "./image-upload-compression";
 
-interface UploadFileWithToastOptions {
+const CLIPBOARD_IMAGE_TYPES = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
+
+interface UploadFilesWithToastOptions {
   relay: RelayClient;
   sessionId: string;
-  file: File;
-  // 默认 "已上传 {path}"。传 null 不弹成功 toast, 上传中 toast 直接 dismiss
-  // (input-bar 用附件预览承载成功反馈, 不需要二次 toast)。
+  files: readonly File[];
+  clipboard?: boolean;
   successLabel?: string | null;
+  onUploaded?: (file: File, path: string) => void;
 }
 
-// 上传一个文件并管理 toast 生命周期, 共享给 chat-header / use-pty-view drop /
-// use-terminal-paste / input-bar 的 picker+drop+paste-fallback 等多个调用点。
-// 调用方只决定拿到 path 之后怎么把它写到目标 (PTY stdin / 输入框 draft)。
-// 上传失败返回 null, 调用方应直接 return。
-export async function uploadFileAndShowToast(
-  opts: UploadFileWithToastOptions,
-): Promise<string | null> {
-  const compressing = shouldCompressImageForUpload(opts.file);
-  const toastId = toast.loading(
-    compressing ? `正在压缩并上传 ${opts.file.name} ...` : `上传 ${opts.file.name} ...`,
-  );
-  try {
-    const uploadFile = await compressLargeImageForUpload(opts.file);
-    const result = await opts.relay.uploadFile(opts.sessionId, uploadFile);
-    if (!result.success || !result.path) {
-      toast.error(result.error ?? "上传失败", { id: toastId });
-      return null;
+/** Upload sequentially so compression stays bounded and attachments keep their selected order. */
+export async function uploadFilesAndShowToast(
+  opts: UploadFilesWithToastOptions,
+): Promise<Array<{ file: File; path: string }>> {
+  const files = Array.from(opts.files);
+  if (files.length === 0) return [];
+
+  const uploaded: Array<{ file: File; path: string }> = [];
+  const failures: string[] = [];
+  let toastId: string | number | undefined;
+  for (const [index, file] of files.entries()) {
+    const progress = `(${index + 1}/${files.length})`;
+    const action = shouldCompressImageForUpload(file) ? "正在压缩并上传" : "正在上传";
+    const label = `${action} ${file.name} ${progress}`;
+    toastId = index === 0 ? toast.loading(label) : toast.loading(label, { id: toastId });
+    try {
+      const prepared = await compressLargeImageForUpload(file);
+      const result =
+        opts.clipboard && CLIPBOARD_IMAGE_TYPES.has(file.type)
+          ? await opts.relay.uploadClipboardImage(opts.sessionId, prepared)
+          : await opts.relay.uploadFile(opts.sessionId, prepared);
+      if (!result.success || !result.path) {
+        failures.push(`${file.name}：${result.error || "上传失败"}`);
+        continue;
+      }
+      uploaded.push({ file, path: result.path });
+      try {
+        opts.onUploaded?.(file, result.path);
+      } catch (error) {
+        failures.push(
+          `${file.name}：已上传，但无法添加附件（${error instanceof Error ? error.message : String(error)}）`,
+        );
+      }
+    } catch (error) {
+      failures.push(`${file.name}：${error instanceof Error ? error.message : String(error)}`);
     }
-    if (opts.successLabel === null) {
-      toast.dismiss(toastId);
-    } else {
-      toast.success(opts.successLabel ?? `已上传 ${result.path}`, { id: toastId });
-    }
-    return result.path;
-  } catch (err) {
-    toast.error(err instanceof Error ? err.message : String(err), { id: toastId });
-    return null;
   }
+
+  if (failures.length > 0) {
+    toast.error(`已上传 ${uploaded.length}/${files.length} 个文件`, {
+      id: toastId,
+      description: failures.join("\n"),
+    });
+  } else if (opts.successLabel === null) {
+    toast.dismiss(toastId);
+  } else {
+    toast.success(
+      opts.successLabel ??
+        (files.length === 1 ? `已上传 ${uploaded[0]!.path}` : `已上传 ${uploaded.length} 个文件`),
+      { id: toastId },
+    );
+  }
+  return uploaded;
 }

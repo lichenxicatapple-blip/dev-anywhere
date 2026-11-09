@@ -1,31 +1,34 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { renderHook } from "@testing-library/react";
+import { cleanup, renderHook, waitFor } from "@testing-library/react";
 import type { Terminal } from "@xterm/xterm";
 import type { ClipboardEvent, RefObject } from "react";
 
 const {
   sendRemoteInputRaw,
-  uploadClipboardImageFromPaste,
-  uploadFileAndShowToast,
+  compressLargeImageForUpload,
   toastLoading,
   toastError,
   toastSuccess,
   toastDismiss,
   relayUploadFile,
+  relayUploadClipboardImage,
 } = vi.hoisted(() => ({
   sendRemoteInputRaw: vi.fn(),
-  uploadClipboardImageFromPaste: vi.fn(),
-  uploadFileAndShowToast: vi.fn(),
+  compressLargeImageForUpload: vi.fn(async (file: File) => file),
   toastLoading: vi.fn(() => "toast-id"),
   toastError: vi.fn(),
   toastSuccess: vi.fn(),
   toastDismiss: vi.fn(),
   relayUploadFile: vi.fn(),
+  relayUploadClipboardImage: vi.fn(),
 }));
 
+// Keep clipboard extraction and batch upload real; replace only their external boundaries.
 vi.mock("@/lib/ansi-keys", () => ({ sendRemoteInputRaw }));
-vi.mock("@/lib/clipboard-image-upload", () => ({ uploadClipboardImageFromPaste }));
-vi.mock("@/lib/file-upload-payload", () => ({ uploadFileAndShowToast }));
+vi.mock("@/lib/image-upload-compression", () => ({
+  compressLargeImageForUpload,
+  shouldCompressImageForUpload: () => false,
+}));
 vi.mock("@/components/toast", () => ({
   toast: {
     loading: toastLoading,
@@ -34,18 +37,12 @@ vi.mock("@/components/toast", () => ({
     dismiss: toastDismiss,
   },
 }));
-vi.mock("@/hooks/use-relay-setup", () => ({
-  // 真值在每个测试里通过 setRelay() 替换; 默认给个最小可用对象, 防 import 期 undefined.
-  relayClientRef: { uploadFile: relayUploadFile },
-}));
+vi.mock("@/hooks/use-relay-setup", () => ({ relayClientRef: null }));
 
 import { useTerminalPaste } from "./use-terminal-paste";
 import * as relaySetup from "@/hooks/use-relay-setup";
 
 function setRelay(value: unknown): void {
-  // relayClientRef 是导出的可变 binding, hook 内部读 module-level 引用,
-  // 测试需要直接覆盖. 这里走 Object.defineProperty 是因为 vi.mock 给的 binding 在
-  // strict mode 下不是 writable.
   Object.defineProperty(relaySetup, "relayClientRef", {
     value,
     writable: true,
@@ -57,16 +54,14 @@ function makePasteEvent(opts: {
   files?: File[];
   items?: Array<{ kind: string; type: string; getAsFile: () => File | null }>;
 }): ClipboardEvent<HTMLDivElement> {
-  const preventDefault = vi.fn();
-  const stopPropagation = vi.fn();
   const clipboardData = {
     files: (opts.files ?? []) as unknown as FileList,
     items: (opts.items ?? []) as unknown as DataTransferItemList,
   } as unknown as DataTransfer;
   return {
     clipboardData,
-    preventDefault,
-    stopPropagation,
+    preventDefault: vi.fn(),
+    stopPropagation: vi.fn(),
   } as unknown as ClipboardEvent<HTMLDivElement>;
 }
 
@@ -75,11 +70,19 @@ function imageFile(name = "shot.png", type = "image/png"): File {
 }
 
 function textFile(name = "notes.txt", type = "text/plain"): File {
-  return new File([new Uint8Array([0x41, 0x42, 0x43])], name, { type });
+  return new File(["ABC"], name, { type });
 }
 
 function makeTerminalRef(): RefObject<Terminal | null> {
   return { current: { focus: vi.fn() } as unknown as Terminal };
+}
+
+function deferredUpload() {
+  let resolve!: (result: { success: boolean; path: string }) => void;
+  const promise = new Promise<{ success: boolean; path: string }>((done) => {
+    resolve = done;
+  });
+  return { promise, resolve };
 }
 
 describe("useTerminalPaste", () => {
@@ -87,151 +90,257 @@ describe("useTerminalPaste", () => {
   let terminalRef: RefObject<Terminal | null>;
 
   beforeEach(() => {
-    sendRemoteInputRaw.mockReset();
-    uploadClipboardImageFromPaste.mockReset();
-    uploadFileAndShowToast.mockReset();
-    toastLoading.mockReset();
-    toastLoading.mockReturnValue("toast-id");
-    toastError.mockReset();
-    toastSuccess.mockReset();
-    toastDismiss.mockReset();
-    onAfterPaste.mockReset();
+    vi.clearAllMocks();
+    compressLargeImageForUpload.mockReset();
+    compressLargeImageForUpload.mockImplementation(async (file: File) => file);
+    relayUploadFile.mockReset();
+    relayUploadFile.mockImplementation(async (sessionId: string, file: File) => ({
+      success: true,
+      path: `.dev-anywhere/uploads/${sessionId}/${file.name}`,
+    }));
+    relayUploadClipboardImage.mockReset();
+    relayUploadClipboardImage.mockImplementation(async (sessionId: string, file: File) => ({
+      success: true,
+      path: `.dev-anywhere/clipboard/${sessionId}/${file.name}`,
+    }));
     terminalRef = makeTerminalRef();
-    setRelay({ uploadFile: relayUploadFile });
+    setRelay({ uploadFile: relayUploadFile, uploadClipboardImage: relayUploadClipboardImage });
   });
 
   afterEach(() => {
+    cleanup();
     vi.restoreAllMocks();
   });
 
-  function callHandler(event: ClipboardEvent<HTMLDivElement>): Promise<void> {
-    const { result } = renderHook(() =>
-      useTerminalPaste({ sessionId: "s1", terminalRef, onAfterPaste }),
+  function renderPaste(sessionId = "s1") {
+    return renderHook(
+      (props: {
+        sessionId: string;
+        terminalRef: RefObject<Terminal | null>;
+        onAfterPaste: () => void;
+      }) => useTerminalPaste(props),
+      { initialProps: { sessionId, terminalRef, onAfterPaste } },
     );
-    return result.current(event);
   }
 
-  it("uploads a pasted image and sends @path as remote input", async () => {
-    uploadClipboardImageFromPaste.mockResolvedValueOnce({
-      pathMention: "@.dev-anywhere/clipboard/s1/shot.png ",
-    });
+  it("uploads an image once when files and items both describe it", async () => {
     const file = imageFile();
     const event = makePasteEvent({
       files: [file],
       items: [{ kind: "file", type: file.type, getAsFile: () => file }],
     });
+    const { result } = renderPaste();
 
-    await callHandler(event);
+    await result.current(event);
 
-    expect(event.preventDefault).toHaveBeenCalled();
-    expect(event.stopPropagation).toHaveBeenCalled();
-    expect(uploadClipboardImageFromPaste).toHaveBeenCalledTimes(1);
-    expect(uploadFileAndShowToast).not.toHaveBeenCalled();
-    expect(sendRemoteInputRaw).toHaveBeenCalledWith("s1", "@.dev-anywhere/clipboard/s1/shot.png ");
-    expect(onAfterPaste).toHaveBeenCalled();
-  });
-
-  it("does nothing when image upload returns null (e.g. extraction failed silently)", async () => {
-    uploadClipboardImageFromPaste.mockResolvedValueOnce(null);
-    const file = imageFile();
-    const event = makePasteEvent({
-      files: [file],
-      items: [{ kind: "file", type: file.type, getAsFile: () => file }],
-    });
-
-    await callHandler(event);
-
-    expect(uploadClipboardImageFromPaste).toHaveBeenCalled();
-    expect(sendRemoteInputRaw).not.toHaveBeenCalled();
-    expect(onAfterPaste).not.toHaveBeenCalled();
-  });
-
-  it("surfaces image upload errors via toast and does not send to PTY", async () => {
-    uploadClipboardImageFromPaste.mockRejectedValueOnce(new Error("network broken"));
-    const file = imageFile();
-    const event = makePasteEvent({
-      files: [file],
-      items: [{ kind: "file", type: file.type, getAsFile: () => file }],
-    });
-
-    await callHandler(event);
-
-    expect(toastError).toHaveBeenCalledWith("network broken", { id: expect.any(String) });
-    expect(sendRemoteInputRaw).not.toHaveBeenCalled();
-    expect(onAfterPaste).not.toHaveBeenCalled();
-  });
-
-  it("uploads a pasted non-image file and sends @path as remote input", async () => {
-    uploadFileAndShowToast.mockResolvedValueOnce(".dev-anywhere/uploads/s1/notes.txt");
-    const file = textFile();
-    const event = makePasteEvent({ files: [file] });
-
-    await callHandler(event);
-
-    expect(event.preventDefault).toHaveBeenCalled();
-    expect(uploadFileAndShowToast).toHaveBeenCalledWith(
-      expect.objectContaining({ sessionId: "s1", file }),
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopPropagation).toHaveBeenCalledOnce();
+    expect(relayUploadClipboardImage).toHaveBeenCalledExactlyOnceWith("s1", file);
+    expect(relayUploadFile).not.toHaveBeenCalled();
+    expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith(
+      "s1",
+      "@.dev-anywhere/clipboard/s1/shot.png ",
     );
-    expect(uploadClipboardImageFromPaste).not.toHaveBeenCalled();
-    expect(sendRemoteInputRaw).toHaveBeenCalledWith("s1", "@.dev-anywhere/uploads/s1/notes.txt ");
-    expect(onAfterPaste).toHaveBeenCalled();
+    expect(onAfterPaste).toHaveBeenCalledOnce();
+    expect(terminalRef.current?.focus).toHaveBeenCalledOnce();
   });
 
-  it("does not send anything when non-image upload returns null", async () => {
-    uploadFileAndShowToast.mockResolvedValueOnce(null);
-    const event = makePasteEvent({ files: [textFile()] });
-
-    await callHandler(event);
-
-    expect(uploadFileAndShowToast).toHaveBeenCalled();
+  it("uploads all files sequentially and inserts their paths in one input after the batch", async () => {
+    const first = deferredUpload();
+    relayUploadFile.mockImplementationOnce(() => first.promise);
+    const { result } = renderPaste();
+    const pending = result.current(makePasteEvent({ files: [textFile(), textFile("second.txt")] }));
+    await waitFor(() => expect(relayUploadFile).toHaveBeenCalledTimes(1));
     expect(sendRemoteInputRaw).not.toHaveBeenCalled();
     expect(onAfterPaste).not.toHaveBeenCalled();
+
+    first.resolve({ success: true, path: ".dev-anywhere/uploads/s1/notes.txt" });
+    await pending;
+
+    expect(relayUploadFile.mock.calls.map(([, file]) => file.name)).toEqual([
+      "notes.txt",
+      "second.txt",
+    ]);
+    expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith(
+      "s1",
+      "@.dev-anywhere/uploads/s1/notes.txt @.dev-anywhere/uploads/s1/second.txt ",
+    );
+    expect(onAfterPaste).toHaveBeenCalledOnce();
+    expect(terminalRef.current?.focus).toHaveBeenCalledOnce();
   });
 
-  // 关键不回归: 没 file 时必须放行让 xterm 默认 paste 接管 (粘贴文本走 OSC 52),
-  // 一旦 preventDefault 文本粘贴会从此失效。
-  it("ignores text-only paste so xterm default paste handler can run", async () => {
-    const event = makePasteEvent({ files: [], items: [] });
+  it("preserves the order of mixed files and images while using each upload endpoint", async () => {
+    const files = [
+      textFile(),
+      imageFile(),
+      textFile("report.pdf", "application/pdf"),
+      imageFile("other.jpg", "image/jpeg"),
+    ];
+    const { result } = renderPaste();
 
-    await callHandler(event);
+    await result.current(makePasteEvent({ files }));
+
+    expect(relayUploadFile.mock.calls.map(([, file]) => file.name)).toEqual([
+      "notes.txt",
+      "report.pdf",
+    ]);
+    expect(relayUploadClipboardImage.mock.calls.map(([, file]) => file.name)).toEqual([
+      "shot.png",
+      "other.jpg",
+    ]);
+    expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith(
+      "s1",
+      "@.dev-anywhere/uploads/s1/notes.txt @.dev-anywhere/clipboard/s1/shot.png @.dev-anywhere/uploads/s1/report.pdf @.dev-anywhere/clipboard/s1/other.jpg ",
+    );
+  });
+
+  it("extracts every file item when the browser provides no FileList", async () => {
+    const files = [imageFile(), textFile()];
+    const { result } = renderPaste();
+
+    await result.current(
+      makePasteEvent({
+        items: files.map((file) => ({ kind: "file", type: file.type, getAsFile: () => file })),
+      }),
+    );
+
+    expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith(
+      "s1",
+      "@.dev-anywhere/clipboard/s1/shot.png @.dev-anywhere/uploads/s1/notes.txt ",
+    );
+  });
+
+  it("inserts only successful paths and continues after server errors and rejected requests", async () => {
+    relayUploadFile.mockResolvedValueOnce({ success: false, error: "磁盘满" });
+    relayUploadClipboardImage.mockRejectedValueOnce(new Error("network broken"));
+    const { result } = renderPaste();
+
+    await result.current(
+      makePasteEvent({ files: [textFile("failed.txt"), imageFile(), textFile("ok.txt")] }),
+    );
+
+    expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith(
+      "s1",
+      "@.dev-anywhere/uploads/s1/ok.txt ",
+    );
+    expect(toastError).toHaveBeenCalledWith(
+      "已上传 1/3 个文件",
+      expect.objectContaining({
+        description: expect.stringContaining("failed.txt：磁盘满"),
+      }),
+    );
+    expect(toastError.mock.calls[0]?.[1].description).toContain("shot.png：network broken");
+    expect(onAfterPaste).toHaveBeenCalledOnce();
+  });
+
+  it("does not insert, follow or focus when every upload fails", async () => {
+    relayUploadFile.mockResolvedValue({ success: false, error: "磁盘满" });
+    relayUploadClipboardImage.mockRejectedValue(new Error("network broken"));
+    const { result } = renderPaste();
+
+    await result.current(makePasteEvent({ files: [textFile(), imageFile()] }));
+
+    expect(sendRemoteInputRaw).not.toHaveBeenCalled();
+    expect(onAfterPaste).not.toHaveBeenCalled();
+    expect(terminalRef.current?.focus).not.toHaveBeenCalled();
+    expect(toastError).toHaveBeenCalledWith("已上传 0/2 个文件", expect.any(Object));
+  });
+
+  it("leaves text-only paste untouched for xterm's bracketed paste handling", async () => {
+    const getAsFile = vi.fn(() => null);
+    const event = makePasteEvent({ items: [{ kind: "string", type: "text/plain", getAsFile }] });
+    const { result } = renderPaste();
+
+    await result.current(event);
 
     expect(event.preventDefault).not.toHaveBeenCalled();
     expect(event.stopPropagation).not.toHaveBeenCalled();
-    expect(uploadClipboardImageFromPaste).not.toHaveBeenCalled();
-    expect(uploadFileAndShowToast).not.toHaveBeenCalled();
+    expect(getAsFile).not.toHaveBeenCalled();
+    expect(relayUploadFile).not.toHaveBeenCalled();
+    expect(relayUploadClipboardImage).not.toHaveBeenCalled();
     expect(sendRemoteInputRaw).not.toHaveBeenCalled();
+    expect(toastLoading).not.toHaveBeenCalled();
+    expect(onAfterPaste).not.toHaveBeenCalled();
+    expect(terminalRef.current?.focus).not.toHaveBeenCalled();
   });
 
-  it("toast.error and abort when relay is not connected", async () => {
+  it("reports a disconnected relay without allowing file data into xterm", async () => {
     setRelay(null);
-    const event = makePasteEvent({ files: [textFile()] });
+    const event = makePasteEvent({ files: [textFile(), imageFile()] });
+    const { result } = renderPaste();
 
-    await callHandler(event);
+    await result.current(event);
 
-    expect(event.preventDefault).toHaveBeenCalled();
+    expect(event.preventDefault).toHaveBeenCalledOnce();
+    expect(event.stopPropagation).toHaveBeenCalledOnce();
     expect(toastError).toHaveBeenCalledWith("请先连接开发机");
-    expect(uploadFileAndShowToast).not.toHaveBeenCalled();
+    expect(relayUploadFile).not.toHaveBeenCalled();
+    expect(relayUploadClipboardImage).not.toHaveBeenCalled();
     expect(sendRemoteInputRaw).not.toHaveBeenCalled();
   });
 
-  // 仅有非 image file (没 image item) 时: 走普通文件上传, 不会误判成 image 路径。
-  it("prefers image branch when both image and non-image files coexist", async () => {
-    uploadClipboardImageFromPaste.mockResolvedValueOnce({
-      pathMention: "@.dev-anywhere/clipboard/s1/shot.png ",
-    });
-    const img = imageFile();
-    const txt = textFile();
-    const event = makePasteEvent({
-      files: [txt, img],
-      items: [
-        { kind: "file", type: txt.type, getAsFile: () => txt },
-        { kind: "file", type: img.type, getAsFile: () => img },
-      ],
-    });
+  it("finishes the original session's batch without following or focusing a newly selected session", async () => {
+    const first = deferredUpload();
+    relayUploadFile.mockImplementationOnce(() => first.promise);
+    const { result, rerender } = renderPaste();
+    const pending = result.current(makePasteEvent({ files: [textFile(), textFile("second.txt")] }));
+    await waitFor(() => expect(relayUploadFile).toHaveBeenCalledTimes(1));
+    const nextOnAfterPaste = vi.fn();
+    // Keep the same Terminal to ensure session identity alone protects the new view.
+    rerender({ sessionId: "s2", terminalRef, onAfterPaste: nextOnAfterPaste });
 
-    await callHandler(event);
+    first.resolve({ success: true, path: "uploaded/first.txt" });
+    await pending;
 
-    expect(uploadClipboardImageFromPaste).toHaveBeenCalled();
-    expect(uploadFileAndShowToast).not.toHaveBeenCalled();
+    expect(relayUploadFile.mock.calls.map(([sessionId]) => sessionId)).toEqual(["s1", "s1"]);
+    expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith(
+      "s1",
+      "@uploaded/first.txt @.dev-anywhere/uploads/s1/second.txt ",
+    );
+    expect(onAfterPaste).not.toHaveBeenCalled();
+    expect(nextOnAfterPaste).not.toHaveBeenCalled();
+    expect(terminalRef.current?.focus).not.toHaveBeenCalled();
+  });
+
+  it.each(["current", "ref"] as const)(
+    "does not focus a replacement terminal in the same session (%s replaced)",
+    async (replacement) => {
+      const first = deferredUpload();
+      relayUploadFile.mockImplementationOnce(() => first.promise);
+      const oldTerminal = terminalRef.current;
+      const { result, rerender } = renderPaste();
+      const pending = result.current(makePasteEvent({ files: [textFile()] }));
+      await waitFor(() => expect(relayUploadFile).toHaveBeenCalledTimes(1));
+      const newTerminalRef = makeTerminalRef();
+      if (replacement === "current") {
+        terminalRef.current = newTerminalRef.current;
+      } else {
+        rerender({ sessionId: "s1", terminalRef: newTerminalRef, onAfterPaste });
+      }
+
+      first.resolve({ success: true, path: "uploaded/notes.txt" });
+      await pending;
+
+      expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith("s1", "@uploaded/notes.txt ");
+      expect(onAfterPaste).not.toHaveBeenCalled();
+      expect(oldTerminal?.focus).not.toHaveBeenCalled();
+      expect(newTerminalRef.current?.focus).not.toHaveBeenCalled();
+    },
+  );
+
+  it("keeps the original input destination after unmount without focusing its disposed terminal", async () => {
+    const first = deferredUpload();
+    relayUploadFile.mockImplementationOnce(() => first.promise);
+    const { result, unmount } = renderPaste();
+    const pending = result.current(makePasteEvent({ files: [textFile()] }));
+    await waitFor(() => expect(relayUploadFile).toHaveBeenCalledTimes(1));
+    unmount();
+
+    first.resolve({ success: true, path: "uploaded/notes.txt" });
+    await pending;
+
+    expect(sendRemoteInputRaw).toHaveBeenCalledExactlyOnceWith("s1", "@uploaded/notes.txt ");
+    expect(onAfterPaste).not.toHaveBeenCalled();
+    expect(terminalRef.current?.focus).not.toHaveBeenCalled();
   });
 });

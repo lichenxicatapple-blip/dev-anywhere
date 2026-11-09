@@ -1,34 +1,19 @@
-type SupportedClipboardImageMimeType = "image/png" | "image/jpeg" | "image/webp" | "image/gif";
-
 type ClipboardItemLike = Pick<DataTransferItem, "kind" | "type" | "getAsFile">;
 type ClipboardDataLike = {
   items?: ArrayLike<ClipboardItemLike>;
   files?: ArrayLike<File>;
 };
 
-const SUPPORTED_IMAGE_TYPES = new Set<SupportedClipboardImageMimeType>([
-  "image/png",
-  "image/jpeg",
-  "image/webp",
-  "image/gif",
-]);
-
-function isSupportedImageType(type: string): type is SupportedClipboardImageMimeType {
-  return SUPPORTED_IMAGE_TYPES.has(type as SupportedClipboardImageMimeType);
-}
-
-export function getClipboardImageFile(clipboardData: ClipboardDataLike | null): File | null {
-  if (!clipboardData) return null;
-
-  const items = Array.from(clipboardData.items ?? []);
-  for (const item of items) {
-    if (item.kind !== "file" || !isSupportedImageType(item.type)) continue;
-    const file = item.getAsFile();
-    if (file) return file;
-  }
-
+/** Browser files/items usually describe the same payload; choose one source, preserving order. */
+export function getClipboardFiles(clipboardData: ClipboardDataLike | null): File[] {
+  if (!clipboardData) return [];
   const files = Array.from(clipboardData.files ?? []);
-  return files.find((file) => isSupportedImageType(file.type)) ?? null;
+  if (files.length > 0) return files;
+  return Array.from(clipboardData.items ?? []).flatMap((item) => {
+    if (item.kind !== "file") return [];
+    const file = item.getAsFile();
+    return file ? [file] : [];
+  });
 }
 
 export function clipboardImagePathMention(path: string): string {
