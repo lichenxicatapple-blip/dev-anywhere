@@ -133,4 +133,24 @@ describe("session history refresh-storm singleflight", () => {
       sessions: [{ id: "history-after-retry" }],
     });
   });
+
+  it("includes the Cursor IDE error alongside successfully scanned histories", async () => {
+    mockedScanSessionHistory.mockImplementationOnce(async (options) => {
+      options?.onCursorIdeUnavailable?.("无法连接 Cursor IDE，请开启调试端口");
+      return [
+        { id: "other", title: "Other", projectDir: "/workspace", updatedAt: 1, provider: "claude" },
+      ];
+    });
+    const sent: string[] = [];
+    const handlers = createControlMessageHandlers(
+      (data) => sent.push(data),
+      createSessionManagerFake(),
+    );
+    await handlers.handleSessionHistoryRequest({ requestId: "partial" });
+    expect(JSON.parse(sent[0])).toMatchObject({
+      success: true,
+      cursorIdeError: "无法连接 Cursor IDE，请开启调试端口",
+      sessions: [{ id: "other" }],
+    });
+  });
 });

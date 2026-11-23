@@ -152,6 +152,8 @@ export const HistorySessionSchema = z.object({
   updatedAt: z.number(),
   provider: z.enum(providerValues),
   preferredMode: z.enum(sessionModeValues).optional(),
+  cursorIdeGroup: z.string().max(512).optional(),
+  cursorIdeUnavailable: z.string().max(512).optional(),
 });
 export type HistorySession = z.infer<typeof HistorySessionSchema>;
 
@@ -719,6 +721,7 @@ const AgentJsonSessionCreateSchema = z
     provider: z.enum(providerValues),
     mode: z.literal("json"),
     resumeSessionId: z.string().optional(),
+    cursorIde: z.boolean().optional(),
     permissionMode: SessionPermissionModeSchema.optional(),
   })
   .strict();
@@ -777,6 +780,7 @@ const SessionCreateSuccessResponseSchema = z.discriminatedUnion("mode", [
     mode: z.literal("json"),
     ptyOwner: z.never().optional(),
     provider: z.enum(providerValues),
+    cursorIde: z.boolean().optional(),
   }),
   z.discriminatedUnion("kind", [
     z.object({
@@ -1471,6 +1475,7 @@ const relayControlDefinitions = [
       ...RequestErrorShape,
       success: z.boolean(),
       sessions: z.array(HistorySessionSchema),
+      cursorIdeError: z.string().max(512).optional(),
     },
     "proxy_to_client",
   ),

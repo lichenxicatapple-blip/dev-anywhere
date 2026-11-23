@@ -264,6 +264,8 @@ The **terminal view** preserves the CLI interface and keyboard controls for user
 
 Claude Code, Codex, Kimi Code, and Cursor CLI all support both views. Kimi Code and Cursor CLI chat use ACP, with streaming responses, tool calls, cancellation of the current response, and history resumption. Cursor ACP also supports questions, plan approval, and todo lists.
 
+Cursor chat can also use the **IDE**: the Proxy connects to an existing Cursor window to create or continue a chat. Start Cursor with `--remote-debugging-port=9222` and open the target workspace first. On macOS, quit Cursor and run `open -a Cursor --args --remote-debugging-port=9222`. DEV Anywhere does not restart Cursor. The Cursor IDE list mirrors the current Agents sidebar, or the open editor chat tabs when no Agents window is open. Selecting an entry opens and continues it in Cursor. The expanded list refreshes every 30 seconds and can also be refreshed manually. Switching protects in-progress turns, pending approvals, and unsent drafts. Cursor controls IDE permissions; recognizable command approvals can be answered remotely, while other prompts must be handled in the IDE. Refresh history to see messages sent locally from the IDE. Terminating a DEV Anywhere session disconnects it without stopping the IDE. CDP depends on Cursor's UI and synchronization may stop if Cursor changes or the active chat is switched. Keep the debug port local.
+
 ![DEV Anywhere terminal and chat views](./docs/assets/readme-session-modes.gif)
 
 ### Web and mobile device simulator previews

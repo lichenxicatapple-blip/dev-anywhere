@@ -22,6 +22,31 @@ function native(overrides: Partial<NativeHistorySession> = {}): NativeHistorySes
 }
 
 describe("native history catalog identity", () => {
+  it("keeps Cursor IDE rows in sidebar order even when timestamps differ", () => {
+    const result = buildHistoryCatalog([
+      native({
+        provider: "cursor",
+        id: "cursor_ide_first",
+        title: "First",
+        updatedAt: 10,
+        cursorIdeGroup: "one",
+      }),
+      native({
+        provider: "cursor",
+        id: "cursor_ide_second",
+        title: "Second",
+        updatedAt: 100,
+        cursorIdeGroup: "two",
+      }),
+      native({ id: "other", updatedAt: 50 }),
+    ]);
+    expect(result.filter((entry) => entry.provider === "cursor").map((entry) => entry.id)).toEqual([
+      "cursor_ide_first",
+      "cursor_ide_second",
+    ]);
+    expect(result.find((entry) => entry.id === "cursor_ide_first")?.cursorIdeGroup).toBe("one");
+  });
+
   it("keeps independent IDs even when their displayed titles truncate identically", () => {
     const prefix = "x".repeat(40);
     const result = buildHistoryCatalog([

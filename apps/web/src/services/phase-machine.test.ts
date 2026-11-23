@@ -560,7 +560,7 @@ describe("phase-machine reconnect timers", () => {
       );
     });
     expect(relay.sendControl).toHaveBeenCalledWith({ type: "session_list_request" });
-    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000);
+    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000, expect.any(Function));
   });
 
   it("does not resync proxy state when a proxy list confirms an existing binding", async () => {
@@ -694,7 +694,7 @@ describe("phase-machine request failure handling", () => {
       expect(toastWarning).toHaveBeenCalledWith("历史会话加载失败，可点击刷新重试");
     });
     expect(toastError).not.toHaveBeenCalled();
-    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000);
+    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000, expect.any(Function));
     expect(useSessionStore.getState().historyLoadStatus).toBe("error");
     expect(useAppStore.getState().phase).toBe("chatting");
     errSpy.mockRestore();
@@ -805,7 +805,7 @@ describe("phase-machine cold-start history", () => {
       });
     });
     expect(relay.requestSessionHistory).toHaveBeenCalledTimes(1);
-    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000);
+    expect(relay.requestSessionHistory).toHaveBeenCalledWith(15_000, expect.any(Function));
     expect(useAppStore.getState()).toMatchObject({
       selectedProxyId: "proxy-1",
       proxyOnline: true,

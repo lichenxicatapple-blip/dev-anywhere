@@ -73,6 +73,7 @@ interface CreateSessionRelay {
       mode: SessionMode;
       provider: ProviderId;
       permissionMode: PermissionMode;
+      cursorIde?: boolean;
     },
     timeoutMs?: number,
   ): Promise<SessionCreateResponse>;
@@ -96,6 +97,7 @@ interface CreateSessionFormSnapshot {
   mode: SessionMode;
   provider: ProviderId;
   permissionMode: PermissionMode;
+  cursorIde?: boolean;
 }
 
 type CreateSessionSubmitResult =
@@ -181,7 +183,7 @@ export async function submitSessionCreate({
   }
 
   const status = providerStatus(form.provider, agentCli);
-  if (status.disabled) {
+  if (status.disabled && !(form.provider === "cursor" && form.mode === "json" && form.cursorIde)) {
     const reason = agentCli?.[form.provider]?.error;
     return {
       type: "provider_unavailable",
@@ -203,7 +205,13 @@ export async function submitSessionCreate({
         name: submittedName || undefined,
         mode: submittedMode,
         provider: submittedProvider,
-        permissionMode: form.permissionMode,
+        permissionMode:
+          form.cursorIde && submittedProvider === "cursor" && submittedMode === "json"
+            ? "default"
+            : form.permissionMode,
+        ...(form.provider === "cursor" && submittedMode === "json" && form.cursorIde
+          ? { cursorIde: true }
+          : {}),
       },
       timeoutMs,
     );
@@ -233,7 +241,7 @@ export async function submitSessionCreate({
     const session: SessionInfo =
       response.mode === "pty"
         ? { ...common, mode: "pty", ptyOwner: response.ptyOwner }
-        : { ...common, mode: "json" };
+        : { ...common, mode: "json", ...(response.cursorIde ? { cursorIde: true } : {}) };
     return {
       type: "success",
       session,

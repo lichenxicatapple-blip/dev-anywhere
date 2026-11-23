@@ -1214,6 +1214,24 @@ describe("RelayClient request handling", () => {
     await expect(promise).rejects.toThrow("历史会话扫描失败");
   });
 
+  it("returns other history while reporting a Cursor IDE list failure", async () => {
+    const { relay, ws } = createClient();
+    const onCursorError = vi.fn();
+    const promise = relay.requestSessionHistory(undefined, onCursorError);
+    const requestId = sentRequestId(ws);
+    ws.emit({
+      type: "session_history_response",
+      requestId,
+      success: true,
+      cursorIdeError: "无法连接 Cursor IDE，请开启调试端口",
+      sessions: [
+        { id: "other", title: "Other", projectDir: "/project", updatedAt: 1, provider: "claude" },
+      ],
+    });
+    await expect(promise).resolves.toHaveLength(1);
+    expect(onCursorError).toHaveBeenCalledWith("无法连接 Cursor IDE，请开启调试端口");
+  });
+
   it("waits for matching session message responses", async () => {
     const { relay, ws } = createClient();
     const promise = relay.requestSessionMessages("s1");

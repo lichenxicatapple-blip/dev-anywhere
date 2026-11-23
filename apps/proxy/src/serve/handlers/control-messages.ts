@@ -111,12 +111,20 @@ export function createControlMessageHandlers(
   sessionManager: SessionManager,
 ): ControlMessageHandlers {
   const sessionResources = new Map<string, SessionResources>();
-  let sessionHistoryScanInFlight: ReturnType<typeof scanSessionHistory> | undefined;
+  let sessionHistoryScanInFlight:
+    | Promise<{ sessions: Awaited<ReturnType<typeof scanSessionHistory>>; cursorIdeError?: string }>
+    | undefined;
 
-  function getSessionHistory(): ReturnType<typeof scanSessionHistory> {
+  function getSessionHistory(): NonNullable<typeof sessionHistoryScanInFlight> {
     if (sessionHistoryScanInFlight) return sessionHistoryScanInFlight;
 
-    const scan = scanSessionHistory({ metadataPath: HISTORY_METADATA_PATH });
+    let cursorIdeError: string | undefined;
+    const scan = scanSessionHistory({
+      metadataPath: HISTORY_METADATA_PATH,
+      onCursorIdeUnavailable: (message) => {
+        cursorIdeError = message;
+      },
+    }).then((sessions) => ({ sessions, ...(cursorIdeError ? { cursorIdeError } : {}) }));
     const sharedScan = scan.finally(() => {
       if (sessionHistoryScanInFlight === sharedScan) {
         sessionHistoryScanInFlight = undefined;
@@ -251,13 +259,14 @@ export function createControlMessageHandlers(
 
     async handleSessionHistoryRequest(msg: { requestId: string }): Promise<void> {
       try {
-        const sessions = await getSessionHistory();
+        const { sessions, cursorIdeError } = await getSessionHistory();
         send(
           serializeControl({
             type: "session_history_response",
             requestId: msg.requestId,
             success: true,
             sessions,
+            ...(cursorIdeError ? { cursorIdeError } : {}),
           }),
         );
         serviceLogger.debug({ count: sessions.length }, "Session history response sent");

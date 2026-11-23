@@ -1264,6 +1264,35 @@ describe("RelayRouter input routing", () => {
     expect(cleanupHookContext).toHaveBeenCalledTimes(1);
   });
 
+  it("returns the Cursor IDE worker's actionable startup error", async () => {
+    vi.useFakeTimers();
+    const relaySend = vi.fn();
+    const router = createRouter({
+      mode: "json",
+      relaySend,
+      workerConnect: async () => createWritableSocketFake().socket,
+      workerWaitForReady: async () => {
+        throw new WorkerStartupError("当前 Cursor 会话有未发送的草稿，请先处理后重试");
+      },
+    });
+    router.handle({
+      type: "session_create",
+      requestId: "create-cursor-ide-failure",
+      kind: "agent",
+      cwd: testCwd,
+      provider: "cursor",
+      mode: "json",
+      resumeSessionId: "cursor_ide_c3bc842d-97dc-4cec-9cde-00f07cac3f02",
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(RelayControlSchema.parse(JSON.parse(relaySend.mock.calls[0][0]))).toMatchObject({
+      type: "session_create_response",
+      requestId: "create-cursor-ide-failure",
+      errorCode: ControlErrorCode.WORKER_START_FAILED,
+      error: "当前 Cursor 会话有未发送的草稿，请先处理后重试",
+    });
+  });
+
   it("classifies an app-server active-writer startup race instead of returning a generic error", async () => {
     vi.useFakeTimers();
     const relaySend = vi.fn();

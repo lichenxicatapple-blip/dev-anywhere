@@ -54,10 +54,13 @@ interface HistoryListProps {
 
 type RestoreMode = "pty" | "json";
 type RestorePermissionMode = "default" | "auto" | "plan" | "bypassPermissions";
+type HistoryProviderGroup = SessionProvider | "cursor-ide";
+const HISTORY_REFRESH_INTERVAL_MS = 30_000;
 
 export function HistoryList({ now }: HistoryListProps) {
   const homePath = useFileStore((s) => s.homePath);
   const historySessions = useSessionStore((s) => s.historySessions);
+  const cursorIdeHistoryError = useSessionStore((s) => s.cursorIdeHistoryError);
   const historyLoadStatus = useSessionStore((s) => s.historyLoadStatus);
   const [resumingId, setResumingId] = useState<string | null>(null);
   const [restoreTarget, setRestoreTarget] = useState<HistorySession | null>(null);
@@ -66,41 +69,69 @@ export function HistoryList({ now }: HistoryListProps) {
     useState<RestorePermissionMode>("default");
   // 整个历史会话区默认折叠, 让活跃会话占据主视野; 点 header 整体展开后再点 group chevron 看行
   const [sectionExpanded, setSectionExpanded] = useState(false);
-  const [collapsedProviders, setCollapsedProviders] = useState<Set<SessionProvider>>(new Set());
+  const [collapsedProviders, setCollapsedProviders] = useState<Set<HistoryProviderGroup>>(
+    new Set(),
+  );
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const navigate = useNavigate();
 
+  useEffect(() => {
+    if (!sectionExpanded) return;
+    const timer = window.setInterval(() => {
+      const relay = relayClientRef;
+      if (
+        !relay ||
+        document.visibilityState === "hidden" ||
+        useSessionStore.getState().historyLoadStatus === "loading"
+      )
+        return;
+      void loadSessionHistory(relay);
+    }, HISTORY_REFRESH_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [sectionExpanded]);
+
   const providerGroups = useMemo(() => {
     const providerMap = new Map<
-      SessionProvider,
-      Map<string, { dir: string; sessions: HistorySession[] }>
+      HistoryProviderGroup,
+      Map<string, { dir: string; groupName?: string; sessions: HistorySession[] }>
     >();
     for (const h of historySessions) {
-      const provider = historySessionProvider(h);
+      const provider = historyGroupProvider(h);
       let projectMap = providerMap.get(provider);
       if (!projectMap) {
         projectMap = new Map<string, { dir: string; sessions: HistorySession[] }>();
         providerMap.set(provider, projectMap);
       }
-      const groupDir = normalizeHistoryProjectDir(h.projectDir);
-      const bucket = projectMap.get(groupDir);
+      const groupDir = h.projectDir ? normalizeHistoryProjectDir(h.projectDir) : "";
+      const groupName = provider === "cursor-ide" ? h.cursorIdeGroup?.trim() : undefined;
+      const groupKey = historyProjectGroupKey(provider, groupDir, groupName);
+      const bucket = projectMap.get(groupKey);
       if (bucket) bucket.sessions.push(h);
-      else projectMap.set(groupDir, { dir: groupDir, sessions: [h] });
+      else projectMap.set(groupKey, { dir: groupDir, groupName, sessions: [h] });
     }
     return Array.from(providerMap.entries())
-      .sort(([a], [b]) => compareProvider(a, b))
+      .sort(([a], [b]) => compareHistoryGroups(a, b))
       .map(([provider, projectMap]) => ({
         provider,
         sessions: Array.from(projectMap.values()).flatMap((group) => group.sessions),
         projects: Array.from(projectMap.values()).map((group) => ({
           dir: group.dir,
-          shortDir: formatRemotePath(group.dir, homePath, { compact: true }),
+          groupName: group.groupName,
+          shortDir: group.groupName || formatRemotePath(group.dir, homePath, { compact: true }),
           sessions: group.sessions,
         })),
       }));
   }, [historySessions, homePath]);
 
   function openRestoreDialog(h: HistorySession) {
+    if (historyGroupProvider(h) === "cursor-ide") {
+      if (h.cursorIdeUnavailable) {
+        toast.error(h.cursorIdeUnavailable);
+        return;
+      }
+      void handleResume(h, "json", "default");
+      return;
+    }
     setRestoreTarget(h);
     setRestoreMode(defaultRestoreMode(h));
     setRestorePermissionMode(defaultRestorePermissionMode(h));
@@ -156,7 +187,7 @@ export function HistoryList({ now }: HistoryListProps) {
       const newSession: SessionInfo =
         ctrl.mode === "pty"
           ? { ...common, mode: "pty", ptyOwner: ctrl.ptyOwner }
-          : { ...common, mode: "json" };
+          : { ...common, mode: "json", ...(ctrl.cursorIde ? { cursorIde: true } : {}) };
       useSessionStore.getState().addSession(newSession);
       navigate(`/chat/${ctrl.sessionId}?mode=${ctrl.mode}`);
       setRestoreTarget(null);
@@ -178,8 +209,8 @@ export function HistoryList({ now }: HistoryListProps) {
     });
   }
 
-  function toggleGroup(provider: SessionProvider, dir: string) {
-    const key = historyProjectGroupKey(provider, dir);
+  function toggleGroup(provider: HistoryProviderGroup, dir: string, groupName?: string) {
+    const key = historyProjectGroupKey(provider, dir, groupName);
     setExpandedGroups((prev) => {
       const next = new Set(prev);
       if (next.has(key)) next.delete(key);
@@ -188,7 +219,7 @@ export function HistoryList({ now }: HistoryListProps) {
     });
   }
 
-  function toggleProvider(provider: SessionProvider) {
+  function toggleProvider(provider: HistoryProviderGroup) {
     setCollapsedProviders((prev) => {
       const next = new Set(prev);
       if (next.has(provider)) next.delete(provider);
@@ -199,9 +230,7 @@ export function HistoryList({ now }: HistoryListProps) {
 
   const hasHistory = historySessions.length > 0;
   const historyLoading = historyLoadStatus === "loading";
-  const restoreModes = restoreTarget
-    ? availableRestoreModes(historySessionProvider(restoreTarget))
-    : [];
+  const restoreModes = restoreTarget ? availableRestoreModes(restoreTarget) : [];
 
   return (
     <div data-slot="history-list" className="flex flex-col">
@@ -299,6 +328,11 @@ export function HistoryList({ now }: HistoryListProps) {
           刷新失败，当前显示上次加载的结果
         </div>
       )}
+      {cursorIdeHistoryError && historyLoadStatus !== "loading" && (
+        <div className="px-4 pb-2 text-xs text-muted-foreground" role="status">
+          Cursor IDE：{cursorIdeHistoryError}
+        </div>
+      )}
       {!hasHistory && historyLoadStatus === "loaded" && (
         <div className="px-4 py-3 text-sm text-muted-foreground/70" data-slot="history-empty">
           暂无会话记录
@@ -322,7 +356,7 @@ export function HistoryList({ now }: HistoryListProps) {
                     "hover:bg-accent focus-visible:ring-2 focus-visible:ring-ring",
                   )}
                 >
-                  <span className="font-mono">{providerLabel(providerGroup.provider)}</span>
+                  <span className="font-mono">{historyGroupLabel(providerGroup.provider)}</span>
                   <span className="h-px flex-1 bg-border/70" aria-hidden="true" />
                   <span className="tabular-nums">{providerGroup.sessions.length}</span>
                   <ChevronRight
@@ -336,13 +370,17 @@ export function HistoryList({ now }: HistoryListProps) {
                 {!providerCollapsed && (
                   <ul role="list" className="flex flex-col">
                     {providerGroup.projects.map((g) => {
-                      const groupKey = historyProjectGroupKey(providerGroup.provider, g.dir);
+                      const groupKey = historyProjectGroupKey(
+                        providerGroup.provider,
+                        g.dir,
+                        g.groupName,
+                      );
                       const expanded = expandedGroups.has(groupKey);
                       return (
                         <li key={groupKey}>
                           <button
                             type="button"
-                            onClick={() => toggleGroup(providerGroup.provider, g.dir)}
+                            onClick={() => toggleGroup(providerGroup.provider, g.dir, g.groupName)}
                             aria-expanded={expanded}
                             data-slot="history-group-header"
                             data-expanded={expanded}
@@ -354,7 +392,7 @@ export function HistoryList({ now }: HistoryListProps) {
                           >
                             <span
                               className="text-sm font-mono truncate flex-1 min-w-0"
-                              title={g.dir}
+                              title={g.dir || "工作目录未知"}
                             >
                               {g.shortDir}
                             </span>
@@ -427,8 +465,30 @@ export function HistoryList({ now }: HistoryListProps) {
   );
 }
 
-function historyProjectGroupKey(provider: SessionProvider, dir: string): string {
-  return `${provider}:${normalizeHistoryProjectDir(dir)}`;
+function historyGroupProvider(session: HistorySession): HistoryProviderGroup {
+  return session.provider === "cursor" && session.id.startsWith("cursor_ide_")
+    ? "cursor-ide"
+    : historySessionProvider(session);
+}
+
+function historyGroupLabel(provider: HistoryProviderGroup): string {
+  return provider === "cursor-ide" ? "Cursor IDE" : providerLabel(provider);
+}
+
+function compareHistoryGroups(a: HistoryProviderGroup, b: HistoryProviderGroup): number {
+  const providerA = a === "cursor-ide" ? "cursor" : a;
+  const providerB = b === "cursor-ide" ? "cursor" : b;
+  return (
+    compareProvider(providerA, providerB) || Number(a === "cursor-ide") - Number(b === "cursor-ide")
+  );
+}
+
+function historyProjectGroupKey(
+  provider: HistoryProviderGroup,
+  dir: string,
+  groupName?: string,
+): string {
+  return `${provider}:${normalizeHistoryProjectDir(dir)}:${groupName ?? ""}`;
 }
 
 function normalizeHistoryProjectDir(dir: string): string {
@@ -437,12 +497,13 @@ function normalizeHistoryProjectDir(dir: string): string {
   return trimmed.replace(/\/+$/, "") || "/";
 }
 
-function availableRestoreModes(_provider: SessionProvider): RestoreMode[] {
+function availableRestoreModes(session: HistorySession): RestoreMode[] {
+  if (session.provider === "cursor" && session.id.startsWith("cursor_ide_")) return ["json"];
   return ["json", "pty"];
 }
 
 function defaultRestoreMode(session: HistorySession): RestoreMode {
-  const modes = availableRestoreModes(historySessionProvider(session));
+  const modes = availableRestoreModes(session);
   if (session.preferredMode && modes.includes(session.preferredMode)) return session.preferredMode;
   return modes[0] ?? "pty";
 }
@@ -482,6 +543,7 @@ function HistoryRestoreDialog({
   const isCodex = provider === "codex";
   const isKimi = provider === "kimi";
   const isCursor = provider === "cursor";
+  const isCursorIde = isCursor && !!session?.id.startsWith("cursor_ide_");
 
   useEffect(() => {
     if (!open) setConfirmingBypass(false);
@@ -516,69 +578,76 @@ function HistoryRestoreDialog({
           )}
         </div>
       </div>
-      <div className="grid min-w-0 gap-2">
-        <span className="text-sm font-medium">权限模式</span>
-        <div role="radiogroup" aria-label="权限模式" className="grid min-w-0 gap-2">
-          {!isCodex && (
+      {!isCursorIde && (
+        <div className="grid min-w-0 gap-2">
+          <span className="text-sm font-medium">权限模式</span>
+          <div role="radiogroup" aria-label="权限模式" className="grid min-w-0 gap-2">
+            {!isCodex && (
+              <PermissionChoiceButton
+                checked={permissionMode === "default"}
+                label={isKimi ? "手工审批" : isCursor ? "命令审批" : "严格审批"}
+                description={
+                  isKimi
+                    ? "工具调用会在 Web 中请求确认。"
+                    : isCursor
+                      ? "Cursor CLI 在执行命令前询问。"
+                      : "所有需要权限的操作都要确认。"
+                }
+                disabled={submitting}
+                onClick={() => onPermissionModeChange("default")}
+              />
+            )}
+            {/* Cursor 聊天模式不提供“智能自动”，原因见 CURSOR_CHAT_PERMISSION_MODE_OPTIONS */}
+            {!(isCursor && mode === "json") && (
+              <PermissionChoiceButton
+                checked={permissionMode === "auto"}
+                label={
+                  isCodex ? "按需审批" : isKimi ? "自动审批" : isCursor ? "智能自动" : "自动判定"
+                }
+                description={
+                  isCodex
+                    ? "Codex 在需要时请求确认。"
+                    : isKimi
+                      ? "Kimi Code 使用原生 yolo 模式自动审批。"
+                      : isCursor
+                        ? "Cursor CLI 自动执行判定为安全的工具，其余仍会询问。"
+                        : "交给 Agent CLI 的原生策略判断。"
+                }
+                disabled={submitting}
+                onClick={() => onPermissionModeChange("auto")}
+              />
+            )}
+            {(isKimi || isCursor) && (
+              <PermissionChoiceButton
+                checked={permissionMode === "plan"}
+                label="只读规划"
+                description={
+                  isCursor ? "Cursor CLI 使用只读规划模式。" : "Kimi Code 使用只读规划模式。"
+                }
+                disabled={submitting}
+                onClick={() => onPermissionModeChange("plan")}
+              />
+            )}
             <PermissionChoiceButton
-              checked={permissionMode === "default"}
-              label={isKimi ? "手工审批" : isCursor ? "命令审批" : "严格审批"}
+              checked={permissionMode === "bypassPermissions"}
+              label={isKimi ? "全自动" : "跳过全部审批"}
               description={
                 isKimi
-                  ? "工具调用会在 Web 中请求确认。"
-                  : isCursor
-                    ? "Cursor CLI 在执行命令前询问。"
-                    : "所有需要权限的操作都要确认。"
+                  ? "危险模式，Kimi Code 将全自动执行。"
+                  : "危险模式，会跳过工具审批和部分沙箱保护。"
               }
+              destructive
               disabled={submitting}
-              onClick={() => onPermissionModeChange("default")}
+              onClick={() => onPermissionModeChange("bypassPermissions")}
             />
-          )}
-          {/* Cursor 聊天模式不提供“智能自动”，原因见 CURSOR_CHAT_PERMISSION_MODE_OPTIONS */}
-          {!(isCursor && mode === "json") && (
-            <PermissionChoiceButton
-              checked={permissionMode === "auto"}
-              label={
-                isCodex ? "按需审批" : isKimi ? "自动审批" : isCursor ? "智能自动" : "自动判定"
-              }
-              description={
-                isCodex
-                  ? "Codex 在需要时请求确认。"
-                  : isKimi
-                    ? "Kimi Code 使用原生 yolo 模式自动审批。"
-                    : isCursor
-                      ? "Cursor CLI 自动执行判定为安全的工具，其余仍会询问。"
-                      : "交给 Agent CLI 的原生策略判断。"
-              }
-              disabled={submitting}
-              onClick={() => onPermissionModeChange("auto")}
-            />
-          )}
-          {(isKimi || isCursor) && (
-            <PermissionChoiceButton
-              checked={permissionMode === "plan"}
-              label="只读规划"
-              description={
-                isCursor ? "Cursor CLI 使用只读规划模式。" : "Kimi Code 使用只读规划模式。"
-              }
-              disabled={submitting}
-              onClick={() => onPermissionModeChange("plan")}
-            />
-          )}
-          <PermissionChoiceButton
-            checked={permissionMode === "bypassPermissions"}
-            label={isKimi ? "全自动" : "跳过全部审批"}
-            description={
-              isKimi
-                ? "危险模式，Kimi Code 将全自动执行。"
-                : "危险模式，会跳过工具审批和部分沙箱保护。"
-            }
-            destructive
-            disabled={submitting}
-            onClick={() => onPermissionModeChange("bypassPermissions")}
-          />
+          </div>
         </div>
-      </div>
+      )}
+      {isCursorIde && (
+        <p className="text-sm text-muted-foreground">
+          将在 Cursor IDE 中打开会话，权限由 IDE 设置控制。
+        </p>
+      )}
     </div>
   );
   const actions = (

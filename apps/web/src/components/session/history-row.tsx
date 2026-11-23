@@ -22,7 +22,13 @@ interface HistoryRowProps {
 }
 
 export function HistoryRow({ session, now, disabled, loading, onClick, modeTag }: HistoryRowProps) {
-  const title = <HistoryTitle title={session.title} modeTag={modeTag} />;
+  const title = (
+    <HistoryTitle
+      title={session.title}
+      modeTag={modeTag}
+      isCursorIde={session.provider === "cursor" && session.id.startsWith("cursor_ide_")}
+    />
+  );
   const timestamp = (
     <span className="text-xs text-muted-foreground tabular-nums">
       {formatRelativeTime(session.updatedAt, now)}
@@ -70,13 +76,25 @@ export function HistoryRow({ session, now, disabled, loading, onClick, modeTag }
   );
 }
 
-function HistoryTitle({ title, modeTag }: { title: string; modeTag?: RestoreMode }) {
+function HistoryTitle({
+  title,
+  modeTag,
+  isCursorIde,
+}: {
+  title: string;
+  modeTag?: RestoreMode;
+  isCursorIde: boolean;
+}) {
   return (
     <span className="flex min-w-0 items-center gap-1.5">
       <span className="text-sm font-normal truncate min-w-0" title={title}>
         {title}
       </span>
-      {modeTag && <HistoryModeTag mode={modeTag} />}
+      {isCursorIde ? (
+        <span className="shrink-0 text-xs text-muted-foreground">IDE</span>
+      ) : (
+        modeTag && <HistoryModeTag mode={modeTag} />
+      )}
     </span>
   );
 }

@@ -74,6 +74,7 @@ function CreateSessionForm({
   const [cwd, setCwd] = useState("");
   const [provider, setProvider] = useState<ProviderId>("claude");
   const [mode, setMode] = useState<SessionMode>("pty");
+  const [cursorIde, setCursorIde] = useState(false);
   const [permissionMode, setPermissionMode] = useState<PermissionMode>("default");
   const [confirmingBypass, setConfirmingBypass] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -135,6 +136,7 @@ function CreateSessionForm({
     setCwd("");
     setProvider("claude");
     setMode("pty");
+    setCursorIde(false);
     setPermissionMode("default");
     setConfirmingBypass(false);
     setMissingCwd(null);
@@ -144,7 +146,10 @@ function CreateSessionForm({
   }
 
   function handleSubmit() {
-    if (permissionMode === "bypassPermissions") {
+    if (
+      permissionMode === "bypassPermissions" &&
+      !(provider === "cursor" && mode === "json" && cursorIde)
+    ) {
       setConfirmingBypass(true);
       return;
     }
@@ -172,7 +177,9 @@ function CreateSessionForm({
   const cliPathChanged =
     cliPathDraftProvider === provider &&
     cliPathDraft.trim() !== (agentCli?.[provider]?.command ?? "");
-  const createDisabled = submitting || savingCliPath || selectedStatus.disabled || cliPathChanged;
+  const isCursorIde = provider === "cursor" && mode === "json" && cursorIde;
+  const createDisabled =
+    submitting || savingCliPath || (!isCursorIde && (selectedStatus.disabled || cliPathChanged));
 
   function normalizePermissionMode(nextProvider: ProviderId, nextMode: SessionMode = mode) {
     const normalized = normalizePermissionModeForProvider(nextProvider, permissionMode, nextMode);
@@ -192,6 +199,7 @@ function CreateSessionForm({
           provider,
           permissionMode,
           mode,
+          cursorIde: isCursorIde,
         },
       });
       if (!isCurrentMachine()) return;
@@ -399,6 +407,7 @@ function CreateSessionForm({
       <AgentCliPicker
         agentCli={agentCli}
         provider={provider}
+        hidePath={isCursorIde}
         cliPathDraftProvider={cliPathDraftProvider}
         cliPathDraft={cliPathDraft}
         savingCliPath={savingCliPath}
@@ -416,24 +425,60 @@ function CreateSessionForm({
         }}
         onSaveCliPath={() => void saveCliPath()}
       />
-      <label className="flex min-w-0 flex-col gap-2">
-        <span className="text-sm">权限模式</span>
-        <Select
-          value={permissionMode}
-          onValueChange={(value) => setPermissionMode(value as PermissionMode)}
-        >
-          <SelectTrigger className="w-full">
-            <SelectValue />
-          </SelectTrigger>
-          <SelectContent>
-            {permissionOptions.map((option) => (
-              <SelectItem key={option.value} value={option.value}>
-                {option.label}
-              </SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      </label>
+      {provider === "cursor" && mode === "json" ? (
+        <section aria-label="Cursor 会话来源" className="flex min-w-0 flex-col gap-2">
+          <span className="text-sm">Cursor 会话来源</span>
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              aria-pressed={!cursorIde}
+              onClick={() => setCursorIde(false)}
+              className={cn(
+                "min-h-11 rounded-md border px-3 text-sm",
+                !cursorIde ? "border-primary/70 bg-primary/10" : "border-border",
+              )}
+            >
+              CLI
+            </button>
+            <button
+              type="button"
+              aria-pressed={cursorIde}
+              onClick={() => setCursorIde(true)}
+              className={cn(
+                "min-h-11 rounded-md border px-3 text-sm",
+                cursorIde ? "border-primary/70 bg-primary/10" : "border-border",
+              )}
+            >
+              IDE
+            </button>
+          </div>
+          {cursorIde ? (
+            <p className="text-xs text-muted-foreground">
+              在已开启调试端口的 Cursor IDE 窗口中创建会话，权限设置由 IDE 控制。
+            </p>
+          ) : null}
+        </section>
+      ) : null}
+      {!isCursorIde && (
+        <label className="flex min-w-0 flex-col gap-2">
+          <span className="text-sm">权限模式</span>
+          <Select
+            value={permissionMode}
+            onValueChange={(value) => setPermissionMode(value as PermissionMode)}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {permissionOptions.map((option) => (
+                <SelectItem key={option.value} value={option.value}>
+                  {option.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </label>
+      )}
       <DialogFooter>
         <Button
           type="button"

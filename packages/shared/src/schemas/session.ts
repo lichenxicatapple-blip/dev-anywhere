@@ -34,6 +34,7 @@ export function createSessionIdentitySchema<T extends z.ZodRawShape>(commonField
       kind: z.literal("agent"),
       mode: z.literal("json"),
       provider: z.enum(providerValues),
+      cursorIde: z.boolean().optional(),
       ptyOwner: z.never().optional(),
     }),
     z.object({

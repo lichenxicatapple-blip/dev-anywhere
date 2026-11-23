@@ -22,15 +22,15 @@ export async function loadSessionHistory(
 
   const generation = useSessionStore.getState().beginHistoryLoad();
   try {
-    const sessions =
-      timeoutMs === undefined
-        ? await relay.requestSessionHistory()
-        : await relay.requestSessionHistory(timeoutMs);
+    let cursorIdeError: string | undefined;
+    const sessions = await relay.requestSessionHistory(timeoutMs, (message) => {
+      cursorIdeError = message;
+    });
     if (useAppStore.getState().selectedProxyId !== requestedProxyId) {
       useSessionStore.getState().cancelHistoryLoad(generation);
       return { status: "stale" };
     }
-    if (!useSessionStore.getState().resolveHistoryLoad(generation, sessions)) {
+    if (!useSessionStore.getState().resolveHistoryLoad(generation, sessions, cursorIdeError)) {
       return { status: "stale" };
     }
     return { status: "loaded", sessions };
