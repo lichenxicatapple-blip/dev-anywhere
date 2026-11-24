@@ -1,4 +1,4 @@
-import type { AgentCliStatus } from "@dev-anywhere/shared";
+import { providerValues, type AgentCliStatus } from "@dev-anywhere/shared";
 import {
   Select,
   SelectContent,
@@ -9,7 +9,7 @@ import {
 import { RemotePathSelector } from "@/components/path/remote-path-selector";
 import { type ProviderId, PROVIDER_LABEL } from "./create-session-submit";
 
-const PROVIDERS = ["claude", "codex", "kimi", "cursor"] as const satisfies readonly ProviderId[];
+const PROVIDERS = providerValues;
 
 interface AgentCliPickerProps {
   agentCli: AgentCliStatus | null;

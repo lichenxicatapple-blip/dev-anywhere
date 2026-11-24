@@ -1,7 +1,12 @@
 import { homedir } from "node:os";
 import { accessSync, constants, statSync } from "node:fs";
 import { isAbsolute } from "node:path";
-import { ControlErrorCode, serializeControl, type ControlMessage } from "@dev-anywhere/shared";
+import {
+  ControlErrorCode,
+  providerValues,
+  serializeControl,
+  type ControlMessage,
+} from "@dev-anywhere/shared";
 import type { ControlMessageHandlers } from "./handlers/control-messages.js";
 import type { RelaySend } from "./relay-router-types.js";
 import type { SessionManager } from "./session-manager.js";
@@ -57,12 +62,7 @@ export class RelayResourceHandlers {
     const { requestId, provider } = msg;
     const rawPath = msg.path;
 
-    if (
-      provider !== "claude" &&
-      provider !== "codex" &&
-      provider !== "kimi" &&
-      provider !== "cursor"
-    ) {
+    if (!providerValues.includes(provider)) {
       this.deps.relaySend(
         serializeControl({
           type: "agent_cli_config_update_response",
@@ -170,7 +170,7 @@ export class RelayResourceHandlers {
       sessionId: sid,
       requestId: msg.requestId,
       workDir: session.cwd,
-      includeCommands: session.provider !== "kimi" && session.provider !== "cursor",
+      includeCommands: session.provider === "claude" || session.provider === "codex",
     });
     serviceLogger.info({ sessionId: sid, cwd: session.cwd }, "Session resources requested");
   }

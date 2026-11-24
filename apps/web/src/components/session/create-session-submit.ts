@@ -3,13 +3,14 @@ import {
   SESSION_CREATE_CLIENT_TIMEOUT_MS,
   type AgentCliStatus,
   type ControlErrorCodeType,
+  type ProviderId,
   type RelayControlMessage,
   type SessionInfo,
   type TerminalShell,
 } from "@dev-anywhere/shared";
 
 export type SessionMode = "pty" | "json";
-export type ProviderId = "claude" | "codex" | "kimi" | "cursor";
+export type { ProviderId } from "@dev-anywhere/shared";
 export type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
@@ -51,11 +52,20 @@ export const CURSOR_CHAT_PERMISSION_MODE_OPTIONS = CURSOR_PERMISSION_MODE_OPTION
   (option) => option.value !== "auto",
 );
 
+export function antigravityPermissionOptions(mode: SessionMode) {
+  return PERMISSION_MODE_OPTIONS.map((option) =>
+    option.value === "default"
+      ? { ...option, label: mode === "pty" ? "CLI 默认" : "按需审批" }
+      : option,
+  );
+}
+
 export const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude Code",
   codex: "Codex",
   kimi: "Kimi Code",
   cursor: "Cursor CLI",
+  antigravity: "Antigravity CLI",
 };
 
 export function providerSupportsChatMode(_provider: ProviderId): boolean {

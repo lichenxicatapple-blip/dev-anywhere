@@ -829,6 +829,7 @@ describe("RelayClient request handling", () => {
       codex: { available: false, error: "codex not found" },
       kimi: { available: false, error: "kimi not found" },
       cursor: { available: false, error: "cursor not found" },
+      antigravity: { available: true, command: "/home/dev/.local/bin/agy" },
     };
 
     ws.emit({
@@ -881,6 +882,7 @@ describe("RelayClient request handling", () => {
       codex: { available: true, command: "/usr/local/bin/codex" },
       kimi: { available: true, command: "/usr/local/bin/kimi" },
       cursor: { available: true, command: "/usr/local/bin/agent" },
+      antigravity: { available: true, command: "/home/dev/.local/bin/agy" },
     };
 
     ws.emit({
@@ -902,6 +904,7 @@ describe("RelayClient request handling", () => {
       codex: { available: true, command: "/usr/local/bin/codex" },
       kimi: { available: true, command: "/home/dev/.local/bin/kimi" },
       cursor: { available: true, command: "/home/dev/.local/bin/agent" },
+      antigravity: { available: true, command: "/home/dev/.local/bin/agy" },
     };
 
     expect(JSON.parse(ws.sent[0] ?? "{}")).toMatchObject({

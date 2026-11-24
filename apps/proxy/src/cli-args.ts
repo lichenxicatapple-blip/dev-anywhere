@@ -1,9 +1,18 @@
 import type { ProviderId } from "./providers/index.js";
 
-const AGENT_CLI_INVOCATION_NAMES = new Set(["claude", "codex", "kimi", "cursor", "agent"]);
+const AGENT_CLI_INVOCATION_NAMES = new Set([
+  "claude",
+  "codex",
+  "kimi",
+  "cursor",
+  "agent",
+  "antigravity",
+  "agy",
+]);
 
 export function providerFromCliName(name: string | undefined): ProviderId | undefined {
   if (name === "claude" || name === "codex" || name === "kimi") return name;
+  if (name === "antigravity" || name === "agy") return "antigravity";
   if (name === "cursor" || name === "agent") return "cursor";
   return undefined;
 }
@@ -45,7 +54,7 @@ export function extractAgentInvocation(args: string[]): { provider: ProviderId; 
   const provider = providerFromCliName(agent);
   if (!provider) {
     throw new Error(
-      'Missing Agent CLI. Use "dev-anywhere claude ...", "dev-anywhere codex ...", "dev-anywhere kimi ...", or "dev-anywhere cursor ...".',
+      'Missing Agent CLI. Use "dev-anywhere claude ...", "dev-anywhere codex ...", "dev-anywhere kimi ...", "dev-anywhere cursor ...", or "dev-anywhere agy ...".',
     );
   }
   return { provider, args: providerArgs };

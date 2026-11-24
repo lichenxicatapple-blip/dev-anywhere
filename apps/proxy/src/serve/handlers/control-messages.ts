@@ -109,6 +109,7 @@ async function getFileTree(rootPath: string): Promise<FileTreeGroup[]> {
 export function createControlMessageHandlers(
   send: (data: string) => void,
   sessionManager: SessionManager,
+  getProviderEnv?: () => NodeJS.ProcessEnv,
 ): ControlMessageHandlers {
   const sessionResources = new Map<string, SessionResources>();
   let sessionHistoryScanInFlight: ReturnType<typeof scanSessionHistory> | undefined;
@@ -116,7 +117,10 @@ export function createControlMessageHandlers(
   function getSessionHistory(): ReturnType<typeof scanSessionHistory> {
     if (sessionHistoryScanInFlight) return sessionHistoryScanInFlight;
 
-    const scan = scanSessionHistory({ metadataPath: HISTORY_METADATA_PATH });
+    const scan = scanSessionHistory({
+      metadataPath: HISTORY_METADATA_PATH,
+      providerEnv: getProviderEnv?.(),
+    });
     const sharedScan = scan.finally(() => {
       if (sessionHistoryScanInFlight === sharedScan) {
         sessionHistoryScanInFlight = undefined;

@@ -2,45 +2,49 @@ import type { ChildProcess } from "node:child_process";
 import { spawnCommand } from "../common/command-launch.js";
 import { terminateOwnedProcessTree } from "../common/process-termination.js";
 import { LineBuffer } from "../ipc/line-buffer.js";
-import { KIMI_PROVIDER, resolveKimiAcpMode, type KimiAcpMode } from "../providers/kimi.js";
+import { ANTIGRAVITY_PROVIDER, resolveAntigravityAcpMode } from "./antigravity.js";
+import { KIMI_PROVIDER, resolveKimiAcpMode } from "./kimi.js";
+import type { ProviderAdapter } from "./types.js";
 import { PROXY_VERSION } from "../version.js";
 
-export type KimiAcpPermissionBehavior = "allow_once" | "allow_always" | "deny" | "cancel";
-export type KimiAcpJsonRpcId = string | number;
+export type AcpPermissionBehavior = "allow_once" | "allow_always" | "deny" | "cancel";
+export type AcpJsonRpcId = string | number;
 
-export interface KimiAcpPermissionOption {
+export interface AcpPermissionOption {
   optionId: string;
   name: string;
   kind: string;
   [key: string]: unknown;
 }
 
-export interface KimiAcpPermissionRequest {
-  requestId: KimiAcpJsonRpcId;
+export interface AcpPermissionRequest {
+  requestId: AcpJsonRpcId;
   sessionId: string;
   toolName: string;
   input: Record<string, unknown>;
   rawToolCall: Record<string, unknown>;
   toolCall: Record<string, unknown>;
-  options: KimiAcpPermissionOption[];
+  options: AcpPermissionOption[];
   rawParams: Record<string, unknown>;
 }
 
-export interface KimiAcpPermissionDecision {
+export interface AcpPermissionDecision {
   // Dynamic question/plan options can be selected exactly by id. When omitted, behavior is
   // mapped to the safest matching option advertised by this individual request.
   optionId?: string;
-  behavior?: KimiAcpPermissionBehavior;
+  behavior?: AcpPermissionBehavior;
   cancelled?: boolean;
   message?: string;
 }
 
-export interface KimiAcpPromptResult {
+export interface AcpPromptResult {
   stopReason?: string;
   [key: string]: unknown;
 }
 
-export interface KimiAcpSessionOptions {
+export interface AcpSessionOptions {
+  provider?: "kimi" | "antigravity";
+  env?: NodeJS.ProcessEnv;
   cwd?: string;
   workDir?: string;
   resumeSessionId?: string;
@@ -51,10 +55,10 @@ export interface KimiAcpSessionOptions {
   onUpdate?: (params: Record<string, unknown>) => void;
   onNotification?: (method: string, params: Record<string, unknown>) => void;
   onPermissionRequest?: (
-    request: KimiAcpPermissionRequest,
-  ) => Promise<KimiAcpPermissionDecision> | KimiAcpPermissionDecision;
+    request: AcpPermissionRequest,
+  ) => Promise<AcpPermissionDecision> | AcpPermissionDecision;
   onPromptStart?: () => void;
-  onPromptComplete?: (result: KimiAcpPromptResult) => void;
+  onPromptComplete?: (result: AcpPromptResult) => void;
   onPromptError?: (error: Error) => void;
   onSessionId?: (sessionId: string) => void;
   onProtocolError?: (error: Error, line?: string) => void;
@@ -71,12 +75,12 @@ interface PendingRequest {
 
 interface ActivePrompt {
   cancelled: boolean;
-  requestId?: KimiAcpJsonRpcId;
+  requestId?: AcpJsonRpcId;
   cancelSettleTimer?: NodeJS.Timeout;
 }
 
 interface PendingPermission {
-  request: KimiAcpPermissionRequest;
+  request: AcpPermissionRequest;
   responded: boolean;
 }
 
@@ -90,7 +94,7 @@ const DEFAULT_CANCEL_ACKNOWLEDGE_TIMEOUT_MS = 2_000;
 const STDERR_TAIL_LIMIT = 8_192;
 const CANCELLED_RESPONSE_TOMBSTONE_LIMIT = 128;
 
-const denyPermission = (): KimiAcpPermissionDecision => ({
+const denyPermission = (): AcpPermissionDecision => ({
   behavior: "deny",
   message: "Tool use denied by default policy. Remote approval is not configured.",
 });
@@ -112,9 +116,9 @@ function normalizeApprovalInput(value: unknown): Record<string, unknown> {
   return input;
 }
 
-function parsePermissionOptions(value: unknown): KimiAcpPermissionOption[] {
+function parsePermissionOptions(value: unknown): AcpPermissionOption[] {
   if (!Array.isArray(value)) return [];
-  const options: KimiAcpPermissionOption[] = [];
+  const options: AcpPermissionOption[] = [];
   for (const candidate of value) {
     if (!isRecord(candidate) || typeof candidate.optionId !== "string") continue;
     options.push({
@@ -127,28 +131,28 @@ function parsePermissionOptions(value: unknown): KimiAcpPermissionOption[] {
   return options;
 }
 
-function normalizedOptionText(option: KimiAcpPermissionOption): string {
+function normalizedOptionText(option: AcpPermissionOption): string {
   return `${option.optionId} ${option.name}`.toLowerCase().replace(/[^a-z0-9]+/g, " ");
 }
 
-function isAllowOption(option: KimiAcpPermissionOption): boolean {
+function isAllowOption(option: AcpPermissionOption): boolean {
   const text = normalizedOptionText(option);
   return option.kind.startsWith("allow") || /\b(allow|approve|accept)\b/.test(text);
 }
 
-function isAlwaysOption(option: KimiAcpPermissionOption): boolean {
+function isAlwaysOption(option: AcpPermissionOption): boolean {
   const text = normalizedOptionText(option);
   return option.kind === "allow_always" || /\b(always|session|persist)\b/.test(text);
 }
 
-function isDenyOption(option: KimiAcpPermissionOption): boolean {
+function isDenyOption(option: AcpPermissionOption): boolean {
   const text = normalizedOptionText(option);
   return option.kind.startsWith("reject") || /\b(reject|deny|decline|cancel|skip)\b/.test(text);
 }
 
 function optionMatchesBehavior(
-  option: KimiAcpPermissionOption,
-  behavior: Exclude<KimiAcpPermissionBehavior, "cancel">,
+  option: AcpPermissionOption,
+  behavior: Exclude<AcpPermissionBehavior, "cancel">,
 ): boolean {
   if (behavior === "deny") return isDenyOption(option);
   if (behavior === "allow_always") {
@@ -158,9 +162,9 @@ function optionMatchesBehavior(
 }
 
 function selectPermissionOption(
-  options: KimiAcpPermissionOption[],
-  behavior: Exclude<KimiAcpPermissionBehavior, "cancel">,
-): KimiAcpPermissionOption | undefined {
+  options: AcpPermissionOption[],
+  behavior: Exclude<AcpPermissionBehavior, "cancel">,
+): AcpPermissionOption | undefined {
   if (behavior === "deny") {
     return options.find((option) => option.kind.startsWith("reject")) ?? options.find(isDenyOption);
   }
@@ -182,43 +186,40 @@ function selectPermissionOption(
   );
 }
 
-function promptResult(value: unknown): KimiAcpPromptResult {
+function promptResult(value: unknown): AcpPromptResult {
   return isRecord(value) ? value : {};
 }
 
-function responseErrorMessage(error: Record<string, unknown>): string {
-  return typeof error.message === "string" ? error.message : "Kimi ACP request failed";
-}
-
-export class KimiAcpRpcError extends Error {
+export class AcpRpcError extends Error {
   constructor(
+    label: string,
     readonly method: string,
     readonly code: number | undefined,
     message: string,
     readonly data?: unknown,
   ) {
-    super(`Kimi ACP ${method} failed${code === undefined ? "" : ` (${code})`}: ${message}`);
-    this.name = "KimiAcpRpcError";
+    super(`${label} ${method} failed${code === undefined ? "" : ` (${code})`}: ${message}`);
+    this.name = "AcpRpcError";
   }
 }
 
-export class KimiAcpProtocolError extends Error {
+export class AcpProtocolError extends Error {
   constructor(
     message: string,
     readonly payload?: unknown,
   ) {
     super(message);
-    this.name = "KimiAcpProtocolError";
+    this.name = "AcpProtocolError";
   }
 }
 
-export class KimiAcpSession {
+export class AcpSession {
   private child: ChildProcess | null = null;
   private stderrTail = "";
   private nextRequestId = 1;
-  private readonly pendingRequests = new Map<KimiAcpJsonRpcId, PendingRequest>();
-  private readonly pendingPermissions = new Map<KimiAcpJsonRpcId, PendingPermission>();
-  private readonly cancelledResponseIds = new Set<KimiAcpJsonRpcId>();
+  private readonly pendingRequests = new Map<AcpJsonRpcId, PendingRequest>();
+  private readonly pendingPermissions = new Map<AcpJsonRpcId, PendingPermission>();
+  private readonly cancelledResponseIds = new Set<AcpJsonRpcId>();
   private readonly toolCalls = new Map<string, Record<string, unknown>>();
   private sessionReady: Promise<string>;
   private resolveSessionReady: (sessionId: string) => void = () => {};
@@ -232,27 +233,38 @@ export class KimiAcpSession {
   private promptQueue: Promise<void> = Promise.resolve();
   private readonly workDir: string;
   private readonly resumeSessionId?: string;
-  private readonly acpMode: KimiAcpMode;
+  private readonly provider: ProviderAdapter;
+  private readonly env: NodeJS.ProcessEnv;
+  private readonly label: string;
+  private readonly permissionMode?: string;
+  private readonly acpMode: string;
   private readonly requestTimeoutMs: number;
   private readonly promptTimeoutMs: number;
   private readonly cancelAcknowledgeTimeoutMs: number;
   private readonly onUpdate?: (params: Record<string, unknown>) => void;
   private readonly onNotification?: (method: string, params: Record<string, unknown>) => void;
   private readonly onPermissionRequest: (
-    request: KimiAcpPermissionRequest,
-  ) => Promise<KimiAcpPermissionDecision> | KimiAcpPermissionDecision;
+    request: AcpPermissionRequest,
+  ) => Promise<AcpPermissionDecision> | AcpPermissionDecision;
   private readonly onPromptStart?: () => void;
-  private readonly onPromptComplete?: (result: KimiAcpPromptResult) => void;
+  private readonly onPromptComplete?: (result: AcpPromptResult) => void;
   private readonly onPromptError?: (error: Error) => void;
   private readonly onSessionId?: (sessionId: string) => void;
   private readonly onProtocolError?: (error: Error, line?: string) => void;
   private readonly onProcessError?: (error: Error) => void;
   private readonly onExitCb?: (code: number) => void;
 
-  constructor(options: KimiAcpSessionOptions = {}) {
+  constructor(options: AcpSessionOptions = {}) {
     this.workDir = options.cwd ?? options.workDir ?? process.cwd();
+    this.env = options.env ?? process.env;
     this.resumeSessionId = options.resumeSessionId;
-    this.acpMode = resolveKimiAcpMode(options.permissionMode);
+    const antigravity = options.provider === "antigravity";
+    this.provider = antigravity ? ANTIGRAVITY_PROVIDER : KIMI_PROVIDER;
+    this.label = antigravity ? "Antigravity ACP" : "Kimi ACP";
+    this.permissionMode = options.permissionMode;
+    this.acpMode = antigravity
+      ? resolveAntigravityAcpMode(options.permissionMode)
+      : resolveKimiAcpMode(options.permissionMode);
     this.requestTimeoutMs = options.requestTimeoutMs ?? DEFAULT_REQUEST_TIMEOUT_MS;
     this.promptTimeoutMs = options.promptTimeoutMs ?? 0;
     this.cancelAcknowledgeTimeoutMs =
@@ -273,17 +285,26 @@ export class KimiAcpSession {
     });
   }
 
-  getKimiSessionId(): string | null {
+  getNativeSessionId(): string | null {
     return this.sessionId;
   }
 
-  getPendingPermission(requestId: KimiAcpJsonRpcId): KimiAcpPermissionRequest | undefined {
+  getPendingPermission(requestId: AcpJsonRpcId): AcpPermissionRequest | undefined {
     return this.pendingPermissions.get(requestId)?.request;
   }
 
   start(): number {
-    if (this.child) throw new Error("Kimi ACP session has already been started");
-    const command = KIMI_PROVIDER.buildJsonCommand({ cwd: this.workDir }, process.env);
+    const pid = this.spawnServer();
+    void this.initializeSession().catch((error) => this.rejectSessionReadyOnce(toError(error)));
+    return pid;
+  }
+
+  private spawnServer(): number {
+    if (this.child) throw new Error(`${this.label} session has already been started`);
+    const command = this.provider.buildJsonCommand(
+      { cwd: this.workDir, permissionMode: this.permissionMode },
+      this.env,
+    );
     this.child = spawnCommand(command.command, command.args, {
       cwd: this.workDir,
       stdio: ["pipe", "pipe", "pipe"],
@@ -292,11 +313,53 @@ export class KimiAcpSession {
 
     this.setupStdoutParsing();
     this.setupStderrCollection();
+    this.child.stdin?.on("error", (error) => this.rejectAllPendingRequests(error));
     this.setupExitHandler();
-    void this.initializeSession().catch((error) => this.rejectSessionReadyOnce(toError(error)));
-
-    if (!this.child.pid) throw new Error("Kimi ACP failed to start: missing child pid");
+    if (!this.child.pid) throw new Error(`${this.label} failed to start: missing child pid`);
     return this.child.pid;
+  }
+
+  async listSessions(): Promise<unknown[]> {
+    return this.queryServer(async (capabilities) => {
+      if (!isRecord(capabilities.sessionCapabilities) || !capabilities.sessionCapabilities.list) {
+        return [];
+      }
+      const records: unknown[] = [];
+      const seen = new Set<string>();
+      const deadline = Date.now() + this.requestTimeoutMs;
+      let cursor: string | undefined;
+      do {
+        const timeLeft = deadline - Date.now();
+        if (timeLeft <= 0) break;
+        const page = await this.request("session/list", cursor ? { cursor } : {}, timeLeft);
+        if (!isRecord(page) || !Array.isArray(page.sessions)) break;
+        records.push(...page.sessions);
+        cursor = typeof page.nextCursor === "string" ? page.nextCursor : undefined;
+        if (!cursor || seen.has(cursor)) break;
+        seen.add(cursor);
+      } while (Date.now() < deadline);
+      return records;
+    });
+  }
+
+  async loadHistory(sessionId: string): Promise<void> {
+    await this.queryServer(async (capabilities) => {
+      if (capabilities.loadSession !== true) return;
+      await this.request("session/load", { sessionId, cwd: this.workDir, mcpServers: [] });
+    });
+  }
+
+  private async queryServer<T>(
+    query: (capabilities: Record<string, unknown>) => Promise<T>,
+  ): Promise<T> {
+    // Queries have their own short-lived ACP process and no live prompt session.
+    void this.sessionReady.catch(() => {});
+    try {
+      this.spawnServer();
+      return await query(await this.initialize());
+    } finally {
+      await this.stop(200);
+    }
   }
 
   waitUntilReady(): Promise<string> {
@@ -336,7 +399,7 @@ export class KimiAcpSession {
 
   async close(): Promise<void> {
     if (this.closed) return;
-    if (!this.child) throw new Error("Kimi ACP session has not been started");
+    if (!this.child) throw new Error(`${this.label} session has not been started`);
     const sessionId = this.sessionId ?? (await this.sessionReady);
     await this.request("session/close", { sessionId });
     this.closed = true;
@@ -351,7 +414,7 @@ export class KimiAcpSession {
       try {
         await this.close();
       } catch (error) {
-        this.appendStderr(`Kimi ACP close failed: ${toError(error).message}\n`);
+        this.appendStderr(`${this.label} close failed: ${toError(error).message}\n`);
       }
     }
 
@@ -382,8 +445,8 @@ export class KimiAcpSession {
     }
   }
 
-  private async initializeSession(): Promise<void> {
-    await this.request("initialize", {
+  private async initialize(): Promise<Record<string, unknown>> {
+    const result = await this.request("initialize", {
       protocolVersion: 1,
       clientCapabilities: {
         fs: { readTextFile: false, writeTextFile: false },
@@ -391,7 +454,11 @@ export class KimiAcpSession {
       },
       clientInfo: CLIENT_INFO,
     });
+    return isRecord(result) && isRecord(result.agentCapabilities) ? result.agentCapabilities : {};
+  }
 
+  private async initializeSession(): Promise<void> {
+    await this.initialize();
     const result = this.resumeSessionId
       ? await this.request("session/resume", {
           sessionId: this.resumeSessionId,
@@ -403,7 +470,7 @@ export class KimiAcpSession {
           mcpServers: [],
         });
     const sessionId = this.resumeSessionId ?? this.sessionIdFromResult(result);
-    if (!sessionId) throw new Error("Kimi ACP session/new did not return a session id");
+    if (!sessionId) throw new Error(`${this.label} session/new did not return a session id`);
 
     await this.request("session/set_mode", { sessionId, modeId: this.acpMode });
     this.sessionId = sessionId;
@@ -460,7 +527,7 @@ export class KimiAcpSession {
     method: string,
     params: Record<string, unknown>,
     timeoutMs = this.requestTimeoutMs,
-    onRequestId?: (requestId: KimiAcpJsonRpcId) => void,
+    onRequestId?: (requestId: AcpJsonRpcId) => void,
   ): Promise<unknown> {
     const id = this.nextRequestId++;
     onRequestId?.(id);
@@ -470,7 +537,7 @@ export class KimiAcpSession {
         timeoutMs > 0
           ? setTimeout(() => {
               this.pendingRequests.delete(id);
-              reject(new Error(`Kimi ACP request ${method} timed out after ${timeoutMs}ms`));
+              reject(new Error(`${this.label} request ${method} timed out after ${timeoutMs}ms`));
             }, timeoutMs)
           : undefined;
       timeout?.unref?.();
@@ -478,7 +545,7 @@ export class KimiAcpSession {
       if (!this.writeLine(payload)) {
         if (timeout) clearTimeout(timeout);
         this.pendingRequests.delete(id);
-        reject(new Error(`Kimi ACP stdin is not writable for ${method}`));
+        reject(new Error(`${this.label} stdin is not writable for ${method}`));
       }
     });
   }
@@ -489,7 +556,9 @@ export class KimiAcpSession {
       this.child.stdin.write(`${JSON.stringify(payload)}\n`);
       return true;
     } catch (error) {
-      this.reportProtocolError(new KimiAcpProtocolError("Failed to write Kimi ACP message", error));
+      this.reportProtocolError(
+        new AcpProtocolError(`Failed to write ${this.label} message`, error),
+      );
       return false;
     }
   }
@@ -506,7 +575,7 @@ export class KimiAcpSession {
         message = JSON.parse(text);
       } catch (error) {
         this.reportProtocolError(
-          new KimiAcpProtocolError(`Invalid Kimi ACP JSON: ${toError(error).message}`, text),
+          new AcpProtocolError(`Invalid ${this.label} JSON: ${toError(error).message}`, text),
           text,
         );
         return;
@@ -518,7 +587,7 @@ export class KimiAcpSession {
   private handleAcpMessage(message: unknown): void {
     if (!isRecord(message)) {
       this.reportProtocolError(
-        new KimiAcpProtocolError("Kimi ACP message must be an object", message),
+        new AcpProtocolError(`${this.label} message must be an object`, message),
       );
       return;
     }
@@ -537,15 +606,15 @@ export class KimiAcpSession {
       this.handleResponse(id, message);
       return;
     }
-    this.reportProtocolError(new KimiAcpProtocolError("Unrecognized Kimi ACP message", message));
+    this.reportProtocolError(new AcpProtocolError(`Unrecognized ${this.label} message`, message));
   }
 
-  private handleResponse(id: KimiAcpJsonRpcId, message: Record<string, unknown>): void {
+  private handleResponse(id: AcpJsonRpcId, message: Record<string, unknown>): void {
     const pending = this.pendingRequests.get(id);
     if (!pending) {
       if (this.cancelledResponseIds.delete(id)) return;
       this.reportProtocolError(
-        new KimiAcpProtocolError(`Unexpected Kimi ACP response id: ${String(id)}`, message),
+        new AcpProtocolError(`Unexpected ${this.label} response id: ${String(id)}`, message),
       );
       return;
     }
@@ -553,10 +622,11 @@ export class KimiAcpSession {
     if (pending.timeout) clearTimeout(pending.timeout);
     if (isRecord(message.error)) {
       pending.reject(
-        new KimiAcpRpcError(
+        new AcpRpcError(
+          this.label,
           pending.method,
           typeof message.error.code === "number" ? message.error.code : undefined,
-          responseErrorMessage(message.error),
+          typeof message.error.message === "string" ? message.error.message : "Request failed",
           message.error.data,
         ),
       );
@@ -571,7 +641,7 @@ export class KimiAcpSession {
     const pending = this.pendingRequests.get(requestId);
     if (!pending || pending.method !== "session/prompt") return;
     const error = new Error(
-      `Kimi ACP did not acknowledge session/cancel within ${this.cancelAcknowledgeTimeoutMs}ms; terminating the unsafe transport`,
+      `${this.label} did not acknowledge session/cancel within ${this.cancelAcknowledgeTimeoutMs}ms; terminating the unsafe transport`,
     );
     this.transportFailure = error;
     this.pendingRequests.delete(requestId);
@@ -586,7 +656,7 @@ export class KimiAcpSession {
     pending.reject(error);
     // The old ACP process may still believe the cancelled prompt is live. Never let a queued
     // prompt or late permission request share that transport; a fresh session can safely resume
-    // from Kimi's durable native history after the worker exits.
+    // from the provider's native history after the worker exits.
     if (this.child) terminateOwnedProcessTree(this.child, "SIGKILL");
   }
 
@@ -614,7 +684,7 @@ export class KimiAcpSession {
   }
 
   private handleServerRequest(request: {
-    id: KimiAcpJsonRpcId;
+    id: AcpJsonRpcId;
     method: string;
     params?: unknown;
   }): void {
@@ -625,11 +695,14 @@ export class KimiAcpSession {
     this.writeLine({
       jsonrpc: "2.0",
       id: request.id,
-      error: { code: -32601, message: `Unsupported Kimi ACP client request: ${request.method}` },
+      error: {
+        code: -32601,
+        message: `Unsupported ${this.label} client request: ${request.method}`,
+      },
     });
   }
 
-  private async handlePermissionRequest(id: KimiAcpJsonRpcId, rawParams: unknown): Promise<void> {
+  private async handlePermissionRequest(id: AcpJsonRpcId, rawParams: unknown): Promise<void> {
     const params = isRecord(rawParams) ? rawParams : {};
     const incomingToolCall = isRecord(params.toolCall) ? params.toolCall : {};
     const toolCallId =
@@ -639,7 +712,7 @@ export class KimiAcpSession {
     const rawInput = isRecord(incomingToolCall.rawInput)
       ? incomingToolCall.rawInput
       : trackedToolCall.rawInput;
-    const request: KimiAcpPermissionRequest = {
+    const request: AcpPermissionRequest = {
       requestId: id,
       sessionId: typeof params.sessionId === "string" ? params.sessionId : (this.sessionId ?? ""),
       toolName:
@@ -668,7 +741,7 @@ export class KimiAcpSession {
     const pending: PendingPermission = { request, responded: false };
     this.pendingPermissions.set(id, pending);
 
-    let decision: KimiAcpPermissionDecision;
+    let decision: AcpPermissionDecision;
     try {
       decision = await this.onPermissionRequest(request);
     } catch (error) {
@@ -687,7 +760,7 @@ export class KimiAcpSession {
       ? request.options.find((candidate) => candidate.optionId === requestedOptionId)
       : undefined;
     const cancelled = decision.cancelled === true || decision.behavior === "cancel";
-    const behavior: Exclude<KimiAcpPermissionBehavior, "cancel"> | undefined =
+    const behavior: Exclude<AcpPermissionBehavior, "cancel"> | undefined =
       decision.behavior === "allow_once" ||
       decision.behavior === "allow_always" ||
       decision.behavior === "deny"
@@ -709,7 +782,7 @@ export class KimiAcpSession {
       : { outcome: "cancelled" };
     if (!this.writeLine({ jsonrpc: "2.0", id, result: { outcome } })) {
       this.reportProtocolError(
-        new KimiAcpProtocolError(`Failed to respond to permission request ${String(id)}`),
+        new AcpProtocolError(`Failed to respond to permission request ${String(id)}`),
       );
     }
   }
@@ -739,7 +812,7 @@ export class KimiAcpSession {
     const child = this.child;
     if (!child) return;
     child.on("error", (error: Error) => {
-      const wrapped = new Error(`Kimi ACP failed to start: ${error.message}`);
+      const wrapped = new Error(`${this.label} failed to start: ${error.message}`);
       this.appendStderr(`${wrapped.message}\n`);
       this.rejectAllPendingRequests(wrapped);
       this.rejectSessionReadyOnce(wrapped);
@@ -750,8 +823,8 @@ export class KimiAcpSession {
       const exitCode = code ?? 1;
       const error = new Error(
         this.sessionReadySettled
-          ? `Kimi ACP exited (code ${exitCode})`
-          : `Kimi ACP exited before ready (code ${exitCode})`,
+          ? `${this.label} exited (code ${exitCode})`
+          : `${this.label} exited before ready (code ${exitCode})`,
       );
       this.rejectAllPendingRequests(error);
       this.pendingPermissions.clear();
@@ -765,7 +838,7 @@ export class KimiAcpSession {
     try {
       callback();
     } catch (error) {
-      this.reportProtocolError(new KimiAcpProtocolError(`${message}: ${toError(error).message}`));
+      this.reportProtocolError(new AcpProtocolError(`${message}: ${toError(error).message}`));
     }
   }
 

@@ -5,7 +5,7 @@ import {
   type MessageEnvelope,
 } from "@dev-anywhere/shared";
 
-type MappedKimiAcpEvent =
+type MappedAcpEvent =
   | { kind: "assistant_text"; text: string }
   | { kind: "envelope"; envelope: MessageEnvelope }
   | {
@@ -17,7 +17,7 @@ type MappedKimiAcpEvent =
     }
   | { kind: "unknown_update"; updateType: string };
 
-interface KimiToolState {
+interface AcpToolState {
   toolCallId: string;
   name?: string;
   title?: string;
@@ -55,7 +55,7 @@ function contentText(content: unknown): string {
   return typeof content.text === "string" ? content.text : "";
 }
 
-function toolName(tool: KimiToolState): string {
+function toolName(tool: AcpToolState, fallback: string): string {
   if (tool.name) return tool.name;
   switch (tool.kind) {
     case "read":
@@ -77,11 +77,11 @@ function toolName(tool: KimiToolState): string {
     case "switch_mode":
       return "SwitchMode";
     default:
-      return tool.title || "Kimi Tool";
+      return tool.title || fallback;
   }
 }
 
-function toolParameters(tool: KimiToolState): Record<string, unknown> {
+function toolParameters(tool: AcpToolState): Record<string, unknown> {
   const parameters: Record<string, unknown> = isRecord(tool.rawInput)
     ? { ...tool.rawInput }
     : tool.rawInput === undefined
@@ -95,7 +95,7 @@ function toolParameters(tool: KimiToolState): Record<string, unknown> {
   return parameters;
 }
 
-function toolResult(tool: KimiToolState): unknown {
+function toolResult(tool: AcpToolState): unknown {
   if (tool.rawOutput !== undefined) return tool.rawOutput;
   if (tool.content !== undefined) return tool.content;
   return tool.status ?? "completed";
@@ -111,13 +111,13 @@ function sameJsonValue(left: unknown, right: unknown): boolean {
 }
 
 function mergeToolState(
-  previous: KimiToolState | undefined,
+  previous: AcpToolState | undefined,
   update: Record<string, unknown>,
-): KimiToolState | null {
+): AcpToolState | null {
   const toolCallId =
     typeof update.toolCallId === "string" ? update.toolCallId : previous?.toolCallId;
   if (!toolCallId) return null;
-  const next: KimiToolState = previous ? { ...previous } : { toolCallId };
+  const next: AcpToolState = previous ? { ...previous } : { toolCallId };
   const stringFields = ["name", "title", "kind", "status"] as const;
   for (const field of stringFields) {
     if (!hasOwn(update, field)) continue;
@@ -145,15 +145,15 @@ function eventParams(event: Record<string, unknown>): Record<string, unknown> {
   return isRecord(event.params) ? event.params : {};
 }
 
-function promptErrorMessage(params: Record<string, unknown>): string {
+function promptErrorMessage(params: Record<string, unknown>, label: string): string {
   if (typeof params.message === "string" && params.message.trim()) return params.message;
   if (isRecord(params.error) && typeof params.error.message === "string") {
     return params.error.message;
   }
-  return "Kimi ACP prompt failed";
+  return `${label} ACP prompt failed`;
 }
 
-function availableCommands(update: Record<string, unknown>): CommandEntry[] {
+function availableCommands(update: Record<string, unknown>, source: string): CommandEntry[] {
   if (!Array.isArray(update.availableCommands)) return [];
   return update.availableCommands.flatMap((candidate) => {
     if (!isRecord(candidate) || typeof candidate.name !== "string") return [];
@@ -166,16 +166,22 @@ function availableCommands(update: Record<string, unknown>): CommandEntry[] {
         name: rawName.startsWith("/") ? rawName : `/${rawName}`,
         description: typeof candidate.description === "string" ? candidate.description : "",
         ...(argumentHint ? { argumentHint } : {}),
-        source: "kimi",
+        source,
       },
     ];
   });
 }
 
-/** Maps Kimi's ACP notifications into the existing JSON-chat wire protocol. */
-export class KimiAcpEventMapper {
-  private readonly toolsBySession = new Map<string, Map<string, KimiToolState>>();
+/** Maps standard ACP notifications into the JSON chat wire protocol. */
+export class AcpEventMapper {
+  private readonly toolsBySession = new Map<string, Map<string, AcpToolState>>();
   private readonly completedToolIdsBySession = new Map<string, Set<string>>();
+
+  constructor(private readonly provider: "kimi" | "antigravity" = "kimi") {}
+
+  private get label(): string {
+    return this.provider === "kimi" ? "Kimi" : "Antigravity";
+  }
 
   clearSession(sessionId: string): void {
     this.toolsBySession.delete(sessionId);
@@ -191,7 +197,7 @@ export class KimiAcpEventMapper {
     this.toolsBySession.delete(sessionId);
   }
 
-  map(sessionId: string, seq: number, event: Record<string, unknown>): MappedKimiAcpEvent[] {
+  map(sessionId: string, seq: number, event: Record<string, unknown>): MappedAcpEvent[] {
     const method = typeof event.method === "string" ? event.method : "";
     const params = eventParams(event);
 
@@ -208,7 +214,7 @@ export class KimiAcpEventMapper {
             sessionId,
             success,
             isError: !success,
-            ...(!success ? { result: `Kimi ACP stopped: ${stopReason}` } : {}),
+            ...(!success ? { result: `${this.label} ACP stopped: ${stopReason}` } : {}),
           }),
           notifyTurnResult: true,
         },
@@ -217,7 +223,7 @@ export class KimiAcpEventMapper {
 
     if (method === "session/prompt/error") {
       this.finishTurn(sessionId);
-      const message = promptErrorMessage(params);
+      const message = promptErrorMessage(params, this.label);
       return [
         {
           kind: "control",
@@ -260,7 +266,7 @@ export class KimiAcpEventMapper {
     }
 
     if (updateType === "available_commands_update") {
-      const commands = availableCommands(update);
+      const commands = availableCommands(update, this.provider);
       return [
         {
           kind: "control",
@@ -285,8 +291,8 @@ export class KimiAcpEventMapper {
     seq: number,
     update: Record<string, unknown>,
     isInitial: boolean,
-  ): MappedKimiAcpEvent[] {
-    const sessionTools = this.toolsBySession.get(sessionId) ?? new Map<string, KimiToolState>();
+  ): MappedAcpEvent[] {
+    const sessionTools = this.toolsBySession.get(sessionId) ?? new Map<string, AcpToolState>();
     this.toolsBySession.set(sessionId, sessionTools);
     const toolCallId = typeof update.toolCallId === "string" ? update.toolCallId : "";
     if (!toolCallId) return [];
@@ -298,7 +304,7 @@ export class KimiAcpEventMapper {
     if (!tool) return [];
     sessionTools.set(toolCallId, tool);
 
-    const mapped: MappedKimiAcpEvent[] = [];
+    const mapped: MappedAcpEvent[] = [];
     const hasPresentationUpdate = ["name", "title", "kind", "rawInput", "locations"].some((field) =>
       hasOwn(update, field),
     );
@@ -310,7 +316,7 @@ export class KimiAcpEventMapper {
           sessionId,
           seq,
           {
-            toolName: toolName(tool),
+            toolName: toolName(tool, `${this.label} Tool`),
             toolId: tool.toolCallId,
             parameters: toolParameters(tool),
           },

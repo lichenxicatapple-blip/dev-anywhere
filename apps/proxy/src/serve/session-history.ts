@@ -8,6 +8,7 @@ import {
   type SessionHistoryMessage,
 } from "@dev-anywhere/shared";
 import { collectJsonlFiles, collectFilesNamed } from "./history/files.js";
+import { readAntigravityMessages } from "./history/antigravity.js";
 import { readCursorConversationRecords } from "./history/cursor.js";
 import { claudeProjectsDir, codexSessionsDir, kimiSessionsDir } from "./history/paths.js";
 import { readCodexSessionId } from "./history/codex.js";
@@ -52,6 +53,8 @@ interface SessionMessagesPage {
 interface SessionMessagesPageOptions {
   limit?: number;
   before?: string;
+  cwd?: string;
+  providerEnv?: NodeJS.ProcessEnv;
 }
 
 const DEFAULT_HISTORY_PAGE_LIMIT = 50;
@@ -137,7 +140,7 @@ async function findCodexSessionFile(codexSessionId: string): Promise<string | nu
 
 async function findSessionFile(sessionId: string, provider?: ProviderId): Promise<string | null> {
   // Cursor ACP transcripts are SQLite blobs, not JSONL. Readers branch before findSessionFile.
-  if (provider === "cursor") return null;
+  if (provider === "cursor" || provider === "antigravity") return null;
   if (provider === "claude") return findClaudeSessionFile(sessionId);
   if (provider === "codex") return findCodexSessionFile(sessionId);
   if (provider === "kimi") return findKimiSessionFile(sessionId);
@@ -810,7 +813,7 @@ function collectCursorHistoryMessages(records: unknown[]): UnpositionedSessionMe
   return messages;
 }
 
-function pageCursorHistoryMessages(
+function pageIndexedHistoryMessages(
   messages: UnpositionedSessionMessage[],
   options: SessionMessagesPageOptions = {},
 ): SessionMessagesPage {
@@ -835,7 +838,7 @@ async function readCursorSessionMessagesPage(
   options: SessionMessagesPageOptions = {},
 ): Promise<SessionMessagesPage> {
   const messages = collectCursorHistoryMessages(await readCursorConversationRecords(sessionId));
-  return pageCursorHistoryMessages(messages, options);
+  return pageIndexedHistoryMessages(messages, options);
 }
 
 function extractCodexMessage(
@@ -1208,6 +1211,14 @@ export async function readSessionMessagesPage(
   provider?: ProviderId,
 ): Promise<SessionMessagesPage> {
   if (provider === "cursor") return readCursorSessionMessagesPage(sessionId, options);
+  if (provider === "antigravity" && options.cwd) {
+    const messages = await readAntigravityMessages(
+      sessionId,
+      options.cwd,
+      options.providerEnv ?? process.env,
+    );
+    return pageIndexedHistoryMessages(messages, options);
+  }
   const filePath = await findSessionFile(sessionId, provider);
   if (!filePath) return { messages: [], hasMore: false };
   return readSessionMessagesPageFromFile(filePath, options);

@@ -22,9 +22,9 @@
 
 ## 这是什么
 
-DEV Anywhere 让你在电脑、手机或平板上远程使用开发机上的 Claude Code、Codex、Kimi Code、Cursor CLI 和 Shell。打开 Web 界面，就能与 coding agent 对话、操作终端、处理工具审批和传输文件，也能预览网页、操控开发机上已启动的 iOS Simulator 与 Android Emulator。
+DEV Anywhere 让你在电脑、手机或平板上远程使用开发机上的 Claude Code、Codex、Kimi Code、Cursor CLI、Antigravity CLI 和 Shell。打开 Web 界面，就能与 coding agent 对话、操作终端、处理工具审批和传输文件，也能预览网页、操控开发机上已启动的 iOS Simulator 与 Android Emulator。
 
-想让本地启动的 Claude Code、Codex、Kimi Code 或 Cursor CLI 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。启动后，你既可以在本地终端中照常操作，也可以随时随地在 DEV Anywhere 的 Web 界面里继续手头的开发工作，或创建新的 coding agent 会话。
+想让本地启动的 Claude Code、Codex、Kimi Code、Cursor CLI 或 Antigravity CLI 随时能在浏览器中继续操作，只需在原命令前加上 `dev-anywhere`。启动后，你既可以在本地终端中照常操作，也可以随时随地在 DEV Anywhere 的 Web 界面里继续手头的开发工作，或创建新的 coding agent 会话。
 
 > **为什么做这个？**
 >
@@ -43,7 +43,7 @@ node --version
 npm --version
 ```
 
-在开发机上安装并登录你要使用的 coding agent：Claude Code、Codex、Kimi Code 或 Cursor CLI。只使用 Shell 时可以跳过这一步。
+在开发机上安装并登录你要使用的 coding agent：Claude Code、Codex、Kimi Code、Cursor CLI 或 Antigravity CLI。只使用 Shell 时可以跳过这一步。
 
 ### 1. 安装 DEV Anywhere
 
@@ -163,6 +163,7 @@ dev-anywhere claude
 dev-anywhere codex
 dev-anywhere kimi
 dev-anywhere cursor
+dev-anywhere agy
 ```
 
 Cursor CLI 也可以使用 `dev-anywhere agent ...` 启动。
@@ -176,6 +177,7 @@ dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
 dev-anywhere --profile quick-tunnel kimi
 dev-anywhere --profile quick-tunnel cursor
+dev-anywhere --profile quick-tunnel agy
 ```
 
 启动后，你可以继续在本地终端操作，也可以打开 DEV Anywhere 的 Web 界面，在会话列表中选择刚启动的会话，继续手头的开发工作。
@@ -262,7 +264,7 @@ dev-anywhere serve status
 
 **终端视图**保留 CLI 的界面和键盘操作，适合熟悉终端的用户。**聊天视图**将回复、工具调用和审批整理成消息，方便阅读和触摸操作。
 
-Claude Code、Codex、Kimi Code 和 Cursor CLI 都支持这两种视图。其中 Kimi Code 和 Cursor CLI 的聊天模式使用 ACP，支持流式回复、工具调用、取消当前回复和恢复历史会话；Cursor ACP 还支持提问、计划确认和待办列表。
+Claude Code、Codex、Kimi Code、Cursor CLI 和 Antigravity CLI 都支持这两种视图。Kimi Code、Cursor CLI 和 Antigravity CLI 的聊天模式使用 ACP，支持流式回复、工具审批、取消当前回复和恢复会话。Cursor 的聊天模式也支持提问、计划确认和待办列表。
 
 ![DEV Anywhere 的终端与聊天视图](./docs/assets/readme-session-modes.gif)
 
@@ -332,7 +334,7 @@ flowchart LR
   subgraph machine["开发机"]
     direction TB
     proxy["Proxy<br/>会话 · 终端 · 文件"]
-    agent["Claude Code / Codex / Kimi Code / Cursor CLI"]
+    agent["Claude Code / Codex / Kimi Code / Cursor CLI / Antigravity CLI"]
     shell["Shell"]
     local["代码仓库 · CLI 配置 · 本地权限"]
 

@@ -1,4 +1,5 @@
 import type { AgentCliAvailability, AgentCliStatus } from "@dev-anywhere/shared";
+import { findAntigravityCandidates, resolveAntigravityCommand } from "./antigravity.js";
 import { resolveClaudePtyCommand } from "./claude.js";
 import { resolveCodexCommand } from "./codex.js";
 import { resolveCursorCommand } from "./cursor.js";
@@ -18,15 +19,17 @@ const PROVIDER_BIN_NAMES: Record<ProviderId, readonly string[]> = {
   codex: ["codex"],
   kimi: ["kimi"],
   cursor: ["agent", "cursor-agent"],
+  antigravity: ["agy"],
 };
 const PROVIDER_ENV_NAME: Record<
   ProviderId,
-  "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN" | "CURSOR_BIN"
+  "CLAUDE_BIN" | "CODEX_BIN" | "KIMI_BIN" | "CURSOR_BIN" | "AGY_BIN"
 > = {
   claude: "CLAUDE_BIN",
   codex: "CODEX_BIN",
   kimi: "KIMI_BIN",
   cursor: "CURSOR_BIN",
+  antigravity: "AGY_BIN",
 };
 
 function errorMessage(err: unknown): string {
@@ -49,7 +52,9 @@ function discoverProviderCandidates(provider: ProviderId, env: NodeJS.ProcessEnv
   const envPath = environmentValue(env, PROVIDER_ENV_NAME[provider]);
   return uniqueSuggestions([
     envPath,
-    ...PROVIDER_BIN_NAMES[provider].flatMap((name) => findExecutableCandidates(name, env)),
+    ...(provider === "antigravity"
+      ? findAntigravityCandidates(env)
+      : PROVIDER_BIN_NAMES[provider].flatMap((name) => findExecutableCandidates(name, env))),
   ]);
 }
 
@@ -91,6 +96,13 @@ export function detectAgentCliStatus(
     kimi: detect(
       () => resolveKimiCommand(env),
       [...discoverProviderCandidates("kimi", env), ...(options.suggestions?.kimi ?? [])],
+    ),
+    antigravity: detect(
+      () => resolveAntigravityCommand(env),
+      [
+        ...discoverProviderCandidates("antigravity", env),
+        ...(options.suggestions?.antigravity ?? []),
+      ],
     ),
     cursor: detect(
       () => resolveCursorCommand(env),

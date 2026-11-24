@@ -1,3 +1,4 @@
+export { ANTIGRAVITY_PROVIDER } from "./antigravity.js";
 export { CLAUDE_PROVIDER } from "./claude.js";
 export { CODEX_PROVIDER } from "./codex.js";
 export { KIMI_PROVIDER } from "./kimi.js";

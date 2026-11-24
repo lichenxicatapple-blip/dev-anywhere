@@ -326,7 +326,9 @@ export const WorkerMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("worker_startup_error"),
     provider: z.enum(providerValues),
     message: z.string().max(2048),
-    errorCode: z.literal(ControlErrorCode.SESSION_ALREADY_ACTIVE).optional(),
+    errorCode: z
+      .enum([ControlErrorCode.SESSION_ALREADY_ACTIVE, ControlErrorCode.PROVIDER_AUTH_REQUIRED])
+      .optional(),
     nativeSessionId: z.string().optional(),
   }),
 

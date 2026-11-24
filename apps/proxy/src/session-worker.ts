@@ -18,10 +18,11 @@ import {
   type CursorAcpPermissionOption,
 } from "./worker/cursor-acp-session.js";
 import {
-  KimiAcpSession,
-  type KimiAcpPermissionDecision,
-  type KimiAcpPermissionOption,
-} from "./worker/kimi-acp-session.js";
+  AcpSession,
+  AcpRpcError,
+  type AcpPermissionDecision,
+  type AcpPermissionOption,
+} from "./providers/acp-session.js";
 import { createApprovalRequestIdFactory } from "./common/approval-request-id.js";
 import { SeqCounter } from "./common/seq-counter.js";
 import {
@@ -36,7 +37,12 @@ import {
 } from "./ipc/worker-connection.js";
 import { readServeConnection } from "./worker/serve-connection.js";
 import type { ProviderHookContext, ProviderId } from "./providers/index.js";
-import { ControlErrorCode, type CursorAnswer, type CursorPrompt } from "@dev-anywhere/shared";
+import {
+  ControlErrorCode,
+  isProviderId,
+  type CursorAnswer,
+  type CursorPrompt,
+} from "@dev-anywhere/shared";
 import {
   classifyCodexActiveWriterError,
   sanitizeProviderErrorTail,
@@ -72,12 +78,7 @@ if (!sessionId || !sockPath) {
   process.exit(1);
 }
 
-if (
-  providerArg !== "claude" &&
-  providerArg !== "codex" &&
-  providerArg !== "kimi" &&
-  providerArg !== "cursor"
-) {
+if (!isProviderId(providerArg)) {
   console.error(
     providerArg === undefined
       ? "JSON worker provider is required"
@@ -85,7 +86,7 @@ if (
   );
   process.exit(1);
 }
-const provider = providerArg as ProviderId;
+const provider = providerArg;
 
 const workerHook: ProviderHookContext | undefined =
   workerHookUrl && workerHookMarker && workerHookToken && workerHookProvider
@@ -100,7 +101,7 @@ const workerHook: ProviderHookContext | undefined =
 
 let serveSocket: Socket | null = null;
 const queuedServeMessages: WorkerMessage[] = [];
-let latestKimiCommandEvent: Extract<WorkerMessage, { type: "worker_event" }> | null = null;
+let latestAcpCommandEvent: Extract<WorkerMessage, { type: "worker_event" }> | null = null;
 let readyMessage: Extract<WorkerMessage, { type: "worker_ready" }> | null = null;
 let providerReady = false;
 let exiting = false;
@@ -134,15 +135,17 @@ interface WorkerApprovalDecision {
 }
 
 function isAcpProvider(value: ProviderId): boolean {
-  return value === "kimi" || value === "cursor";
+  return value === "kimi" || value === "cursor" || value === "antigravity";
 }
 
-function isKimiCommandEvent(
+function isAcpCommandEvent(
   msg: WorkerMessage,
 ): msg is Extract<WorkerMessage, { type: "worker_event" }> {
   if (
     msg.type !== "worker_event" ||
-    (msg.event.type !== "kimi_acp" && msg.event.type !== "cursor_acp")
+    (msg.event.type !== "kimi_acp" &&
+      msg.event.type !== "cursor_acp" &&
+      msg.event.type !== "antigravity_acp")
   ) {
     return false;
   }
@@ -158,9 +161,9 @@ function isKimiCommandEvent(
 }
 
 function sendToServe(msg: WorkerMessage): void {
-  if (isKimiCommandEvent(msg)) latestKimiCommandEvent = msg;
+  if (isAcpCommandEvent(msg)) latestAcpCommandEvent = msg;
   if (!providerReady && msg.type !== "worker_startup_error" && msg.type !== "worker_exit") {
-    if (!isKimiCommandEvent(msg) && msg.type !== "worker_approval_request") {
+    if (!isAcpCommandEvent(msg) && msg.type !== "worker_approval_request") {
       queuedServeMessages.push(msg);
     }
     return;
@@ -169,7 +172,7 @@ function sendToServe(msg: WorkerMessage): void {
     serveSocket.write(serializeWorkerMsg(msg));
     return;
   }
-  if (isKimiCommandEvent(msg)) return;
+  if (isAcpCommandEvent(msg)) return;
   if (msg.type !== "worker_approval_request") {
     queuedServeMessages.push(msg);
   }
@@ -194,17 +197,17 @@ function replayServeState(socket: Socket | null): void {
   if (!providerReady || !readyMessage) return;
 
   socket.write(serializeWorkerMsg(readyMessage));
-  const queuedKimiTurnStart = queuedServeMessages.some(
+  const queuedAcpTurnStart = queuedServeMessages.some(
     (message) => message.type === "worker_turn_started",
   );
   // If start happened on the previous connection, restore WORKING before replaying chunks. When
   // start itself is queued, preserve backlog order (previous result -> next start -> next chunks).
-  if (isAcpProvider(provider) && acpTurnActive && !queuedKimiTurnStart) {
+  if (isAcpProvider(provider) && acpTurnActive && !queuedAcpTurnStart) {
     socket.write(serializeWorkerMsg({ type: "worker_turn_started" }));
   }
   flushQueuedServeMessages();
-  if (latestKimiCommandEvent && socket.writable) {
-    socket.write(serializeWorkerMsg(latestKimiCommandEvent));
+  if (latestAcpCommandEvent && socket.writable) {
+    socket.write(serializeWorkerMsg(latestAcpCommandEvent));
   }
 
   for (const [requestId, pending] of pendingApprovals) {
@@ -264,11 +267,15 @@ function handleProviderEvent(event: Record<string, unknown>): void {
   });
 }
 
-function handleKimiEvent(
+function handleAcpEvent(
   method: "session/update" | "session/prompt/result" | "session/prompt/error",
   params: Record<string, unknown>,
 ): void {
-  handleProviderEvent({ type: "kimi_acp", method, params });
+  handleProviderEvent({
+    type: provider === "antigravity" ? "antigravity_acp" : "kimi_acp",
+    method,
+    params,
+  });
 }
 
 function handleCursorEvent(method: string, params: Record<string, unknown>): void {
@@ -276,7 +283,7 @@ function handleCursorEvent(method: string, params: Record<string, unknown>): voi
 }
 
 function workerApprovalOptions(
-  options: Array<KimiAcpPermissionOption | CursorAcpPermissionOption>,
+  options: Array<AcpPermissionOption | CursorAcpPermissionOption>,
 ): WorkerApprovalOption[] {
   return options.flatMap((option) => {
     const kind = option.kind.replace(/-/g, "_");
@@ -292,11 +299,11 @@ function workerApprovalOptions(
   });
 }
 
-async function handleKimiPermissionRequest(request: {
+async function handleAcpPermissionRequest(request: {
   toolName: string;
   input: Record<string, unknown>;
-  options: KimiAcpPermissionOption[];
-}): Promise<KimiAcpPermissionDecision> {
+  options: AcpPermissionOption[];
+}): Promise<AcpPermissionDecision> {
   if (whitelist.has(request.toolName)) return { behavior: "allow_always" };
   const options = workerApprovalOptions(request.options);
   const decision = await forwardToRelay(
@@ -391,32 +398,33 @@ const session =
         },
         onExit: handleProviderExit,
       })
-    : provider === "kimi"
-      ? new KimiAcpSession({
+    : provider === "kimi" || provider === "antigravity"
+      ? new AcpSession({
+          provider,
           cwd: workerCwd,
           resumeSessionId: workerResume,
           permissionMode: workerPermissionMode,
-          onUpdate: (params) => handleKimiEvent("session/update", params),
-          onPermissionRequest: handleKimiPermissionRequest,
+          onUpdate: (params) => handleAcpEvent("session/update", params),
+          onPermissionRequest: handleAcpPermissionRequest,
           onPromptStart: () => {
             acpTurnActive = true;
             sendToServe({ type: "worker_turn_started" });
           },
           onPromptComplete: (result) => {
             acpTurnActive = false;
-            handleKimiEvent("session/prompt/result", { response: result });
+            handleAcpEvent("session/prompt/result", { response: result });
           },
           onPromptError: (error) => {
             acpTurnActive = false;
-            handleKimiEvent("session/prompt/error", {
-              message: sanitizeProviderErrorTail(error.message) || "Kimi ACP prompt failed",
+            handleAcpEvent("session/prompt/error", {
+              message: sanitizeProviderErrorTail(error.message) || "ACP prompt failed",
             });
           },
-          onSessionId: (kimiSessionId) => {
+          onSessionId: (nativeSessionId) => {
             sendToServe({
               type: "worker_native_session_id",
-              provider: "kimi",
-              sessionId: kimiSessionId,
+              provider,
+              sessionId: nativeSessionId,
             });
           },
           onProtocolError: (error) => console.error(`[worker] ${error.message}`),
@@ -635,26 +643,29 @@ server.listen(sockPath, () => {
         console.error(`[worker] Codex app-server failed to initialize: ${diagnostic}`);
         void session.stop(0).finally(() => handleProviderExit(1));
       });
-  } else if (provider === "kimi" && session instanceof KimiAcpSession) {
+  } else if ((provider === "kimi" || provider === "antigravity") && session instanceof AcpSession) {
     void session
       .waitUntilReady()
-      .then((kimiSessionId) => {
+      .then((nativeSessionId) => {
         reportReady({
           type: "worker_ready",
           pid,
-          nativeSession: { provider: "kimi", sessionId: kimiSessionId },
+          nativeSession: { provider, sessionId: nativeSessionId },
         });
       })
       .catch((err: unknown) => {
         const message = err instanceof Error ? err.message : String(err);
         const diagnostic =
-          sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) || "Kimi ACP 初始化失败";
+          sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) || "ACP 初始化失败";
         sendToServe({
           type: "worker_startup_error",
-          provider: "kimi",
+          provider,
           message: diagnostic,
+          ...(provider === "antigravity" && err instanceof AcpRpcError && err.code === -32000
+            ? { errorCode: ControlErrorCode.PROVIDER_AUTH_REQUIRED }
+            : {}),
         });
-        console.error(`[worker] Kimi ACP failed to initialize: ${diagnostic}`);
+        console.error(`[worker] ${provider} ACP failed to initialize: ${diagnostic}`);
         void session.stop(0).finally(() => handleProviderExit(1));
       });
   } else if (provider === "cursor" && session instanceof CursorAcpSession) {

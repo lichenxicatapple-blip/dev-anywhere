@@ -1,8 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import type {
-  KimiAcpPermissionDecision,
-  KimiAcpSessionOptions,
-} from "#src/worker/kimi-acp-session.js";
+import type { AcpPermissionDecision, AcpSessionOptions } from "#src/providers/acp-session.js";
 import { PROXY_VERSION } from "#src/version.js";
 import { createChildProcessFake } from "./test-fakes.js";
 
@@ -43,11 +40,11 @@ async function waitForStdinLines(message = "stdin write timed out") {
   return readStdinLines();
 }
 
-describe("KimiAcpSession", () => {
-  let KimiAcpSession: typeof import("#src/worker/kimi-acp-session.js").KimiAcpSession;
+describe("AcpSession", () => {
+  let AcpSession: typeof import("#src/providers/acp-session.js").AcpSession;
 
-  async function makeReady(options: KimiAcpSessionOptions = {}, sessionId = "kimi-session-1") {
-    const session = new KimiAcpSession(options);
+  async function makeReady(options: AcpSessionOptions = {}, sessionId = "kimi-session-1") {
+    const session = new AcpSession(options);
     session.start();
 
     const initialize = readStdinLines()[0];
@@ -75,7 +72,7 @@ describe("KimiAcpSession", () => {
     mockChild = createChildProcessFake();
     const { spawn } = await import("node:child_process");
     vi.mocked(spawn).mockClear();
-    ({ KimiAcpSession } = await import("#src/worker/kimi-acp-session.js"));
+    ({ AcpSession } = await import("#src/providers/acp-session.js"));
   });
 
   afterEach(() => {
@@ -84,7 +81,7 @@ describe("KimiAcpSession", () => {
 
   it("spawns kimi acp over stdio and initializes ACP protocol version 1", async () => {
     const { spawn } = await import("node:child_process");
-    const session = new KimiAcpSession({ cwd: "/tmp/project" });
+    const session = new AcpSession({ cwd: "/tmp/project" });
 
     expect(session.start()).toBe(12345);
     expect(vi.mocked(spawn)).toHaveBeenCalledWith(
@@ -117,7 +114,7 @@ describe("KimiAcpSession", () => {
     ["plan", "plan"],
     ["bypassPermissions", "auto"],
   ])("maps permission mode %s to ACP mode %s", async (permissionMode, expectedMode) => {
-    const session = new KimiAcpSession({ cwd: "/tmp/project", permissionMode });
+    const session = new AcpSession({ cwd: "/tmp/project", permissionMode });
     session.start();
     const initialize = readStdinLines()[0];
     writeStdout({ id: initialize.id, result: { protocolVersion: 1 } });
@@ -138,7 +135,7 @@ describe("KimiAcpSession", () => {
 
   it("resumes a native session without requesting an unbounded ACP history replay", async () => {
     const sessionIds: string[] = [];
-    const session = new KimiAcpSession({
+    const session = new AcpSession({
       cwd: "/tmp/project",
       resumeSessionId: "existing-kimi-session",
       onSessionId: (id) => sessionIds.push(id),
@@ -161,7 +158,7 @@ describe("KimiAcpSession", () => {
     writeStdout({ id: setMode.id, result: {} });
 
     await expect(session.waitUntilReady()).resolves.toBe("existing-kimi-session");
-    expect(session.getKimiSessionId()).toBe("existing-kimi-session");
+    expect(session.getNativeSessionId()).toBe("existing-kimi-session");
     expect(sessionIds).toEqual(["existing-kimi-session"]);
   });
 
@@ -170,7 +167,7 @@ describe("KimiAcpSession", () => {
     const notifications: Array<{ method: string; params: Record<string, unknown> }> = [];
     const started = vi.fn();
     const completed = vi.fn();
-    const session = new KimiAcpSession({
+    const session = new AcpSession({
       cwd: "/tmp/project",
       onUpdate: (params) => updates.push(params),
       onNotification: (method, params) => notifications.push({ method, params }),
@@ -222,7 +219,7 @@ describe("KimiAcpSession", () => {
 
     await waitForCondition(() => promptErrors.length === 1, "prompt error timed out");
     expect(promptErrors[0]).toMatchObject({
-      name: "KimiAcpRpcError",
+      name: "AcpRpcError",
       method: "session/prompt",
       code: -32000,
       data: { retryable: true },
@@ -231,8 +228,8 @@ describe("KimiAcpSession", () => {
   });
 
   it("preserves dynamic permission options, tool call details, and tracked raw input", async () => {
-    let resolveDecision: ((decision: KimiAcpPermissionDecision) => void) | undefined;
-    const requests: Array<import("#src/worker/kimi-acp-session.js").KimiAcpPermissionRequest> = [];
+    let resolveDecision: ((decision: AcpPermissionDecision) => void) | undefined;
+    const requests: Array<import("#src/providers/acp-session.js").AcpPermissionRequest> = [];
     const session = await makeReady({
       onPermissionRequest: (request) => {
         requests.push(request);
@@ -310,7 +307,7 @@ describe("KimiAcpSession", () => {
   });
 
   it("selects an exact AskUserQuestion option and rejects stale or contradictory decisions", async () => {
-    const decisions: KimiAcpPermissionDecision[] = [
+    const decisions: AcpPermissionDecision[] = [
       { optionId: "answer-b", behavior: "allow_once" },
       { optionId: "stale-answer" },
       { optionId: "answer-a", behavior: "deny" },
@@ -432,12 +429,12 @@ describe("KimiAcpSession", () => {
   });
 
   it("cancels pending reverse permission RPCs and suppresses the cancelled prompt result", async () => {
-    let resolveDecision: ((decision: KimiAcpPermissionDecision) => void) | undefined;
+    let resolveDecision: ((decision: AcpPermissionDecision) => void) | undefined;
     const completed = vi.fn();
     const errors = vi.fn();
     const onPermissionRequest = vi.fn(
       () =>
-        new Promise<KimiAcpPermissionDecision>((resolve) => {
+        new Promise<AcpPermissionDecision>((resolve) => {
           resolveDecision = resolve;
         }),
     );
@@ -602,14 +599,14 @@ describe("KimiAcpSession", () => {
   });
 
   it("rejects readiness on timeout, process error, and early exit", async () => {
-    const timedOut = new KimiAcpSession({ requestTimeoutMs: 5 });
+    const timedOut = new AcpSession({ requestTimeoutMs: 5 });
     timedOut.start();
     readStdinLines();
     await expect(timedOut.waitUntilReady()).rejects.toThrow(/initialize.*timed out/i);
 
     mockChild = createChildProcessFake();
     const processErrors: Error[] = [];
-    const failedSpawn = new KimiAcpSession({
+    const failedSpawn = new AcpSession({
       onProcessError: (error) => processErrors.push(error),
     });
     failedSpawn.start();
@@ -619,7 +616,7 @@ describe("KimiAcpSession", () => {
     expect(processErrors[0]?.message).toContain("spawn ENOENT");
 
     mockChild = createChildProcessFake();
-    const exited = new KimiAcpSession();
+    const exited = new AcpSession();
     exited.start();
     readStdinLines();
     mockChild.emit("exit", 9);
@@ -627,7 +624,7 @@ describe("KimiAcpSession", () => {
   });
 
   it("retains only a bounded stderr tail", () => {
-    const session = new KimiAcpSession({ requestTimeoutMs: 0 });
+    const session = new AcpSession({ requestTimeoutMs: 0 });
     session.start();
     readStdinLines();
     mockChild.mockStderr.write(`prefix-${"x".repeat(9_000)}-tail`);

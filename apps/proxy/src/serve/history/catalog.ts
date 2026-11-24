@@ -1,5 +1,6 @@
 import { tmpdir } from "node:os";
 import { isAbsolute, resolve, sep } from "node:path";
+import { scanAntigravityHistory } from "./antigravity.js";
 import { scanClaudeHistory } from "./claude.js";
 import { scanCodexHistory } from "./codex.js";
 import { CursorHistoryUnavailableError, scanCursorHistory } from "./cursor.js";
@@ -68,12 +69,13 @@ export function buildHistoryCatalog(records: NativeHistorySession[]): SessionHis
 }
 
 export async function scanSessionHistory(
-  options: { metadataPath?: string } = {},
+  options: { metadataPath?: string; providerEnv?: NodeJS.ProcessEnv } = {},
 ): Promise<SessionHistoryEntry[]> {
   const records = await Promise.all([
     scanClaudeHistory(claudeProjectsDir()),
     scanCodexHistory(codexSessionsDir()),
     scanKimiHistory(kimiSessionsDir()),
+    options.providerEnv ? scanAntigravityHistory(options.providerEnv) : [],
     scanCursorHistory(cursorAcpSessionsDir()).catch((error: unknown) => {
       // 不支持 Cursor 历史的环境只影响 Cursor，不能拖垮其他 Agent 的历史列表。
       if (!(error instanceof CursorHistoryUnavailableError)) throw error;

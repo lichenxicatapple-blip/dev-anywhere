@@ -1,3 +1,4 @@
+import { isProviderId } from "@dev-anywhere/shared";
 import { existsSync, readFileSync } from "node:fs";
 import { atomicWriteFileSync } from "../common/atomic-write.js";
 import type { ProviderId } from "../providers/types.js";
@@ -19,10 +20,6 @@ interface HistorySessionLike {
   title?: string;
   projectDir?: string;
   preferredMode?: "pty" | "json";
-}
-
-function isProviderId(value: unknown): value is ProviderId {
-  return value === "claude" || value === "codex" || value === "kimi" || value === "cursor";
 }
 
 function isSessionMode(value: unknown): value is "pty" | "json" {

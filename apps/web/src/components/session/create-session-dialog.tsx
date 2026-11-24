@@ -39,6 +39,7 @@ import {
   type ProviderId,
   PROVIDER_LABEL,
   providerStatus,
+  antigravityPermissionOptions,
   providerSupportsChatMode,
   type SessionMode,
   submitSessionCreate,
@@ -166,7 +167,9 @@ function CreateSessionForm({
             mode === "json"
             ? CURSOR_CHAT_PERMISSION_MODE_OPTIONS
             : CURSOR_PERMISSION_MODE_OPTIONS
-          : PERMISSION_MODE_OPTIONS;
+          : provider === "antigravity"
+            ? antigravityPermissionOptions(mode)
+            : PERMISSION_MODE_OPTIONS;
   const chatModeSupported = providerSupportsChatMode(provider);
   const selectedStatus = providerStatus(provider, agentCli);
   const cliPathChanged =

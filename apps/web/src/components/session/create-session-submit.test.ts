@@ -19,6 +19,7 @@ const agentCli = {
   codex: { available: true, command: "/usr/local/bin/codex" },
   kimi: { available: true, command: "/usr/local/bin/kimi" },
   cursor: { available: true, command: "/usr/local/bin/agent" },
+  antigravity: { available: false, notReported: true },
 };
 
 describe("create-session submit model", () => {
@@ -66,6 +67,7 @@ describe("create-session submit model", () => {
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
         cursor: { available: true, command: "/usr/local/bin/agent" },
+        antigravity: { available: false, notReported: true },
       }),
     ).toEqual({ label: "未找到", disabled: true, title: "claude not found" });
     expect(
@@ -74,6 +76,7 @@ describe("create-session submit model", () => {
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: false, error: "kimi not found" },
         cursor: { available: false, error: "cursor not found" },
+        antigravity: { available: false, notReported: true },
       }),
     ).toEqual({ label: "未找到", disabled: true, title: "kimi not found" });
     expect(
@@ -82,6 +85,7 @@ describe("create-session submit model", () => {
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
         cursor: { available: false, error: "未上报", notReported: true },
+        antigravity: { available: false, notReported: true },
       }),
     ).toEqual({ label: "未上报", disabled: true, title: "未上报" });
   });
@@ -224,6 +228,7 @@ describe("create-session submit model", () => {
           codex: { available: true, command: "/usr/local/bin/codex" },
           kimi: { available: true, command: "/usr/local/bin/kimi" },
           cursor: { available: true, command: "/usr/local/bin/agent" },
+          antigravity: { available: false, notReported: true },
         },
         form: {
           cwd: "/home/dev",

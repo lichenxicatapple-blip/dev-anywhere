@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { MessageEnvelopeSchema, RelayControlSchema } from "@dev-anywhere/shared";
-import { KimiAcpEventMapper } from "#src/serve/kimi-acp-event-mapper.js";
+import { AcpEventMapper } from "#src/serve/acp-event-mapper.js";
 
 function update(sessionUpdate: string, fields: Record<string, unknown>) {
   return {
@@ -10,9 +10,9 @@ function update(sessionUpdate: string, fields: Record<string, unknown>) {
   };
 }
 
-describe("KimiAcpEventMapper", () => {
+describe("AcpEventMapper", () => {
   it("maps agent message chunks to assistant text snapshots", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
 
     expect(
       mapper.map(
@@ -24,7 +24,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("maps thought chunks to schema-valid thinking envelopes", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     const mapped = mapper.map(
       "s1",
       2,
@@ -44,7 +44,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("merges partial tool_call_update fields and emits the terminal result", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     const started = mapper.map(
       "s1",
       3,
@@ -114,7 +114,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("maps failed tool updates to error results", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     mapper.map(
       "s1",
       5,
@@ -147,7 +147,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("bounds completed tool tombstones while suppressing recent duplicate terminal updates", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     for (let index = 0; index < 513; index += 1) {
       const toolCallId = `tool-${index}`;
       mapper.map(
@@ -194,7 +194,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("drops incomplete tool payloads when a turn ends", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     mapper.map(
       "s1",
       1,
@@ -228,7 +228,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("maps prompt completion and errors to turn_result controls", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     const completed = mapper.map("s1", 7, {
       type: "kimi_acp",
       method: "session/prompt/result",
@@ -260,7 +260,7 @@ describe("KimiAcpEventMapper", () => {
   it.each(["cancelled", "max_tokens", "max_turn_requests", "refusal", "future_reason"])(
     "maps non-success stop reason %s to a failed turn",
     (stopReason) => {
-      const mapper = new KimiAcpEventMapper();
+      const mapper = new AcpEventMapper();
       const mapped = mapper.map("s1", 9, {
         type: "kimi_acp",
         method: "session/prompt/result",
@@ -282,7 +282,7 @@ describe("KimiAcpEventMapper", () => {
   );
 
   it("treats a missing stop reason as a failed turn", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     const [mapped] = mapper.map("s1", 9, {
       type: "kimi_acp",
       method: "session/prompt/result",
@@ -299,7 +299,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("maps available ACP commands to the existing slash-command control", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     const mapped = mapper.map(
       "s1",
       9,
@@ -336,7 +336,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("ignores ACP user-message echoes because relay input and disk history are authoritative", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
     expect(
       mapper.map(
         "s1",
@@ -347,7 +347,7 @@ describe("KimiAcpEventMapper", () => {
   });
 
   it("ignores known non-chat updates and exposes unknown variants as a canary", () => {
-    const mapper = new KimiAcpEventMapper();
+    const mapper = new AcpEventMapper();
 
     expect(mapper.map("s1", 14, update("usage_update", { used: 1 }))).toEqual([]);
     expect(mapper.map("s1", 15, update("future_update", {}))).toEqual([

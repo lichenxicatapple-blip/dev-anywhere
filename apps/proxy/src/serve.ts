@@ -63,12 +63,13 @@ import {
 
 const AGENT_CLI_PATH_FIELDS: Record<
   ProviderId,
-  "claudeBin" | "codexBin" | "kimiBin" | "cursorBin"
+  "claudeBin" | "codexBin" | "kimiBin" | "cursorBin" | "agyBin"
 > = {
   claude: "claudeBin",
   codex: "codexBin",
   kimi: "kimiBin",
   cursor: "cursorBin",
+  antigravity: "agyBin",
 };
 
 function resolveInterruptedApprovals(
@@ -291,7 +292,7 @@ export async function startService(options?: ServiceOptions): Promise<void> {
     send: relaySend,
   });
   previewRuntime.start();
-  const controlHandlers = createControlMessageHandlers(relaySend, sessionManager);
+  const controlHandlers = createControlMessageHandlers(relaySend, sessionManager, getProviderEnv);
 
   const eventBridge = createEventBridge({
     sessionManager,

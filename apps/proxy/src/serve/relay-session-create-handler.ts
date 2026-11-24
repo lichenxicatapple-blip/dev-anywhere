@@ -1,6 +1,8 @@
+import { execFile } from "node:child_process";
 import { rmSync, statSync } from "node:fs";
 import { homedir } from "node:os";
 import { isAbsolute } from "node:path";
+import { promisify } from "node:util";
 import { nanoid } from "nanoid";
 import {
   ControlErrorCode,
@@ -21,6 +23,10 @@ import {
   sanitizeProviderErrorTail,
 } from "../common/codex-session-conflict.js";
 import { findClosestAncestorPid } from "../common/process-ancestry.js";
+import {
+  AntigravityPermissionModeUnsupportedError,
+  resolveAntigravityAcpMode,
+} from "../providers/antigravity.js";
 import type { ProviderHookContext, ProviderId } from "../providers/index.js";
 import {
   CodexApprovalPolicyUnsupportedError,
@@ -50,6 +56,19 @@ import { JsonWorkerStartupTimeoutError, waitForJsonWorkerStartup } from "./json-
 
 const WORKER_START_FAILED_MESSAGE = "Agent 进程启动失败，请检查 Agent CLI 配置后重试";
 const WORKER_START_TIMEOUT_MESSAGE = "Agent 启动超时，请检查 Agent CLI 配置与开发机负载后重试";
+const execFileAsync = promisify(execFile);
+
+async function antigravityAuthErrorMessage(): Promise<string> {
+  if (process.platform === "darwin") {
+    const launchd = await execFileAsync("/bin/launchctl", ["managername"], {
+      timeout: 1_000,
+    }).catch(() => undefined);
+    if (launchd?.stdout.trim() === "System") {
+      return "当前 macOS 系统服务未读取到 Antigravity 的登录凭据。请在登录后的用户环境中运行 Proxy，或为系统服务配置 Antigravity 支持的无桌面认证。";
+    }
+  }
+  return "Antigravity CLI 未读取到登录凭据。请在运行 Proxy 的用户环境中执行 agy acp --login，登录后重试。";
+}
 
 interface PendingJsonCreate {
   controller: AbortController;
@@ -167,7 +186,10 @@ export class RelaySessionCreateHandler {
     const permissionMode = msg.permissionMode;
     const resumeSessionId = msg.resumeSessionId;
 
-    if ((provider === "kimi" || provider === "cursor") && resumeSessionId) {
+    if (
+      (provider === "kimi" || provider === "cursor" || provider === "antigravity") &&
+      resumeSessionId
+    ) {
       const existing = this.deps.sessionManager
         .listSessions()
         .find(
@@ -299,6 +321,24 @@ export class RelaySessionCreateHandler {
       }
     }
 
+    if (provider === "antigravity") {
+      try {
+        resolveAntigravityAcpMode(permissionMode);
+      } catch (err) {
+        if (!(err instanceof AntigravityPermissionModeUnsupportedError)) throw err;
+        this.deps.relaySend(
+          serializeControl({
+            type: "session_create_response",
+            requestId,
+            success: false,
+            errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+            error: err.message,
+          }),
+        );
+        return;
+      }
+    }
+
     const cwdError = validateSessionCwd(cwd);
     if (cwdError) {
       this.deps.relaySend(
@@ -342,7 +382,7 @@ export class RelaySessionCreateHandler {
         hook,
       });
     } catch (err) {
-      this.reportJsonStartupFailure(requestId, pendingId, WORKER_START_FAILED_MESSAGE, err);
+      void this.reportJsonStartupFailure(requestId, pendingId, WORKER_START_FAILED_MESSAGE, err);
       return;
     }
 
@@ -369,7 +409,7 @@ export class RelaySessionCreateHandler {
       )
       .catch((err: unknown) => {
         if (!this.takePendingJsonCreate(pendingId)) return;
-        this.reportJsonStartupFailure(
+        return this.reportJsonStartupFailure(
           requestId,
           pendingId,
           err instanceof JsonWorkerStartupTimeoutError
@@ -478,26 +518,26 @@ export class RelaySessionCreateHandler {
         provider: options.provider,
       }),
     );
-    if (options.resumeSessionId) {
+    if (options.resumeSessionId && options.provider !== "antigravity") {
       this.pushHistoryMessages(session.id, options.resumeSessionId);
     }
     serviceLogger.info(
       { sessionId: session.id, cwd: options.sessionCwd },
       "JSON session created via relay",
     );
-    if (options.provider !== "kimi") {
+    if (options.provider !== "kimi" && options.provider !== "antigravity") {
       this.deps.controlHandlers.pushCommandList(session.id, options.sessionCwd);
     }
     this.deps.broadcastSessionSync();
     this.deps.broadcastSessionList();
   }
 
-  private reportJsonStartupFailure(
+  private async reportJsonStartupFailure(
     requestId: string,
     sessionId: string,
     message: string,
     reason: unknown,
-  ): void {
+  ): Promise<void> {
     this.cleanupPendingJsonSession(sessionId);
     const reasonText = reason instanceof Error ? reason.message : String(reason);
     const startupErrorTail = sanitizeProviderErrorTail(reasonText);
@@ -506,6 +546,14 @@ export class RelaySessionCreateHandler {
       reason.errorCode === ControlErrorCode.SESSION_ALREADY_ACTIVE
         ? reason
         : null;
+    const needsAntigravityLogin =
+      reason instanceof WorkerStartupError &&
+      reason.errorCode === ControlErrorCode.PROVIDER_AUTH_REQUIRED;
+    const errorCode = activeWriterFailure
+      ? ControlErrorCode.SESSION_ALREADY_ACTIVE
+      : needsAntigravityLogin
+        ? ControlErrorCode.PROVIDER_AUTH_REQUIRED
+        : ControlErrorCode.WORKER_START_FAILED;
     const activeWriter = activeWriterFailure?.nativeSessionId
       ? (this.deps.findCodexActiveWriter ?? findCodexActiveWriter)(
           activeWriterFailure.nativeSessionId,
@@ -517,10 +565,12 @@ export class RelaySessionCreateHandler {
         type: "session_create_response",
         requestId,
         success: false,
-        errorCode: activeWriterFailure
-          ? ControlErrorCode.SESSION_ALREADY_ACTIVE
-          : ControlErrorCode.WORKER_START_FAILED,
-        error: activeWriterFailure ? codexActiveWriterMessage(activeWriter?.pid) : message,
+        errorCode,
+        error: activeWriterFailure
+          ? codexActiveWriterMessage(activeWriter?.pid)
+          : needsAntigravityLogin
+            ? await antigravityAuthErrorMessage()
+            : message,
         ...(activeWriter ? { activeWriterPid: activeWriter.pid } : {}),
       }),
     );
@@ -528,7 +578,7 @@ export class RelaySessionCreateHandler {
       {
         sessionId,
         ...(startupErrorTail ? { startupErrorTail } : {}),
-        errorCode: activeWriterFailure?.errorCode,
+        errorCode,
         timedOut: message === WORKER_START_TIMEOUT_MESSAGE,
       },
       "JSON worker startup failed via relay",
@@ -575,7 +625,7 @@ export class RelaySessionCreateHandler {
         cwd,
         name,
         args: buildHostedPtyArgs(provider, resumeSessionId),
-        permissionMode,
+        permissionMode: provider === "antigravity" ? (permissionMode ?? "default") : permissionMode,
         nativeSessionId: resumeSessionId,
         hook,
         env: this.deps.getProviderEnv(),
@@ -615,6 +665,7 @@ export class RelaySessionCreateHandler {
           codexBin: providerEnv.CODEX_BIN,
           kimiBin: providerEnv.KIMI_BIN,
           cursorBin: providerEnv.CURSOR_BIN,
+          agyBin: providerEnv.AGY_BIN,
           path: providerEnv.PATH,
         },
         "Hosted PTY session create failed",
@@ -647,7 +698,7 @@ export class RelaySessionCreateHandler {
     );
     // Command discovery currently reads Claude's built-ins and ~/.claude commands.
     // Do not present that provider-specific list inside a Kimi terminal.
-    if (provider !== "kimi" && provider !== "cursor") {
+    if (provider === "claude" || provider === "codex") {
       this.deps.controlHandlers.pushCommandList(session.id, cwd);
     }
     this.deps.controlHandlers.pushFileTree(session.id, cwd);

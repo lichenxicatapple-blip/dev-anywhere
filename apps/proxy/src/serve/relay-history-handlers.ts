@@ -16,6 +16,7 @@ interface RelayHistoryHandlersDeps {
   sessionManager: SessionManager;
   permissionBroker: PermissionBroker;
   workerRegistry: WorkerRegistry;
+  getProviderEnv?: () => NodeJS.ProcessEnv;
 }
 
 export class RelayHistoryHandlers {
@@ -28,7 +29,13 @@ export class RelayHistoryHandlers {
 
     const session = this.deps.sessionManager.getSession(sid);
     if (session?.claudeSessionId || session?.historySessionId) {
-      readSessionHistoryPageForSession(session, { before, limit })
+      readSessionHistoryPageForSession(session, {
+        before,
+        limit,
+        ...(session.provider === "antigravity"
+          ? { cwd: session.cwd, providerEnv: this.deps.getProviderEnv?.() }
+          : {}),
+      })
         .then((page) => {
           this.deps.relaySend(
             serializeControl({
@@ -98,6 +105,8 @@ export class RelayHistoryHandlers {
 interface HistoryPageOptions {
   limit?: number;
   before?: string;
+  cwd?: string;
+  providerEnv?: NodeJS.ProcessEnv;
 }
 
 interface SessionHistoryPage {

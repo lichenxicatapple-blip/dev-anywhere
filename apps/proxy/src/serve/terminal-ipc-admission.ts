@@ -1,3 +1,4 @@
+import type { ProviderId } from "@dev-anywhere/shared";
 import type { Socket } from "node:net";
 import {
   isTerminalAdmissionRequestCandidate,
@@ -191,7 +192,7 @@ export function createTerminalIpcAdmissionController(
     request: {
       sessionId: string;
       pid?: number;
-      provider?: "claude" | "codex" | "kimi" | "cursor";
+      provider?: ProviderId;
       kind?: "agent" | "terminal";
       generation: "unversioned" | `protocol-${number}`;
     },

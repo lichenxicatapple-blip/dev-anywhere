@@ -1,3 +1,4 @@
+import { isProviderId } from "@dev-anywhere/shared";
 import type { Socket } from "node:net";
 import { readTtySize, notifyUser } from "./terminal/tty.js";
 import { PtyManager } from "./terminal/pty-manager.js";
@@ -46,6 +47,7 @@ import {
 } from "./ipc/ipc-protocol.js";
 import { terminalLogger as log } from "./common/logger.js";
 import {
+  ANTIGRAVITY_PROVIDER,
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
   CURSOR_PROVIDER,
@@ -71,6 +73,7 @@ const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   codex: CODEX_PROVIDER,
   kimi: KIMI_PROVIDER,
   cursor: CURSOR_PROVIDER,
+  antigravity: ANTIGRAVITY_PROVIDER,
 };
 
 class TerminalSession {
@@ -634,7 +637,7 @@ class TerminalSession {
 
 function providerFromEnv(): ProviderId {
   const provider = process.env.DEV_ANYWHERE_PROVIDER;
-  return provider === "codex" || provider === "kimi" || provider === "cursor" ? provider : "claude";
+  return isProviderId(provider) ? provider : "claude";
 }
 
 export async function startTerminal(

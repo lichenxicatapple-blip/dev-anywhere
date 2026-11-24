@@ -3,6 +3,7 @@ import { isAbsolute, normalize } from "node:path";
 import { nanoid } from "nanoid";
 import {
   defineFSM,
+  isProviderId,
   SessionState,
   type SessionExitInfo,
   type TerminalShellFamily,
@@ -196,10 +197,6 @@ const jsonFSM = defineFSM(JSON_TRANSITIONS);
 
 function fsmForMode(mode: "pty" | "json"): ReturnType<typeof defineFSM<SessionState>> {
   return mode === "pty" ? ptyFSM : jsonFSM;
-}
-
-function isProviderId(value: unknown): value is ProviderId {
-  return value === "claude" || value === "codex" || value === "kimi" || value === "cursor";
 }
 
 export class SessionManager {

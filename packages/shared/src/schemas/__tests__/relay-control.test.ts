@@ -1150,6 +1150,11 @@ describe("RelayControlSchema", () => {
         codex: { available: false, error: "codex not found" },
         kimi: { available: false, error: "kimi not found" },
         cursor: { available: false, error: "cursor not found" },
+        antigravity: {
+          available: false,
+          error: "开发机未上报该 Agent 的状态，暂不可用",
+          notReported: true,
+        },
       },
     });
 
@@ -1269,6 +1274,11 @@ describe("RelayControlSchema", () => {
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
         cursor: { available: true, command: "/usr/local/bin/agent" },
+        antigravity: {
+          available: false,
+          error: "开发机未上报该 Agent 的状态，暂不可用",
+          notReported: true,
+        },
       },
     });
 

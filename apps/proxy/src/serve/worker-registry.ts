@@ -29,7 +29,7 @@ import {
 import { mapClaudeStreamEvent } from "./claude-stream-event-mapper.js";
 import { mapCodexAppServerEvent } from "./codex-app-server-event-mapper.js";
 import { CursorAcpEventMapper } from "./cursor-acp-event-mapper.js";
-import { KimiAcpEventMapper } from "./kimi-acp-event-mapper.js";
+import { AcpEventMapper } from "./acp-event-mapper.js";
 import type { SessionManager } from "./session-manager.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { JsonObserver } from "./json-observer.js";
@@ -154,7 +154,8 @@ export class WorkerRegistry {
   private readyWaiters = new Map<string, Set<ReadyWaiter>>();
   private pendingNativeSessions = new Map<string, NativeSessionRef>();
   private assistantSnapshots = new Map<string, AssistantSnapshotState>();
-  private readonly kimiAcpEventMapper = new KimiAcpEventMapper();
+  private readonly kimiAcpEventMapper = new AcpEventMapper();
+  private readonly antigravityAcpEventMapper = new AcpEventMapper("antigravity");
   private readonly cursorAcpEventMapper = new CursorAcpEventMapper();
   /** 用户点停止后到下一轮开始前，丢弃 Cursor 晚到的旧回答，避免接进下一轮。 */
   private interruptedCursorSessions = new Set<string>();
@@ -562,6 +563,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
+    this.antigravityAcpEventMapper.clearSession(sessionId);
     this.cursorAcpEventMapper.clearSession(sessionId);
     this.interruptedCursorSessions.delete(sessionId);
     this.rejectReadyWaiters(
@@ -579,6 +581,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
+    this.antigravityAcpEventMapper.clearSession(sessionId);
     this.cursorAcpEventMapper.clearSession(sessionId);
     this.interruptedCursorSessions.delete(sessionId);
     this.startupFailures.delete(sessionId);
@@ -610,6 +613,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.clear();
     this.assistantSnapshots.clear();
     this.kimiAcpEventMapper.clear();
+    this.antigravityAcpEventMapper.clear();
     this.cursorAcpEventMapper.clear();
     this.interruptedCursorSessions.clear();
     this.startupFailures.clear();
@@ -676,6 +680,7 @@ export class WorkerRegistry {
 
       case "worker_interrupted": {
         this.kimiAcpEventMapper.finishTurn(sessionId);
+        this.antigravityAcpEventMapper.finishTurn(sessionId);
         this.cursorAcpEventMapper.finishTurn(sessionId);
         // 保留已显示的文字但封口，下一轮会用新的 turnId，不会拼进这条消息。
         this.completeAssistantSnapshot(
@@ -901,6 +906,7 @@ export class WorkerRegistry {
     this.pendingNativeSessions.delete(sessionId);
     this.assistantSnapshots.delete(sessionId);
     this.kimiAcpEventMapper.clearSession(sessionId);
+    this.antigravityAcpEventMapper.clearSession(sessionId);
     this.cursorAcpEventMapper.clearSession(sessionId);
     this.interruptedCursorSessions.delete(sessionId);
     if (child) this.startupFailures.set(sessionId, error);
@@ -1023,8 +1029,8 @@ export class WorkerRegistry {
   // schema 未识别的 event/block 以 warn 暴露，作为 Claude CLI 协议变化的 runtime canary。
   private forwardEvent(sessionId: string, seq: number, event: Record<string, unknown>): void {
     const relay = this.deps.relayConnection;
-    if (event.type === "kimi_acp") {
-      this.forwardKimiAcpEvent(sessionId, seq, event);
+    if (event.type === "kimi_acp" || event.type === "antigravity_acp") {
+      this.forwardAcpEvent(sessionId, seq, event);
       return;
     }
     if (event.type === "cursor_acp") {
@@ -1127,14 +1133,12 @@ export class WorkerRegistry {
     if (forwardedActivity) this.deps.touchSessionActivity?.(sessionId);
   }
 
-  private forwardKimiAcpEvent(
-    sessionId: string,
-    seq: number,
-    event: Record<string, unknown>,
-  ): void {
+  private forwardAcpEvent(sessionId: string, seq: number, event: Record<string, unknown>): void {
     const relay = this.deps.relayConnection;
     let forwardedActivity = false;
-    for (const mapped of this.kimiAcpEventMapper.map(sessionId, seq, event)) {
+    const mapper =
+      event.type === "antigravity_acp" ? this.antigravityAcpEventMapper : this.kimiAcpEventMapper;
+    for (const mapped of mapper.map(sessionId, seq, event)) {
       if (mapped.kind === "assistant_text") {
         this.appendAssistantSnapshot(sessionId, seq, mapped.text);
         forwardedActivity = true;
@@ -1157,8 +1161,8 @@ export class WorkerRegistry {
         if (mapped.notifyTurnResult) this.deps.jsonObserver.onTurnResult(sessionId);
       } else {
         serviceLogger.warn(
-          { sessionId, seq, updateType: mapped.updateType },
-          "Unknown Kimi ACP session update; protocol may have changed",
+          { sessionId, seq, providerEvent: event.type, updateType: mapped.updateType },
+          "Unknown ACP session update; protocol may have changed",
         );
       }
     }

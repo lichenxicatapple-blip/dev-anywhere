@@ -85,6 +85,7 @@ export class RelayRouter {
       sessionManager: deps.sessionManager,
       permissionBroker: deps.permissionBroker,
       workerRegistry: deps.workerRegistry,
+      getProviderEnv: deps.getProviderEnv,
     });
     this.inputHandlers = new RelayInputHandlers({
       sessionManager: deps.sessionManager,

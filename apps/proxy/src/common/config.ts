@@ -22,6 +22,7 @@ export interface ProxyConfig {
   codexBin?: string;
   kimiBin?: string;
   cursorBin?: string;
+  agyBin?: string;
   agentCliSuggestions: Record<ProviderId, string[]>;
   sources: {
     relayName: "cli" | "profile" | "env";
@@ -32,6 +33,7 @@ export interface ProxyConfig {
     codexBin: "env" | "file" | "none";
     kimiBin: "env" | "file" | "none";
     cursorBin: "env" | "file" | "none";
+    agyBin: "env" | "file" | "none";
   };
 }
 
@@ -57,10 +59,12 @@ const AgentCliSchema = z
     codexBin: z.string().optional(),
     kimiBin: z.string().optional(),
     cursorBin: z.string().optional(),
+    agyBin: z.string().optional(),
     claudeBinHistory: z.array(z.string()).optional(),
     codexBinHistory: z.array(z.string()).optional(),
     kimiBinHistory: z.array(z.string()).optional(),
     cursorBinHistory: z.array(z.string()).optional(),
+    agyBinHistory: z.array(z.string()).optional(),
   })
   .strict();
 
@@ -106,18 +110,20 @@ function readConfigFile(): ProxyConfigFile {
   return parsed.data;
 }
 
-type AgentCliField = "claudeBin" | "codexBin" | "kimiBin" | "cursorBin";
+type AgentCliField = "claudeBin" | "codexBin" | "kimiBin" | "cursorBin" | "agyBin";
 type AgentCliHistoryField =
   | "claudeBinHistory"
   | "codexBinHistory"
   | "kimiBinHistory"
-  | "cursorBinHistory";
+  | "cursorBinHistory"
+  | "agyBinHistory";
 
 const AGENT_CLI_FIELDS: Record<ProviderId, AgentCliField> = {
   claude: "claudeBin",
   codex: "codexBin",
   kimi: "kimiBin",
   cursor: "cursorBin",
+  antigravity: "agyBin",
 };
 
 const AGENT_CLI_HISTORY_FIELDS: Record<ProviderId, AgentCliHistoryField> = {
@@ -125,6 +131,7 @@ const AGENT_CLI_HISTORY_FIELDS: Record<ProviderId, AgentCliHistoryField> = {
   codex: "codexBinHistory",
   kimi: "kimiBinHistory",
   cursor: "cursorBinHistory",
+  antigravity: "agyBinHistory",
 };
 
 function agentCliField(provider: ProviderId): AgentCliField {
@@ -207,6 +214,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
   const codexBin = env.codexBin ?? agentCli.codexBin;
   const kimiBin = env.kimiBin ?? agentCli.kimiBin;
   const cursorBin = env.cursorBin ?? agentCli.cursorBin;
+  const agyBin = env.agyBin ?? agentCli.agyBin;
   const config: ProxyConfig = {
     profileName: PROFILE_NAME,
     // 自动升级是 daemon 的默认维护策略；用户可在 config.json 显式设 false 关闭。
@@ -219,6 +227,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
     codexBin,
     kimiBin,
     cursorBin,
+    agyBin,
     agentCliSuggestions: {
       claude: uniqueAbsolutePaths([
         env.claudeBin,
@@ -240,6 +249,11 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
         agentCli.cursorBin,
         ...(agentCli.cursorBinHistory ?? []),
       ]),
+      antigravity: uniqueAbsolutePaths([
+        env.agyBin,
+        agentCli.agyBin,
+        ...(agentCli.agyBinHistory ?? []),
+      ]),
     },
     sources: {
       relayName: resolved.relayNameSource,
@@ -250,6 +264,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
       codexBin: env.codexBin ? "env" : agentCli.codexBin ? "file" : "none",
       kimiBin: env.kimiBin ? "env" : agentCli.kimiBin ? "file" : "none",
       cursorBin: env.cursorBin ? "env" : agentCli.cursorBin ? "file" : "none",
+      agyBin: env.agyBin ? "env" : agentCli.agyBin ? "file" : "none",
     },
   };
 
@@ -268,6 +283,7 @@ export function loadConfig(options?: { relayName?: string }): ProxyConfig {
       codexBinSource: config.sources.codexBin,
       kimiBinSource: config.sources.kimiBin,
       cursorBinSource: config.sources.cursorBin,
+      agyBinSource: config.sources.agyBin,
     },
     "Config loaded",
   );
@@ -285,6 +301,7 @@ export function buildProviderEnv(
     ...(config.codexBin ? { CODEX_BIN: config.codexBin } : {}),
     ...(config.kimiBin ? { KIMI_BIN: config.kimiBin } : {}),
     ...(config.cursorBin ? { CURSOR_BIN: config.cursorBin } : {}),
+    ...(config.agyBin ? { AGY_BIN: config.agyBin } : {}),
   };
 }
 

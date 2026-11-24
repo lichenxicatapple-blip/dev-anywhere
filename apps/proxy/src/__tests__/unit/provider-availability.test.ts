@@ -21,6 +21,8 @@ describe("provider availability", () => {
       chmodSync(kimiBin, 0o755);
       chmodSync(cursorBin, 0o755);
       const status = detectAgentCliStatus({
+        HOME: root,
+        LOCALAPPDATA: root,
         CLAUDE_BIN: claudeBin,
         CODEX_BIN: codexBin,
         KIMI_BIN: kimiBin,
@@ -36,6 +38,7 @@ describe("provider availability", () => {
         codex: { available: true, command: codexBin, suggestions: [codexBin] },
         kimi: { available: true, command: kimiBin, suggestions: [kimiBin] },
         cursor: { available: true, command: cursorBin, suggestions: [cursorBin] },
+        antigravity: { available: false, error: expect.stringContaining("agy") },
       });
     } finally {
       rmSync(root, { recursive: true, force: true });

@@ -27,6 +27,7 @@ import { createPtyInputCompat } from "./pty-input-compat.js";
 import { withPtyLocaleFallback } from "./pty-locale.js";
 import { createIdleChecker, type IdleChecker } from "./pty-idle-checker.js";
 import {
+  ANTIGRAVITY_PROVIDER,
   CLAUDE_PROVIDER,
   CODEX_PROVIDER,
   CURSOR_PROVIDER,
@@ -41,6 +42,7 @@ const PROVIDERS: Record<ProviderId, ProviderAdapter> = {
   codex: CODEX_PROVIDER,
   kimi: KIMI_PROVIDER,
   cursor: CURSOR_PROVIDER,
+  antigravity: ANTIGRAVITY_PROVIDER,
 };
 
 export interface PtyRuntimeExit {
@@ -89,6 +91,7 @@ export function buildHostedPtyArgs(provider: ProviderId, resumeSessionId?: strin
   if (!resumeSessionId) return [];
   if (provider === "codex") return ["resume", resumeSessionId];
   if (provider === "kimi") return ["--session", resumeSessionId];
+  if (provider === "antigravity") return ["--conversation", resumeSessionId];
   return ["--resume", resumeSessionId];
 }
 

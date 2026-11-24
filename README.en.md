@@ -22,9 +22,9 @@
 
 ## What it is
 
-DEV Anywhere lets you use Claude Code, Codex, Kimi Code, Cursor CLI, and Shell on your development machine remotely from a computer, phone, or tablet. In the Web interface, you can chat with coding agents, interact with terminals, handle tool approvals, transfer files, preview web apps, and operate iOS Simulators and Android Emulators already running on the development machine.
+DEV Anywhere lets you use Claude Code, Codex, Kimi Code, Cursor CLI, Antigravity CLI, and Shell on your development machine remotely from a computer, phone, or tablet. In the Web interface, you can chat with coding agents, interact with terminals, handle tool approvals, transfer files, preview web apps, and operate iOS Simulators and Android Emulators already running on the development machine.
 
-To continue a locally started Claude Code, Codex, Kimi Code, or Cursor CLI session from the browser, add `dev-anywhere` before the original command. Once started, you can work in your local terminal as usual or use the DEV Anywhere Web interface anytime, anywhere to continue your work or create a new coding agent session.
+To continue a locally started Claude Code, Codex, Kimi Code, Cursor CLI, or Antigravity CLI session from the browser, add `dev-anywhere` before the original command. Once started, you can work in your local terminal as usual or use the DEV Anywhere Web interface anytime, anywhere to continue your work or create a new coding agent session.
 
 > **Why build this?**
 >
@@ -43,7 +43,7 @@ node --version
 npm --version
 ```
 
-Install and sign in to the coding agent you want to use: Claude Code, Codex, Kimi Code, or Cursor CLI. You can skip this step if you only need Shell sessions.
+Install and sign in to the coding agent you want to use: Claude Code, Codex, Kimi Code, Cursor CLI, or Antigravity CLI. You can skip this step if you only need Shell sessions.
 
 ### 1. Install DEV Anywhere
 
@@ -163,6 +163,7 @@ dev-anywhere claude
 dev-anywhere codex
 dev-anywhere kimi
 dev-anywhere cursor
+dev-anywhere agy
 ```
 
 You can also launch Cursor CLI with `dev-anywhere agent ...`.
@@ -176,6 +177,7 @@ dev-anywhere --profile quick-tunnel claude
 dev-anywhere --profile quick-tunnel codex
 dev-anywhere --profile quick-tunnel kimi
 dev-anywhere --profile quick-tunnel cursor
+dev-anywhere --profile quick-tunnel agy
 ```
 
 Once the session starts, you can keep working in your local terminal or open the DEV Anywhere Web interface and select that session from the session list to continue your work.
@@ -262,7 +264,7 @@ For pinned versions, disabled automatic updates, or migration from a release old
 
 The **terminal view** preserves the CLI interface and keyboard controls for users comfortable with a terminal. The **chat view** presents responses, tool calls, and approvals as messages that are easier to read and operate by touch.
 
-Claude Code, Codex, Kimi Code, and Cursor CLI all support both views. Kimi Code and Cursor CLI chat use ACP, with streaming responses, tool calls, cancellation of the current response, and history resumption. Cursor ACP also supports questions, plan approval, and todo lists.
+Claude Code, Codex, Kimi Code, Cursor CLI, and Antigravity CLI all support both views. Chat in Kimi Code, Cursor CLI, and Antigravity CLI uses ACP for streaming replies, tool approvals, cancellation, and session resumption. Cursor chat also supports questions, plan approval, and todo lists.
 
 ![DEV Anywhere terminal and chat views](./docs/assets/readme-session-modes.gif)
 
@@ -332,7 +334,7 @@ flowchart LR
   subgraph machine["Development machine"]
     direction TB
     proxy["Proxy<br/>sessions · terminals · files"]
-    agent["Claude Code / Codex / Kimi Code / Cursor CLI"]
+    agent["Claude Code / Codex / Kimi Code / Cursor CLI / Antigravity CLI"]
     shell["Shell"]
     local["Repositories · CLI configuration · local permissions"]
 

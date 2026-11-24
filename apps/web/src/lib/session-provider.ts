@@ -1,4 +1,4 @@
-import type { HistorySession, SessionInfo } from "@dev-anywhere/shared";
+import { providerValues, type HistorySession, type SessionInfo } from "@dev-anywhere/shared";
 
 export type SessionProvider = SessionInfo["provider"];
 
@@ -7,9 +7,10 @@ const PROVIDER_LABEL: Record<SessionProvider, string> = {
   codex: "Codex",
   kimi: "Kimi Code",
   cursor: "Cursor CLI",
+  antigravity: "Antigravity CLI",
 };
 
-const PROVIDER_ORDER: SessionProvider[] = ["claude", "codex", "kimi", "cursor"];
+const PROVIDER_ORDER = providerValues;
 
 export function providerLabel(provider: SessionProvider): string {
   return PROVIDER_LABEL[provider];

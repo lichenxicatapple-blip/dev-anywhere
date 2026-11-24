@@ -53,7 +53,7 @@ interface HistoryListProps {
 }
 
 type RestoreMode = "pty" | "json";
-type RestorePermissionMode = "default" | "auto" | "plan" | "bypassPermissions";
+type RestorePermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 export function HistoryList({ now }: HistoryListProps) {
   const homePath = useFileStore((s) => s.homePath);
@@ -482,6 +482,7 @@ function HistoryRestoreDialog({
   const isCodex = provider === "codex";
   const isKimi = provider === "kimi";
   const isCursor = provider === "cursor";
+  const isAntigravity = provider === "antigravity";
 
   useEffect(() => {
     if (!open) setConfirmingBypass(false);
@@ -522,13 +523,27 @@ function HistoryRestoreDialog({
           {!isCodex && (
             <PermissionChoiceButton
               checked={permissionMode === "default"}
-              label={isKimi ? "手工审批" : isCursor ? "命令审批" : "严格审批"}
+              label={
+                isKimi
+                  ? "手工审批"
+                  : isCursor
+                    ? "命令审批"
+                    : isAntigravity
+                      ? mode === "pty"
+                        ? "CLI 默认"
+                        : "按需审批"
+                      : "严格审批"
+              }
               description={
                 isKimi
                   ? "工具调用会在 Web 中请求确认。"
                   : isCursor
                     ? "Cursor CLI 在执行命令前询问。"
-                    : "所有需要权限的操作都要确认。"
+                    : isAntigravity
+                      ? mode === "pty"
+                        ? "使用开发机上 Antigravity CLI 的审批设置。"
+                        : "需要权限时在网页中请求确认。"
+                      : "所有需要权限的操作都要确认。"
               }
               disabled={submitting}
               onClick={() => onPermissionModeChange("default")}
@@ -554,13 +569,20 @@ function HistoryRestoreDialog({
               onClick={() => onPermissionModeChange("auto")}
             />
           )}
-          {(isKimi || isCursor) && (
+          {isAntigravity && (
+            <PermissionChoiceButton
+              checked={permissionMode === "acceptEdits"}
+              label="自动接受编辑"
+              description="自动接受工作区编辑，其他操作按需询问。"
+              disabled={submitting}
+              onClick={() => onPermissionModeChange("acceptEdits")}
+            />
+          )}
+          {(isKimi || isCursor || isAntigravity) && (
             <PermissionChoiceButton
               checked={permissionMode === "plan"}
               label="只读规划"
-              description={
-                isCursor ? "Cursor CLI 使用只读规划模式。" : "Kimi Code 使用只读规划模式。"
-              }
+              description={"Agent 以只读方式制定计划。"}
               disabled={submitting}
               onClick={() => onPermissionModeChange("plan")}
             />

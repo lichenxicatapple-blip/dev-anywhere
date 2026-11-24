@@ -77,6 +77,7 @@ const availableAgentCli = {
     command: "/usr/local/bin/agent",
     suggestions: ["/usr/local/bin/agent", "/home/dev/.local/bin/agent"],
   },
+  antigravity: { available: false, notReported: true },
 };
 
 const sessionCreatePermissionCases = [
@@ -208,6 +209,7 @@ describe("CreateSessionDialog", () => {
       "Codex",
       "Kimi Code",
       "Cursor CLI",
+      "Antigravity CLI",
     ]);
   });
 
@@ -886,6 +888,7 @@ describe("CreateSessionDialog", () => {
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
         cursor: { available: true, command: "/usr/local/bin/agent" },
+        antigravity: { available: false, notReported: true },
       },
     });
 
@@ -908,6 +911,7 @@ describe("CreateSessionDialog", () => {
         codex: { available: true, command: "/usr/local/bin/codex" },
         kimi: { available: true, command: "/usr/local/bin/kimi" },
         cursor: { available: true, command: "/usr/local/bin/agent" },
+        antigravity: { available: false, notReported: true },
       },
     });
     updateAgentCliPath.mockResolvedValueOnce({

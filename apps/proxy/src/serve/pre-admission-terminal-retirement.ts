@@ -1,10 +1,11 @@
+import type { ProviderId } from "@dev-anywhere/shared";
 const PRE_ADMISSION_PATH_MAX_LENGTH = 4_096;
 const PRE_ADMISSION_SESSION_ID_MAX_LENGTH = 256;
 
 interface UnversionedTerminalReconnect {
   sessionId: string;
   pid: number;
-  provider: "claude" | "codex" | "kimi" | "cursor";
+  provider: ProviderId;
   kind?: "agent" | "terminal";
 }
 
@@ -12,7 +13,7 @@ interface VersionedTerminalReconnect {
   sessionId: string;
   protocolVersion: number;
   pid?: number;
-  provider?: "claude" | "codex" | "kimi" | "cursor";
+  provider?: ProviderId;
   kind?: "agent" | "terminal";
 }
 

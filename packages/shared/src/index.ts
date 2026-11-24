@@ -245,6 +245,7 @@ export { RelayErrorCode } from "./constants/relay-errors.js";
 export { ControlErrorCode } from "./constants/control-errors.js";
 export type { ControlErrorCode as ControlErrorCodeType } from "./constants/control-errors.js";
 export {
+  isProviderId,
   providerValues,
   ptyOwnerValues,
   sessionKindValues,

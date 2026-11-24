@@ -1,4 +1,6 @@
-export type ProviderId = "claude" | "codex" | "kimi" | "cursor";
+import type { ProviderId } from "@dev-anywhere/shared";
+
+export type { ProviderId } from "@dev-anywhere/shared";
 export type HookProviderId = "claude" | "codex";
 
 export interface ProviderCapabilities {

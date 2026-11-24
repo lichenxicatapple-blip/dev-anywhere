@@ -107,12 +107,14 @@ export const AgentCliStatusSchema = z
     codex: AgentCliAvailabilitySchema.optional(),
     kimi: AgentCliAvailabilitySchema.optional(),
     cursor: AgentCliAvailabilitySchema.optional(),
+    antigravity: AgentCliAvailabilitySchema.optional(),
   })
   .transform((status) => ({
     claude: status.claude ?? notReportedAgentCli(),
     codex: status.codex ?? notReportedAgentCli(),
     kimi: status.kimi ?? notReportedAgentCli(),
     cursor: status.cursor ?? notReportedAgentCli(),
+    antigravity: status.antigravity ?? notReportedAgentCli(),
   }));
 export type AgentCliStatus = z.infer<typeof AgentCliStatusSchema>;
 

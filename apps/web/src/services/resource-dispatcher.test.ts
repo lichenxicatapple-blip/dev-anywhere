@@ -10,6 +10,7 @@ const unavailableAgentCli = {
   codex: { available: false },
   kimi: { available: false },
   cursor: { available: false },
+  antigravity: { available: false, notReported: true },
 };
 
 function command(name: string): CommandEntry {

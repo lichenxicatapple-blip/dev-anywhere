@@ -63,6 +63,11 @@ const agentPresets: Record<SessionProvider, PtyShortcutPreset> = {
     mobile: [ctrlT, ctrlR, "clear", ctrlK],
   },
   kimi: { menu: [ctrlO, ctrlE, ctrlT, ctrlS, ctrlB], mobile: [ctrlO, ctrlS, "clear", ctrlT] },
+  // https://antigravity.google/docs/cli/using
+  antigravity: {
+    menu: [ctrlL, key("ctrl-g", "Ctrl+G", "^G", "\x07")],
+    mobile: [ctrlO, ctrlR, "clear", key("ctrl-j", "Ctrl+J", "^J", "\x0a")],
+  },
   cursor: {
     menu: [shiftTab, ctrlR, ctrlD, ctrlT, ctrlS],
     mobile: [shiftTab, ctrlR, "clear", ctrlD],

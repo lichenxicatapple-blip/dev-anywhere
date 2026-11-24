@@ -132,6 +132,10 @@ describe("RelayControlSchema round-trip stability", () => {
         codex: { available: false },
         kimi: { available: false },
         cursor: { available: false },
+        antigravity: {
+          available: true,
+          command: "C:\\Users\\dev\\AppData\\Local\\agy\\bin\\agy.exe",
+        },
       },
       terminalShells: [
         { id: "powershell", label: "PowerShell 7" },

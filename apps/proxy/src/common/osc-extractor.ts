@@ -1,3 +1,4 @@
+import type { ProviderId } from "@dev-anywhere/shared";
 import type { PtySemanticState } from "@dev-anywhere/shared";
 import { posix, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -8,7 +9,7 @@ import { fileURLToPath } from "node:url";
 // eslint-disable-next-line no-control-regex
 const OSC_PATTERN = /\x1b\](\d+);([^\x07\x1b]*?)(?:\x07|\x1b\\)/g;
 
-type PtySignalProvider = "claude" | "codex" | "kimi" | "cursor";
+type PtySignalProvider = ProviderId;
 
 interface PtyStateEvent {
   state: PtySemanticState | null;

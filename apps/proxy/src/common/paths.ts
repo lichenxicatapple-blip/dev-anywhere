@@ -3,6 +3,7 @@ import { createHash } from "node:crypto";
 import { homedir } from "node:os";
 import { dirname, resolve, win32 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { isAgentCliInvocationName } from "../cli-args.js";
 
 // 所有 dev-anywhere 文件路径的集中定义
 // 使用 os.homedir()：POSIX 走 HOME，Windows 走 USERPROFILE；未设置时回退到 getpwuid。
@@ -68,15 +69,7 @@ function readProxyProfileNameFromArgv(argv: readonly string[]): string | undefin
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (
-      arg === "claude" ||
-      arg === "codex" ||
-      arg === "kimi" ||
-      arg === "cursor" ||
-      arg === "agent"
-    ) {
-      return undefined;
-    }
+    if (isAgentCliInvocationName(arg)) return undefined;
     if (arg === "--profile") {
       const next = args[i + 1];
       return next && !next.startsWith("-") ? next : undefined;
