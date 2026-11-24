@@ -42,7 +42,16 @@ type BufferTextBlock = {
   parts: BufferTextPart[];
 };
 
+type PathLinkTerminal = Pick<Terminal, "buffer" | "cols">;
+
 const MAX_WRAPPED_PATH_LINES = 16;
+const MAX_INDENTED_PATH_BREAKS = 4;
+const PATH_WRAP_RIGHT_MARGIN = 4;
+const INCOMPLETE_PATH_TAIL =
+  /(?:^|[\s`"'([{@])@?((?:[A-Z]:[\\/]|[\\/]|(?:~|\.{1,2})[\\/]|[\p{L}\p{N}_.-]+[\\/])[\p{L}\p{N}\p{M}_.+\\/-]*)$/iu;
+const COMPLETE_FILE_TAIL = /\.[\p{L}\p{N}]{1,16}$/u;
+const INDENTED_PATH_PART = /^( {2,})([\p{L}\p{N}\p{M}_.+\\/-]+)$/u;
+const PATH_ROOT = /^(?:[a-z]:[\\/]|[\\/]|(?:~|\.{1,2})[\\/])/i;
 
 export function findXtermPathMatches(line: string, extractPaths: PathExtractor): XtermPathMatch[] {
   return findPathSpans(line, extractPaths).map((span) => ({
@@ -53,19 +62,36 @@ export function findXtermPathMatches(line: string, extractPaths: PathExtractor):
 }
 
 export function findXtermPathMatchesInWrappedBuffer(
-  terminal: Pick<Terminal, "buffer">,
+  terminal: PathLinkTerminal,
   bufferLineNumber: number,
   extractPaths: PathExtractor,
 ): XtermBufferPathMatch[] {
   const block = getWrappedLineBlock(terminal, bufferLineNumber);
   if (!block) return [];
 
+  const single = findBufferPathMatches(block.parts, bufferLineNumber, extractPaths);
+  const joined = findIndentedPathMatches(terminal, block, bufferLineNumber, extractPaths);
+  if (joined.length === 0) return single;
+
+  return [
+    ...joined,
+    ...single.filter(
+      (match) => !joined.some((other) => sameRowOverlap(match, other, bufferLineNumber)),
+    ),
+  ];
+}
+
+function findBufferPathMatches(
+  parts: BufferTextPart[],
+  bufferLineNumber: number,
+  extractPaths: PathExtractor,
+): XtermBufferPathMatch[] {
   const seen = new Set<string>();
-  const logicalLine = block.parts.map((part) => part.text).join("");
+  const logicalLine = parts.map((part) => part.text).join("");
   return findPathSpans(logicalLine, extractPaths)
     .map((span) => {
-      const start = stringIndexToTerminalPosition(block.parts, span.startIndex);
-      const end = stringEndIndexToTerminalPosition(block.parts, span.endIndex);
+      const start = stringIndexToTerminalPosition(parts, span.startIndex);
+      const end = stringEndIndexToTerminalPosition(parts, span.endIndex);
       if (!start || !end) return null;
       return {
         path: span.path,
@@ -73,7 +99,7 @@ export function findXtermPathMatchesInWrappedBuffer(
         startColumn: start.column,
         endLineNumber: end.lineNumber,
         endColumn: end.column,
-        segments: getPathSegmentsForSpan(block.parts, span.startIndex, span.endIndex),
+        segments: getPathSegmentsForSpan(parts, span.startIndex, span.endIndex),
       };
     })
     .filter((match): match is XtermBufferPathMatch => match !== null)
@@ -87,6 +113,74 @@ export function findXtermPathMatchesInWrappedBuffer(
       seen.add(key);
       return true;
     });
+}
+
+function findIndentedPathMatches(
+  terminal: PathLinkTerminal,
+  clickedBlock: BufferTextBlock,
+  lineNumber: number,
+  extractPaths: PathExtractor,
+): XtermBufferPathMatch[] {
+  if (!terminal.cols) return [];
+
+  // Some TUIs fill a row and then print a hard newline plus an indent themselves.
+  // Only join a right-edge, unfinished path to token-only continuation rows.
+  if (!reachesRightEdge(clickedBlock, terminal.cols) && !indentedPathPart(clickedBlock)) return [];
+  const firstCandidate = Math.max(1, clickedBlock.startLineNumber - MAX_WRAPPED_PATH_LINES);
+  for (let start = clickedBlock.startLineNumber; start >= firstCandidate; start -= 1) {
+    const line = terminal.buffer.active.getLine(start - 1);
+    if (!line || line.isWrapped) continue;
+    const initial = getWrappedLineBlockFromStart(terminal, start);
+    if (!initial || !reachesRightEdge(initial, terminal.cols)) continue;
+    const firstText = initial.parts.map((part) => part.text).join("");
+    const pathHead = INCOMPLETE_PATH_TAIL.exec(firstText)?.[1];
+    if (!pathHead || COMPLETE_FILE_TAIL.test(pathHead)) continue;
+
+    const parts = [...initial.parts];
+    let block = initial;
+    for (let breaks = 0; breaks < MAX_INDENTED_PATH_BREAKS; breaks += 1) {
+      if (!reachesRightEdge(block, terminal.cols)) break;
+      if (terminal.buffer.active.getLine(block.endLineNumber)?.isWrapped) break;
+      const next = getWrappedLineBlockFromStart(terminal, block.endLineNumber + 1);
+      const firstPart = next && indentedPathPart(next);
+      if (!next || !firstPart) break;
+      parts.push(firstPart, ...next.parts.slice(1));
+      const matches = findBufferPathMatches(parts, lineNumber, extractPaths).filter(
+        (match) =>
+          match.path.startsWith(pathHead) &&
+          match.startLineNumber <= initial.endLineNumber &&
+          match.endLineNumber > initial.endLineNumber,
+      );
+      if (matches.length > 0) return matches;
+      const tail = [firstPart, ...next.parts.slice(1)].map((part) => part.text).join("");
+      if (COMPLETE_FILE_TAIL.test(tail)) break;
+      block = next;
+    }
+  }
+  return [];
+}
+
+function indentedPathPart(block: BufferTextBlock): BufferTextPart | undefined {
+  const first = block.parts[0];
+  if (!first) return;
+  const match = INDENTED_PATH_PART.exec(first.sourceText);
+  if (!match || PATH_ROOT.test(match[2]) || /^[.-]$/.test(match[2])) return;
+  return { ...first, sourceStartIndex: match[1].length, text: match[2] };
+}
+
+function reachesRightEdge(block: BufferTextBlock, cols: number): boolean {
+  const last = block.parts.at(-1);
+  return Boolean(last && stringCellWidth(last.sourceText) >= cols - PATH_WRAP_RIGHT_MARGIN);
+}
+
+function sameRowOverlap(
+  left: XtermBufferPathMatch,
+  right: XtermBufferPathMatch,
+  lineNumber: number,
+): boolean {
+  const a = left.segments.find((segment) => segment.lineNumber === lineNumber);
+  const b = right.segments.find((segment) => segment.lineNumber === lineNumber);
+  return Boolean(a && b && a.startColumn <= b.endColumn && b.startColumn <= a.endColumn);
 }
 
 export function getXtermPathLinkRanges(match: XtermBufferPathMatch): ILink["range"][] {

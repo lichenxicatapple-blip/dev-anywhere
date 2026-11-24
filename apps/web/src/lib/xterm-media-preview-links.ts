@@ -1,5 +1,6 @@
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 import { extractMediaPreviewPaths } from "./media-preview-path";
+import { clearPathHoverSegments, createPathLinkHover } from "./xterm-path-link-hover";
 import {
   findXtermPathMatches,
   findXtermPathMatchesInWrappedBuffer,
@@ -13,7 +14,7 @@ export function findMediaPreviewPathMatches(line: string): XtermPathMatch[] {
 }
 
 export function findMediaPreviewPathMatchesInWrappedBuffer(
-  terminal: Pick<Terminal, "buffer">,
+  terminal: Pick<Terminal, "buffer" | "cols">,
   bufferLineNumber: number,
 ): XtermBufferPathMatch[] {
   return findXtermPathMatchesInWrappedBuffer(terminal, bufferLineNumber, extractMediaPreviewPaths);
@@ -30,7 +31,7 @@ function shouldActivatePreview(event: MouseEvent): boolean {
 }
 
 export function registerMediaPreviewLinkProvider(
-  terminal: Pick<Terminal, "buffer" | "registerLinkProvider">,
+  terminal: Pick<Terminal, "buffer" | "cols" | "element" | "registerLinkProvider" | "rows">,
   onPreview: (path: string) => void,
 ): { dispose: () => void; provider: ILinkProvider } {
   const provider: ILinkProvider = {
@@ -46,10 +47,9 @@ export function registerMediaPreviewLinkProvider(
           acc.push({
             text: match.path,
             range,
-            decorations: {
-              underline: true,
-              pointerCursor: true,
-            },
+            ...(match.segments.length > 1
+              ? createPathLinkHover(terminal, match)
+              : { decorations: { underline: true, pointerCursor: true } }),
             // PC: cmd/ctrl + click 防误触, 普通 click 只是阅读路径文本不触发.
             // 平板 / 手机触屏 (pointer: coarse) 没修饰键, tap 即触发; 平板接外置键盘
             // 走修饰键路径也照样 work.
@@ -65,5 +65,11 @@ export function registerMediaPreviewLinkProvider(
     },
   };
   const disposable = terminal.registerLinkProvider(provider);
-  return { dispose: () => disposable.dispose(), provider };
+  return {
+    dispose: () => {
+      clearPathHoverSegments(terminal);
+      disposable.dispose();
+    },
+    provider,
+  };
 }

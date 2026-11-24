@@ -543,4 +543,74 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     expect(result?.rows ?? 0).toBeGreaterThan(1);
     expect(result?.segments.every((segment) => segment.width > 0)).toBe(true);
   });
+
+  for (const { kind, name, disposition } of [
+    { kind: "file-download", name: "report.txt", disposition: "download" },
+    { kind: "image-preview", name: "screenshot.png", disposition: "inline" },
+  ] as const) {
+    test(`cmd+click uses the complete ${name} path after an indented right-edge wrap`, async ({
+      page,
+    }) => {
+      await gotoPty(page);
+      const cols = await page.evaluate(
+        () => window.__ccTest?.pty.metrics("claude-pty")?.cols ?? 80,
+      );
+      const directory = `./artifacts/${"a".repeat(cols - 19)}/`;
+      const path = `${directory}${name}`;
+      await emitPtyLine(page, `  - ${directory}\r\n    ${name}\r\n`);
+      await waitForBufferContains(page, name);
+
+      await expectPtyRendered(page);
+      const points = await page.evaluate(
+        ({ name, directory }) => {
+          const term = window.__ccTestPtyTerminals?.get("claude-pty");
+          const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
+          if (!term || !screen) return null;
+          const buffer = term.buffer.active;
+          const rect = screen.getBoundingClientRect();
+          const points: Array<{ x: number; y: number }> = [];
+          for (let row = 0; row < term.rows; row += 1) {
+            const line = buffer.getLine(buffer.viewportY + row);
+            if (!line || line.isWrapped) continue;
+            const text = line.translateToString(true);
+            if (text.trim() !== name && !text.endsWith(`  - ${directory}`)) continue;
+            const column = text.trim() === name ? text.indexOf(name) : text.indexOf(directory);
+            points.push({
+              x: rect.left + ((column + 1.5) * screen.clientWidth) / term.cols,
+              y: rect.top + ((row + 0.5) * screen.clientHeight) / term.rows,
+            });
+          }
+          return points;
+        },
+        { name, directory },
+      );
+      expect(points).toHaveLength(2);
+      const underlines = page.locator('[data-slot="pty-file-link-hover-segment"]');
+      for (const point of points!) {
+        await page.mouse.move(point.x, point.y);
+        await expect(underlines).toHaveCount(2);
+        await expect(underlines.nth(0)).toBeVisible();
+        await expect(underlines.nth(1)).toBeVisible();
+        await page.mouse.move(900, 25);
+        await expect(underlines).toHaveCount(0);
+      }
+      const point = points![1];
+      await page.keyboard.down("Meta");
+      await page.mouse.click(point.x, point.y);
+      await page.keyboard.up("Meta");
+      await expect
+        .poll(async () =>
+          (await sentFakeRelayMessages(page)).some(
+            (message) =>
+              message.type === "remote_file_url_request" &&
+              message.path === path &&
+              message.disposition === disposition,
+          ),
+        )
+        .toBe(true);
+      if (kind === "image-preview") {
+        await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
+      }
+    });
+  }
 });

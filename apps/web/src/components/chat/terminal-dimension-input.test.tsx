@@ -1,4 +1,4 @@
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { TerminalDimensionInput } from "./terminal-dimension-input";
 
@@ -16,10 +16,11 @@ describe("terminal dimension editing", () => {
     const onCommit = vi.fn();
     render(<TerminalDimensionInput {...props} value={24} onCommit={onCommit} />);
     const input = screen.getByRole("textbox");
-    fireEvent.focus(input);
+    act(() => input.focus());
+    expect(input).toHaveFocus();
     fireEvent.change(input, { target: { value: "60" } });
     fireEvent.keyDown(input, { key: "Enter" });
-    fireEvent.blur(input);
+    expect(input).not.toHaveFocus();
     expect(onCommit).toHaveBeenCalledExactlyOnceWith(60);
 
     fireEvent.focus(input);
@@ -42,9 +43,10 @@ describe("terminal dimension editing", () => {
       const onCommit = vi.fn();
       render(<TerminalDimensionInput {...props} value={24} onCommit={onCommit} />);
       const input = screen.getByRole("textbox");
-      fireEvent.focus(input);
+      act(() => input.focus());
       fireEvent.change(input, { target: { value: draft } });
       fireEvent.keyDown(input, { key: "Enter" });
+      expect(input).toHaveFocus();
       expect(input).toHaveAttribute("aria-invalid", "true");
       expect(toastError).toHaveBeenCalledWith("请输入 1–200 之间的整数");
       expect(onCommit).not.toHaveBeenCalled();

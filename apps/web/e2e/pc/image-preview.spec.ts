@@ -496,6 +496,54 @@ test.describe("image preview", () => {
       await expect(page.locator('[data-slot="image-preview-loading"]')).toBeHidden();
     });
 
+    test("a mouse wheel notch zooms a fitted image by a small amount", async ({ page }) => {
+      const path = ".dev-anywhere/clipboard/test-sess/wheel-step.png";
+      await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");
+      await setWideImagePreviewData(page);
+      await openJsonPreview(page, path);
+      await expectPreviewReady(page, path);
+      await waitForPreviewOpeningAnimation(page);
+
+      const stage = page.locator('[data-slot="image-preview-stage"]');
+      const transform = stage.locator(".react-transform-component");
+      await waitForTransformToSettle(transform);
+      const fitScale = await getTransformScale(transform);
+      expect(fitScale).toBeLessThan(0.5);
+      await stage.hover();
+
+      await page.mouse.wheel(0, -120);
+      await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(fitScale);
+      await waitForTransformToSettle(transform);
+      const afterNotch = await getTransformScale(transform);
+      expect(afterNotch / fitScale).toBeLessThan(1.2);
+
+      await page.mouse.wheel(0, 120);
+      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(fitScale, 3);
+
+      await page.mouse.wheel(0, -480);
+      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(afterNotch, 3);
+
+      await page.mouse.wheel(0, -12);
+      await expect.poll(() => getTransformScale(transform)).toBeGreaterThan(afterNotch);
+      expect((await getTransformScale(transform)) / afterNotch).toBeLessThan(1.03);
+
+      await page.mouse.wheel(0, 480);
+      await expect.poll(() => getTransformScale(transform)).toBeLessThan(afterNotch);
+      await page.mouse.wheel(0, 120);
+      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(fitScale, 3);
+      await transform.evaluate((element) => {
+        element.dispatchEvent(
+          new WheelEvent("wheel", {
+            bubbles: true,
+            cancelable: true,
+            deltaMode: WheelEvent.DOM_DELTA_LINE,
+            deltaY: -3,
+          }),
+        );
+      });
+      await expect.poll(() => getTransformScale(transform)).toBeCloseTo(afterNotch, 3);
+    });
+
     test("wheel zooms, mouse drag pans, and double-click resets transform", async ({ page }) => {
       const path = ".dev-anywhere/clipboard/test-sess/zoom.png";
       await gotoWithFakeProxy(page, "/#/chat/test-sess?mode=json");

@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, type RefObject } from "react";
 import { toast } from "@/components/toast";
 import { cn } from "@/lib/utils";
 
@@ -9,6 +9,7 @@ interface TerminalDimensionInputProps {
   min: number;
   max: number;
   disabled: boolean;
+  returnFocusRef?: RefObject<HTMLElement | null>;
   onCommit: (value: number) => void;
 }
 
@@ -19,11 +20,13 @@ export function TerminalDimensionInput({
   min,
   max,
   disabled,
+  returnFocusRef,
   onCommit,
 }: TerminalDimensionInputProps) {
   const [draft, setDraft] = useState<string | null>(null);
   const [edited, setEdited] = useState(false);
   const [invalid, setInvalid] = useState(false);
+  const invalidDimensionMessage = `请输入 ${min}–${max} 之间的整数`;
 
   function cancel() {
     setDraft(null);
@@ -31,21 +34,20 @@ export function TerminalDimensionInput({
     setInvalid(false);
   }
 
-  function commit(keepInvalid: boolean) {
-    if (disabled || !edited || draft === null) {
-      cancel();
-      return;
-    }
+  function readEditedDimension() {
+    if (disabled || !edited || draft === null) return undefined;
     const text = draft.trim();
     const next = Number(text);
-    if (!/^\d+$/.test(text) || !Number.isSafeInteger(next) || next < min || next > max) {
-      toast.error(`请输入 ${min}–${max} 之间的整数`);
-      if (keepInvalid) setInvalid(true);
-      else cancel();
-      return;
-    }
+    return /^\d+$/.test(text) && Number.isSafeInteger(next) && next >= min && next <= max
+      ? next
+      : null;
+  }
+
+  function commitOnBlur() {
+    const next = readEditedDimension();
     cancel();
-    if (next !== value) onCommit(next);
+    if (next === null) toast.error(invalidDimensionMessage);
+    else if (next !== undefined && next !== value) onCommit(next);
   }
 
   return (
@@ -78,14 +80,21 @@ export function TerminalDimensionInput({
         setEdited(true);
         setInvalid(false);
       }}
-      onBlur={() => commit(false)}
+      onBlur={commitOnBlur}
       onKeyDown={(event) => {
         // Editing keys and digits belong to the input, not menu navigation/typeahead.
         event.stopPropagation();
         if (event.nativeEvent.isComposing) return;
         if (event.key === "Enter") {
           event.preventDefault();
-          commit(true);
+          if (readEditedDimension() === null) {
+            toast.error(invalidDimensionMessage);
+            setInvalid(true);
+            return;
+          }
+          // Moving focus commits through onBlur, just like clicking another menu control.
+          returnFocusRef?.current?.focus({ preventScroll: true });
+          event.currentTarget.blur();
         } else if (event.key === "Escape") {
           event.preventDefault();
           cancel();

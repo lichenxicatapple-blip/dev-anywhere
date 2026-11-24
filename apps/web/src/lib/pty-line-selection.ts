@@ -541,12 +541,14 @@ function resolveTerminalPathLinkAtBufferPoint({
       match,
       pathAction: { kind: "file-download", path: match.path } as const,
     })),
-  ].find(({ match }) => {
-    if (lineNumber < match.startLineNumber || lineNumber > match.endLineNumber) return false;
-    if (lineNumber === match.startLineNumber && column < match.startColumn) return false;
-    if (lineNumber === match.endLineNumber && column > match.endColumn) return false;
-    return true;
-  });
+  ].find(({ match }) =>
+    match.segments.some(
+      (segment) =>
+        segment.lineNumber === lineNumber &&
+        column >= segment.startColumn &&
+        column <= segment.endColumn,
+    ),
+  );
   if (!candidate) return null;
 
   const selected = resolveTerminalRange({

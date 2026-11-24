@@ -113,6 +113,8 @@ test("resizes a real hosted shell and synchronizes desktop and touch viewers", a
     await phoneColumns.tap();
     await phoneColumns.fill("160");
     await phoneColumns.press("Enter");
+    await expect(phoneColumns).not.toBeFocused();
+    await expect(phone.locator('[data-slot="chat-overflow-menu"]')).toBeVisible();
     await verifyShell("phone_direct_columns", { cols: 160, rows: 23 });
     await phoneRows.tap();
     await phoneRows.fill("60");
@@ -122,6 +124,7 @@ test("resizes a real hosted shell and synchronizes desktop and touch viewers", a
     await phoneRows.fill("1.5");
     await phoneRows.press("Enter");
     await expect(phoneRows).toHaveAttribute("aria-invalid", "true");
+    await expect(phoneRows).toBeFocused();
     await verifyShell("invalid_size_ignored", { cols: 160, rows: 60 }, false);
     await phoneRows.fill("70");
     await phoneRows.press("Escape");
@@ -174,6 +177,7 @@ test("resizes a real hosted shell and synchronizes desktop and touch viewers", a
         rows: fitted.rows + 1,
       });
     await desktopColumns.press("Enter");
+    await expect(desktopColumns).not.toBeFocused();
     await verifyShell("direct_size_keeps_latest_other_axis", { cols: 140, rows: fitted.rows + 1 });
     await testInfo.attach("real-shell-sizes", {
       body: JSON.stringify(observedSizes, null, 2),

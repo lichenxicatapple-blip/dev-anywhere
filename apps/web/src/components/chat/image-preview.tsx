@@ -14,6 +14,7 @@ import {
   TransformWrapper,
   useControls,
   useTransformComponent,
+  type ReactZoomPanPinchRef,
 } from "react-zoom-pan-pinch";
 import { Button } from "@/components/ui/button";
 import {
@@ -35,6 +36,9 @@ import type { MediaPreviewState } from "./media-preview";
 import { applyImagePreviewTransform } from "./image-preview-transform";
 
 const MAX_IMAGE_SCALE = 8;
+const WHEEL_NOTCH_PIXELS = 120;
+const WHEEL_LINE_PIXELS = 40;
+const WHEEL_LOG_ZOOM_PER_NOTCH = Math.log(1.12);
 
 type ImagePreviewSize = {
   width: number;
@@ -62,6 +66,7 @@ export function ImagePreviewDialog({
   const [copyingImage, setCopyingImage] = useState(false);
   const stageRef = useRef<HTMLDivElement | null>(null);
   const imageRef = useRef<HTMLImageElement | null>(null);
+  const transformRef = useRef<ReactZoomPanPinchRef | null>(null);
   const source = open && state.status === "ready" && state.url ? state.url : "";
   const preview = useImagePreviewSource(source, state.path);
   const src = preview.src;
@@ -113,6 +118,52 @@ export function ImagePreviewDialog({
     resizeObserver.observe(stage);
     return () => resizeObserver.disconnect();
   }, [open, state.status]);
+
+  useEffect(() => {
+    const stage = stageRef.current;
+    if (!imageLoaded || !stage) return;
+
+    const handleWheel = (event: WheelEvent) => {
+      const { deltaMode, deltaY } = event;
+      // Ctrl+wheel is also used for trackpad pinch. The library handles that gesture.
+      if (event.ctrlKey || event.defaultPrevented || deltaY === 0) return;
+      const transform = transformRef.current;
+      const wrapper = transform?.instance.wrapperComponent;
+      if (!transform || !wrapper?.contains(event.target as Node) || transform.instance.isPanning) {
+        return;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      const pixelsPerUnit =
+        deltaMode === WheelEvent.DOM_DELTA_LINE
+          ? WHEEL_LINE_PIXELS
+          : deltaMode === WheelEvent.DOM_DELTA_PAGE
+            ? wrapper.clientHeight
+            : 1;
+      const notches = Math.max(-1, Math.min(1, (deltaY * pixelsPerUnit) / WHEEL_NOTCH_PIXELS));
+      const { scale, positionX, positionY } = transform.state;
+      const nextScale = Math.min(
+        MAX_IMAGE_SCALE,
+        Math.max(fitScale, scale * Math.exp(-notches * WHEEL_LOG_ZOOM_PER_NOTCH)),
+      );
+      if (nextScale === scale) return;
+
+      const rect = wrapper.getBoundingClientRect();
+      const x = event.clientX - rect.left;
+      const y = event.clientY - rect.top;
+      const ratio = nextScale / scale;
+      applyImagePreviewTransform(
+        transform,
+        x - (x - positionX) * ratio,
+        y - (y - positionY) * ratio,
+        nextScale,
+      );
+    };
+
+    stage.addEventListener("wheel", handleWheel, { passive: false });
+    return () => stage.removeEventListener("wheel", handleWheel);
+  }, [fitScale, imageLoaded]);
 
   async function copyPath(): Promise<void> {
     try {
@@ -205,6 +256,7 @@ export function ImagePreviewDialog({
             // 初始 scale 按图片自然尺寸和 stage 尺寸计算，避免移动端宽图以 1:1
             // 内容尺寸进入 transform 后被裁切且无法横向移动。
             <TransformWrapper
+              ref={transformRef}
               key={transformKey}
               initialScale={fitScale}
               minScale={fitScale}
@@ -212,7 +264,7 @@ export function ImagePreviewDialog({
               centerOnInit
               centerZoomedOut
               limitToBounds
-              wheel={{ step: 0.15 }}
+              wheel={{ wheelDisabled: true, step: 0.15 }}
               pinch={{ step: 5 }}
               doubleClick={{ mode: "reset" }}
             >

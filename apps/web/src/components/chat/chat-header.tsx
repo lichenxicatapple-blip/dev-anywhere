@@ -213,6 +213,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
   const isPty = mode === "pty" || session?.mode === "pty";
   const shortcuts = getPtyShortcutPreset(session ?? {}).menu;
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuContentRef = useRef<HTMLDivElement>(null);
   const menuPtyFocusRef = useRef<HTMLTextAreaElement | null>(null);
   const menuClosedByEscapeRef = useRef(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
@@ -460,6 +461,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent
+              ref={menuContentRef}
               align="end"
               className="w-max min-w-44 max-w-[calc(100vw-1rem)] data-[state=open]:animate-none"
               data-slot="chat-overflow-menu"
@@ -659,6 +661,7 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
                               min={min}
                               max={max}
                               disabled={disabled}
+                              returnFocusRef={menuContentRef}
                               onCommit={(next) => onResizeTerminal({ axis, value: next })}
                             />
                             <Button

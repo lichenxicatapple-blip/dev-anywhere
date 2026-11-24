@@ -91,3 +91,32 @@ describe("PTY initial URL selection", () => {
     ).toBe(expected);
   });
 });
+
+describe("PTY initial path selection across printed line breaks", () => {
+  it.each([
+    { head: "./artifacts/a-long-directory/", file: "report.txt", kind: "file-download" },
+    { head: "C:\\build\\a-long-directory\\", file: "screen.png", kind: "media-preview" },
+  ])("selects the complete $file path from either row", async ({ head, file, kind }) => {
+    const first = `  - ${head}`;
+    const term = await writeTerminal(`${first}\r\n    ${file}`, first.length + 2);
+    expect(term.buffer.active.getLine(1)?.isWrapped).toBe(false);
+    for (const row of [0, 1]) {
+      expect(
+        resolveTerminalInitialRangeAtBufferPoint({ terminal: term, point: { row, column: 5 } }),
+      ).toMatchObject({ pathAction: { kind, path: `${head}${file}` } });
+    }
+    expect(
+      resolveTerminalInitialRangeAtBufferPoint({ terminal: term, point: { row: 1, column: 2 } })
+        ?.pathAction,
+    ).toBeUndefined();
+  });
+
+  it("keeps an independent rooted path after a right-edge directory", async () => {
+    const first = "  - ./artifacts/a-long-directory/";
+    const file = "/other/screen.png";
+    const term = await writeTerminal(`${first}\r\n    ${file}`, first.length + 2);
+    expect(
+      resolveTerminalInitialRangeAtBufferPoint({ terminal: term, point: { row: 1, column: 6 } }),
+    ).toMatchObject({ pathAction: { kind: "media-preview", path: file } });
+  });
+});
