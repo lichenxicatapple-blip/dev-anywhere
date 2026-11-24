@@ -67,6 +67,7 @@ interface SessionStoreState {
   // 已绑定新开发机但 session_list 尚未返回时保留目标名称，避免退化成无上下文的加载态。
   loadingProxyName: string | null;
   historySessions: HistorySession[];
+  cursorIdeHistoryError: string | null;
   // 历史扫描独立于活跃 session_list 异步进行。不要把“请求尚未返回”渲染成“确实为空”。
   historyLoadStatus: HistoryLoadStatus;
   // 后发请求/切换开发机使旧请求失效，防止慢响应覆盖新开发机的数据或加载状态。
@@ -97,7 +98,11 @@ interface SessionStoreState {
   setPtyAutoYes: (sessionKey: string, enabled: boolean) => void;
   setHistorySessions: (sessions: HistorySession[]) => void;
   beginHistoryLoad: () => number;
-  resolveHistoryLoad: (generation: number, sessions: HistorySession[]) => boolean;
+  resolveHistoryLoad: (
+    generation: number,
+    sessions: HistorySession[],
+    cursorIdeError?: string,
+  ) => boolean;
   rejectHistoryLoad: (generation: number) => boolean;
   cancelHistoryLoad: (generation: number) => boolean;
   prepareForProxySwitch: (proxyName: string) => void;
@@ -114,6 +119,7 @@ export const useSessionStore = create<SessionStoreState>()(
       sessionListLoaded: false,
       loadingProxyName: null,
       historySessions: [],
+      cursorIdeHistoryError: null,
       historyLoadStatus: "idle",
       historyLoadGeneration: 0,
       ptyTitles: {},
@@ -264,6 +270,7 @@ export const useSessionStore = create<SessionStoreState>()(
       setHistorySessions: (sessions) =>
         set((state) => ({
           historySessions: sessions,
+          cursorIdeHistoryError: null,
           historyLoadStatus: "loaded",
           historyLoadGeneration: state.historyLoadGeneration + 1,
         })),
@@ -272,9 +279,13 @@ export const useSessionStore = create<SessionStoreState>()(
         set({ historyLoadStatus: "loading", historyLoadGeneration: generation });
         return generation;
       },
-      resolveHistoryLoad: (generation, sessions) => {
+      resolveHistoryLoad: (generation, sessions, cursorIdeError) => {
         if (get().historyLoadGeneration !== generation) return false;
-        set({ historySessions: sessions, historyLoadStatus: "loaded" });
+        set({
+          historySessions: sessions,
+          cursorIdeHistoryError: cursorIdeError ?? null,
+          historyLoadStatus: "loaded",
+        });
         return true;
       },
       rejectHistoryLoad: (generation) => {
@@ -294,6 +305,7 @@ export const useSessionStore = create<SessionStoreState>()(
           sessionListLoaded: false,
           loadingProxyName,
           historySessions: [],
+          cursorIdeHistoryError: null,
           historyLoadStatus: "idle",
           historyLoadGeneration: state.historyLoadGeneration + 1,
           ptyTitles: {},
@@ -324,6 +336,7 @@ export const useSessionStore = create<SessionStoreState>()(
             sessionListLoaded: false,
             loadingProxyName: null,
             historySessions: [],
+            cursorIdeHistoryError: null,
             historyLoadStatus: "idle",
             historyLoadGeneration: state.historyLoadGeneration + 1,
             ptyTitles: {},

@@ -155,7 +155,9 @@ export function SessionRow({
                 ·
               </span>
               <span className="font-mono text-muted-foreground shrink-0">
-                {providerLabel(session.provider)}
+                {session.mode === "json" && session.cursorIde
+                  ? "Cursor IDE"
+                  : providerLabel(session.provider)}
               </span>
               <span className="text-muted-foreground/60 shrink-0" aria-hidden="true">
                 ·

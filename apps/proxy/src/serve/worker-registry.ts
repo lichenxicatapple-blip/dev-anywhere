@@ -59,6 +59,7 @@ interface SpawnOptions {
   provider: ProviderId;
   cwd?: string;
   resumeSessionId?: string;
+  cursorIde?: boolean;
   permissionMode?: string;
   // 开启后 worker spawn claude 带 --include-partial-messages，forwardEvent 处理 stream_event delta；
   // aggregated assistant 的 text/thinking 会被跳过避免和 delta 重复
@@ -235,6 +236,7 @@ export class WorkerRegistry {
     args.push("--provider", options.provider);
     if (options.cwd) args.push("--cwd", options.cwd);
     if (options.resumeSessionId) args.push("--resume", options.resumeSessionId);
+    if (options.cursorIde) args.push("--cursor-ide");
     // Claude 的远程安全默认值仍是 default；Codex 未显式选择时保留其本机配置。
     // Codex 的显式值已在 session_create 边界做过严格校验。
     const provider = options.provider;

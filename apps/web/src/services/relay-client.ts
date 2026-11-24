@@ -1553,7 +1553,10 @@ export class RelayClient {
     }));
   }
 
-  requestSessionHistory(timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS): Promise<HistorySession[]> {
+  requestSessionHistory(
+    timeoutMs = DEFAULT_REQUEST_TIMEOUT_MS,
+    onCursorIdeError?: (message: string | undefined) => void,
+  ): Promise<HistorySession[]> {
     const requestId = nextRequestId("session-history");
     return this.waitForMessage(
       (msg): msg is Extract<RelayControlMessage, { type: "session_history_response" }> =>
@@ -1564,6 +1567,7 @@ export class RelayClient {
       requestId,
     ).then((resp) => {
       if (!resp.success) throw new Error(resp.error ?? "读取历史会话失败");
+      onCursorIdeError?.(resp.cursorIdeError);
       return resp.sessions;
     });
   }

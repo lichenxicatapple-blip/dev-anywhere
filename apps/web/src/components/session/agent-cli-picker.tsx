@@ -12,6 +12,7 @@ import { type ProviderId, PROVIDER_LABEL } from "./create-session-submit";
 const PROVIDERS = ["claude", "codex", "kimi", "cursor"] as const satisfies readonly ProviderId[];
 
 interface AgentCliPickerProps {
+  hidePath?: boolean;
   agentCli: AgentCliStatus | null;
   provider: ProviderId;
   cliPathDraftProvider: ProviderId | null;
@@ -24,6 +25,7 @@ interface AgentCliPickerProps {
 }
 
 export function AgentCliPicker({
+  hidePath,
   agentCli,
   provider,
   cliPathDraftProvider,
@@ -63,57 +65,59 @@ export function AgentCliPicker({
           ))}
         </SelectContent>
       </Select>
-      <div className="relative min-w-0" data-slot="agent-cli-path-card">
-        <RemotePathSelector
-          key={provider}
-          id={`agent-cli-path-${provider}`}
-          data-slot="agent-cli-path"
-          label="CLI 路径"
-          value={pathValue}
-          onValueChange={(path) => onCliPathDraftChange(provider, path)}
-          selectionKind="file"
-          includeHidden
-          disabled={savingCliPath}
-          placeholder="选择 CLI 可执行文件"
-          labelActions={
-            pathChanged ? (
-              <div className="flex items-center gap-4" data-slot="agent-cli-path-actions">
-                <button
-                  type="button"
-                  className="inline-flex min-h-11 min-w-11 items-center justify-center px-0 text-xs font-medium text-muted-foreground hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:no-underline md:min-h-8 md:min-w-0"
-                  onClick={onDiscardCliPathDraft}
-                  disabled={savingCliPath}
-                >
-                  取消
-                </button>
-                <button
-                  type="button"
-                  className="inline-flex min-h-11 min-w-11 items-center justify-center px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
-                  onClick={onSaveCliPath}
-                  disabled={savingCliPath || !cliPathDraft.trim()}
-                >
-                  {savingCliPath ? "保存中..." : "保存"}
-                </button>
-              </div>
-            ) : undefined
-          }
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && pathChanged) {
-              event.preventDefault();
-              event.stopPropagation();
-              onSaveCliPath();
+      {!hidePath && (
+        <div className="relative min-w-0" data-slot="agent-cli-path-card">
+          <RemotePathSelector
+            key={provider}
+            id={`agent-cli-path-${provider}`}
+            data-slot="agent-cli-path"
+            label="CLI 路径"
+            value={pathValue}
+            onValueChange={(path) => onCliPathDraftChange(provider, path)}
+            selectionKind="file"
+            includeHidden
+            disabled={savingCliPath}
+            placeholder="选择 CLI 可执行文件"
+            labelActions={
+              pathChanged ? (
+                <div className="flex items-center gap-4" data-slot="agent-cli-path-actions">
+                  <button
+                    type="button"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-0 text-xs font-medium text-muted-foreground hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:no-underline md:min-h-8 md:min-w-0"
+                    onClick={onDiscardCliPathDraft}
+                    disabled={savingCliPath}
+                  >
+                    取消
+                  </button>
+                  <button
+                    type="button"
+                    className="inline-flex min-h-11 min-w-11 items-center justify-center px-0 text-xs font-medium text-primary hover:underline focus-visible:underline focus-visible:outline-none disabled:cursor-not-allowed disabled:text-muted-foreground disabled:no-underline md:min-h-8 md:min-w-0"
+                    onClick={onSaveCliPath}
+                    disabled={savingCliPath || !cliPathDraft.trim()}
+                  >
+                    {savingCliPath ? "保存中..." : "保存"}
+                  </button>
+                </div>
+              ) : undefined
             }
-            if (event.key === "Escape" && hasDraft) {
-              event.preventDefault();
-              event.stopPropagation();
-              onDiscardCliPathDraft();
-            }
-          }}
-        />
-        {selectedCli?.error && !pathChanged ? (
-          <p className="mt-1 break-all text-xs text-destructive">{selectedCli.error}</p>
-        ) : null}
-      </div>
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && pathChanged) {
+                event.preventDefault();
+                event.stopPropagation();
+                onSaveCliPath();
+              }
+              if (event.key === "Escape" && hasDraft) {
+                event.preventDefault();
+                event.stopPropagation();
+                onDiscardCliPathDraft();
+              }
+            }}
+          />
+          {selectedCli?.error && !pathChanged ? (
+            <p className="mt-1 break-all text-xs text-destructive">{selectedCli.error}</p>
+          ) : null}
+        </div>
+      )}
     </section>
   );
 }

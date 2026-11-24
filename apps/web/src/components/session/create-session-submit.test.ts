@@ -213,6 +213,42 @@ describe("create-session submit model", () => {
     );
   });
 
+  it("creates a Cursor IDE session even when Cursor CLI is unavailable", async () => {
+    const relay = {
+      createSession: vi.fn().mockResolvedValue({
+        type: "session_create_response",
+        success: true,
+        sessionId: "ide-1",
+        cwd: "/home/dev",
+        lastActive: 1,
+        kind: "agent",
+        mode: "json",
+        provider: "cursor",
+        cursorIde: true,
+      }),
+    };
+    const result = await submitSessionCreate({
+      relay,
+      agentCli: null,
+      form: {
+        cwd: "/home/dev",
+        name: "",
+        mode: "json",
+        provider: "cursor",
+        permissionMode: "bypassPermissions",
+        cursorIde: true,
+      },
+    });
+    expect(relay.createSession).toHaveBeenCalledWith(
+      expect.objectContaining({ cursorIde: true, permissionMode: "default" }),
+      SESSION_CREATE_CLIENT_TIMEOUT_MS,
+    );
+    expect(result).toMatchObject({
+      type: "success",
+      session: { provider: "cursor", mode: "json", cursorIde: true },
+    });
+  });
+
   it("returns provider unavailable with the provider error", async () => {
     const relay = { createSession: vi.fn() };
 

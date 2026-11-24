@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { fileURLToPath } from "node:url";
+import { join } from "node:path";
 import { scanSessionHistory } from "#src/serve/history/catalog.js";
 import { readCursorConversationRecords } from "#src/serve/history/cursor.js";
 import { readSessionMessages } from "#src/serve/session-history.js";
@@ -9,16 +10,20 @@ const FIXTURE_ROOT = fileURLToPath(new URL("../fixtures/cursor-acp-session", imp
 const SESSION_ID = "18518e66-b1dd-4214-99cd-332f1578bd9c";
 
 describe("Cursor ACP history from a real store.db", () => {
-  let original: string | undefined;
+  const envKeys = ["CURSOR_ACP_SESSIONS_DIR", "CURSOR_IDE_USER_DIR"] as const;
+  let original: Array<readonly [(typeof envKeys)[number], string | undefined]>;
 
   beforeEach(() => {
-    original = process.env.CURSOR_ACP_SESSIONS_DIR;
+    original = envKeys.map((key) => [key, process.env[key]] as const);
     process.env.CURSOR_ACP_SESSIONS_DIR = FIXTURE_ROOT;
+    process.env.CURSOR_IDE_USER_DIR = join(FIXTURE_ROOT, "no-ide-user");
   });
 
   afterEach(() => {
-    if (original === undefined) delete process.env.CURSOR_ACP_SESSIONS_DIR;
-    else process.env.CURSOR_ACP_SESSIONS_DIR = original;
+    for (const [key, value] of original) {
+      if (value === undefined) delete process.env[key];
+      else process.env[key] = value;
+    }
   });
 
   it("reads every conversation record the CLI wrote", async () => {

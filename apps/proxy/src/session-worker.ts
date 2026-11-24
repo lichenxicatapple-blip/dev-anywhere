@@ -11,6 +11,8 @@ import {
   type ClaudePermissionMode,
 } from "./worker/json-session.js";
 import { CodexAppServerSession } from "./worker/codex-app-server-session.js";
+import { CursorIdeSession } from "./worker/cursor-ide-session.js";
+import { CursorIdeError } from "./common/cursor-ide-cdp.js";
 import {
   CursorAcpSession,
   type CursorAcpExtensionDecision,
@@ -59,6 +61,7 @@ function hasFlag(name: string): boolean {
 }
 const workerCwd = getArg("--cwd");
 const workerResume = getArg("--resume");
+const workerCursorIde = hasFlag("--cursor-ide");
 const workerPermissionMode = getArg("--permission-mode") as ClaudePermissionMode | undefined;
 const workerStreamDelta = hasFlag("--stream-delta");
 const workerHookUrl = getArg("--hook-url");
@@ -102,6 +105,7 @@ let serveSocket: Socket | null = null;
 const queuedServeMessages: WorkerMessage[] = [];
 let latestKimiCommandEvent: Extract<WorkerMessage, { type: "worker_event" }> | null = null;
 let readyMessage: Extract<WorkerMessage, { type: "worker_ready" }> | null = null;
+let pendingCursorIdeStart: (() => void) | undefined;
 let providerReady = false;
 let exiting = false;
 let acpTurnActive = false;
@@ -423,17 +427,11 @@ const session =
           onProcessError: (error) => console.error(`[worker] ${error.message}`),
           onExit: handleProviderExit,
         })
-      : provider === "cursor"
-        ? new CursorAcpSession({
-            cwd: workerCwd,
+      : provider === "cursor" && workerCursorIde
+        ? new CursorIdeSession({
+            cwd: workerCwd ?? process.cwd(),
             resumeSessionId: workerResume,
-            permissionMode: workerPermissionMode,
             onUpdate: (params) => handleCursorEvent("session/update", params),
-            onNotification: (method, params) => {
-              if (method !== "session/update") handleCursorEvent(method, params);
-            },
-            onPermissionRequest: handleCursorPermissionRequest,
-            onExtensionRequest: handleCursorExtensionRequest,
             onPromptStart: () => {
               acpTurnActive = true;
               sendToServe({ type: "worker_turn_started" });
@@ -445,31 +443,66 @@ const session =
             onPromptError: (error) => {
               acpTurnActive = false;
               handleCursorEvent("session/prompt/error", {
-                message: sanitizeProviderErrorTail(error.message) || "Cursor ACP prompt failed",
+                message:
+                  error instanceof CursorIdeError
+                    ? error.message
+                    : sanitizeProviderErrorTail(error.message) ||
+                      "Cursor IDE 同步失败，请检查 Cursor 窗口后重试",
               });
             },
-            onSessionId: (cursorSessionId) => {
-              sendToServe({
-                type: "worker_native_session_id",
-                provider: "cursor",
-                sessionId: cursorSessionId,
-              });
+            onApproval: async (description) => {
+              const decision = await forwardToRelay("Cursor IDE 命令", { description });
+              return decision.cancelled ? "cancel" : decision.behavior;
             },
-            onProtocolError: (error) => console.error(`[worker] ${error.message}`),
-            onProcessError: (error) => console.error(`[worker] ${error.message}`),
             onExit: handleProviderExit,
           })
-        : new JsonSession({
-            claudeArgs: providerArgs,
-            cwd: workerCwd,
-            resumeSessionId: workerResume,
-            permissionMode: workerPermissionMode,
-            includePartialMessages: workerStreamDelta,
-            hook: workerHook,
-            approvalStrategy,
-            onEvent: handleProviderEvent,
-            onExit: handleProviderExit,
-          });
+        : provider === "cursor"
+          ? new CursorAcpSession({
+              cwd: workerCwd,
+              resumeSessionId: workerResume,
+              permissionMode: workerPermissionMode,
+              onUpdate: (params) => handleCursorEvent("session/update", params),
+              onNotification: (method, params) => {
+                if (method !== "session/update") handleCursorEvent(method, params);
+              },
+              onPermissionRequest: handleCursorPermissionRequest,
+              onExtensionRequest: handleCursorExtensionRequest,
+              onPromptStart: () => {
+                acpTurnActive = true;
+                sendToServe({ type: "worker_turn_started" });
+              },
+              onPromptComplete: (result) => {
+                acpTurnActive = false;
+                handleCursorEvent("session/prompt/result", { response: result });
+              },
+              onPromptError: (error) => {
+                acpTurnActive = false;
+                handleCursorEvent("session/prompt/error", {
+                  message: sanitizeProviderErrorTail(error.message) || "Cursor ACP prompt failed",
+                });
+              },
+              onSessionId: (cursorSessionId) => {
+                sendToServe({
+                  type: "worker_native_session_id",
+                  provider: "cursor",
+                  sessionId: cursorSessionId,
+                });
+              },
+              onProtocolError: (error) => console.error(`[worker] ${error.message}`),
+              onProcessError: (error) => console.error(`[worker] ${error.message}`),
+              onExit: handleProviderExit,
+            })
+          : new JsonSession({
+              claudeArgs: providerArgs,
+              cwd: workerCwd,
+              resumeSessionId: workerResume,
+              permissionMode: workerPermissionMode,
+              includePartialMessages: workerStreamDelta,
+              hook: workerHook,
+              approvalStrategy,
+              onEvent: handleProviderEvent,
+              onExit: handleProviderExit,
+            });
 
 function handleServeConnection(socket: Socket): void {
   readServeConnection(socket, sessionId, {
@@ -487,6 +520,11 @@ function handleServeConnection(socket: Socket): void {
         }),
       );
       replayServeState(socket);
+      if (pendingCursorIdeStart) {
+        const start = pendingCursorIdeStart;
+        pendingCursorIdeStart = undefined;
+        start();
+      }
     },
     onMessage: (msg: WorkerMessage) => {
       if (!acceptCurrentWorkerSocketMessage(serveSocket, socket)) return;
@@ -599,88 +637,122 @@ process.on("SIGTERM", () => {
 
 server.listen(sockPath, () => {
   setLocalIpcEndpointPermissions(sockPath);
-  const pid = session.start();
-  if (!Number.isFinite(pid) || pid <= 0) {
-    console.error("[worker] provider process failed to start: missing child pid");
-    handleProviderExit(1);
-    return;
-  }
-  if (provider === "codex" && session instanceof CodexAppServerSession) {
-    void session
-      .waitUntilReady()
-      .then((threadId) => {
-        reportReady({
-          type: "worker_ready",
-          pid,
-          nativeSession: { provider: "codex", sessionId: threadId },
+  const startSession = () => {
+    const pid = session.start();
+    if (!Number.isFinite(pid) || pid <= 0) {
+      console.error("[worker] provider process failed to start: missing child pid");
+      handleProviderExit(1);
+      return;
+    }
+    if (provider === "codex" && session instanceof CodexAppServerSession) {
+      void session
+        .waitUntilReady()
+        .then((threadId) => {
+          reportReady({
+            type: "worker_ready",
+            pid,
+            nativeSession: { provider: "codex", sessionId: threadId },
+          });
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          const failureOutput = `${message}\n${session.getStderr()}`;
+          const diagnostic =
+            sanitizeProviderErrorTail(failureOutput) || "Codex app-server 初始化失败";
+          const activeWriter = classifyCodexActiveWriterError(failureOutput);
+          sendToServe({
+            type: "worker_startup_error",
+            provider: "codex",
+            message: diagnostic,
+            ...(activeWriter
+              ? {
+                  errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
+                  nativeSessionId: activeWriter.threadId,
+                }
+              : {}),
+          });
+          console.error(`[worker] Codex app-server failed to initialize: ${diagnostic}`);
+          void session.stop(0).finally(() => handleProviderExit(1));
         });
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        const failureOutput = `${message}\n${session.getStderr()}`;
-        const diagnostic =
-          sanitizeProviderErrorTail(failureOutput) || "Codex app-server 初始化失败";
-        const activeWriter = classifyCodexActiveWriterError(failureOutput);
-        sendToServe({
-          type: "worker_startup_error",
-          provider: "codex",
-          message: diagnostic,
-          ...(activeWriter
-            ? {
-                errorCode: ControlErrorCode.SESSION_ALREADY_ACTIVE,
-                nativeSessionId: activeWriter.threadId,
-              }
-            : {}),
+    } else if (provider === "kimi" && session instanceof KimiAcpSession) {
+      void session
+        .waitUntilReady()
+        .then((kimiSessionId) => {
+          reportReady({
+            type: "worker_ready",
+            pid,
+            nativeSession: { provider: "kimi", sessionId: kimiSessionId },
+          });
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          const diagnostic =
+            sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) ||
+            "Kimi ACP 初始化失败";
+          sendToServe({
+            type: "worker_startup_error",
+            provider: "kimi",
+            message: diagnostic,
+          });
+          console.error(`[worker] Kimi ACP failed to initialize: ${diagnostic}`);
+          void session.stop(0).finally(() => handleProviderExit(1));
         });
-        console.error(`[worker] Codex app-server failed to initialize: ${diagnostic}`);
-        void session.stop(0).finally(() => handleProviderExit(1));
-      });
-  } else if (provider === "kimi" && session instanceof KimiAcpSession) {
-    void session
-      .waitUntilReady()
-      .then((kimiSessionId) => {
-        reportReady({
-          type: "worker_ready",
-          pid,
-          nativeSession: { provider: "kimi", sessionId: kimiSessionId },
+    } else if (
+      provider === "cursor" &&
+      (session instanceof CursorAcpSession || session instanceof CursorIdeSession)
+    ) {
+      void session
+        .waitUntilReady()
+        .then((cursorSessionId) => {
+          reportReady({
+            type: "worker_ready",
+            pid,
+            nativeSession: { provider: "cursor", sessionId: cursorSessionId },
+          });
+        })
+        .catch((err: unknown) => {
+          const message = err instanceof Error ? err.message : String(err);
+          const diagnostic =
+            (session instanceof CursorIdeSession && err instanceof CursorIdeError
+              ? err.message
+              : "") ||
+            sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) ||
+            (session instanceof CursorIdeSession
+              ? "Cursor IDE 初始化失败，请检查 Cursor 窗口后重试"
+              : "Cursor ACP 初始化失败");
+          sendToServe({
+            type: "worker_startup_error",
+            provider: "cursor",
+            message: diagnostic,
+          });
+          console.error(
+            `[worker] Cursor ${session instanceof CursorIdeSession ? "IDE" : "ACP"} failed to initialize: ${diagnostic}`,
+          );
+          if (session instanceof CursorIdeSession) {
+            // Give the IPC socket a chance to flush the actionable error before stopping.
+            const timer = setTimeout(
+              () => void session.stop().finally(() => handleProviderExit(1)),
+              50,
+            );
+            timer.unref?.();
+          } else {
+            void session.stop(0).finally(() => handleProviderExit(1));
+          }
         });
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        const diagnostic =
-          sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) || "Kimi ACP 初始化失败";
-        sendToServe({
-          type: "worker_startup_error",
-          provider: "kimi",
-          message: diagnostic,
-        });
-        console.error(`[worker] Kimi ACP failed to initialize: ${diagnostic}`);
-        void session.stop(0).finally(() => handleProviderExit(1));
-      });
-  } else if (provider === "cursor" && session instanceof CursorAcpSession) {
-    void session
-      .waitUntilReady()
-      .then((cursorSessionId) => {
-        reportReady({
-          type: "worker_ready",
-          pid,
-          nativeSession: { provider: "cursor", sessionId: cursorSessionId },
-        });
-      })
-      .catch((err: unknown) => {
-        const message = err instanceof Error ? err.message : String(err);
-        const diagnostic =
-          sanitizeProviderErrorTail(`${message}\n${session.getStderr()}`) ||
-          "Cursor ACP 初始化失败";
-        sendToServe({
-          type: "worker_startup_error",
-          provider: "cursor",
-          message: diagnostic,
-        });
-        console.error(`[worker] Cursor ACP failed to initialize: ${diagnostic}`);
-        void session.stop(0).finally(() => handleProviderExit(1));
-      });
+    } else {
+      reportReady({ type: "worker_ready", pid });
+    }
+  };
+  if (session instanceof CursorIdeSession && !serveSocket) {
+    // Do not lose a fast IDE startup error before the daemon connects to IPC.
+    pendingCursorIdeStart = startSession;
+    const timeout = setTimeout(() => {
+      if (!pendingCursorIdeStart) return;
+      pendingCursorIdeStart = undefined;
+      handleProviderExit(1);
+    }, 10_000);
+    timeout.unref?.();
   } else {
-    reportReady({ type: "worker_ready", pid });
+    startSession();
   }
 });

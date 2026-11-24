@@ -6,6 +6,7 @@ import {
   type SessionListPayload,
 } from "@dev-anywhere/shared";
 import { serviceLogger } from "../common/logger.js";
+import { cursorIdeNativeId } from "../common/cursor-ide.js";
 import type { RelayConnection } from "./relay-connection.js";
 import type { SessionInfo, SessionManager } from "./session-manager.js";
 
@@ -42,7 +43,13 @@ export function toSessionListPayload(s: SessionInfo): SessionListEntry {
       ptyOwner: s.ptyOwner,
     };
   }
-  return { ...common, kind: "agent", mode: "json", provider: s.provider };
+  return {
+    ...common,
+    kind: "agent",
+    mode: "json",
+    provider: s.provider,
+    ...(s.historySessionId && cursorIdeNativeId(s.historySessionId) ? { cursorIde: true } : {}),
+  };
 }
 
 export function toSessionSyncEntry(s: SessionInfo): SessionSyncEntry {
@@ -72,7 +79,13 @@ export function toSessionSyncEntry(s: SessionInfo): SessionSyncEntry {
       ptyOwner: s.ptyOwner,
     };
   }
-  return { ...common, kind: "agent", mode: "json", provider: s.provider };
+  return {
+    ...common,
+    kind: "agent",
+    mode: "json",
+    provider: s.provider,
+    ...(s.historySessionId && cursorIdeNativeId(s.historySessionId) ? { cursorIde: true } : {}),
+  };
 }
 
 function pushSessionStatus(

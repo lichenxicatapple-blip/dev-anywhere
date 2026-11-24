@@ -13,6 +13,7 @@ import {
   type ControlMessage,
 } from "@dev-anywhere/shared";
 import { getTerminalShellFamily, resolveTerminalShell } from "../common/terminal-shell.js";
+import { cursorIdeNativeId } from "../common/cursor-ide.js";
 import { serviceLogger } from "../common/logger.js";
 import { sessionPaths, tildify } from "../common/paths.js";
 import { findCodexActiveWriter, type CodexActiveWriter } from "../common/codex-active-writer.js";
@@ -166,6 +167,39 @@ export class RelaySessionCreateHandler {
     const mode = msg.mode;
     const permissionMode = msg.permissionMode;
     const resumeSessionId = msg.resumeSessionId;
+    const cursorIde =
+      mode === "json" &&
+      (msg.cursorIde === true || !!(resumeSessionId && cursorIdeNativeId(resumeSessionId)));
+
+    if (
+      (mode === "json" && msg.cursorIde && provider !== "cursor") ||
+      (resumeSessionId &&
+        cursorIdeNativeId(resumeSessionId) &&
+        (mode !== "json" || provider !== "cursor"))
+    ) {
+      this.deps.relaySend(
+        serializeControl({
+          type: "session_create_response",
+          requestId,
+          success: false,
+          errorCode: ControlErrorCode.UNKNOWN,
+          error: "Cursor IDE 会话仅支持 Cursor 聊天模式",
+        }),
+      );
+      return;
+    }
+    if (cursorIde && permissionMode && permissionMode !== "default") {
+      this.deps.relaySend(
+        serializeControl({
+          type: "session_create_response",
+          requestId,
+          success: false,
+          errorCode: ControlErrorCode.APPROVAL_POLICY_UNSUPPORTED,
+          error: "Cursor IDE 会话使用 IDE 自身的权限设置",
+        }),
+      );
+      return;
+    }
 
     if ((provider === "kimi" || provider === "cursor") && resumeSessionId) {
       const existing = this.deps.sessionManager
@@ -274,7 +308,7 @@ export class RelaySessionCreateHandler {
       }
     }
 
-    if (provider === "cursor") {
+    if (provider === "cursor" && !cursorIde) {
       try {
         if (mode === "pty") resolveCursorPermissionFlags(permissionMode);
         else resolveCursorAcpMode(permissionMode);
@@ -338,6 +372,7 @@ export class RelaySessionCreateHandler {
         resumeSessionId,
         permissionMode,
         provider,
+        ...(cursorIde ? { cursorIde: true } : {}),
         streamDelta,
         hook,
       });
@@ -372,9 +407,11 @@ export class RelaySessionCreateHandler {
         this.reportJsonStartupFailure(
           requestId,
           pendingId,
-          err instanceof JsonWorkerStartupTimeoutError
-            ? WORKER_START_TIMEOUT_MESSAGE
-            : WORKER_START_FAILED_MESSAGE,
+          cursorIde && err instanceof WorkerStartupError
+            ? err.message
+            : err instanceof JsonWorkerStartupTimeoutError
+              ? WORKER_START_TIMEOUT_MESSAGE
+              : WORKER_START_FAILED_MESSAGE,
           err,
         );
       });
@@ -401,7 +438,15 @@ export class RelaySessionCreateHandler {
       if (ptyOwner === undefined) throw new TypeError("PTY session is missing its owner");
       this.deps.relaySend(serializeControl({ ...identity, mode: "pty", ptyOwner }));
     } else {
-      this.deps.relaySend(serializeControl({ ...identity, mode: "json" }));
+      this.deps.relaySend(
+        serializeControl({
+          ...identity,
+          mode: "json",
+          ...(session.historySessionId && cursorIdeNativeId(session.historySessionId)
+            ? { cursorIde: true }
+            : {}),
+        }),
+      );
     }
     serviceLogger.info(
       {
@@ -476,6 +521,9 @@ export class RelaySessionCreateHandler {
         kind: "agent",
         mode: "json",
         provider: options.provider,
+        ...(session.historySessionId && cursorIdeNativeId(session.historySessionId)
+          ? { cursorIde: true }
+          : {}),
       }),
     );
     if (options.resumeSessionId) {

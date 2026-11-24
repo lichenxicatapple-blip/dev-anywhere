@@ -9,6 +9,8 @@ export interface NativeHistorySession {
   updatedAt: number;
   kind: "main" | "internal" | "unknown";
   hasConversation: boolean;
+  cursorIdeGroup?: string;
+  cursorIdeUnavailable?: string;
 }
 
 export interface SessionHistoryEntry {
@@ -18,6 +20,8 @@ export interface SessionHistoryEntry {
   title: string;
   updatedAt: number;
   preferredMode?: "pty" | "json";
+  cursorIdeGroup?: string;
+  cursorIdeUnavailable?: string;
 }
 
 export const SAFE_SESSION_ID_PATTERN = /^[A-Za-z0-9_-]+$/;

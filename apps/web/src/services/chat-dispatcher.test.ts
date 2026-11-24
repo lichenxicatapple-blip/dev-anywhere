@@ -196,6 +196,27 @@ describe("chat-dispatcher permission flow", () => {
     });
   });
 
+  it("does not duplicate an IDE echo of a user prompt already on screen", () => {
+    const handle = createChatMessageHandler({ sendControl: vi.fn() });
+    useChatStore.getState().addUserMessage("s1", {
+      id: "local-user",
+      role: "user",
+      text: "plan this feature",
+      isPartial: false,
+      timestamp: 1,
+      toolCalls: [],
+    });
+
+    handle(
+      envelope({
+        type: "user_input",
+        payload: { text: "plan this feature", messageId: "ide-echo-0" },
+      }),
+    );
+
+    expect(useChatStore.getState().bySessionId.s1.messages).toHaveLength(1);
+  });
+
   it("loads session history messages into chat store", () => {
     const handle = createChatMessageHandler({ sendControl: vi.fn() });
 

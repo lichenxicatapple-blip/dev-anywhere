@@ -111,7 +111,11 @@ export function applySessionHistoryMetadata<T extends HistorySessionLike>(
   }
   return sessions.map((session) => {
     const record = byNativeSession.get(metadataKey(session.provider, session.id));
-    const title = explicitTitle(record);
+    // Cursor IDE names come from its live sidebar, not an older DEV Anywhere alias.
+    const title =
+      session.provider === "cursor" && session.id.startsWith("cursor_ide_")
+        ? undefined
+        : explicitTitle(record);
     return record
       ? {
           ...session,

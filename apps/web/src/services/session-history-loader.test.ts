@@ -41,7 +41,7 @@ describe("loadSessionHistory", () => {
     const pending = loadSessionHistory(relayWithHistoryRequest(request), 30_000);
 
     expect(useSessionStore.getState().historyLoadStatus).toBe("loading");
-    expect(request).toHaveBeenCalledWith(30_000);
+    expect(request).toHaveBeenCalledWith(30_000, expect.any(Function));
 
     resolveHistory(history);
     await expect(pending).resolves.toEqual({ status: "loaded", sessions: history });

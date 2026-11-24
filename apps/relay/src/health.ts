@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   PROXY_UPGRADE_BOOTSTRAP_VERSION,
+  ProxyUpgradeBootstrapResponseSchema,
   RELAY_CONTROL_PROTOCOL_VERSION,
 } from "@dev-anywhere/shared";
 import type { RelayRegistry } from "./registry.js";
@@ -90,11 +91,18 @@ export function healthRouter(registry: RelayRegistry, options: HealthRouterOptio
   router.get("/api/proxy-upgrade-bootstrap", (req, res) => {
     if (!requireProxyTokenIfConfigured(req, res)) return;
     res.setHeader("Cache-Control", "no-store");
-    res.json({
+    const response = ProxyUpgradeBootstrapResponseSchema.safeParse({
       bootstrapVersion: PROXY_UPGRADE_BOOTSTRAP_VERSION,
       relayVersion: RELAY_VERSION,
       controlProtocolVersion: RELAY_CONTROL_PROTOCOL_VERSION,
     });
+    // Private builds cannot advertise an exact, published npm upgrade target. Older Proxies
+    // already treat 404 as "no bootstrap" and continue through normal WebSocket admission.
+    if (!response.success) {
+      res.status(404).end();
+      return;
+    }
+    res.json(response.data);
   });
 
   router.get("/status", (_req, res) => {

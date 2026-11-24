@@ -46,6 +46,7 @@ function renderHistoryList(
     sessions: [],
     sessionListLoaded: true,
     historySessions,
+    cursorIdeHistoryError: null,
     historyLoadStatus,
     historyLoadGeneration: 0,
     ptyTitles: {},
@@ -96,6 +97,90 @@ describe("HistoryList", () => {
     // finish while this test file's jsdom realm is still active; otherwise a
     // parallel file can replace global CustomEvent before the callback runs.
     await new Promise((resolve) => setTimeout(resolve, 0));
+  });
+
+  it("opens Cursor IDE rows directly and shows the specific failure", async () => {
+    const id = "cursor_ide_c3bc842d-97dc-4cec-9cde-00f07cac3f02";
+    createSession.mockResolvedValueOnce({
+      type: "session_create_response",
+      success: false,
+      error: "当前 Cursor 会话有未发送的草稿，请先处理后重试",
+    });
+    const { container } = renderHistoryList([
+      {
+        id,
+        title: "IDE chat",
+        projectDir: "/Users/dev/project",
+        cursorIdeGroup: "team/project",
+        updatedAt: 1,
+        provider: "cursor",
+      },
+      {
+        id: "cli-chat",
+        title: "CLI chat",
+        projectDir: "/Users/dev/project",
+        updatedAt: 1,
+        provider: "cursor",
+      },
+    ]);
+    fireEvent.click(container.querySelector('[data-slot="history-section-header"]')!);
+    expect(screen.getByText("Cursor IDE")).toBeTruthy();
+    expect(screen.getByText("Cursor CLI")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: /team\/project/ }));
+    fireEvent.click(screen.getByRole("button", { name: "恢复会话：IDE chat" }));
+    await waitFor(() =>
+      expect(createSession).toHaveBeenCalledWith(
+        expect.objectContaining({
+          provider: "cursor",
+          mode: "json",
+          resumeSessionId: id,
+          cwd: "/Users/dev/project",
+        }),
+      ),
+    );
+    expect(toastError).toHaveBeenCalledWith(
+      "恢复失败：当前 Cursor 会话有未发送的草稿，请先处理后重试",
+    );
+    expect(screen.queryByRole("dialog")).toBeNull();
+  });
+
+  it("refreshes the expanded list while the page is visible", async () => {
+    vi.useFakeTimers();
+    try {
+      const { container } = renderHistoryList([
+        {
+          id: "cursor_ide_c3bc842d-97dc-4cec-9cde-00f07cac3f02",
+          title: "IDE chat",
+          projectDir: "/Users/dev/project",
+          updatedAt: 1,
+          provider: "cursor",
+        },
+      ]);
+      fireEvent.click(container.querySelector('[data-slot="history-section-header"]')!);
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(30_000);
+      });
+      expect(requestSessionHistory).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("shows a Cursor connection error without removing other providers", () => {
+    renderHistoryList([
+      {
+        id: "claude-1",
+        title: "Other chat",
+        projectDir: "/Users/dev/project",
+        updatedAt: 1,
+        provider: "claude",
+      },
+    ]);
+    act(() =>
+      useSessionStore.setState({ cursorIdeHistoryError: "无法连接 Cursor IDE，请开启调试端口" }),
+    );
+    expect(screen.getByRole("status").textContent).toContain("无法连接 Cursor IDE，请开启调试端口");
+    expect(useSessionStore.getState().historySessions).toHaveLength(1);
   });
 
   it("groups the same project directory with or without a trailing slash", () => {

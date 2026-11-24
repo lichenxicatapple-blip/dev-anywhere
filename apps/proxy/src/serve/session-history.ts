@@ -9,6 +9,12 @@ import {
 } from "@dev-anywhere/shared";
 import { collectJsonlFiles, collectFilesNamed } from "./history/files.js";
 import { readCursorConversationRecords } from "./history/cursor.js";
+import {
+  readCursorIdeBubbleMessages,
+  resolveCursorIdeTranscript,
+} from "./history/cursor-ide.js";
+import { cursorIdeNativeId, isCursorTaskResultPrompt } from "../common/cursor-ide.js";
+import { readJsonlRecords } from "./history/files.js";
 import { claudeProjectsDir, codexSessionsDir, kimiSessionsDir } from "./history/paths.js";
 import { readCodexSessionId } from "./history/codex.js";
 import {
@@ -712,7 +718,8 @@ function unwrapCursorUserText(rawText: string): string | null {
   const query = text.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
   if (query?.[1] !== undefined) {
     const unwrapped = query[1].trim();
-    return unwrapped.length > 0 ? unwrapped : null;
+    if (!unwrapped || isCursorTaskResultPrompt(unwrapped)) return null;
+    return unwrapped;
   }
   if (
     /^<(?:user_info|timestamp|environment_context|conversation_summary)(?:[\s>:-])/i.test(
@@ -834,8 +841,37 @@ async function readCursorSessionMessagesPage(
   sessionId: string,
   options: SessionMessagesPageOptions = {},
 ): Promise<SessionMessagesPage> {
+  if (cursorIdeNativeId(sessionId)) {
+    return pageCursorHistoryMessages(await readCursorIdeMessages(sessionId), options);
+  }
   const messages = collectCursorHistoryMessages(await readCursorConversationRecords(sessionId));
   return pageCursorHistoryMessages(messages, options);
+}
+
+async function readCursorIdeMessages(sessionId: string): Promise<UnpositionedSessionMessage[]> {
+  const path = await resolveCursorIdeTranscript(sessionId);
+  const messages: UnpositionedSessionMessage[] = [];
+  if (path) {
+    try {
+      for await (const row of readJsonlRecords(path)) {
+        if (row.role !== "user" && row.role !== "assistant") continue;
+        const message = asRecord(row.message);
+        const content =
+          row.role === "user" ? unwrapCursorUserContent(message?.content) : message?.content;
+        for (const item of extractClaudeContentItems(row.role, content)) {
+          if (item.kind === "message") messages.push(item.message);
+        }
+      }
+    } catch {
+      // An unavailable transcript should not make the rest of the catalog unavailable.
+    }
+  }
+  if (messages.length > 0) return messages;
+  return (await readCursorIdeBubbleMessages(sessionId)).map((message) => ({
+    role: message.role,
+    text: message.text,
+    ...(message.timestamp !== undefined ? { timestamp: message.timestamp } : {}),
+  }));
 }
 
 function extractCodexMessage(
@@ -1149,6 +1185,7 @@ export async function readSessionMessages(
   provider?: ProviderId,
 ): Promise<SessionMessage[]> {
   if (provider === "cursor") {
+    if (cursorIdeNativeId(sessionId)) return readCursorIdeMessages(sessionId);
     return collectCursorHistoryMessages(await readCursorConversationRecords(sessionId));
   }
   const filePath = await findSessionFile(sessionId, provider);

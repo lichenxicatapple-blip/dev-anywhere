@@ -264,6 +264,8 @@ dev-anywhere serve status
 
 Claude Code、Codex、Kimi Code 和 Cursor CLI 都支持这两种视图。其中 Kimi Code 和 Cursor CLI 的聊天模式使用 ACP，支持流式回复、工具调用、取消当前回复和恢复历史会话；Cursor ACP 还支持提问、计划确认和待办列表。
 
+Cursor 的聊天模式也可以选择 **IDE**：Proxy 连接本机已运行的 Cursor 窗口，在 IDE 中新建会话或继续聊天。先用 `--remote-debugging-port=9222` 启动 Cursor，并在 IDE 打开目标工作区；例如 macOS 可在退出 Cursor 后运行 `open -a Cursor --args --remote-debugging-port=9222`。DEV Anywhere 不会自动重启 Cursor。全部会话中的 Cursor IDE 列表与 Cursor Agents 当前侧边栏同步；没有 Agents 窗口时显示编辑器中打开的聊天标签。点击条目会在 Cursor 中打开并接续该会话；列表展开时每 30 秒刷新，也可手动刷新。切换前会保护正在生成的会话、待处理审批和未发送的草稿。IDE 权限由 Cursor 自身设置，当前支持转发可识别的命令审批，其他审批或提问需在 IDE 处理。在 IDE 本地发起的消息可通过刷新历史查看；终止 DEV Anywhere 会话只断开连接，不会停止 IDE。界面由 CDP 驱动，Cursor 更新或切换聊天可能导致同步中断；调试端口只应在本机使用。
+
 ![DEV Anywhere 的终端与聊天视图](./docs/assets/readme-session-modes.gif)
 
 ### 网页与移动设备模拟器预览

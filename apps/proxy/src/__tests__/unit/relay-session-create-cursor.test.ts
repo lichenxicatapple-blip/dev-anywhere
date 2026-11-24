@@ -11,6 +11,40 @@ vi.mock("#src/common/pty-runtime.js", () => ({
 }));
 
 describe("Cursor session create", () => {
+  it("routes an IDE history session to the IDE worker", () => {
+    const relaySend = vi.fn();
+    const spawn = vi.fn(() => 4321);
+    const handler = new RelaySessionCreateHandler({
+      relaySend,
+      terminalWorkerSpawner: { start: vi.fn() } as never,
+      sessionManager: { listSessions: vi.fn(() => []) } as unknown as SessionManager,
+      workerRegistry: { spawn } as never,
+      controlHandlers: {} as never,
+      permissionBroker: {} as never,
+      agentStatusRegistry: {} as never,
+      getProviderEnv: () => ({}),
+      createHookContext: vi.fn(),
+      cleanupHookContext: vi.fn(),
+      broadcastSessionSync: vi.fn(),
+      broadcastSessionList: vi.fn(),
+    });
+    const historyId = "cursor_ide_c3bc842d-97dc-4cec-9cde-00f07cac3f02";
+    handler.onSessionCreate({
+      type: "session_create",
+      requestId: "ide",
+      kind: "agent",
+      mode: "json",
+      provider: "cursor",
+      cwd: existingCwd,
+      resumeSessionId: historyId,
+      permissionMode: "default",
+    });
+    expect(spawn).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ provider: "cursor", cursorIde: true, resumeSessionId: historyId }),
+    );
+  });
+
   it("starts a JSON worker for Cursor ACP chat", () => {
     const relaySend = vi.fn();
     const spawn = vi.fn(() => 4321);
