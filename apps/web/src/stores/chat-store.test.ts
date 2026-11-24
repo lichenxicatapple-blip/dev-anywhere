@@ -256,6 +256,26 @@ describe("chat-store per-session", () => {
     ]);
   });
 
+  it("keeps a local user prompt when history reloads before the plan is saved", () => {
+    useChatStore.getState().addUserMessage("s1", {
+      id: "live-user",
+      role: "user",
+      text: "先出计划",
+      isPartial: false,
+      timestamp: 500,
+      toolCalls: [],
+    });
+
+    useChatStore.getState().loadHistoryPage("s1", {
+      mode: "replace",
+      messages: [],
+    });
+
+    expect(useChatStore.getState().bySessionId.s1.messages.map((message) => message.text)).toEqual([
+      "先出计划",
+    ]);
+  });
+
   it("keeps a replayed full snapshot while initial history loads", () => {
     useChatStore.getState().upsertAssistantSnapshot("s1", {
       turnId: "turn-active",

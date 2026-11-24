@@ -65,7 +65,11 @@ vi.mock("ws", async () => {
   return { default: FakeSocket };
 });
 
-import { CursorIdeSession } from "#src/worker/cursor-ide-session.js";
+import {
+  CursorIdeSession,
+  diffCursorIdeTranscript,
+  diffUnkeyedTranscript,
+} from "#src/worker/cursor-ide-session.js";
 
 function session(
   callbacks: {
@@ -152,6 +156,93 @@ describe("Cursor IDE session", () => {
     expect((await failure).message).toContain("草稿");
     expect(state.inserted).toBe(false);
     await current.stop();
+  });
+
+  it("follows a virtualized window by row id instead of aborting", () => {
+    const sync = {
+      sent: new Map([
+        ["u1", "question"],
+        ["a1", "Hello"],
+      ]),
+      highWater: 1,
+    };
+    expect(
+      diffCursorIdeTranscript(sync, [
+        { id: "a1", role: "assistant", text: "Hello", index: 1 },
+        { id: "a2", role: "assistant", text: " world", index: 2 },
+      ]),
+    ).toEqual([{ role: "assistant", messageId: "", text: " world" }]);
+    expect(
+      diffCursorIdeTranscript(
+        { sent: new Map([["a1", "Hello"]]), highWater: 5 },
+        [
+          { id: "old", role: "user", text: "earlier", index: 2 },
+          { id: "a1", role: "assistant", text: "Hello", index: 5 },
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  it("does not resend a reply that Cursor split into bubbles, then sends later growth", () => {
+    const sync = { sent: new Map([["a1", "Hello world"]]), highWater: 1 };
+    expect(
+      diffCursorIdeTranscript(sync, [
+        { id: "a1", role: "assistant", text: "Hello", index: 1 },
+        { id: "a2", role: "assistant", text: " world", index: 2 },
+      ]),
+    ).toEqual([]);
+    expect(sync.sent.get("a1")).toBe("Hello");
+    expect(
+      diffCursorIdeTranscript(sync, [
+        { id: "a1", role: "assistant", text: "Hello", index: 1 },
+        { id: "a2", role: "assistant", text: " world!", index: 2 },
+      ]),
+    ).toEqual([{ role: "assistant", messageId: "", text: "!" }]);
+  });
+
+  it("keeps index alignment when the transcript has no row ids", () => {
+    expect(
+      diffCursorIdeTranscript(
+        { sent: new Map(), highWater: -1 },
+        [{ role: "assistant", text: "answer" }],
+      ),
+    ).toBeNull();
+  });
+
+  it("realigns an unkeyed transcript after the view scrolls or a bubble splits", () => {
+    expect(
+      diffUnkeyedTranscript(
+        { user: "question", assistant: "Hello" },
+        [
+          { role: "assistant", text: "Hello" },
+          { role: "assistant", text: " world" },
+        ],
+      ),
+    ).toEqual([{ role: "assistant", messageId: "", text: " world" }]);
+    expect(
+      diffUnkeyedTranscript(
+        { user: "", assistant: "Hello world" },
+        [
+          { role: "assistant", text: "Hello" },
+          { role: "assistant", text: " world" },
+        ],
+      ),
+    ).toEqual([]);
+    expect(
+      diffUnkeyedTranscript(
+        { user: "", assistant: "Hello world" },
+        [
+          { role: "assistant", text: "Hello" },
+          { role: "assistant", text: " world!" },
+        ],
+      ),
+    ).toEqual([{ role: "assistant", messageId: "", text: "!" }]);
+    expect(
+      diffUnkeyedTranscript(
+        { user: "", assistant: "Hello world" },
+        [{ role: "assistant", text: "Hello  world" }],
+      ),
+    ).toEqual([]);
   });
 
   it("rejects a target whose debug socket is not loopback", async () => {

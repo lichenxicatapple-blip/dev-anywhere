@@ -210,6 +210,123 @@ describe("Cursor IDE DOM interaction", () => {
     await current.stop();
   });
 
+  it("selects a background agent before typing when Cursor is showing another chat", async () => {
+    const other = "d6bc842d-97dc-4cec-9cde-00f07cac3f02";
+    document.body.innerHTML = `
+      <div data-perf-id="glass-sidebar-agent-row" data-sidebar-file-drop-agent-id="${id}" data-active="true"><div data-sidebar-row-trigger></div></div>
+      <div data-perf-id="glass-sidebar-agent-row" data-sidebar-file-drop-agent-id="${other}"><div data-sidebar-row-trigger></div></div>
+      <div class="agent-panel-conversation-shell"><div contenteditable="true" role="textbox" data-sidebar-file-drop-editor-agent-id="${id}"></div><button aria-label="Send message" class="ui-prompt-input-submit-button">Send</button></div>
+      <div class="agent-panel-conversation-shell"><div contenteditable="true" role="textbox" data-sidebar-file-drop-editor-agent-id="${other}"></div><button aria-label="Send message" class="ui-prompt-input-submit-button">Send</button></div>`;
+    const targetRow = document.querySelector(
+      `[data-sidebar-file-drop-agent-id="${id}"]`,
+    ) as HTMLElement;
+    targetRow.querySelector("[data-sidebar-row-trigger]")!.addEventListener("click", () => {
+      document
+        .querySelectorAll("[data-perf-id='glass-sidebar-agent-row']")
+        .forEach((row) => row.removeAttribute("data-active"));
+      targetRow.setAttribute("data-active", "true");
+    });
+    const input = document.querySelector(
+      `[data-sidebar-file-drop-editor-agent-id="${id}"]`,
+    ) as HTMLElement;
+    const send = input.parentElement!.querySelector("button")!;
+    send.addEventListener("click", () => {
+      expect(input.textContent).toBe("hello");
+      send.setAttribute("data-state", "stop");
+      setTimeout(() => send.removeAttribute("data-state"), 500);
+    });
+    let complete!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    const current = makeSession((error) => {
+      throw error;
+    }, complete);
+    current.start();
+    await current.waitUntilReady();
+    targetRow.removeAttribute("data-active");
+    document
+      .querySelector(`[data-sidebar-file-drop-agent-id="${other}"]`)!
+      .setAttribute("data-active", "true");
+    current.sendMessage("hello");
+    await finished;
+    expect(
+      document.querySelector(`[data-sidebar-file-drop-editor-agent-id="${other}"]`)?.textContent,
+    ).toBe("");
+    await current.stop();
+  });
+
+  it("sends to the target chat while the chat Cursor is showing is still generating", async () => {
+    const other = "d6bc842d-97dc-4cec-9cde-00f07cac3f02";
+    document.body.innerHTML = `
+      <div data-perf-id="glass-sidebar-agent-row" data-sidebar-file-drop-agent-id="${id}" data-active="true"><div data-sidebar-row-trigger></div></div>
+      <div data-perf-id="glass-sidebar-agent-row" data-sidebar-file-drop-agent-id="${other}"><div data-sidebar-row-trigger></div></div>
+      <div class="agent-panel-conversation-shell"><div contenteditable="true" role="textbox" data-sidebar-file-drop-editor-agent-id="${id}"></div><button aria-label="Send message" class="ui-prompt-input-submit-button">Send</button></div>
+      <div class="agent-panel-conversation-shell"><div contenteditable="true" role="textbox" data-sidebar-file-drop-editor-agent-id="${other}"></div><button aria-label="Stop generation" class="ui-prompt-input-submit-button" data-state="stop">Stop</button></div>`;
+    const targetRow = document.querySelector(
+      `[data-sidebar-file-drop-agent-id="${id}"]`,
+    ) as HTMLElement;
+    targetRow.querySelector("[data-sidebar-row-trigger]")!.addEventListener("click", () => {
+      document
+        .querySelectorAll("[data-perf-id='glass-sidebar-agent-row']")
+        .forEach((row) => row.removeAttribute("data-active"));
+      targetRow.setAttribute("data-active", "true");
+    });
+    const input = document.querySelector(
+      `[data-sidebar-file-drop-editor-agent-id="${id}"]`,
+    ) as HTMLElement;
+    const send = input.parentElement!.querySelector("button")!;
+    send.addEventListener("click", () => {
+      expect(input.textContent).toBe("hello");
+      send.setAttribute("data-state", "stop");
+      setTimeout(() => send.removeAttribute("data-state"), 500);
+    });
+    let complete!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    const current = makeSession((error) => {
+      throw error;
+    }, complete);
+    current.start();
+    await current.waitUntilReady();
+    targetRow.removeAttribute("data-active");
+    document
+      .querySelector(`[data-sidebar-file-drop-agent-id="${other}"]`)!
+      .setAttribute("data-active", "true");
+    current.sendMessage("hello");
+    await finished;
+    expect(
+      document.querySelector(`[data-sidebar-file-drop-editor-agent-id="${other}"]`)?.textContent,
+    ).toBe("");
+    await current.stop();
+  });
+
+  it("does not sync Cursor's injected task-result prompt as a user message", async () => {
+    const prompt =
+      "Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.";
+    const updates: Record<string, unknown>[] = [];
+    const current = makeSession(
+      (error) => {
+        throw error;
+      },
+      () => {},
+      (value) => updates.push(value),
+    );
+    current.start();
+    await current.waitUntilReady();
+    document.querySelector(".composer-bar")!.insertAdjacentHTML(
+      "beforeend",
+      `<div data-message-id="sys" data-message-kind="human"><div class="ui-agent-transcript-human-bubble">${prompt}</div></div>
+       <div data-message-id="real" data-message-kind="human"><div class="ui-agent-transcript-human-bubble">real question</div></div>`,
+    );
+    const texts = () =>
+      updates.map((value) => (value.update as { content?: { text?: string } }).content?.text);
+    await vi.waitFor(() => expect(texts()).toContain("real question"), { timeout: 3_000 });
+    expect(texts()).not.toContain(prompt);
+    await current.stop();
+  });
+
   it("creates a new IDE chat only after its identity changes", async () => {
     const root = await mkdtemp(join(tmpdir(), "cursor-ide-workspace-"));
     const original = process.env.CURSOR_IDE_USER_DIR;
@@ -298,6 +415,145 @@ describe("Cursor IDE DOM interaction", () => {
     expect(updates).toMatchObject([{ update: { content: { text: "local response" } } }]);
     await current.stop();
   });
+
+  it("keeps a switched-away composer working and shows the user prompt and plan", async () => {
+    const updates: Record<string, unknown>[] = [];
+    const complete = vi.fn();
+    const current = new CursorIdeSession({
+      cwd: "/project",
+      resumeSessionId: `cursor_ide_${id}`,
+      onUpdate: (value) => updates.push(value),
+      onPromptStart: () => {},
+      onPromptComplete: complete,
+      onPromptError: (error) => {
+        throw error;
+      },
+      onApproval: async () => "cancel",
+      onExit: () => {},
+    });
+    current.start();
+    await current.waitUntilReady();
+    const other = document.createElement("div");
+    other.setAttribute("data-perf-id", "glass-sidebar-agent-row");
+    other.setAttribute("data-active", "true");
+    other.setAttribute("data-sidebar-file-drop-agent-id", "d6bc842d-97dc-4cec-9cde-00f07cac3f02");
+    document.body.appendChild(other);
+    document.querySelector(".composer-bar")!.insertAdjacentHTML(
+      "beforeend",
+      `<div data-message-kind="human"><div data-agent-transcript-human-bubble>plan this feature</div></div>
+       <div class="plan-body">1. Inspect the switch</div>`,
+    );
+    document.querySelector("button")!.setAttribute("data-state", "stop");
+    await vi.waitFor(() => {
+      expect(updates.map((value) => (value.update as { content?: { text?: string } }).content?.text)).toEqual(
+        expect.arrayContaining(["plan this feature", "1. Inspect the switch"]),
+      );
+    });
+    expect(complete).not.toHaveBeenCalled();
+    other.remove();
+    document.querySelector("button")!.removeAttribute("data-state");
+    await vi.waitFor(() => expect(complete).toHaveBeenCalled(), { timeout: 3_000 });
+    await current.stop();
+  });
+
+  it("keeps syncing after the virtualized transcript scrolls and splits", async () => {
+    const updates: Record<string, unknown>[] = [];
+    const errors: Error[] = [];
+    const complete = vi.fn();
+    const current = new CursorIdeSession({
+      cwd: "/project",
+      resumeSessionId: `cursor_ide_${id}`,
+      onUpdate: (value) => updates.push(value),
+      onPromptStart: () => {},
+      onPromptComplete: complete,
+      onPromptError: (error) => errors.push(error),
+      onApproval: async () => "cancel",
+      onExit: () => {},
+    });
+    current.start();
+    await current.waitUntilReady();
+    const bar = document.querySelector(".composer-bar")!;
+    bar.insertAdjacentHTML(
+      "beforeend",
+      `<div class="virtualized-composer-messages-row" data-index="0">
+         <div data-message-id="u1" data-message-kind="human"><div class="ui-agent-transcript-human-bubble">question</div></div>
+       </div>
+       <div class="virtualized-composer-messages-row" data-index="1">
+         <div data-message-id="a1" data-message-kind="assistant"><div class="markdown-root">Hello</div></div>
+       </div>`,
+    );
+    document.querySelector("button")!.setAttribute("data-state", "stop");
+    const texts = () =>
+      updates.map((value) => (value.update as { content?: { text?: string } }).content?.text);
+    await vi.waitFor(() => expect(texts()).toEqual(expect.arrayContaining(["question", "Hello"])), {
+      timeout: 3_000,
+    });
+    bar.querySelector('[data-index="0"]')!.remove();
+    bar.insertAdjacentHTML(
+      "beforeend",
+      `<div class="virtualized-composer-messages-row" data-index="2">
+         <div data-message-id="a2" data-message-kind="assistant"><div class="markdown-root">world</div></div>
+       </div>`,
+    );
+    await vi.waitFor(() => expect(texts()).toContain("world"), { timeout: 3_000 });
+    document.querySelector('[data-message-id="a1"] .markdown-root')!.textContent = "Hel";
+    bar.insertAdjacentHTML(
+      "beforeend",
+      `<div class="virtualized-composer-messages-row" data-index="3">
+         <div data-message-id="a3" data-message-kind="assistant"><div class="markdown-root">lo</div></div>
+       </div>`,
+    );
+    document.querySelector('[data-message-id="a2"] .markdown-root')!.textContent = "world!";
+    await vi.waitFor(() => expect(texts()).toContain("!"), { timeout: 3_000 });
+    expect(texts()).not.toContain("lo");
+    expect(errors).toEqual([]);
+    document.querySelector("button")!.removeAttribute("data-state");
+    await vi.waitFor(() => expect(complete).toHaveBeenCalled(), { timeout: 3_000 });
+    await current.stop();
+  });
+
+  it("keeps syncing when an unkeyed transcript scrolls instead of aborting", async () => {
+    const updates: Record<string, unknown>[] = [];
+    const errors: Error[] = [];
+    const complete = vi.fn();
+    const current = new CursorIdeSession({
+      cwd: "/project",
+      resumeSessionId: `cursor_ide_${id}`,
+      onUpdate: (value) => updates.push(value),
+      onPromptStart: () => {},
+      onPromptComplete: complete,
+      onPromptError: (error) => errors.push(error),
+      onApproval: async () => "cancel",
+      onExit: () => {},
+    });
+    current.start();
+    await current.waitUntilReady();
+    const bar = document.querySelector(".composer-bar")!;
+    bar.insertAdjacentHTML(
+      "beforeend",
+      `<div data-message-kind="human"><div data-agent-transcript-human-bubble>question</div></div>
+       <div class="agent-transcript-row-markdown"><div class="markdown-root">Hello</div></div>`,
+    );
+    document.querySelector("button")!.setAttribute("data-state", "stop");
+    const texts = () =>
+      updates.map((value) => (value.update as { content?: { text?: string } }).content?.text);
+    await vi.waitFor(() => expect(texts()).toEqual(expect.arrayContaining(["question", "Hello"])), {
+      timeout: 3_000,
+    });
+    bar.querySelector('[data-message-kind="human"]')!.remove();
+    bar.insertAdjacentHTML(
+      "beforeend",
+      `<div class="agent-transcript-row-markdown"><div class="markdown-root">world</div></div>`,
+    );
+    await vi.waitFor(() => expect(texts()).toContain("world"), { timeout: 3_000 });
+    expect(errors.map((error) => error.message)).not.toContain(
+      "Cursor IDE 消息视图已变化，无法可靠同步回复",
+    );
+    document.querySelector("button")!.removeAttribute("data-state");
+    await vi.waitFor(() => expect(complete).toHaveBeenCalled(), { timeout: 3_000 });
+    await current.stop();
+  });
+
   it("inserts into the verified composer, submits and streams its response", async () => {
     const button = document.querySelector("button")!;
     button.addEventListener("click", () => {
@@ -328,6 +584,91 @@ describe("Cursor IDE DOM interaction", () => {
     expect(updates).toMatchObject([
       { update: { sessionUpdate: "agent_message_chunk", content: { text: "answer" } } },
     ]);
+    await current.stop();
+  });
+
+  it("writes through the Lexical editor when execCommand refuses the input", async () => {
+    const input = document.querySelector("[contenteditable='true']") as HTMLElement & {
+      __lexicalEditor?: {
+        parseEditorState: (serialized: string) => string;
+        setEditorState: (state: string) => void;
+      };
+    };
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn(() => false),
+    });
+    input.__lexicalEditor = {
+      parseEditorState: (serialized) => serialized,
+      setEditorState: (state) => {
+        const parsed = JSON.parse(state) as {
+          root: { children: Array<{ children: Array<{ text?: string }> }> };
+        };
+        input.textContent = parsed.root.children[0]?.children[0]?.text ?? "";
+      },
+    };
+    const button = document.querySelector("button")!;
+    button.addEventListener("click", () => {
+      expect(input.textContent).toBe("hello");
+      button.setAttribute("data-state", "stop");
+      const row = document.createElement("div");
+      row.className = "agent-transcript-row-markdown";
+      row.innerHTML = '<div class="markdown-root">answer</div>';
+      document.querySelector(".composer-bar")!.appendChild(row);
+      setTimeout(() => button.removeAttribute("data-state"), 500);
+    });
+    let complete!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    const current = makeSession(
+      (error) => {
+        throw error;
+      },
+      complete,
+    );
+    current.start();
+    await current.waitUntilReady();
+    current.sendMessage("hello");
+    await finished;
+    await current.stop();
+  });
+
+  it("waits for editor text that lands after execCommand accepts", async () => {
+    Object.defineProperty(document, "execCommand", {
+      configurable: true,
+      value: vi.fn((_command: string, _ui: boolean, text: string) => {
+        const input = document.querySelector("[contenteditable='true']");
+        setTimeout(() => {
+          if (input) input.textContent = text;
+        }, 150);
+        return true;
+      }),
+    });
+    const button = document.querySelector("button")!;
+    button.addEventListener("click", () => {
+      expect(document.querySelector("[contenteditable='true']")?.textContent).toBe("hello");
+      button.setAttribute("data-state", "stop");
+      const row = document.createElement("div");
+      row.className = "agent-transcript-row-markdown";
+      row.innerHTML = '<div class="markdown-root">answer</div>';
+      document.querySelector(".composer-bar")!.appendChild(row);
+      setTimeout(() => button.removeAttribute("data-state"), 500);
+    });
+    let complete!: () => void;
+    const finished = new Promise<void>((resolve) => {
+      complete = resolve;
+    });
+    const current = makeSession(
+      (error) => {
+        throw error;
+      },
+      complete,
+    );
+    current.start();
+    await current.waitUntilReady();
+    current.sendMessage("hello");
+    await finished;
     await current.stop();
   });
 

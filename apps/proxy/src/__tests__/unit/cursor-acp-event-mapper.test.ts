@@ -22,6 +22,32 @@ describe("CursorAcpEventMapper", () => {
     ).toEqual([{ kind: "assistant_text", text: "你好" }]);
   });
 
+  it("maps an IDE user bubble without treating ACP user echoes as chat input", () => {
+    const mapper = new CursorAcpEventMapper();
+    const echoed = mapper.map(
+      "s1",
+      4,
+      update("cursor_ide_user_message", {
+        messageId: "ide-echo-0",
+        content: { type: "text", text: "plan this feature" },
+      }),
+    );
+    expect(echoed[0]).toMatchObject({
+      kind: "envelope",
+      envelope: {
+        type: "user_input",
+        payload: { text: "plan this feature", messageId: "ide-echo-0" },
+      },
+    });
+    expect(
+      mapper.map(
+        "s1",
+        5,
+        update("user_message_chunk", { content: { type: "text", text: "ignored echo" } }),
+      ),
+    ).toEqual([]);
+  });
+
   it("maps todos and generated images onto the existing chat protocol", () => {
     const mapper = new CursorAcpEventMapper();
     const todos = mapper.map("s1", 2, {

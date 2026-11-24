@@ -393,6 +393,24 @@ export class CursorAcpEventMapper {
       return text ? [{ kind: "assistant_text", text }] : [];
     }
 
+    if (updateType === "cursor_ide_user_message") {
+      const text = contentText(update.content);
+      if (!text) return [];
+      const messageId = typeof update.messageId === "string" ? update.messageId : undefined;
+      return [
+        {
+          kind: "envelope",
+          envelope: buildMessage(
+            "user_input",
+            sessionId,
+            seq,
+            { text, ...(messageId ? { messageId } : {}) },
+            "proxy",
+          ),
+        },
+      ];
+    }
+
     if (updateType === "agent_thought_chunk") {
       const text = contentText(update.content);
       return text

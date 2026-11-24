@@ -67,6 +67,13 @@ function handleAssistantMessage(env: Extract<MessageEnvelope, { type: "assistant
 function handleUserInput(env: Extract<MessageEnvelope, { type: "user_input" }>) {
   const timestamp = Number.isFinite(env.timestamp) ? env.timestamp : Date.now();
   const messageId = env.payload.messageId ?? `${env.sessionId}-user-${timestamp}`;
+  if (messageId.startsWith("ide-echo-")) {
+    const text = env.payload.text.trim();
+    const existing = useChatStore.getState().bySessionId[env.sessionId]?.messages ?? [];
+    if (existing.some((message) => message.role === "user" && message.text.trim() === text)) {
+      return;
+    }
+  }
   useChatStore.getState().addUserMessage(env.sessionId, {
     id: messageId,
     role: "user",

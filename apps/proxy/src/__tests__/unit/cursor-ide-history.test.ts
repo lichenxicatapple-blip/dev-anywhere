@@ -97,6 +97,109 @@ describe("Cursor IDE history", () => {
     expect(previous.messages).toMatchObject([{ role: "user", text: "Hello" }]);
   });
 
+  it("omits Cursor task-result prompts that the user did not write", async () => {
+    const { transcript } = await fixture();
+    const prompt =
+      "Briefly inform the user about the task result and perform any follow-up actions (if needed). If there's no follow-ups needed, don't explicitly say that.";
+    const shortPrompt =
+      "Briefly inform the user about the task result and perform any follow-up actions (if needed).";
+    await writeFile(
+      transcript,
+      [
+        JSON.stringify({
+          role: "user",
+          message: { content: [{ type: "text", text: "<user_query>Hello</user_query>" }] },
+        }),
+        JSON.stringify({
+          role: "user",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: `<timestamp>Tuesday, Nov 24, 2026, 2:25 PM (UTC+8)</timestamp>\n<user_query>${prompt}</user_query>`,
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          role: "user",
+          message: {
+            content: [{ type: "text", text: `<user_query>${shortPrompt}</user_query>` }],
+          },
+        }),
+        JSON.stringify({
+          role: "user",
+          message: {
+            content: [
+              {
+                type: "text",
+                text: `<user_query>\n客户端引用了这句\n${prompt}\n</user_query>`,
+              },
+            ],
+          },
+        }),
+        JSON.stringify({
+          role: "assistant",
+          message: { content: [{ type: "text", text: "Hello back" }] },
+        }),
+      ].join("\n"),
+    );
+    const page = await readSessionMessagesPage(historyId, { limit: 10 }, "cursor");
+    expect(page.messages.map((message) => message.text)).toEqual([
+      "Hello",
+      `客户端引用了这句\n${prompt}`,
+      "Hello back",
+    ]);
+  });
+
+  it("reads the workspace transcript when the same id was copied into another project", async () => {
+    const { projects } = await fixture();
+    const slug = "home-example-project";
+    const preferred = join(projects, slug, "agent-transcripts", id, `${id}.jsonl`);
+    await mkdir(join(projects, slug, "agent-transcripts", id), { recursive: true });
+    await writeFile(
+      preferred,
+      JSON.stringify({
+        role: "assistant",
+        message: { content: [{ type: "text", text: "from workspace" }] },
+      }),
+    );
+    const page = await readSessionMessagesPage(historyId, { limit: 10 }, "cursor");
+    expect(page.messages).toMatchObject([{ role: "assistant", text: "from workspace" }]);
+  });
+
+  it("reads composer bubbles when the IDE has not flushed a transcript", async () => {
+    await fixture();
+    const user = process.env.CURSOR_IDE_USER_DIR;
+    if (!user) throw new Error("fixture did not set CURSOR_IDE_USER_DIR");
+    const missing = "d6bc842d-97dc-4cec-9cde-00f07cac3f02";
+    const db = new DatabaseSync(join(user, "globalStorage", "state.vscdb"));
+    db.exec("CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value TEXT)");
+    const insert = db.prepare("INSERT INTO cursorDiskKV (key, value) VALUES (?, ?)");
+    insert.run(
+      `bubbleId:${missing}:user`,
+      JSON.stringify({
+        type: 1,
+        text: "<user_query>plan this</user_query>",
+        createdAt: "2026-11-23T00:00:00.000Z",
+      }),
+    );
+    insert.run(
+      `bubbleId:${missing}:plan`,
+      JSON.stringify({
+        type: 2,
+        text: "1. Look at the sidebar",
+        createdAt: "2026-11-23T00:00:01.000Z",
+      }),
+    );
+    db.close();
+    const page = await readSessionMessagesPage(`cursor_ide_${missing}`, { limit: 10 }, "cursor");
+    expect(page.messages).toMatchObject([
+      { role: "user", text: "plan this" },
+      { role: "assistant", text: "1. Look at the sidebar" },
+    ]);
+  });
+
   it("rejects unsafe IDs and ambiguous transcript matches", async () => {
     const { projects, transcript } = await fixture();
     const duplicate = join(projects, "other", "agent-transcripts", id, `${id}.jsonl`);

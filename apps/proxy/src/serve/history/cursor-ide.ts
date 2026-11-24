@@ -1,8 +1,8 @@
 import { createRequire } from "node:module";
 import type { DatabaseSync } from "node:sqlite";
-import { readdir, readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { homedir } from "node:os";
-import { basename, isAbsolute, join } from "node:path";
+import { basename, isAbsolute, join, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { collectJsonlFiles } from "./files.js";
 import type { NativeHistorySession } from "./types.js";
@@ -10,6 +10,7 @@ import {
   cursorIdeNativeId,
   cursorIdeUserDir,
   CURSOR_IDE_HISTORY_PREFIX,
+  isCursorTaskResultPrompt,
 } from "../../common/cursor-ide.js";
 import {
   listCursorIdeVisibleChats,
@@ -51,6 +52,134 @@ export async function findCursorIdeTranscript(
   );
   // Never choose an arbitrary transcript when IDs collide.
   return matches.length === 1 ? matches[0] : null;
+}
+
+function cursorProjectSlug(folder: string): string {
+  return folder.replace(/\\/g, "/").replace(/^\/+/, "").replace(/[/: ]/g, "-");
+}
+
+async function composerWorkspaceFolder(
+  userDir: string,
+  composerId: string,
+): Promise<string | undefined> {
+  let db: DatabaseSync | undefined;
+  try {
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    db = new DatabaseSync(join(userDir, "globalStorage", "state.vscdb"), { readOnly: true });
+    const row = db.prepare("SELECT workspaceId FROM composerHeaders WHERE composerId = ?").get(
+      composerId,
+    ) as { workspaceId?: unknown } | undefined;
+    const workspaceId = typeof row?.workspaceId === "string" ? row.workspaceId : undefined;
+    return workspaceId ? workspacePath(userDir, workspaceId) : undefined;
+  } catch {
+    return;
+  } finally {
+    db?.close();
+  }
+}
+
+/**
+ * Prefer the transcript for this composer's workspace. Identical ids are copied
+ * into worktrees; returning nothing there made a restored IDE session look empty.
+ */
+export async function resolveCursorIdeTranscript(
+  id: string,
+  root = cursorIdeProjectsDir(),
+  userDir = cursorIdeUserDir(),
+): Promise<string | null> {
+  const nativeId = cursorIdeNativeId(id);
+  if (!nativeId) return null;
+  const matches = (await transcriptFiles(root)).filter(
+    (file) => basename(file) === `${nativeId}.jsonl`,
+  );
+  if (matches.length <= 1) return matches[0] ?? null;
+  const folder = await composerWorkspaceFolder(userDir, nativeId);
+  if (folder) {
+    const slug = cursorProjectSlug(folder);
+    const preferred = matches.filter((file) => file.split(sep).includes(slug));
+    if (preferred.length === 1) return preferred[0] ?? null;
+  }
+  const ranked = await Promise.all(
+    matches.map(async (file) => ({ file, mtime: (await stat(file)).mtimeMs })),
+  );
+  ranked.sort((left, right) => right.mtime - left.mtime);
+  return ranked[0]?.file ?? null;
+}
+
+function visibleBubbleText(role: "user" | "assistant", raw: string): string {
+  const withoutReminders = raw.replace(/<system_reminder>[\s\S]*?<\/system_reminder>/gi, "");
+  const query = withoutReminders.match(/<user_query>\s*([\s\S]*?)\s*<\/user_query>/i);
+  const text = (query?.[1] ?? withoutReminders).trim();
+  if (role === "user" && isCursorTaskResultPrompt(text)) return "";
+  if (
+    role === "user" &&
+    /^<(?:user_info|timestamp|environment_context|conversation_summary)(?:[\s>:-])/i.test(text)
+  ) {
+    return "";
+  }
+  return text;
+}
+
+export interface CursorIdeBubbleMessage {
+  role: "user" | "assistant";
+  text: string;
+  timestamp?: number;
+}
+
+/** IDE chats that never flushed an agent transcript still keep their text in composer bubbles. */
+export async function readCursorIdeBubbleMessages(
+  id: string,
+  userDir = cursorIdeUserDir(),
+): Promise<CursorIdeBubbleMessage[]> {
+  const nativeId = cursorIdeNativeId(id);
+  if (!nativeId) return [];
+  let db: DatabaseSync | undefined;
+  try {
+    const { DatabaseSync } = require("node:sqlite") as typeof import("node:sqlite");
+    db = new DatabaseSync(join(userDir, "globalStorage", "state.vscdb"), { readOnly: true });
+    const rows = db
+      .prepare("SELECT value FROM cursorDiskKV WHERE key >= ? AND key < ?")
+      .all(`bubbleId:${nativeId}:`, `bubbleId:${nativeId};`) as Array<{ value?: unknown }>;
+    const messages: Array<CursorIdeBubbleMessage & { order: number }> = [];
+    for (const row of rows) {
+      if (typeof row.value !== "string") continue;
+      let bubble: Record<string, unknown>;
+      try {
+        const parsed = JSON.parse(row.value) as unknown;
+        if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) continue;
+        bubble = parsed as Record<string, unknown>;
+      } catch {
+        continue;
+      }
+      const role = bubble.type === 1 ? "user" : bubble.type === 2 ? "assistant" : null;
+      if (!role || typeof bubble.text !== "string") continue;
+      const text = visibleBubbleText(role, bubble.text);
+      if (!text) continue;
+      const createdAt = bubble.createdAt;
+      const timestamp =
+        typeof createdAt === "number"
+          ? createdAt
+          : typeof createdAt === "string"
+            ? Date.parse(createdAt)
+            : Number.NaN;
+      messages.push({
+        role,
+        text,
+        ...(Number.isFinite(timestamp) ? { timestamp } : {}),
+        order: Number.isFinite(timestamp) ? timestamp : Number.MAX_SAFE_INTEGER,
+      });
+    }
+    messages.sort((left, right) => left.order - right.order);
+    return messages.map(({ role, text, timestamp }) => ({
+      role,
+      text,
+      ...(timestamp !== undefined ? { timestamp } : {}),
+    }));
+  } catch {
+    return [];
+  } finally {
+    db?.close();
+  }
 }
 
 async function workspacePath(userDir: string, workspaceId: string): Promise<string | undefined> {

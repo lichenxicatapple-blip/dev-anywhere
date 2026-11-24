@@ -236,6 +236,27 @@ function isExactHistoryDuplicate(message: ChatMessage, history: ChatMessage[]): 
   );
 }
 
+function historyHasSameText(message: ChatMessage, history: ChatMessage[]): boolean {
+  const text = message.text.trim();
+  return (
+    text.length > 0 &&
+    history.some((candidate) => candidate.role === message.role && candidate.text.trim() === text)
+  );
+}
+
+/** Plan mode can run for a long time before Cursor writes the transcript, so a local user
+ *  message must survive a history replace that does not contain it yet. */
+function keepUnsyncedLiveMessage(
+  message: ChatMessage,
+  history: ChatMessage[],
+  preserveLiveSince: number,
+): boolean {
+  if (message.deliveryStatus === "queued") return true;
+  if (message.role === "assistant" && message.isPartial) return true;
+  if (message.role === "user" && !historyHasSameText(message, history)) return true;
+  return message.timestamp >= preserveLiveSince && !isExactHistoryDuplicate(message, history);
+}
+
 let liveMessageCounter = 0;
 
 function liveMessageId(sessionId: string, role: "assistant" | "activity"): string {
@@ -618,10 +639,7 @@ export const useChatStore = create<ChatStoreState>()(
               const liveMessages = slice.messages.filter(
                 (message) =>
                   !message.id.startsWith(historyPrefix) &&
-                  (message.deliveryStatus === "queued" ||
-                    (message.role === "assistant" && message.isPartial) ||
-                    (message.timestamp >= preserveLiveSince &&
-                      !isExactHistoryDuplicate(message, refreshedHistory))),
+                  keepUnsyncedLiveMessage(message, refreshedHistory, preserveLiveSince),
               );
               nextMessages = [...refreshedHistory, ...liveMessages];
             } else {
@@ -629,12 +647,9 @@ export const useChatStore = create<ChatStoreState>()(
               nextMessages = [
                 ...historyMessages,
                 ...slice.messages.filter(
-                  (m) =>
-                    !m.id.startsWith(historyPrefix) &&
-                    (m.deliveryStatus === "queued" ||
-                      (m.role === "assistant" && m.isPartial) ||
-                      (m.timestamp >= preserveLiveSince &&
-                        !isExactHistoryDuplicate(m, historyMessages))),
+                  (message) =>
+                    !message.id.startsWith(historyPrefix) &&
+                    keepUnsyncedLiveMessage(message, historyMessages, preserveLiveSince),
                 ),
               ];
             }
