@@ -6,10 +6,18 @@ export interface PtyShortcut {
   key: string;
   display: string;
   data: string;
+  action?: string;
+  mobileLabel?: string;
 }
 
-function key(id: string, name: string, display: string, data: string): PtyShortcut {
-  return { id, key: name, display, data };
+function key(
+  id: string,
+  name: string,
+  display: string,
+  data: string,
+  action?: string,
+): PtyShortcut {
+  return { id, key: name, display, data, action };
 }
 
 const ctrlA = key("ctrl-a", "Ctrl+A", "^A", "\x01");
@@ -31,6 +39,8 @@ const f8 = key("f8", "F8", "F8", "\x1b[19~");
 
 interface PtyShortcutPreset {
   menu: readonly PtyShortcut[];
+  menuWithMobileControls?: readonly PtyShortcut[];
+  mobileShiftTab?: PtyShortcut;
   // Keep four contextual positions within the 14-key toolbar. Prioritize viewing output,
   // recalling/editing prompts, and keys missing from phone keyboards. Every agent keeps
   // whole-draft clear in the third position; less frequent actions stay accessible in menu.
@@ -44,6 +54,21 @@ interface PtyShortcutPreset {
 // https://moonshotai.github.io/kimi-code/en/reference/keyboard.html
 const shiftTab = key("shift-tab", "Shift+Tab", "⇧⇥", "\x1b[Z");
 const ctrlD = key("ctrl-d", "Ctrl+D", "^D", "\x04");
+
+// https://antigravity.google/docs/cli/using#keybindings
+const antigravityDetails = { ...ctrlO, action: "工具详情", mobileLabel: "详情" };
+const antigravityReview = { ...ctrlR, action: "审查产物", mobileLabel: "审查" };
+const antigravityNewline = key("ctrl-j", "Ctrl+J", "^J", "\x0a", "换行");
+const antigravityMode = { ...shiftTab, action: "切换模式", mobileLabel: "模式" };
+// agy recognizes two explicit Escape sequences in one PTY write. Two bare ESC bytes
+// sent together leave the draft in place.
+const antigravityClear = key("clear", "Esc ×2", "Esc", "\x1b[27u\x1b[27u", "清空");
+const antigravityEditing = [
+  { ...ctrlA, action: "移到行首" },
+  { ...ctrlE, action: "移到行尾" },
+  key("ctrl-g", "Ctrl+G", "^G", "\x07", "在编辑器中打开"),
+  { ...ctrlL, action: "清屏" },
+];
 
 const agentPresets: Record<SessionProvider, PtyShortcutPreset> = {
   claude: { menu: [ctrlO, ctrlR, ctrlT, ctrlS, ctrlB], mobile: [ctrlO, ctrlR, "clear", ctrlS] },
@@ -63,10 +88,18 @@ const agentPresets: Record<SessionProvider, PtyShortcutPreset> = {
     mobile: [ctrlT, ctrlR, "clear", ctrlK],
   },
   kimi: { menu: [ctrlO, ctrlE, ctrlT, ctrlS, ctrlB], mobile: [ctrlO, ctrlS, "clear", ctrlT] },
-  // https://antigravity.google/docs/cli/using
   antigravity: {
-    menu: [ctrlL, key("ctrl-g", "Ctrl+G", "^G", "\x07")],
-    mobile: [ctrlO, ctrlR, "clear", key("ctrl-j", "Ctrl+J", "^J", "\x0a")],
+    menu: [
+      antigravityDetails,
+      antigravityReview,
+      antigravityMode,
+      antigravityNewline,
+      antigravityClear,
+      ...antigravityEditing,
+    ],
+    menuWithMobileControls: antigravityEditing,
+    mobileShiftTab: antigravityMode,
+    mobile: [antigravityDetails, antigravityReview, antigravityClear, antigravityNewline],
   },
   cursor: {
     menu: [shiftTab, ctrlR, ctrlD, ctrlT, ctrlS],

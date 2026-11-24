@@ -5,6 +5,7 @@ import { readTtySize, restoreHostTerminalModes } from "./tty.js";
 import { prepareCommandLaunch } from "../common/command-launch.js";
 import { createPtyInputCompat } from "../common/pty-input-compat.js";
 import { withPtyLocaleFallback } from "../common/pty-locale.js";
+import { withSystemHttpProxy } from "../common/system-http-proxy.js";
 
 interface PtyManagerOptions {
   provider: ProviderAdapter;
@@ -56,7 +57,7 @@ export class PtyManager {
 
     const command = this.provider.buildTerminalCommand(
       { args: this.providerArgs, hook: this.hook, cwd: this.cwd },
-      process.env,
+      withSystemHttpProxy(process.env),
     );
     const launch = prepareCommandLaunch(
       command.command,

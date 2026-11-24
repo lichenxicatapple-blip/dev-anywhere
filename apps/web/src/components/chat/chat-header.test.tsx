@@ -698,6 +698,41 @@ describe("ChatHeader PTY upload menu", () => {
     },
   );
 
+  it.each([false, true])(
+    "sends Antigravity shortcuts with mobile controls visible %s",
+    async (mobileControlsVisible) => {
+      useSessionStore.setState({
+        sessions: useSessionStore
+          .getState()
+          .sessions.map((session) =>
+            session.kind === "agent" ? { ...session, provider: "antigravity" } : session,
+          ),
+      });
+      const { input, trigger } = renderHeaderWithPtyFocus();
+      if (mobileControlsVisible) {
+        const controls = document.createElement("div");
+        controls.dataset.slot = "pty-mobile-controls";
+        input.closest('[data-slot="pty-keepalive-entry"]')?.append(controls);
+      }
+      input.focus();
+      await openMenuWithPointer(trigger);
+      await openShortcutsMenu();
+
+      const review = screen.queryByRole("menuitem", { name: "审查产物 Ctrl+R" });
+      if (mobileControlsVisible) {
+        expect(review).toBeNull();
+        expect(screen.queryByRole("menuitem", { name: "清空 Esc ×2" })).toBeNull();
+        fireEvent.click(screen.getByRole("menuitem", { name: "清屏 Ctrl+L" }));
+        expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", "\x0c");
+      } else {
+        expect(screen.getByRole("menuitem", { name: "工具详情 Ctrl+O" })).toBeVisible();
+        expect(screen.getByRole("menuitem", { name: "清空 Esc ×2" })).toBeVisible();
+        fireEvent.click(review!);
+        expect(sendRawSpy).toHaveBeenCalledExactlyOnceWith("s1", "\x12");
+      }
+    },
+  );
+
   it("does not offer Ctrl+R for JSON chat sessions", async () => {
     useSessionStore.setState({
       sessions: [

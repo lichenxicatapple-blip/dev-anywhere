@@ -5,6 +5,7 @@ import { z } from "zod";
 import { CONFIG_PATH, PROFILE_NAME, defaultHookPortForProfile } from "./paths.js";
 import { serviceLogger } from "./logger.js";
 import { VALID_LOG_LEVELS, loadProxyRuntimeEnv } from "./runtime-env.js";
+import { withSystemHttpProxy } from "./system-http-proxy.js";
 import type { ProviderId } from "../providers/types.js";
 
 export type { LogLevel } from "./runtime-env.js";
@@ -296,7 +297,7 @@ export function buildProviderEnv(
   baseEnv: NodeJS.ProcessEnv = process.env,
 ): NodeJS.ProcessEnv {
   return {
-    ...baseEnv,
+    ...withSystemHttpProxy(baseEnv),
     ...(config.claudeBin ? { CLAUDE_BIN: config.claudeBin } : {}),
     ...(config.codexBin ? { CODEX_BIN: config.codexBin } : {}),
     ...(config.kimiBin ? { KIMI_BIN: config.kimiBin } : {}),

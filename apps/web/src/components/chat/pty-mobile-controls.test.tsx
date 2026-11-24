@@ -86,6 +86,31 @@ describe("PtyMobileControls", () => {
     },
   );
 
+  it("sends Antigravity actions and two explicit Escape events for whole-draft clear", () => {
+    const onInput = vi.fn();
+    const { getByRole } = render(
+      <PtyMobileControls
+        sessionKind="agent"
+        provider="antigravity"
+        onInput={onInput}
+        onPaste={vi.fn()}
+      />,
+    );
+    for (const [action, label, key, data] of [
+      ["工具详情", "详情", "Ctrl+O", "\x0f"],
+      ["审查产物", "审查", "Ctrl+R", "\x12"],
+      ["切换模式", "模式", "Shift+Tab", "\x1b[Z"],
+      ["换行", "换行", "Ctrl+J", "\x0a"],
+      ["清空", "清空", "Esc ×2", "\x1b[27u\x1b[27u"],
+    ]) {
+      const button = getByRole("button", { name: `${action}（${key}）` });
+      expect(button.textContent).toBe(label);
+      fireEvent.click(button);
+      expect(onInput).toHaveBeenLastCalledWith(data);
+    }
+    expect(onInput).toHaveBeenCalledTimes(5);
+  });
+
   it("updates contextual keys when a retained view changes from an agent to CMD", () => {
     const onInput = vi.fn();
     const props = { onInput, onPaste: vi.fn() };

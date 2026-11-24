@@ -45,7 +45,11 @@ export function PtyMobileControls({
   onHeightChange,
 }: PtyMobileControlsProps) {
   const rootRef = useRef<HTMLDivElement>(null);
-  const { mobile } = getPtyShortcutPreset({ kind: sessionKind, provider, shellFamily });
+  const { mobile, mobileShiftTab } = getPtyShortcutPreset({
+    kind: sessionKind,
+    provider,
+    shellFamily,
+  });
 
   useLayoutEffect(() => {
     if (!onHeightChange) return;
@@ -88,11 +92,11 @@ export function PtyMobileControls({
           Tab
         </SinglePressKey>
         <SinglePressKey
-          label="发送 Shift+Tab"
+          label={mobileShiftTab ? `${mobileShiftTab.action}（Shift+Tab）` : "发送 Shift+Tab"}
           slot="pty-mobile-key-shift-tab"
-          onPress={() => onInput("\x1b[Z")}
+          onPress={() => onInput(mobileShiftTab?.data ?? "\x1b[Z")}
         >
-          ⇧Tab
+          {mobileShiftTab?.mobileLabel ?? "⇧Tab"}
         </SinglePressKey>
         <ShortcutKey shortcut={mobile[0]} position="primary" onInput={onInput} />
         <ShortcutKey shortcut={mobile[1]} position="secondary" onInput={onInput} />
@@ -210,12 +214,12 @@ function ShortcutKey({
 }) {
   return (
     <SinglePressKey
-      label={`发送 ${shortcut.key}`}
+      label={shortcut.action ? `${shortcut.action}（${shortcut.key}）` : `发送 ${shortcut.key}`}
       slot={`pty-mobile-key-${shortcut.id}`}
       position={position}
       onPress={() => onInput(shortcut.data)}
     >
-      {shortcut.display}
+      {shortcut.mobileLabel ?? shortcut.action ?? shortcut.display}
     </SinglePressKey>
   );
 }

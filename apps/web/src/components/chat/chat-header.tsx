@@ -211,7 +211,11 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
   const nativeTouchEditingSurface = useMediaQuery("(pointer: coarse), (hover: none)");
   const touchEditingSurface = nativeTouchEditingSurface && !forceHardwareInput;
   const isPty = mode === "pty" || session?.mode === "pty";
-  const shortcuts = getPtyShortcutPreset(session ?? {}).menu;
+  const shortcutPreset = getPtyShortcutPreset(session ?? {});
+  const [mobileKeysAtMenuOpen, setMobileKeysAtMenuOpen] = useState(false);
+  const shortcuts = mobileKeysAtMenuOpen
+    ? (shortcutPreset.menuWithMobileControls ?? shortcutPreset.menu)
+    : shortcutPreset.menu;
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const menuContentRef = useRef<HTMLDivElement>(null);
   const menuPtyFocusRef = useRef<HTMLTextAreaElement | null>(null);
@@ -426,8 +430,16 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
           <DropdownMenu
             modal={false}
             onOpenChange={(open) => {
-              if (open) menuClosedByEscapeRef.current = false;
-              else setShortcutsOpen(false);
+              if (open) {
+                menuClosedByEscapeRef.current = false;
+                // Opening the menu can blur the terminal and hide its mobile keyboard.
+                const entry = menuPtyFocusRef.current?.closest('[data-slot="pty-keepalive-entry"]');
+                setMobileKeysAtMenuOpen(
+                  Boolean(entry?.querySelector('[data-slot="pty-mobile-controls"]')),
+                );
+              } else {
+                setShortcutsOpen(false);
+              }
             }}
           >
             <DropdownMenuTrigger asChild>
@@ -732,7 +744,16 @@ export function ChatHeader({ sessionId, mode, onFind, onResizeTerminal }: ChatHe
                             onSelect={() => sendRemoteInputRaw(sessionId, shortcut.data)}
                           >
                             <ShortcutKeyIcon label={shortcut.display} />
-                            发送 {shortcut.key}
+                            {shortcut.action ? (
+                              <>
+                                <span className="flex-1">{shortcut.action}</span>
+                                <kbd className="font-mono text-xs text-muted-foreground">
+                                  {shortcut.key}
+                                </kbd>
+                              </>
+                            ) : (
+                              <>发送 {shortcut.key}</>
+                            )}
                           </DropdownMenuItem>
                         ))}
                       </DropdownMenuSubContent>
