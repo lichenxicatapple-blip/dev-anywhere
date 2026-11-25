@@ -8,9 +8,11 @@ import {
   type SessionInfo,
   type TerminalShell,
 } from "@dev-anywhere/shared";
+import { PROVIDER_LABEL } from "@/lib/session-provider";
 
 export type SessionMode = "pty" | "json";
 export type { ProviderId } from "@dev-anywhere/shared";
+export { PROVIDER_LABEL };
 export type PermissionMode = "default" | "auto" | "acceptEdits" | "plan" | "bypassPermissions";
 
 const MISSING_CWD_PREFIX = "工作目录不存在或不可访问:";
@@ -59,14 +61,6 @@ export function antigravityPermissionOptions(mode: SessionMode) {
       : option,
   );
 }
-
-export const PROVIDER_LABEL: Record<ProviderId, string> = {
-  claude: "Claude Code",
-  codex: "Codex",
-  kimi: "Kimi Code",
-  cursor: "Cursor CLI",
-  antigravity: "Antigravity CLI",
-};
 
 export function providerSupportsChatMode(_provider: ProviderId): boolean {
   return true;

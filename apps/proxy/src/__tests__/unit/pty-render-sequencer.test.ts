@@ -8,6 +8,27 @@ function snapshot(sequencer: PtyRenderSequencer): Promise<PtySnapshot> {
 }
 
 describe("PtyRenderSequencer", () => {
+  it("preserves a terminal file link and its display label across snapshots", async () => {
+    const sequencer = new PtyRenderSequencer({ cols: 80, rows: 24 });
+    const start = "\x1b]8;;file:///tmp/visual%20checks/first-coarse.png\x1b\\";
+    const end = "\x1b]8;;\x1b\\";
+    try {
+      sequencer.write(`Viewed image ${start}first-coarse.png${end} done`);
+      const first = (await snapshot(sequencer)).data;
+      const linkedLabel = start + "first-coarse.png";
+      expect(first).toContain(linkedLabel);
+      expect(first.indexOf(end)).toBeGreaterThan(first.indexOf(linkedLabel));
+      expect(first.indexOf(" done")).toBeGreaterThan(first.indexOf(end));
+      sequencer.write(`${start}link still open`);
+      expect((await snapshot(sequencer)).data.endsWith(start)).toBe(true);
+      sequencer.write(end);
+      const closed = (await snapshot(sequencer)).data;
+      expect(closed.lastIndexOf(end)).toBeGreaterThan(closed.lastIndexOf(start));
+    } finally {
+      sequencer.dispose();
+    }
+  });
+
   it("answers hosted default-color queries locally once across chunk boundaries", async () => {
     const replies: string[] = [];
     const sequencer = new PtyRenderSequencer({

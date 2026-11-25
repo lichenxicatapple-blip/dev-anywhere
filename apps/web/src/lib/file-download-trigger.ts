@@ -3,28 +3,36 @@
 
 import type { RelayClient } from "@/services/relay-client";
 import { describeControlError } from "./control-error-message";
+import { requestRemoteFileUrlWithFallback } from "./remote-file-url";
 
 type DownloadOpts = {
   relay: RelayClient;
   sessionId: string;
   path: string;
+  fallbackPath?: string;
 };
 
-type DownloadResult = { ok: true } | { ok: false; error: string };
+type DownloadResult = { ok: true; path: string } | { ok: false; error: string };
 
 export async function triggerFileDownload(opts: DownloadOpts): Promise<DownloadResult> {
   const startedAt = Date.now();
-  const resp = await opts.relay.requestRemoteFileUrl(opts.sessionId, opts.path, "download");
+  const { path, response: resp } = await requestRemoteFileUrlWithFallback(
+    opts.relay,
+    opts.sessionId,
+    opts.path,
+    "download",
+    opts.fallbackPath,
+  );
   if (!resp.success || !resp.url) {
     const reason = describeControlError({
       errorCode: resp.errorCode,
       rawError: resp.error,
       fallback: "下载失败",
     });
-    const errorMessage = describeFileDownloadFailure(opts.path, reason);
+    const errorMessage = describeFileDownloadFailure(path, reason);
     console.debug("[file-download] failed", {
       sessionId: opts.sessionId,
-      path: opts.path,
+      path,
       durationMs: Date.now() - startedAt,
       errorCode: resp.errorCode,
       errorMessage,
@@ -32,7 +40,7 @@ export async function triggerFileDownload(opts: DownloadOpts): Promise<DownloadR
     });
     return { ok: false, error: errorMessage };
   }
-  const fileName = opts.path.split(/[\\/]/).pop() || "download";
+  const fileName = path.split(/[\\/]/).pop() || "download";
   const a = document.createElement("a");
   a.href = resp.url;
   a.download = fileName;
@@ -42,11 +50,11 @@ export async function triggerFileDownload(opts: DownloadOpts): Promise<DownloadR
   document.body.removeChild(a);
   console.debug("[file-download] ok", {
     sessionId: opts.sessionId,
-    path: opts.path,
+    path,
     fileName,
     durationMs: Date.now() - startedAt,
   });
-  return { ok: true };
+  return { ok: true, path };
 }
 
 function describeFileDownloadFailure(path: string, reason: string): string {

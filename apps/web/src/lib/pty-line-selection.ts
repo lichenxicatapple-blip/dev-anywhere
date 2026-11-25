@@ -4,7 +4,10 @@ import {
   getRenderedPtyHistorySelectionLine,
 } from "./pty-history-projection";
 import { measureXtermCellSize } from "./pty-xterm-metrics";
-import type { PtySelectionPathAction } from "./pty-selection-path-action";
+import {
+  resolvePtySelectionPathAction,
+  type PtySelectionPathAction,
+} from "./pty-selection-path-action";
 import { findFileDownloadPathMatchesInWrappedBuffer } from "./xterm-file-download-links";
 import { findMediaPreviewPathMatchesInWrappedBuffer } from "./xterm-media-preview-links";
 import { findUrlTextRanges } from "./url-text";
@@ -327,6 +330,32 @@ export function resolveTerminalRange({
   return { anchor: normalizedAnchor, focus: normalizedFocus, text, columnMode };
 }
 
+export function resolveTerminalSelectionPathAction(
+  terminal: Terminal,
+  selected: TerminalSelectionResult,
+): PtySelectionPathAction | null {
+  if (selected.columnMode) {
+    return resolvePtySelectionPathAction(selected.text);
+  }
+
+  // An explicit link can display a short label, and a hard-wrapped path keeps its newline
+  // in copied text. Use the buffer target when the selection covers the exact link.
+  const { start, end } = normalizeTerminalSelectionPoints(selected.anchor, selected.focus);
+  for (const point of [end, start]) {
+    const link = resolveTerminalPathLinkAtBufferPoint({ terminal, point });
+    if (
+      link &&
+      link.anchor.row === start.row &&
+      link.anchor.column === start.column &&
+      link.focus.row === end.row &&
+      link.focus.column === end.column
+    ) {
+      return link.pathAction;
+    }
+  }
+  return resolvePtySelectionPathAction(selected.text);
+}
+
 export function getTerminalPointAtClient({
   terminal,
   host,
@@ -535,11 +564,11 @@ function resolveTerminalPathLinkAtBufferPoint({
   const candidate = [
     ...findMediaPreviewPathMatchesInWrappedBuffer(terminal, lineNumber).map((match) => ({
       match,
-      pathAction: { kind: "media-preview", path: match.path } as const,
+      kind: "media-preview" as const,
     })),
     ...findFileDownloadPathMatchesInWrappedBuffer(terminal, lineNumber).map((match) => ({
       match,
-      pathAction: { kind: "file-download", path: match.path } as const,
+      kind: "file-download" as const,
     })),
   ].find(({ match }) =>
     match.segments.some(
@@ -562,5 +591,9 @@ function resolveTerminalPathLinkAtBufferPoint({
       column: candidate.match.endColumn - 1,
     },
   });
-  return selected ? { ...selected, pathAction: candidate.pathAction } : null;
+  if (!selected) return null;
+  const { path, fallbackPath } = candidate.match;
+  const pathAction: PtySelectionPathAction = { kind: candidate.kind, path };
+  if (fallbackPath) pathAction.fallbackPath = fallbackPath;
+  return { ...selected, pathAction };
 }

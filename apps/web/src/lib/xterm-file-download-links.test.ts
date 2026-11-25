@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 import {
   findFileDownloadPathMatches,
+  findFileDownloadPathMatchesInWrappedBuffer,
   registerFileDownloadLinkProvider,
 } from "./xterm-file-download-links";
 
@@ -45,6 +46,63 @@ describe("xterm file download links", () => {
         endColumn: 86,
       },
     ]);
+  });
+
+  it("links both parts of a path wrapped between a directory and a filename", () => {
+    const directory = "Scripts/Assets/CatIdentity/";
+    const filename = "breed_four_views.py";
+    const cols = 80;
+    const prefix = "four-view tool: ";
+    const matchLine = (lines: string[], lineNumber: number) => {
+      const terminal = {
+        cols,
+        buffer: {
+          active: {
+            getLine(index: number) {
+              const text = lines[index];
+              return text === undefined
+                ? undefined
+                : { isWrapped: false, translateToString: () => text };
+            },
+          },
+        },
+      };
+      return findFileDownloadPathMatchesInWrappedBuffer(terminal as never, lineNumber);
+    };
+
+    for (const [open, close] of [
+      ["", ""],
+      ["(", ")"],
+      ["`", "`"],
+      ["", "，"],
+    ]) {
+      const first = `${prefix}${open}${directory}`.padStart(cols - 7);
+      const lines = [first, `  ${filename}${close}`];
+      for (const lineNumber of [1, 2]) {
+        expect(matchLine(lines, lineNumber)).toEqual([
+          expect.objectContaining({
+            path: directory + filename,
+            segments: [
+              { lineNumber: 1, startColumn: first.indexOf(directory) + 1, endColumn: first.length },
+              { lineNumber: 2, startColumn: 3, endColumn: filename.length + 2 },
+            ],
+          }),
+        ]);
+      }
+    }
+
+    const first = `${prefix}${directory}`.padStart(cols - 7);
+    expect(matchLine([`${prefix}${directory}`, `  ${filename}`], 2)[0]?.path).toBe(
+      directory + filename,
+    );
+    expect(matchLine([first, `  ${filename}) ordinary text`], 2)).toEqual([]);
+    expect(matchLine([first, `  ./another/${filename}`], 2).map((match) => match.path)).toEqual([
+      `./another/${filename}`,
+    ]);
+    expect(matchLine([first, "  README.md"], 2)[0]).toMatchObject({
+      path: directory + "README.md",
+      fallbackPath: "README.md",
+    });
   });
 
   function provideAndActivate(

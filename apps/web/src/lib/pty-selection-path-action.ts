@@ -3,9 +3,11 @@ import { isRecognizedBareDomain } from "./bare-domain";
 import { findUrlTextRanges } from "./url-text";
 import { getMediaPreviewKind } from "./media-preview-path";
 
-export type PtySelectionPathAction =
-  | { kind: "media-preview"; path: string }
-  | { kind: "file-download"; path: string };
+export type PtySelectionPathAction = {
+  kind: "media-preview" | "file-download";
+  path: string;
+  fallbackPath?: string;
+};
 
 const FILE_EXT_RE = /\.[\p{L}\p{N}]{1,16}$/u;
 

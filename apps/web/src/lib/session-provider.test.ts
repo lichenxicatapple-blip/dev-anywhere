@@ -3,9 +3,9 @@ import { describe, expect, it } from "vitest";
 import { compareProvider, historySessionProvider, providerLabel } from "./session-provider";
 
 describe("session-provider", () => {
-  it("labels Cursor CLI and sorts it after Kimi", () => {
+  it("labels Cursor and sorts it after Kimi", () => {
     expect(providerLabel("kimi")).toBe("Kimi Code");
-    expect(providerLabel("cursor")).toBe("Cursor CLI");
+    expect(providerLabel("cursor")).toBe("Cursor");
 
     const providers = ["kimi", "cursor", "claude", "codex"] as const;
     expect([...providers].sort(compareProvider)).toEqual(["claude", "codex", "kimi", "cursor"]);

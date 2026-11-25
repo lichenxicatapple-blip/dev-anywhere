@@ -2,12 +2,12 @@ import { providerValues, type HistorySession, type SessionInfo } from "@dev-anyw
 
 export type SessionProvider = SessionInfo["provider"];
 
-const PROVIDER_LABEL: Record<SessionProvider, string> = {
+export const PROVIDER_LABEL: Readonly<Record<SessionProvider, string>> = {
   claude: "Claude Code",
   codex: "Codex",
   kimi: "Kimi Code",
-  cursor: "Cursor CLI",
-  antigravity: "Antigravity CLI",
+  cursor: "Cursor",
+  antigravity: "agy",
 };
 
 const PROVIDER_ORDER = providerValues;

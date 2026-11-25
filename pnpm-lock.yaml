@@ -10,6 +10,9 @@ overrides:
   vite@6.4.2>esbuild: 0.28.2
 
 patchedDependencies:
+  '@xterm/addon-serialize@0.14.0':
+    hash: h2cawg7hfvsnhwinj7ekv35cuq
+    path: patches/@xterm__addon-serialize@0.14.0.patch
   '@xterm/addon-unicode-graphemes@0.4.0':
     hash: ii5qcsnajlhye26zd4cjwwjuxu
     path: patches/@xterm__addon-unicode-graphemes@0.4.0.patch
@@ -65,7 +68,7 @@ importers:
         version: link:../relay
       '@xterm/addon-serialize':
         specifier: ^0.14.0
-        version: 0.14.0
+        version: 0.14.0(patch_hash=h2cawg7hfvsnhwinj7ekv35cuq)
       '@xterm/headless':
         specifier: ^6.0.0
         version: 6.0.0
@@ -175,7 +178,7 @@ importers:
         version: 0.16.0
       '@xterm/addon-serialize':
         specifier: 0.14.0
-        version: 0.14.0
+        version: 0.14.0(patch_hash=h2cawg7hfvsnhwinj7ekv35cuq)
       '@xterm/addon-unicode-graphemes':
         specifier: ^0.4.0
         version: 0.4.0(patch_hash=ii5qcsnajlhye26zd4cjwwjuxu)
@@ -8937,7 +8940,7 @@ snapshots:
 
   '@xterm/addon-search@0.16.0': {}
 
-  '@xterm/addon-serialize@0.14.0': {}
+  '@xterm/addon-serialize@0.14.0(patch_hash=h2cawg7hfvsnhwinj7ekv35cuq)': {}
 
   '@xterm/addon-unicode-graphemes@0.4.0(patch_hash=ii5qcsnajlhye26zd4cjwwjuxu)': {}
 

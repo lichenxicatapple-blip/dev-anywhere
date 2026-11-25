@@ -1,6 +1,7 @@
 // 移动端 PTY 图片路径可 tap 预览；文件路径下载必须走长按选区 toolbar，避免误触即下载。
 import { test, expect, mobileBaseUrl } from "../fixtures/cdp";
 import { setupPtyChat, expectPtyTerminalMounted } from "../pty-fixture";
+import { waitForStableVisiblePtyRow } from "../pty-scroll-helpers";
 
 const SESSION_ID = "mobile-touch-link";
 const PTY_READY_MARKER = "PTY SMOKE READY";
@@ -9,10 +10,6 @@ declare global {
   interface Window {
     __ccTestPtyTouchGestureEvents?: unknown[];
     __ccTestPtyTouchLinkActivations?: unknown[];
-    __ccTestPtyLinks?: Map<
-      string,
-      Array<{ kind: "file-download" | "image-preview"; path: string }>
-    >;
   }
 }
 
@@ -49,9 +46,14 @@ test.describe("L4 mobile / PTY touch link activation", () => {
 
   async function findPtyLinkTapPoint(
     page: import("@playwright/test").Page,
-    options: { sid: string; kind: "file-download" | "image-preview"; needle: string },
+    options: {
+      sid: string;
+      kind: "file-download" | "image-preview";
+      needle: string;
+      rowText?: string;
+    },
   ): Promise<{ x: number; y: number } | null> {
-    return page.evaluate(({ sid, kind, needle }) => {
+    return page.evaluate(({ sid, kind, needle, rowText }) => {
       const term = window.__ccTestPtyTerminals?.get(sid);
       const provider = window.__ccTestPtyLinkProviders?.get(`${sid}/${kind}`);
       const screen = term?.element?.querySelector<HTMLElement>(".xterm-screen");
@@ -65,6 +67,15 @@ test.describe("L4 mobile / PTY touch link activation", () => {
       const cellHeight = screen.clientHeight / term.rows;
 
       for (let lineNumber = firstVisibleLine; lineNumber <= lastVisibleLine; lineNumber += 1) {
+        if (
+          rowText &&
+          !buffer
+            .getLine(lineNumber - 1)
+            ?.translateToString(true)
+            .includes(rowText)
+        ) {
+          continue;
+        }
         let point: { x: number; y: number } | null = null;
         provider.provideLinks(lineNumber, (links) => {
           const link = links?.find((candidate) => candidate.text === needle);
@@ -213,6 +224,27 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     }
   }
 
+  async function longPressPtyLink(
+    page: import("@playwright/test").Page,
+    options: { kind: "file-download" | "image-preview"; needle: string; rowText: string },
+  ): Promise<void> {
+    await waitForStableVisiblePtyRow(page, options.rowText);
+    const point = await findPtyLinkTapPoint(page, { sid: SESSION_ID, ...options });
+    if (!point) throw new Error("The file link is outside the terminal viewport");
+
+    const client = await page.context().newCDPSession(page);
+    try {
+      await client.send("Input.dispatchTouchEvent", {
+        type: "touchStart",
+        touchPoints: [{ ...point, id: 1, radiusX: 2, radiusY: 2, force: 1 }],
+      });
+      await page.waitForTimeout(650);
+      await client.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
+    } finally {
+      await client.detach();
+    }
+  }
+
   test("tap on an xterm-wrapped PTY document path does not trigger download", async ({
     emuPage,
   }) => {
@@ -255,7 +287,7 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     await expectNoFileDownloadRequest(emuPage, path);
   });
 
-  test("does not combine indented hard-newline path fragments into one link", async ({
+  test("long press on the second line offers download for a hard-wrapped path", async ({
     emuPage,
   }) => {
     await setupPtyChat(emuPage, {
@@ -269,32 +301,78 @@ test.describe("L4 mobile / PTY touch link activation", () => {
     });
     await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
 
-    const path =
-      "/Users/catli/MyApps/AIMovieFactory/docs/superpowers/specs/2026-05-24-v1-open-source-research.md";
+    const filename = "breed_four_views.py";
+    const path = `Scripts/Assets/CatIdentity/${filename}`;
     await emitLineAndAwait(
       emuPage,
-      [
-        "• 两个文档路径：",
-        "  - /Users/catli/MyApps/AIMovieFactory/docs/",
-        "    superpowers/specs/2026-05-24-v1-open-source-",
-        "    research.md",
-        "",
-      ].join("\r\n"),
-      "research.md",
+      `\r\nTool (Scripts/Assets/CatIdentity/\r\n  ${filename})\r\n\r\nEND\r\n`,
+      filename,
     );
+    await longPressPtyLink(emuPage, {
+      kind: "file-download",
+      needle: path,
+      rowText: filename,
+    });
 
+    const download = emuPage.getByRole("button", { name: "下载终端选区文件" });
+    await expect(download).toBeVisible();
+    await expectNoFileDownloadRequest(emuPage, path);
+    await download.click();
     await expect
       .poll(() =>
         emuPage.evaluate(
-          ({ sid, needle }) => {
-            const links = window.__ccTestPtyLinks?.get(sid) ?? [];
-            return links.some((link) => link.kind === "file-download" && link.path === needle);
-          },
-          { sid: SESSION_ID, needle: path },
+          (expectedPath) =>
+            window.__ptySmoke.sent.some((raw) => {
+              const msg = JSON.parse(raw) as { type?: string; path?: string; disposition?: string };
+              return (
+                msg.type === "remote_file_url_request" &&
+                msg.path === expectedPath &&
+                msg.disposition === "download"
+              );
+            }),
+          path,
         ),
       )
-      .toBe(false);
-    await expectNoFileDownloadRequest(emuPage, path);
+      .toBe(true);
+  });
+
+  test("the image link toolbar offers preview and direct download of the OSC 8 target", async ({
+    emuPage,
+  }) => {
+    await setupPtyChat(emuPage, {
+      sessionId: SESSION_ID,
+      sessionKind: "agent",
+      provider: "claude",
+      ptyOwner: "proxy-hosted",
+      cols: 80,
+      rows: 24,
+      baseUrl: mobileBaseUrl,
+    });
+    await expectPtyTerminalMounted(emuPage, { timeout: 30_000 });
+    const label = "first-coarse.png";
+    const path = "/tmp/screen shots/actual.png";
+    await emitLineAndAwait(
+      emuPage,
+      `\r\nViewed image \x1b]8;;file://${encodeURI(path)}\x07${label}\x1b]8;;\x07\r\n\r\nEND\r\n`,
+      label,
+    );
+    await longPressPtyLink(emuPage, { kind: "image-preview", needle: path, rowText: label });
+    await expect(emuPage.getByRole("button", { name: "预览终端选区图片" })).toBeVisible();
+    await emuPage.getByRole("button", { name: "下载终端选区文件" }).click();
+    await expect
+      .poll(() =>
+        emuPage.evaluate(
+          (target) =>
+            window.__ptySmoke.sent
+              .filter((raw) => {
+                const msg = JSON.parse(raw);
+                return msg.type === "remote_file_url_request" && msg.path === target;
+              })
+              .map((raw) => JSON.parse(raw).disposition),
+          path,
+        ),
+      )
+      .toEqual(["download"]);
   });
 
   test("tap on a PTY image path opens image preview (no modifier on touch surface)", async ({

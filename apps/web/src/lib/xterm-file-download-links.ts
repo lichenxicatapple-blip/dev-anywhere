@@ -1,5 +1,6 @@
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
 import { extractFileDownloadPaths } from "./file-download-path";
+import { getMediaPreviewKind } from "./media-preview-path";
 import { clearPathHoverSegments, createPathLinkHover } from "./xterm-path-link-hover";
 import {
   findXtermPathMatches,
@@ -16,10 +17,15 @@ export function findFileDownloadPathMatches(line: string): XtermPathMatch[] {
 }
 
 export function findFileDownloadPathMatchesInWrappedBuffer(
-  terminal: Pick<Terminal, "buffer" | "cols">,
+  terminal: Pick<Terminal, "buffer">,
   bufferLineNumber: number,
 ): XtermBufferPathMatch[] {
-  return findXtermPathMatchesInWrappedBuffer(terminal, bufferLineNumber, extractFileDownloadPaths);
+  return findXtermPathMatchesInWrappedBuffer(
+    terminal,
+    bufferLineNumber,
+    extractFileDownloadPaths,
+    (path) => getMediaPreviewKind(path) === null,
+  );
 }
 
 function shouldActivateDownload(event: MouseEvent): boolean {
@@ -28,18 +34,22 @@ function shouldActivateDownload(event: MouseEvent): boolean {
 
 export function registerFileDownloadLinkProvider(
   terminal: Pick<Terminal, "buffer" | "cols" | "element" | "registerLinkProvider" | "rows">,
-  onDownload: (path: string) => void,
+  onDownload: (path: string, fallbackPath?: string) => void,
 ): { dispose: () => void; provider: ILinkProvider } {
   let lastActivation: { path: string; at: number } | null = null;
 
-  const activateDownload = (path: string, event: MouseEvent): void => {
+  const activateDownload = (
+    { path, fallbackPath }: XtermBufferPathMatch,
+    event: MouseEvent,
+  ): void => {
     if (!shouldActivateDownload(event)) return;
     const now = performance.now();
     if (lastActivation?.path === path && now - lastActivation.at < DUPLICATE_ACTIVATION_WINDOW_MS) {
       return;
     }
     lastActivation = { path, at: now };
-    onDownload(path);
+    if (fallbackPath) onDownload(path, fallbackPath);
+    else onDownload(path);
   };
 
   const provider: ILinkProvider = {
@@ -59,7 +69,7 @@ export function registerFileDownloadLinkProvider(
             // 桌面仍要求 cmd/ctrl + click 防误触。移动端下载走长按选区 toolbar,
             // tap 文件路径只用于命中/选区候选, 不直接拉取文件。
             activate: (event) => {
-              activateDownload(match.path, event);
+              activateDownload(match, event);
             },
           });
         }

@@ -26,7 +26,7 @@ describe("create-session submit model", () => {
   it("keeps provider labels and permission options centralized for the dialog", () => {
     expect(PROVIDER_LABEL.claude).toBe("Claude Code");
     expect(PROVIDER_LABEL.kimi).toBe("Kimi Code");
-    expect(PROVIDER_LABEL.cursor).toBe("Cursor CLI");
+    expect(PROVIDER_LABEL.cursor).toBe("Cursor");
     expect(providerSupportsChatMode("cursor")).toBe(true);
     expect(providerSupportsChatMode("claude")).toBe(true);
     expect(CURSOR_PERMISSION_MODE_OPTIONS).toEqual([

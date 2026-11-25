@@ -37,6 +37,7 @@ interface ComputePtySelectionToolbarPositionForHandlesOptions {
   viewportHeight: number;
   viewportOffsetLeft?: number;
   viewportOffsetTop?: number;
+  horizontalInset?: number;
 }
 
 export function computePtySelectionHandleMetrics(ptyFontSize: number): PtySelectionHandleMetrics {
@@ -93,6 +94,7 @@ export function computePtySelectionToolbarPositionForHandles({
   viewportHeight,
   viewportOffsetLeft = 0,
   viewportOffsetTop = 0,
+  horizontalInset,
 }: ComputePtySelectionToolbarPositionForHandlesOptions): { left: number; top: number } {
   return computePtySelectionToolbarPosition({
     clientX: (handles.anchor.left + handles.focus.left) / 2,
@@ -101,5 +103,6 @@ export function computePtySelectionToolbarPositionForHandles({
     viewportHeight,
     viewportOffsetLeft,
     viewportOffsetTop,
+    horizontalInset,
   });
 }

@@ -1,5 +1,5 @@
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
-import { extractMediaPreviewPaths } from "./media-preview-path";
+import { extractMediaPreviewPaths, getMediaPreviewKind } from "./media-preview-path";
 import { clearPathHoverSegments, createPathLinkHover } from "./xterm-path-link-hover";
 import {
   findXtermPathMatches,
@@ -14,10 +14,15 @@ export function findMediaPreviewPathMatches(line: string): XtermPathMatch[] {
 }
 
 export function findMediaPreviewPathMatchesInWrappedBuffer(
-  terminal: Pick<Terminal, "buffer" | "cols">,
+  terminal: Pick<Terminal, "buffer">,
   bufferLineNumber: number,
 ): XtermBufferPathMatch[] {
-  return findXtermPathMatchesInWrappedBuffer(terminal, bufferLineNumber, extractMediaPreviewPaths);
+  return findXtermPathMatchesInWrappedBuffer(
+    terminal,
+    bufferLineNumber,
+    extractMediaPreviewPaths,
+    (path) => getMediaPreviewKind(path) !== null,
+  );
 }
 
 function shouldActivatePreview(event: MouseEvent): boolean {
@@ -32,7 +37,7 @@ function shouldActivatePreview(event: MouseEvent): boolean {
 
 export function registerMediaPreviewLinkProvider(
   terminal: Pick<Terminal, "buffer" | "cols" | "element" | "registerLinkProvider" | "rows">,
-  onPreview: (path: string) => void,
+  onPreview: (path: string, fallbackPath?: string) => void,
 ): { dispose: () => void; provider: ILinkProvider } {
   const provider: ILinkProvider = {
     provideLinks(bufferLineNumber, callback) {
@@ -55,7 +60,8 @@ export function registerMediaPreviewLinkProvider(
             // 走修饰键路径也照样 work.
             activate: (event) => {
               if (!shouldActivatePreview(event)) return;
-              onPreview(match.path);
+              if (match.fallbackPath) onPreview(match.path, match.fallbackPath);
+              else onPreview(match.path);
             },
           });
         }

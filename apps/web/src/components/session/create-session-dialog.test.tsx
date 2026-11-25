@@ -103,13 +103,13 @@ const sessionCreatePermissionCases = [
   ["Kimi Code", "json", "kimi", "自动审批", "auto"],
   ["Kimi Code", "json", "kimi", "只读规划", "plan"],
   ["Kimi Code", "json", "kimi", "全自动", "bypassPermissions"],
-  ["Cursor CLI", "pty", "cursor", "命令审批", "default"],
-  ["Cursor CLI", "pty", "cursor", "智能自动", "auto"],
-  ["Cursor CLI", "pty", "cursor", "只读规划", "plan"],
-  ["Cursor CLI", "pty", "cursor", "跳过全部审批", "bypassPermissions"],
-  ["Cursor CLI", "json", "cursor", "命令审批", "default"],
-  ["Cursor CLI", "json", "cursor", "只读规划", "plan"],
-  ["Cursor CLI", "json", "cursor", "跳过全部审批", "bypassPermissions"],
+  ["Cursor", "pty", "cursor", "命令审批", "default"],
+  ["Cursor", "pty", "cursor", "智能自动", "auto"],
+  ["Cursor", "pty", "cursor", "只读规划", "plan"],
+  ["Cursor", "pty", "cursor", "跳过全部审批", "bypassPermissions"],
+  ["Cursor", "json", "cursor", "命令审批", "default"],
+  ["Cursor", "json", "cursor", "只读规划", "plan"],
+  ["Cursor", "json", "cursor", "跳过全部审批", "bypassPermissions"],
 ] as const;
 
 type TestViewport = "desktop" | "mobile";
@@ -148,7 +148,7 @@ function renderDialog() {
   return render(dialogElement());
 }
 
-function selectAgentCli(label: "Claude Code" | "Codex" | "Kimi Code" | "Cursor CLI"): void {
+function selectAgentCli(label: "Claude Code" | "Codex" | "Kimi Code" | "Cursor"): void {
   fireEvent.click(screen.getByRole("combobox", { name: "Agent CLI" }));
   fireEvent.click(screen.getByRole("option", { name: label }));
 }
@@ -208,8 +208,8 @@ describe("CreateSessionDialog", () => {
       "Claude Code",
       "Codex",
       "Kimi Code",
-      "Cursor CLI",
-      "Antigravity CLI",
+      "Cursor",
+      "agy",
     ]);
   });
 
@@ -542,7 +542,7 @@ describe("CreateSessionDialog", () => {
       }
       if (provider !== "claude") {
         selectAgentCli(
-          provider === "codex" ? "Codex" : provider === "kimi" ? "Kimi Code" : "Cursor CLI",
+          provider === "codex" ? "Codex" : provider === "kimi" ? "Kimi Code" : "Cursor",
         );
       }
       fireEvent.click(getByRole("combobox", { name: "权限模式" }));
@@ -578,7 +578,7 @@ describe("CreateSessionDialog", () => {
     });
 
     const { getByRole, queryByRole } = renderDialog();
-    selectAgentCli("Cursor CLI");
+    selectAgentCli("Cursor");
     fireEvent.click(getByRole("combobox", { name: "权限模式" }));
     fireEvent.click(getByRole("option", { name: "智能自动" }));
     expect(getByRole("combobox", { name: "权限模式" }).textContent).toBe("智能自动");
@@ -589,7 +589,7 @@ describe("CreateSessionDialog", () => {
     expect(queryByRole("option", { name: "智能自动" })).toBeNull();
   });
 
-  it("keeps chat mode available when Cursor CLI is selected", async () => {
+  it("keeps chat mode available when Cursor is selected", async () => {
     createSession.mockResolvedValueOnce({
       type: "session_create_response",
       success: true,
@@ -609,7 +609,7 @@ describe("CreateSessionDialog", () => {
 
     const { getByRole } = renderDialog();
     fireEvent.click(getByRole("button", { name: /聊天模式/ }));
-    selectAgentCli("Cursor CLI");
+    selectAgentCli("Cursor");
 
     expect(getByRole("button", { name: /聊天模式/ })).toHaveAttribute("aria-pressed", "true");
 

@@ -5,6 +5,7 @@ interface PtySelectionToolbarPositionInput {
   viewportHeight: number;
   viewportOffsetLeft?: number;
   viewportOffsetTop?: number;
+  horizontalInset?: number;
 }
 
 interface PtySelectionInteractionStartInput {
@@ -28,9 +29,10 @@ export function computePtySelectionToolbarPosition({
   viewportHeight,
   viewportOffsetLeft = 0,
   viewportOffsetTop = 0,
+  horizontalInset = 56,
 }: PtySelectionToolbarPositionInput): { left: number; top: number } {
-  const minLeft = viewportOffsetLeft + 56;
-  const maxLeft = viewportOffsetLeft + viewportWidth - 56;
+  const minLeft = viewportOffsetLeft + horizontalInset;
+  const maxLeft = viewportOffsetLeft + viewportWidth - horizontalInset;
   const minTop = viewportOffsetTop + 56;
   const maxTop = viewportOffsetTop + viewportHeight - TOOLBAR_EDGE_PADDING;
   return {

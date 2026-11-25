@@ -21,6 +21,9 @@ import { PtyHorizontalScrollbar, PtyScrollbar } from "./pty-scrollbar";
 import { useChatFindShortcuts } from "./use-chat-find-shortcuts";
 import { usePtyView } from "./use-pty-view";
 
+const SELECTION_TOOLBAR_BUTTON_CLASS =
+  "min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none hover:bg-accent active:bg-accent/80";
+
 interface ChatPtyViewProps {
   sessionId: string;
   sessionKind?: "agent" | "terminal";
@@ -235,28 +238,37 @@ export function ChatPtyView({
         >
           <button
             type="button"
-            className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none hover:bg-accent active:bg-accent/80"
+            className={SELECTION_TOOLBAR_BUTTON_CLASS}
             onPointerDown={(event) => event.preventDefault()}
             onClick={view.copyPtySelection}
             aria-label="复制终端选区"
           >
             复制
           </button>
+          {view.ptySelectionPathAction?.kind === "media-preview" ? (
+            <button
+              type="button"
+              className={SELECTION_TOOLBAR_BUTTON_CLASS}
+              onPointerDown={(event) => event.preventDefault()}
+              onClick={() => view.openPtySelectionPathAction()}
+              aria-label={
+                getMediaPreviewKind(view.ptySelectionPathAction.path) === "video"
+                  ? "预览终端选区视频"
+                  : "预览终端选区图片"
+              }
+            >
+              预览
+            </button>
+          ) : null}
           {view.ptySelectionPathAction ? (
             <button
               type="button"
-              className="min-w-14 whitespace-nowrap rounded px-3 py-1.5 text-center text-sm font-medium leading-none hover:bg-accent active:bg-accent/80"
+              className={SELECTION_TOOLBAR_BUTTON_CLASS}
               onPointerDown={(event) => event.preventDefault()}
-              onClick={view.openPtySelectionPathAction}
-              aria-label={
-                view.ptySelectionPathAction.kind === "media-preview"
-                  ? getMediaPreviewKind(view.ptySelectionPathAction.path) === "video"
-                    ? "预览终端选区视频"
-                    : "预览终端选区图片"
-                  : "下载终端选区文件"
-              }
+              onClick={() => view.openPtySelectionPathAction("download")}
+              aria-label="下载终端选区文件"
             >
-              {view.ptySelectionPathAction.kind === "media-preview" ? "预览" : "下载"}
+              下载
             </button>
           ) : null}
         </div>

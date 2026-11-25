@@ -147,7 +147,7 @@ interface UsePtyViewResult {
   ptySelectionPathAction: PtySelectionPathAction | null;
   ptySelectionHandleMetrics: PtySelectionHandleMetrics;
   copyPtySelection: () => void;
-  openPtySelectionPathAction: () => void;
+  openPtySelectionPathAction: (disposition?: "download") => void;
   handlePtySelectionHandlePointerDown: (
     kind: PtySelectionHandleKind,
     event: ReactPointerEvent<HTMLElement>,
@@ -716,16 +716,16 @@ export function usePtyView(options: UsePtyViewOptions): UsePtyViewResult {
   ]);
 
   const downloadPtyPath = useCallback(
-    (path: string): void => {
+    (path: string, fallbackPath?: string): void => {
       const relay = relayClientRef;
       if (!relay) {
         toast.error("请先连接开发机");
         return;
       }
       const toastId = toast.loading(`下载 ${path} ...`);
-      void triggerFileDownload({ relay, sessionId, path })
+      void triggerFileDownload({ relay, sessionId, path, fallbackPath })
         .then((result) => {
-          if (result.ok) toast.success(`已开始下载 ${path}`, { id: toastId });
+          if (result.ok) toast.success(`已开始下载 ${result.path}`, { id: toastId });
           else toast.error(result.error, { id: toastId });
         })
         .catch((err: unknown) => {

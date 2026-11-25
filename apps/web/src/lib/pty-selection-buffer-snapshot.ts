@@ -1,4 +1,5 @@
 import type { IBufferCell, IBufferLine } from "@xterm/xterm";
+import { getXtermOscLinkId } from "./xterm-osc-file-links";
 
 const CELL_WIDTH_MASK = 0b0000_0011;
 const CELL_HAS_CONTENT = 0b0000_0100;
@@ -18,10 +19,13 @@ export function snapshotPtySelectionBufferLine(line: IBufferLine, cols: number):
   let translatedLength = 0;
   let trimmedLength = 0;
   let reusableCell: IBufferCell | undefined;
+  let oscLinkIds: Uint32Array | undefined;
 
   for (let column = 0; column < length; column += 1) {
     const cell = line.getCell(column, reusableCell);
     if (cell) reusableCell = cell;
+    const oscLinkId = getXtermOscLinkId(cell);
+    if (oscLinkId) (oscLinkIds ??= new Uint32Array(length))[column] = oscLinkId;
     const chars = cell?.getChars() ?? "";
     const width = (cell?.getWidth() ?? 1) & CELL_WIDTH_MASK;
     const hasContent = chars.length > 0;
@@ -46,6 +50,7 @@ export function snapshotPtySelectionBufferLine(line: IBufferLine, cols: number):
     return {
       getChars: () => chars,
       getWidth: () => width,
+      extended: { urlId: oscLinkIds?.[column] },
     } as unknown as IBufferCell;
   };
 

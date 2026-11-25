@@ -12,6 +12,7 @@ import {
 import { relayClientRef } from "@/hooks/use-relay-setup";
 import { describeControlError } from "@/lib/control-error-message";
 import { getMediaPreviewKind } from "@/lib/media-preview-path";
+import { requestRemoteFileUrlWithFallback } from "@/lib/remote-file-url";
 import { ImagePreviewDialog } from "./image-preview";
 import { VideoPreviewDialog } from "./video-preview";
 
@@ -25,7 +26,7 @@ export type MediaPreviewState = {
 
 type PreviewUrl = { url: string; path: string };
 type MediaPreviewContextValue = {
-  openMediaPreview: (path: string) => void;
+  openMediaPreview: (path: string, fallbackPath?: string) => void;
   requestMediaPreviewUrl: (path: string) => Promise<PreviewUrl>;
 };
 type PreviewUrlCacheEntry = {
@@ -63,15 +64,22 @@ export function MediaPreviewProvider({
   const previewUrlCacheRef = useRef(new Map<string, PreviewUrlCacheEntry>());
 
   const requestMediaPreviewUrl = useCallback(
-    (path: string): Promise<PreviewUrl> => {
-      const cached = previewUrlCacheRef.current.get(path);
+    (path: string, fallbackPath?: string): Promise<PreviewUrl> => {
+      const key = JSON.stringify([path, fallbackPath]);
+      const cached = previewUrlCacheRef.current.get(key);
       if (cached?.sessionId === sessionId && cached.expiresAt > Date.now()) return cached.request;
       const relay = relayClientRef;
       if (!relay) return Promise.reject(new Error("请先连接开发机"));
       const entry: PreviewUrlCacheEntry = {
         sessionId,
         expiresAt: Infinity,
-        request: relay.requestRemoteFileUrl(sessionId, path, "inline").then((result) => {
+        request: requestRemoteFileUrlWithFallback(
+          relay,
+          sessionId,
+          path,
+          "inline",
+          fallbackPath,
+        ).then(({ path: requestedPath, response: result }) => {
           if (!result.success || !result.url) {
             throw new Error(
               describeControlError({
@@ -82,14 +90,14 @@ export function MediaPreviewProvider({
             );
           }
           entry.expiresAt = result.expiresAt ?? Date.now() + 60_000;
-          return { url: result.url, path: result.path || path };
+          return { url: result.url, path: result.path || requestedPath };
         }),
       };
       entry.request = entry.request.catch((error: unknown) => {
-        if (previewUrlCacheRef.current.get(path) === entry) previewUrlCacheRef.current.delete(path);
+        if (previewUrlCacheRef.current.get(key) === entry) previewUrlCacheRef.current.delete(key);
         throw error;
       });
-      previewUrlCacheRef.current.set(path, entry);
+      previewUrlCacheRef.current.set(key, entry);
       return entry.request;
     },
     [sessionId],
@@ -101,15 +109,15 @@ export function MediaPreviewProvider({
   }, []);
 
   const openMediaPreview = useCallback(
-    (path: string) => {
+    (path: string, fallbackPath?: string) => {
       const kind = getMediaPreviewKind(path);
       if (!activeRef.current || !kind) return;
       const requestSeq = ++requestSeqRef.current;
       // A Shell may have changed cwd since the last preview of this relative path.
       // Explicit opens resolve it again; thumbnails can still share cached requests.
-      previewUrlCacheRef.current.delete(path);
+      previewUrlCacheRef.current.delete(JSON.stringify([path, fallbackPath]));
       setPreview({ sessionId, kind, state: { status: "loading", path } });
-      void requestMediaPreviewUrl(path)
+      void requestMediaPreviewUrl(path, fallbackPath)
         .then((result) => {
           if (requestSeqRef.current !== requestSeq) return;
           setPreview({ sessionId, kind, state: { status: "ready", ...result } });

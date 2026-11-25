@@ -14,6 +14,7 @@ import {
   resolveTerminalInitialRangeAtBufferPoint,
   resolveTerminalLineAtBufferPoint,
   resolveTerminalRange,
+  resolveTerminalSelectionPathAction,
   type TerminalSelectionPoint,
   type TerminalSelectionResult,
 } from "@/lib/pty-line-selection";
@@ -51,10 +52,7 @@ import {
   shouldDeferPtySelectionDismissOnInteractionStart,
   shouldDismissManagedPtySelectionAfterGesture,
 } from "@/lib/pty-selection-overlay-position";
-import {
-  resolvePtySelectionPathAction,
-  type PtySelectionPathAction,
-} from "@/lib/pty-selection-path-action";
+import type { PtySelectionPathAction } from "@/lib/pty-selection-path-action";
 import {
   captureXtermDesktopLinkCandidate,
   type XtermDesktopLinkCandidate,
@@ -68,6 +66,7 @@ import {
 const DESKTOP_DRAG_THRESHOLD_PX = 2;
 const VIEWPORT_SELECTION_SETTLE_MS = 600;
 const SELECTION_TOOLBAR_SCROLL_SETTLE_MS = 160;
+const MEDIA_SELECTION_TOOLBAR_HORIZONTAL_INSET = 96;
 
 export type { PtySelectionHandleMetrics, PtySelectionHandles, PtySelectionPathAction };
 export type { PtySelectionHandleKind } from "./use-pty-selection-gesture-driver";
@@ -104,8 +103,8 @@ interface UsePtySelectionControllerOptions {
   focusPtyInput: () => void;
   onTap?: (point: XtermLinkActivationPoint) => boolean;
   isTapCandidate?: (point: { clientX: number; clientY: number }) => boolean;
-  onDownloadPath: (path: string) => void;
-  onPreviewPath: (path: string) => void;
+  onDownloadPath: (path: string, fallbackPath?: string) => void;
+  onPreviewPath: (path: string, fallbackPath?: string) => void;
 }
 
 interface UsePtySelectionControllerResult {
@@ -118,7 +117,7 @@ interface UsePtySelectionControllerResult {
   clearManagedPtySelection: () => void;
   clearPtySelection: () => void;
   copyPtySelection: () => void;
-  openPtySelectionPathAction: () => void;
+  openPtySelectionPathAction: (disposition?: "download") => void;
   handlePtySelectionHandlePointerDown: (
     kind: PtySelectionHandleKind,
     event: ReactPointerEvent<HTMLElement>,
@@ -320,6 +319,10 @@ export function usePtySelectionController(
         viewportHeight: visualViewport?.height ?? window.innerHeight,
         viewportOffsetLeft: visualViewport?.offsetLeft ?? 0,
         viewportOffsetTop: visualViewport?.offsetTop ?? 0,
+        horizontalInset:
+          selectedPathActionRef.current?.kind === "media-preview"
+            ? MEDIA_SELECTION_TOOLBAR_HORIZONTAL_INSET
+            : undefined,
       });
     },
     [],
@@ -396,6 +399,10 @@ export function usePtySelectionController(
         viewportHeight: visualViewport?.height ?? window.innerHeight,
         viewportOffsetLeft: visualViewport?.offsetLeft ?? 0,
         viewportOffsetTop: visualViewport?.offsetTop ?? 0,
+        horizontalInset:
+          selectedPathActionRef.current?.kind === "media-preview"
+            ? MEDIA_SELECTION_TOOLBAR_HORIZONTAL_INSET
+            : undefined,
       });
     },
     [getSelectionHandleViewportGeometry],
@@ -521,19 +528,6 @@ export function usePtySelectionController(
     });
   }, [terminalRef, xtermHostRef]);
 
-  const setSelectedPathAction = useCallback(
-    (
-      selectedText: string,
-      explicitPathAction?: PtySelectionPathAction | null,
-    ): PtySelectionPathAction | null => {
-      const action = explicitPathAction ?? resolvePtySelectionPathAction(selectedText);
-      selectedPathActionRef.current = action;
-      setPtySelectionPathAction(action);
-      return action;
-    },
-    [],
-  );
-
   const resolveManagedSelection = useCallback(
     (
       range: PtySelectionRange,
@@ -550,10 +544,12 @@ export function usePtySelectionController(
       });
       if (!selected) return null;
       selectedPtyTextRef.current = selected.text;
-      setSelectedPathAction(selected.text, explicitPathAction);
+      const action = explicitPathAction ?? resolveTerminalSelectionPathAction(terminal, selected);
+      selectedPathActionRef.current = action;
+      setPtySelectionPathAction(action);
       return selected;
     },
-    [captureSelectionLines, getSelectionTerminalView, setSelectedPathAction],
+    [captureSelectionLines, getSelectionTerminalView],
   );
 
   const refreshCurrentSelection = useCallback((): TerminalSelectionResult | null => {
@@ -1915,14 +1911,21 @@ export function usePtySelectionController(
     });
   }, [clearPtySelection, refreshCurrentSelection]);
 
-  const openPtySelectionPathAction = useCallback((): void => {
-    if (!refreshCurrentSelection()) return;
-    const action = selectedPathActionRef.current;
-    if (!action) return;
-    if (action.kind === "media-preview") onPreviewPath(action.path);
-    else onDownloadPath(action.path);
-    clearPtySelection();
-  }, [clearPtySelection, onDownloadPath, onPreviewPath, refreshCurrentSelection]);
+  const openPtySelectionPathAction = useCallback(
+    (disposition?: "download"): void => {
+      if (!refreshCurrentSelection()) return;
+      const action = selectedPathActionRef.current;
+      if (!action) return;
+      const openPath =
+        action.kind === "media-preview" && disposition !== "download"
+          ? onPreviewPath
+          : onDownloadPath;
+      if (action.fallbackPath) openPath(action.path, action.fallbackPath);
+      else openPath(action.path);
+      clearPtySelection();
+    },
+    [clearPtySelection, onDownloadPath, onPreviewPath, refreshCurrentSelection],
+  );
 
   const isSelectionActive = useCallback(
     (): boolean => getPtyManagedSelectionRange(managedStateRef.current) !== null,

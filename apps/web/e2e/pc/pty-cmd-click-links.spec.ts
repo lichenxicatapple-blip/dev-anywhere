@@ -220,6 +220,43 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
       .toBe(true);
   });
 
+  test("uses the decoded OSC 8 file target instead of the Codex image label", async ({ page }) => {
+    await gotoPty(page);
+    const path = "/tmp/screen shots/对照.png";
+    const label = "first-coarse.png";
+    await emitPtyLine(
+      page,
+      `Viewed image \x1b]8;;file://${encodeURI(path)}\x07${label}\x1b]8;;\x07\r\n`,
+    );
+    await waitForBufferContains(page, label);
+
+    expect((await activate(page, "image-preview", path, "ctrl"))?.text).toBe(path);
+    await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
+    await expect
+      .poll(() => sentFakeRelayMessages(page))
+      .toContainEqual(
+        expect.objectContaining({ type: "remote_file_url_request", path, disposition: "inline" }),
+      );
+  });
+
+  test("downloads an OSC 8 file by its target and uses the target filename", async ({ page }) => {
+    await gotoPty(page);
+    const path = "C:/work/screen shots/report.txt";
+    await emitPtyLine(
+      page,
+      `Artifact \x1b]8;;file:///${encodeURI(path)}\x07image.png\x1b]8;;\x07\r\n`,
+    );
+    await waitForBufferContains(page, "image.png");
+    expect((await activate(page, "image-preview", "image.png", "ctrl"))?.triggered).toBe(false);
+
+    const download = page.waitForEvent("download");
+    expect((await activate(page, "file-download", path, "ctrl"))?.text).toBe(path);
+    expect((await download).suggestedFilename()).toBe("report.txt");
+    expect(await sentFakeRelayMessages(page)).toContainEqual(
+      expect.objectContaining({ type: "remote_file_url_request", path, disposition: "download" }),
+    );
+  });
+
   for (const path of [String.raw`.\build\result.txt`, String.raw`C:\Users\dev\result.txt`]) {
     test(`downloads Windows path ${path} with its original path and file name`, async ({
       page,
@@ -544,23 +581,23 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
     expect(result?.segments.every((segment) => segment.width > 0)).toBe(true);
   });
 
-  for (const { kind, name, disposition } of [
-    { kind: "file-download", name: "report.txt", disposition: "download" },
-    { kind: "image-preview", name: "screenshot.png", disposition: "inline" },
+  for (const { kind, name, disposition, rightGap } of [
+    { kind: "file-download", name: "report.txt", disposition: "download", rightGap: 2 },
+    { kind: "image-preview", name: "screenshot.png", disposition: "inline", rightGap: 2 },
+    { kind: "file-download", name: "long-report.txt", disposition: "download", rightGap: 30 },
   ] as const) {
-    test(`cmd+click uses the complete ${name} path after an indented right-edge wrap`, async ({
-      page,
-    }) => {
+    test(`cmd+click uses the complete ${name} path after an indented wrap`, async ({ page }) => {
       await gotoPty(page);
       const cols = await page.evaluate(
         () => window.__ccTest?.pty.metrics("claude-pty")?.cols ?? 80,
       );
-      const directory = `./artifacts/${"a".repeat(cols - 19)}/`;
+      const prefix = "  - ./artifacts/";
+      const directory = `./artifacts/${"a".repeat(cols - prefix.length - 1 - rightGap)}/`;
       const path = `${directory}${name}`;
-      await emitPtyLine(page, `  - ${directory}\r\n    ${name}\r\n`);
+      await emitPtyLine(page, `\r\n  - ${directory}\r\n    ${name}\r\n\r\n\r\n\r\n`);
       await waitForBufferContains(page, name);
 
-      await expectPtyRendered(page);
+      await expectPtyCursorAwareBottom(page);
       const points = await page.evaluate(
         ({ name, directory }) => {
           const term = window.__ccTestPtyTerminals?.get("claude-pty");
@@ -595,6 +632,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
         await expect(underlines).toHaveCount(0);
       }
       const point = points![1];
+      const download = disposition === "download" ? page.waitForEvent("download") : undefined;
       await page.keyboard.down("Meta");
       await page.mouse.click(point.x, point.y);
       await page.keyboard.up("Meta");
@@ -611,6 +649,7 @@ test.describe("PTY cmd/ctrl+click on file paths and image paths", () => {
       if (kind === "image-preview") {
         await expect(page.locator('[data-slot="image-preview-dialog"]')).toBeVisible();
       }
+      if (download) expect((await download).suggestedFilename()).toBe(name);
     });
   }
 });

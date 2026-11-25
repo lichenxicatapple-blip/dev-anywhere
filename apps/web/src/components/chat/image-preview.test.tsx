@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { registerMediaPreviewLinkProvider } from "@/lib/xterm-media-preview-links";
+import { ControlErrorCode } from "@dev-anywhere/shared";
 
 const { requestRemoteFileUrl, toastLoading, toastSuccess, toastError } = vi.hoisted(() => ({
   requestRemoteFileUrl: vi.fn(),
@@ -48,10 +49,10 @@ import { MediaPreviewProvider, useMediaPreview } from "./media-preview";
 
 afterEach(cleanup);
 
-function PreviewProbe({ path }: { path: string }) {
+function PreviewProbe({ path, fallbackPath }: { path: string; fallbackPath?: string }) {
   const { openMediaPreview } = useMediaPreview();
   return (
-    <button type="button" onClick={() => openMediaPreview(path)}>
+    <button type="button" onClick={() => openMediaPreview(path, fallbackPath)}>
       open preview
     </button>
   );
@@ -136,6 +137,26 @@ describe("MediaPreviewProvider", () => {
     const close = screen.getByRole("button", { name: "关闭图片预览" });
     expect(close).toHaveClass("size-11");
     expect(close.querySelector('[data-slot="image-preview-close-visual"]')).toHaveClass("size-7");
+  });
+
+  it("previews the standalone image if the joined path is missing", async () => {
+    const path = "artifacts/screenshot.png";
+    const fallbackPath = "screenshot.png";
+    const url = "https://example.test/screenshot.png";
+    requestRemoteFileUrl
+      .mockResolvedValueOnce({ success: false, errorCode: ControlErrorCode.PATH_NOT_FOUND })
+      .mockResolvedValueOnce({ success: true, url, path: `/work/${fallbackPath}` });
+
+    render(
+      <MediaPreviewProvider sessionId="s1">
+        <PreviewProbe path={path} fallbackPath={fallbackPath} />
+      </MediaPreviewProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: "open preview" }));
+
+    expect(await screen.findByRole("img")).toHaveAttribute("src", url);
+    expect(requestRemoteFileUrl).toHaveBeenNthCalledWith(1, "s1", path, "inline");
+    expect(requestRemoteFileUrl).toHaveBeenNthCalledWith(2, "s1", fallbackPath, "inline");
   });
 
   it("does not report the image as loaded until the browser image load event fires", async () => {

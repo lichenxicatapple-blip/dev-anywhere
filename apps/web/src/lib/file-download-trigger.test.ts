@@ -63,6 +63,44 @@ describe("triggerFileDownload", () => {
     expect(clickSpy).not.toHaveBeenCalled();
   });
 
+  it.each([ControlErrorCode.PATH_NOT_FOUND, ControlErrorCode.INVALID_PATH])(
+    "downloads the standalone path when the joined terminal path returns %s",
+    async (errorCode) => {
+      const relay = makeRelayWithResponse({ url: "/api/remote-files/standalone" });
+      vi.mocked(relay.requestRemoteFileUrl).mockResolvedValueOnce({
+        sessionId: "s1",
+        success: false,
+        errorCode,
+      });
+
+      const path = "artifacts/README.md";
+      const fallbackPath = "README.md";
+      const result = await triggerFileDownload({ relay, sessionId: "s1", path, fallbackPath });
+
+      expect(result).toEqual({ ok: true, path: fallbackPath });
+      expect(relay.requestRemoteFileUrl).toHaveBeenNthCalledWith(1, "s1", path, "download");
+      expect(relay.requestRemoteFileUrl).toHaveBeenNthCalledWith(2, "s1", fallbackPath, "download");
+      expect(clickSpy).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it("reports access denied without trying another file", async () => {
+    const relay = makeRelayWithResponse({
+      success: false,
+      errorCode: ControlErrorCode.PATH_ACCESS_DENIED,
+    });
+    const result = await triggerFileDownload({
+      relay,
+      sessionId: "s1",
+      path: "artifacts/README.md",
+      fallbackPath: "README.md",
+    });
+
+    expect(result.ok).toBe(false);
+    expect(relay.requestRemoteFileUrl).toHaveBeenCalledTimes(1);
+    expect(clickSpy).not.toHaveBeenCalled();
+  });
+
   it("translates errorCode into Chinese and includes the requested path", async () => {
     const relay = makeRelayWithResponse({
       success: false,
