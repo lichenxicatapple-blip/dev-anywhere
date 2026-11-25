@@ -9,6 +9,32 @@ import {
 } from "./pty-line-selection";
 
 describe("PTY selected path actions", () => {
+  it("does not offer download for a wrapped web URL ending in an apparent extension", () => {
+    const url = "x.com/report.md?download=cat.txt";
+    const cols = 32;
+    const text = `URL ${url}, done`;
+    const lines = [text.slice(0, cols), text.slice(cols)].map((row, index) => ({
+      length: cols,
+      isWrapped: index > 0,
+      getCell: (column: number) => ({ getWidth: () => 1, getChars: () => row[column] ?? " " }),
+      translateToString: (trim = false, start = 0, end = cols) => {
+        const slice = row.padEnd(cols).slice(start, end);
+        return trim ? slice.trimEnd() : slice;
+      },
+    }));
+    const terminal = {
+      cols,
+      buffer: { active: { length: lines.length, getLine: (row: number) => lines[row] } },
+    } as unknown as Terminal;
+    const selected = resolveTerminalRange({
+      terminal,
+      anchor: { row: 0, column: 4 },
+      focus: { row: 1, column: 4 + url.length - 1 - cols },
+    });
+    expect(selected?.text).toBe(url);
+    expect(resolveTerminalSelectionPathAction(terminal, selected!)).toBeNull();
+  });
+
   it("keeps the OSC 8 file target when a selected label looks like a different file", () => {
     const label = "first-coarse.png";
     const row = `Viewed image ${label} done`;

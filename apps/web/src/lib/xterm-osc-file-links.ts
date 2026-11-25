@@ -54,6 +54,7 @@ export function findXtermOscFilePathMatches(
       if (path) {
         activeMatch = {
           path,
+          source: "osc-file",
           startLineNumber: lineNumber,
           endLineNumber: lineNumber,
           startColumn: column + 1,

@@ -49,7 +49,9 @@ interface SelectTerminalInitialRangeAtBufferPointOptions {
   point: TerminalSelectionPoint;
 }
 
-type SelectTerminalPathLinkAtBufferPointOptions = SelectTerminalInitialRangeAtBufferPointOptions;
+type SelectTerminalPathLinkAtBufferPointOptions = SelectTerminalInitialRangeAtBufferPointOptions & {
+  oscFileOnly?: boolean;
+};
 
 interface SelectTerminalRangeOptions {
   terminal: Terminal;
@@ -338,11 +340,12 @@ export function resolveTerminalSelectionPathAction(
     return resolvePtySelectionPathAction(selected.text);
   }
 
-  // An explicit link can display a short label, and a hard-wrapped path keeps its newline
-  // in copied text. Use the buffer target when the selection covers the exact link.
+  // Explicit file links can display a short label. Hard-wrapped paths need the buffer
+  // to join across a newline. Ordinary single tokens keep the text resolver's URL checks.
+  const oscFileOnly = !selected.text.includes("\n");
   const { start, end } = normalizeTerminalSelectionPoints(selected.anchor, selected.focus);
   for (const point of [end, start]) {
-    const link = resolveTerminalPathLinkAtBufferPoint({ terminal, point });
+    const link = resolveTerminalPathLinkAtBufferPoint({ terminal, point, oscFileOnly });
     if (
       link &&
       link.anchor.row === start.row &&
@@ -558,6 +561,7 @@ export function resolveTerminalLineAtBufferPoint({
 function resolveTerminalPathLinkAtBufferPoint({
   terminal,
   point,
+  oscFileOnly,
 }: SelectTerminalPathLinkAtBufferPointOptions): TerminalPathSelectionResult | null {
   const lineNumber = point.row + 1;
   const column = point.column + 1;
@@ -570,13 +574,15 @@ function resolveTerminalPathLinkAtBufferPoint({
       match,
       kind: "file-download" as const,
     })),
-  ].find(({ match }) =>
-    match.segments.some(
-      (segment) =>
-        segment.lineNumber === lineNumber &&
-        column >= segment.startColumn &&
-        column <= segment.endColumn,
-    ),
+  ].find(
+    ({ match }) =>
+      (!oscFileOnly || match.source === "osc-file") &&
+      match.segments.some(
+        (segment) =>
+          segment.lineNumber === lineNumber &&
+          column >= segment.startColumn &&
+          column <= segment.endColumn,
+      ),
   );
   if (!candidate) return null;
 

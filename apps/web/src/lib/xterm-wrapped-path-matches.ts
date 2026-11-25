@@ -16,6 +16,7 @@ export type XtermBufferPathSegment = {
 export type XtermBufferPathMatch = {
   path: string;
   fallbackPath?: string;
+  source?: "osc-file";
   startLineNumber: number;
   startColumn: number;
   endLineNumber: number;
